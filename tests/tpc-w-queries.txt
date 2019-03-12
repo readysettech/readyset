@@ -11,14 +11,14 @@ SELECT * FROM customer, address, country WHERE customer.c_addr_id = address.addr
 SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND item.i_subject = ? ORDER BY item.i_title limit 50;
 
 # doTitleSearch
-#SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND substring(soundex(item.i_title),0,4)=substring(soundex(?),0,4) ORDER BY item.i_title limit 50;
-SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND substring(soundex(item.i_title),1,4)=substring(soundex(?),1,4) ORDER BY item.i_title limit 50;
-#SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND item.i_title LIKE ? ORDER BY item.i_title limit 50;
+-- SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND substring(soundex(item.i_title),0,4)=substring(soundex(?),0,4) ORDER BY item.i_title limit 50;
+-- SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND substring(soundex(item.i_title),1,4)=substring(soundex(?),1,4) ORDER BY item.i_title limit 50;
+-- SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND item.i_title LIKE ? ORDER BY item.i_title limit 50;
 
 # doAuthorSearch
-#SELECT * FROM author, item WHERE substring(soundex(author.a_lname),0,4)=substring(soundex(?),0,4) AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
-SELECT * FROM author, item WHERE substring(soundex(author.a_lname),1,4)=substring(soundex(?),1,4) AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
-#SELECT * FROM author, item WHERE author.a_lname LIKE ? AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
+-- SELECT * FROM author, item WHERE substring(soundex(author.a_lname),0,4)=substring(soundex(?),0,4) AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
+-- SELECT * FROM author, item WHERE substring(soundex(author.a_lname),1,4)=substring(soundex(?),1,4) AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
+-- SELECT * FROM author, item WHERE author.a_lname LIKE ? AND item.i_a_id = author.a_id ORDER BY item.i_title limit 50;
 
 # getNewProducts
 SELECT i_id, i_title, a_fname, a_lname FROM item, author WHERE item.i_a_id = author.a_id AND item.i_subject = ? ORDER BY item.i_pub_date DESC,item.i_title limit 50;
@@ -56,7 +56,7 @@ SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
 # createEmptyCart
 SELECT COUNT(*) FROM shopping_cart;
 # createEmptyCart.insert
-INSERT into shopping_cart (sc_id, sc_time) VALUES ((SELECT COUNT(*) FROM shopping_cart), CURRENT_TIMESTAMP);
+-- INSERT into shopping_cart (sc_id, sc_time) VALUES ((SELECT COUNT(*) FROM shopping_cart), CURRENT_TIMESTAMP);
 # createEmptyCart.insert.v2
 INSERT into shopping_cart (sc_id, sc_time) VALUES (?, CURRENT_TIMESTAMP);
 
@@ -82,7 +82,7 @@ UPDATE shopping_cart SET sc_time = CURRENT_TIMESTAMP WHERE sc_id = ?;
 SELECT * FROM shopping_cart_line, item WHERE scl_i_id = item.i_id AND scl_sc_id = ?;
 
 # refreshSession
-UPDATE customer SET c_login = NOW(), c_expiration = (CURRENT_TIMESTAMP + INTERVAL 2 HOUR) WHERE c_id = ?;
+-- UPDATE customer SET c_login = NOW(), c_expiration = (CURRENT_TIMESTAMP + INTERVAL 2 HOUR) WHERE c_id = ?;
 
 # createNewCustomer
 INSERT into customer (c_id, c_uname, c_passwd, c_fname, c_lname, c_addr_id, c_phone, c_email, c_since, c_last_login, c_login, c_expiration, c_discount, c_balance, c_ytd_pmt, c_birthdate, c_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -99,7 +99,7 @@ SELECT c_addr_id FROM customer WHERE customer.c_id = ?;
 SELECT c_addr_id FROM customer WHERE customer.c_id = ?;
 
 # enterCCXact
-INSERT into cc_xacts (cx_o_id, cx_type, cx_num, cx_name, cx_expire, cx_xact_amt, cx_xact_date, cx_co_id) VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE, (SELECT co_id FROM address, country WHERE addr_id = ? AND addr_co_id = co_id));
+-- INSERT into cc_xacts (cx_o_id, cx_type, cx_num, cx_name, cx_expire, cx_xact_amt, cx_xact_date, cx_co_id) VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE, (SELECT co_id FROM address, country WHERE addr_id = ? AND addr_co_id = co_id));
 
 # clearCart
 DELETE FROM shopping_cart_line WHERE scl_sc_id = ?;
@@ -114,7 +114,7 @@ INSERT into address (addr_id, addr_street1, addr_street2, addr_city, addr_state,
 SELECT max(addr_id) FROM address;
 
 # enterOrder.insert
-INSERT into orders (o_id, o_c_id, o_date, o_sub_total, o_tax, o_total, o_ship_type, o_ship_date, o_bill_addr_id, o_ship_addr_id, o_status) VALUES (?, ?, CURRENT_DATE, ?, 8.25, ?, ?, CURRENT_DATE + INTERVAL ? DAY, ?, ?, 'Pending');
+-- INSERT into orders (o_id, o_c_id, o_date, o_sub_total, o_tax, o_total, o_ship_type, o_ship_date, o_bill_addr_id, o_ship_addr_id, o_status) VALUES (?, ?, CURRENT_DATE, ?, 8.25, ?, ?, CURRENT_DATE + INTERVAL ? DAY, ?, ?, 'Pending');
 # enterOrder.maxId
 SELECT count(o_id) FROM orders;
 
