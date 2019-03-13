@@ -4,6 +4,7 @@ extern crate nom_sql;
 extern crate noria_server;
 #[macro_use]
 extern crate slog;
+extern crate tokio;
 extern crate zookeeper;
 
 extern crate noria_mysql;
@@ -18,7 +19,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria_server::{ControllerBuilder, ZookeeperAuthority};
+use noria_server::{Builder, ZookeeperAuthority};
+use tokio::prelude::*;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use noria_mysql::{NoriaBackend, Schema};
@@ -83,10 +85,14 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     let n = deployment.name.clone();
     thread::spawn(move || {
         let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, n)).unwrap();
-        let mut builder = ControllerBuilder::default();
+        let mut builder = Builder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
-        builder.build(Arc::new(authority)).unwrap().wait();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(builder.start(Arc::new(authority))).unwrap();
+        loop {
+            thread::sleep(Duration::from_millis(1000));
+        }
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
@@ -105,7 +111,6 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
             &deployment_id,
             auto_increments,
             query_cache,
-            query_counter,
             false,
             true,
             true,
