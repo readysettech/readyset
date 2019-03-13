@@ -39,7 +39,7 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     f.read_to_string(&mut s).unwrap();
     let lines: Vec<String> = s
         .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("/*"))
+        .filter(|l| !l.is_empty() && !l.starts_with("#") && !l.starts_with("--"))
         .map(|l| {
             if !(l.ends_with("\n") || l.ends_with(";")) {
                 String::from(l) + "\n"
