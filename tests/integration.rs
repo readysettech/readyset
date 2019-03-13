@@ -752,7 +752,42 @@ fn basic_select() {
     conn.query("INSERT INTO test (x, y) VALUES (4, 2)").unwrap();
     sleep();
 
-    assert_eq!(conn.query("SELECT test.* FROM test").unwrap().count(), 1);
+    let rows: Vec<_> = conn
+        .query("SELECT test.* FROM test")
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
+    // the MySQL text protocol, and we receive the result as `Bytes`.
+    assert_eq!(
+        rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
+        vec![vec!["4".into(), "2".into()]]
+    );
+}
+
+#[test]
+fn prepared_select() {
+    let d = Deployment::new("prepared_select");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query("INSERT INTO test (x, y) VALUES (4, 2)").unwrap();
+    sleep();
+
+    let rows: Vec<_> = conn
+        .prep_exec("SELECT test.* FROM test WHERE x = ?", (4,))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 1);
+    // results actually arrive as integer values since prepared statements use the binary protocol
+    assert_eq!(
+        rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
+        vec![vec![4.into(), 2.into()]]
+    );
 }
 
 #[test]
@@ -776,6 +811,8 @@ fn create_view() {
         .map(|row| row.unwrap())
         .collect();
     assert_eq!(rows.len(), 1);
+    // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
+    // the MySQL text protocol, and we receive the result as `Bytes`.
     assert_eq!(
         rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
         vec![vec!["4".into(), "2".into()]]
@@ -787,9 +824,11 @@ fn create_view() {
         .map(|row| row.unwrap())
         .collect();
     assert_eq!(rows.len(), 1);
+    // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
+    // the MySQL text protocol, and we receive the result as `Bytes`.
     assert_eq!(
         rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
-        vec![vec![4.into(), 2.into()]]
+        vec![vec!["4".into(), "2".into()]]
     );
 }
 
