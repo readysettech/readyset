@@ -46,6 +46,7 @@ impl fmt::Debug for PreparedStatement {
 
 struct NoriaBackendInner {
     noria: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
+    _rt: tokio::runtime::Runtime,
     inputs: BTreeMap<String, SyncTable>,
     outputs: BTreeMap<String, SyncView>,
 }
@@ -74,6 +75,7 @@ impl NoriaBackendInner {
                 .map(|(n, _)| (n.clone(), ch.view(&n).unwrap().into_sync()))
                 .collect::<BTreeMap<String, SyncView>>(),
             noria: ch,
+            _rt: rt,
         };
 
         debug!(log, "Connected!");
