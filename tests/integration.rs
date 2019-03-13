@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -81,8 +81,11 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         slog::Logger::root(slog::Discard, o!())
     };
 
+    let barrier = Arc::new(Barrier::new(2));
+
     let l = logger.clone();
     let n = deployment.name.clone();
+    let b = barrier.clone();
     thread::spawn(move || {
         let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, n)).unwrap();
         let mut builder = Builder::default();
@@ -92,12 +95,15 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
         let handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+        b.wait();
         loop {
             thread::sleep(Duration::from_millis(1000));
         }
     });
 
     let query_counter = Arc::new(AtomicUsize::new(0));
+    barrier.wait();
+
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -105,6 +111,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 
     let deployment_id = deployment.name.clone();
 
+    // no need for a barrier here since accept() acts as one
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
