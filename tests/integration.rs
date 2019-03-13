@@ -89,7 +89,9 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         authority.log_with(l.clone());
         builder.log_with(l);
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(builder.start(Arc::new(authority))).unwrap();
+        // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
+        // dropped immediately and the Noria instance quits.
+        let handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
         loop {
             thread::sleep(Duration::from_millis(1000));
         }
