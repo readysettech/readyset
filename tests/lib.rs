@@ -39,7 +39,12 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     f.read_to_string(&mut s).unwrap();
     let lines: Vec<String> = s
         .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#") && !l.starts_with("--"))
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("#")
+                && !l.starts_with("--")
+                && !(l.starts_with("/*") && l.ends_with("*/;"))
+        })
         .map(|l| {
             if !(l.ends_with("\n") || l.ends_with(";")) {
                 String::from(l) + "\n"
@@ -72,7 +77,7 @@ fn parse_file(path: &str) -> (i32, i32) {
                 && !l.starts_with("#")
                 && !l.starts_with("--")
                 && !l.starts_with("DROP")
-                && !l.starts_with("/*")
+                && !(l.starts_with("/*") && l.ends_with("*/;"))
         }).collect();
     let mut q = String::new();
     let mut queries = Vec::new();
