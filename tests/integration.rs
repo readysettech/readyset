@@ -20,10 +20,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria_server::{Builder, ZookeeperAuthority};
-use tokio::prelude::*;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use noria_mysql::{NoriaBackend, Schema};
+use noria_mysql::NoriaBackend;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -94,14 +93,13 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
-        let handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+        let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
         b.wait();
         loop {
             thread::sleep(Duration::from_millis(1000));
         }
     });
 
-    let query_counter = Arc::new(AtomicUsize::new(0));
     barrier.wait();
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
