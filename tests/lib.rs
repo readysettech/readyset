@@ -21,7 +21,7 @@ fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
         }
     }
 
-    println!("Parsing failed: {} queries", parsed_err);
+    println!("\nParsing failed: {} queries", parsed_err);
     println!("Parsed successfully: {} queries", parsed_ok.len());
     println!("\nSuccessfully parsed queries:");
     for q in parsed_ok.iter() {
@@ -39,7 +39,12 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     f.read_to_string(&mut s).unwrap();
     let lines: Vec<String> = s
         .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#"))
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("#")
+                && !l.starts_with("--")
+                && !(l.starts_with("/*") && l.ends_with("*/;"))
+        })
         .map(|l| {
             if !(l.ends_with("\n") || l.ends_with(";")) {
                 String::from(l) + "\n"
@@ -47,12 +52,14 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
                 String::from(l)
             }
         }).collect();
-    println!("Loaded {} {} queries", lines.len(), name);
+    println!("\nLoaded {} {} queries", lines.len(), name);
 
     // Try parsing them all
-    let (ok, _) = parse_queryset(lines);
+    let (ok, err) = parse_queryset(lines);
 
-    // For the moment, we're always good
+    if err > 0 {
+        return Err(err);
+    }
     Ok(ok)
 }
 
@@ -70,7 +77,7 @@ fn parse_file(path: &str) -> (i32, i32) {
                 && !l.starts_with("#")
                 && !l.starts_with("--")
                 && !l.starts_with("DROP")
-                && !l.starts_with("/*")
+                && !(l.starts_with("/*") && l.ends_with("*/;"))
         }).collect();
     let mut q = String::new();
     let mut queries = Vec::new();
@@ -90,7 +97,7 @@ fn parse_file(path: &str) -> (i32, i32) {
     parse_queryset(queries)
 }
 
-#[test]
+#[test] #[ignore]
 fn hotcrp_queries() {
     assert!(test_queries_from_file(Path::new("tests/hotcrp-queries.txt"), "HotCRP").is_ok());
 }
