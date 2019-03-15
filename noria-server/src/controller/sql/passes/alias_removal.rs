@@ -158,6 +158,18 @@ impl AliasRemoval for SqlQuery {
                     .join
                     .into_iter()
                     .map(|mut jc| {
+                        jc.right = match jc.right {
+                            JoinRightSide::Table(t) => {
+                                if table_aliases.contains_key(&t.name) {
+                                    JoinRightSide::Table(nom_sql::Table::from(
+                                        table_aliases[&t.name].as_ref(),
+                                    ))
+                                } else {
+                                    JoinRightSide::Table(t)
+                                }
+                            }
+                            _ => unimplemented!(),
+                        };
                         jc.constraint = match jc.constraint {
                             JoinConstraint::On(cond) => {
                                 JoinConstraint::On(rewrite_conditional(&table_aliases, cond))
