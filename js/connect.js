@@ -1,7 +1,7 @@
       var controller_addr = localStorage.getItem("noria_controller_addr");
 
       /* Controller connection handling */
-      if (controller_addr != "") {
+      if (controller_addr) {
         $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
       } else {
         $("#controller-addr").html("<b>Click to connect to controller</b>");
@@ -9,8 +9,10 @@
 
       $("#controller-addr").click(function() {
         $("#controller-addr").addClass("d-none");
-        if (controller_addr != "") {
+        if (controller_addr) {
           $("#controller-addr-input").val(controller_addr);
+        } else {
+          $("#controller-addr-input").val("localhost:6033");
         }
         $("#controller-addr-edit").removeClass("d-none");
         $("#controller-addr-input").focus();
