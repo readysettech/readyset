@@ -1685,6 +1685,22 @@ impl Domain {
 
                         // are we about to fill a hole?
                         if target {
+                            // if the node is beyond the materialization frontier, we want to
+                            // purge it before we fill it with new keys so that we don't amass any
+                            // serious state.
+                            //
+                            // TODO: we probably also need to evict downstream?
+                            if n.beyond_mat_frontier() {
+                                if let Some(state) = self.state.get_mut(segment.node) {
+                                    state.clear();
+                                } else {
+                                    n.with_reader_mut(|r| {
+                                        r.writer_mut().unwrap().clear();
+                                    })
+                                    .unwrap();
+                                }
+                            }
+
                             let backfill_keys = backfill_keys.as_ref().unwrap();
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that

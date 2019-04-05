@@ -279,6 +279,18 @@ impl SingleState {
             .sum()
     }
 
+    pub(super) fn clear(&mut self) {
+        self.rows = 0;
+        match self.state {
+            KeyedState::Single(ref mut map) => map.clear(),
+            KeyedState::Double(ref mut map) => map.clear(),
+            KeyedState::Tri(ref mut map) => map.clear(),
+            KeyedState::Quad(ref mut map) => map.clear(),
+            KeyedState::Quin(ref mut map) => map.clear(),
+            KeyedState::Sex(ref mut map) => map.clear(),
+        };
+    }
+
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
     pub(super) fn evict_random_keys(

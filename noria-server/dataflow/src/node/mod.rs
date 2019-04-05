@@ -31,6 +31,8 @@ pub struct Node {
     inner: NodeType,
     taken: bool,
 
+    purge: bool,
+
     sharded_by: Sharding,
 }
 
@@ -52,6 +54,8 @@ impl Node {
             children: Vec::new(),
             inner: inner.into(),
             taken: false,
+
+            purge: false,
 
             sharded_by: Sharding::None,
         }
@@ -306,6 +310,10 @@ impl Node {
 
 // attributes
 impl Node {
+    crate fn beyond_mat_frontier(&self) -> bool {
+        self.purge
+    }
+
     crate fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
     }

@@ -48,6 +48,8 @@ crate trait State: SizeOf + Send {
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
     /// of the index that was evicted from and the number of bytes evicted.
     fn evict_keys(&mut self, tag: Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
+
+    fn clear(&mut self);
 }
 
 #[derive(Clone, Debug)]
