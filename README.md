@@ -88,11 +88,12 @@ ZooKeeper is not running on `localhost:2181`).
 
 The [`noria` crate](https://crates.io/crates/noria) provides native Rust
 bindings to interact with `noria-server`. See the [`noria`
-documentation](https://jon.thesquareplanet.com/crates/noria/) for detailed instructions on how
-to use the library. You can also take a look at the [example Noria
-program](noria/examples/basic-recipe.rs). You can also see a
-self-contained version that embeds `noria-server` (and doesn't require
-ZooKeeper) in [this example](noria-server/examples/basic-recipe.rs).
+documentation](https://jon.thesquareplanet.com/crates/noria/) for detailed
+instructions on how to use the library. You can also take a look at the
+[example Noria program](noria/examples/quickstart.rs) using Noria's async client
+API, or the same example using [the synchronous API](noria/examples/basic-distribution.rs).
+You can also see a self-contained version that embeds `noria-server` (and
+doesn't require ZooKeeper) in [this example](noria-server/examples/local-server.rs).
 
 ### MySQL adapter
 
