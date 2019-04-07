@@ -1546,11 +1546,11 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
-            let &mut ReplayPath {
+            let ReplayPath {
                 ref path,
                 notify_done,
                 ..
-            } = self.replay_paths.get_mut(&tag).unwrap();
+            } = self.replay_paths[&tag];
 
             match self.mode {
                 DomainMode::Forwarding if notify_done => {
