@@ -2064,6 +2064,18 @@ impl Domain {
                         .collect();
 
                     for (tag, replay_key) in replay {
+                        // TODO: we want to evict the state contained in this replay from any
+                        // materializations marked "purge" when this replay has been processed.
+                        // this poses two challenges:
+                        //
+                        //  - how do we know when it has been processed?
+                        //  - what if there are other replays that also need that state
+                        //    (and can than even happen?)
+                        //
+                        // XXX: When this replay completes, clear the state for any key that is not
+                        // in waiting.redos! Hmm, but we'll already have removed the entry for
+                        // .redos above. And we need to somehow know if a later replay that gets
+                        // put on hold also needs that key...
                         self.delayed_for_self
                             .push_back(box Packet::RequestPartialReplay {
                                 tag,
