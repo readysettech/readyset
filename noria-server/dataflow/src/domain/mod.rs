@@ -1685,20 +1685,16 @@ impl Domain {
 
                         // are we about to fill a hole?
                         if target {
-                            // if the node is beyond the materialization frontier, we want to
-                            // purge it before we fill it with new keys so that we don't amass any
-                            // serious state.
-                            //
-                            // TODO: we probably also need to evict downstream?
+                            // if the node is a reader beyond the materialization frontier, we want
+                            // to purge it before we fill it with new keys so that we don't amass
+                            // any serious state. if it's just an internal materialization, state
+                            // will be evicted by our children when they process replays that use
+                            // this state.
                             if n.beyond_mat_frontier() {
-                                if let Some(state) = self.state.get_mut(segment.node) {
-                                    state.clear();
-                                } else {
-                                    n.with_reader_mut(|r| {
-                                        r.writer_mut().unwrap().clear();
-                                    })
-                                    .unwrap();
-                                }
+                                n.with_reader_mut(|r| {
+                                    r.writer_mut().unwrap().clear();
+                                })
+                                .is_ok();
                             }
 
                             let backfill_keys = backfill_keys.as_ref().unwrap();
@@ -1908,6 +1904,120 @@ impl Domain {
                             break 'outer;
                         }
 
+                        // we successfully processed some upquery responses!
+                        // at this point, we can discard the state that the replay used in n's
+                        // ancestors if they are beyond the materialization frontier (and thus
+                        // should not be allowed to amass significant state).
+                        //
+                        // TODO: imagine this graph:
+                        //
+                        //  (a)     (b)
+                        //   |       |
+                        //   |       |
+                        //  (q)      |
+                        //   |       |
+                        //   `--(j)--`
+                        //       |
+                        //
+                        // where j is a join, a and b are materialized, q is query-through.
+                        // replay comes from a, passes through q, q then discards state from a and
+                        // forwards to j. j misses in b. replay happens to b, and re-triggers
+                        // replay from a. however, state in a is discarded, so replay to a needs to
+                        // happen a second time. that's not _wrong_, and we will eventually make
+                        // progress, but it is pretty inefficient. we probably want the join to do
+                        // the eviction.
+                        //
+                        // maybe the rule here is that only some nodes execute this? specifically,
+                        // perhaps nodes only prune state from materializations they do lookups
+                        // into (resolving through query-through)?
+                        //
+                        // TODO: but then how do things get evicted from the last materialized node
+                        // within a given domain? maybe we need to special-case egress nodes?
+                        if backfill_keys.is_some() {
+                            let lookups =
+                                self.nodes[segment.node].borrow().suggest_indexes(0.into());
+                            // TODO: will it ever be the case that we do replays from a side that
+                            // the operator doesn't do lookups into? if so, this won't be enough.
+                            // TODO: the below assumes that a given operator only ever looks up
+                            // into a particular ancestor by a single column set.
+                            for (pni, columns) in lookups {
+                                if pni == 0.into() {
+                                    // don't evict from our own state
+                                    continue;
+                                }
+
+                                // XXX: cache
+                                let pn = self
+                                    .nodes
+                                    .values()
+                                    .map(|n| n.borrow())
+                                    .find(|n| n.global_addr() == pni)
+                                    .expect("looking up into non-local node");
+
+                                // what keys do we evict?
+                                // we certainly need to evict the entry for the replay key in the
+                                // source node for the replay, but what else? things we lookup on
+                                // only? what if we have a materialized ancestor that we don't do
+                                // lookups into?
+                                if !pn.beyond_mat_frontier() {
+                                    continue;
+                                }
+
+                                let state = if let Some(state) = self.state.get_mut(segment.node) {
+                                    state
+                                } else {
+                                    continue;
+                                };
+
+                                // NOTE: this won't underflow, since ingress nodes don't do lookups
+                                if pn.local_addr() == path[i - 1].node {
+                                    // this is the node we are processing a replay _from_.
+                                    // evict the state for the replay key.
+                                    for key in backfill_keys.as_ref().unwrap().iter() {
+                                        state.mark_hole(&key[..], tag);
+                                    }
+
+                                // TODO: can it be that we do lookups into the same node we're
+                                // doing the replay from by a different column?
+                                } else {
+                                    // this is a node that we were doing lookups into as part of
+                                    // the replay -- make sure we evict any state we may have
+                                    // populated there.
+                                    let mut evict_tag = None;
+                                    for (tag, rp) in &self.replay_paths {
+                                        match rp.trigger {
+                                            TriggerEndpoint::Local(..)
+                                            | TriggerEndpoint::End { .. } => {
+                                                if rp
+                                                    .path
+                                                    .last()
+                                                    .unwrap()
+                                                    .partial_key
+                                                    .as_ref()
+                                                    .unwrap()
+                                                    == &columns
+                                                {
+                                                    // this is the tag we would have used to fill a
+                                                    // lookup hole in this ancestor, so this is the
+                                                    // tag we need to evict from.
+                                                    evict_tag = Some(tag);
+                                                    break;
+                                                }
+                                            }
+                                            TriggerEndpoint::Start(..) | TriggerEndpoint::None => {}
+                                        }
+                                    }
+
+                                    if let Some(tag) = evict_tag {
+                                        // TODO: how do we figure out what lookups we did (and
+                                        // thus what keys we have to evict)?
+                                        // TODO: for backfill_keys { state.mark_hole(&key[..], tag); }
+                                        unimplemented!();
+                                    }
+                                }
+                            }
+                        }
+
                         // we're all good -- continue propagating
                         if m.as_ref().map(|m| m.is_empty()).unwrap_or(true) {
                             if let ReplayPieceContext::Regular { last: false } = context {
@@ -2064,18 +2174,6 @@ impl Domain {
                         .collect();
 
                     for (tag, replay_key) in replay {
-                        // TODO: we want to evict the state contained in this replay from any
-                        // materializations marked "purge" when this replay has been processed.
-                        // this poses two challenges:
-                        //
-                        //  - how do we know when it has been processed?
-                        //  - what if there are other replays that also need that state
-                        //    (and can than even happen?)
-                        //
-                        // XXX: When this replay completes, clear the state for any key that is not
-                        // in waiting.redos! Hmm, but we'll already have removed the entry for
-                        // .redos above. And we need to somehow know if a later replay that gets
-                        // put on hold also needs that key...
                         self.delayed_for_self
                             .push_back(box Packet::RequestPartialReplay {
                                 tag,
