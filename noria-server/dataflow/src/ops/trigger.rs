@@ -126,9 +126,9 @@ impl Ingredient for Trigger {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index all key columns
-        Some((this, (vec![self.key], true))).into_iter().collect()
+        Some((this, vec![self.key])).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

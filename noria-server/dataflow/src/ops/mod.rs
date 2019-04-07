@@ -116,7 +116,7 @@ impl Ingredient for NodeOperator {
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self, must_replay_among,)
     }
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
     fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {

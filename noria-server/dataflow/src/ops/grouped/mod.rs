@@ -273,11 +273,9 @@ where
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index by our primary key
-        Some((this, (self.out_key.clone(), true)))
-            .into_iter()
-            .collect()
+        Some((this, self.out_key.clone())).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

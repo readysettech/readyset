@@ -157,10 +157,8 @@ impl Ingredient for Distinct {
         true
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![(this, (self.group_by.clone(), true))]
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        vec![(this, self.group_by.clone())].into_iter().collect()
     }
 }
 

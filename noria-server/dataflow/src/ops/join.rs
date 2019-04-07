@@ -523,10 +523,10 @@ impl Ingredient for Join {
         }
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         vec![
-            (self.left.as_global(), (vec![self.on.0], true)),
-            (self.right.as_global(), (vec![self.on.1], true)),
+            (self.left.as_global(), vec![self.on.0]),
+            (self.right.as_global(), vec![self.on.1]),
         ]
         .into_iter()
         .collect()

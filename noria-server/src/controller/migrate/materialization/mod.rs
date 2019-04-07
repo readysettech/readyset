@@ -125,6 +125,9 @@ impl Materializations {
                 i
             } else {
                 n.suggest_indexes(ni)
+                    .into_iter()
+                    .map(|(k, c)| (k, (c, true)))
+                    .collect()
             };
 
             if indices.is_empty() && n.is_base() {

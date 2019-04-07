@@ -167,10 +167,10 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         vec![
-            (self.signal.as_global(), (vec![0], true)),
-            (self.src.as_global(), (vec![self.signal_key], true)),
+            (self.signal.as_global(), vec![0]),
+            (self.src.as_global(), vec![self.signal_key]),
         ]
         .into_iter()
         .collect()

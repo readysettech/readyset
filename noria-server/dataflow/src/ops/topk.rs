@@ -290,10 +290,8 @@ impl Ingredient for TopK {
         assert_eq!(key_columns, &self.group_by[..]);
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![(this, (self.group_by.clone(), true))]
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        vec![(this, self.group_by.clone())].into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

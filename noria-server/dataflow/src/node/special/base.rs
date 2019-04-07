@@ -270,12 +270,9 @@ impl Base {
         results.into()
     }
 
-    pub(in crate::node) fn suggest_indexes(
-        &self,
-        n: NodeIndex,
-    ) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n, (self.primary_key.as_ref().unwrap().clone(), true)))
+            Some((n, self.primary_key.as_ref().unwrap().clone()))
                 .into_iter()
                 .collect()
         } else {

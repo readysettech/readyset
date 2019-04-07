@@ -103,10 +103,8 @@ where
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     ///
     /// Note that a vector of length > 1 for any one node means that that node should be given a
-    /// *compound* key, *not* that multiple columns should be independently indexed. The bool in
-    /// the return value specifies if the node wants to do *lookups* on that key; false would imply
-    /// that this index will only be used for partial replay.
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)>;
+    /// *compound* key, *not* that multiple columns should be independently indexed.
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.

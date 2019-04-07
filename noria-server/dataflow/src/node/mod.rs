@@ -268,7 +268,7 @@ impl Node {
         }
     }
 
-    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         match self.inner {
             NodeType::Internal(ref i) => i.suggest_indexes(n),
             NodeType::Base(ref b) => b.suggest_indexes(n),
