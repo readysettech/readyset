@@ -1906,11 +1906,13 @@ impl Domain {
                         }
 
                         // we successfully processed some upquery responses!
+                        //
                         // at this point, we can discard the state that the replay used in n's
                         // ancestors if they are beyond the materialization frontier (and thus
                         // should not be allowed to amass significant state).
                         //
-                        // TODO: imagine this graph:
+                        // we want to make sure we only remove state once it will no longer be
+                        // looked up into though. consider this dataflow graph:
                         //
                         //  (a)     (b)
                         //   |       |
@@ -1920,23 +1922,18 @@ impl Domain {
                         //   `--(j)--`
                         //       |
                         //
-                        // where j is a join, a and b are materialized, q is query-through.
-                        // replay comes from a, passes through q, q then discards state from a and
-                        // forwards to j. j misses in b. replay happens to b, and re-triggers
-                        // replay from a. however, state in a is discarded, so replay to a needs to
-                        // happen a second time. that's not _wrong_, and we will eventually make
-                        // progress, but it is pretty inefficient. we probably want the join to do
-                        // the eviction.
+                        // where j is a join, a and b are materialized, q is query-through. if we
+                        // removed state the moment a replay has passed through the next operator,
+                        // then the following could happen: a replay then comes from a, passes
+                        // through q, q then discards state from a and forwards to j. j misses in
+                        // b. replay happens to b, and re-triggers replay from a. however, state in
+                        // a is discarded, so replay to a needs to happen a second time. that's not
+                        // _wrong_, and we will eventually make progress, but it is pretty
+                        // inefficient.
                         //
-                        // maybe the rule here is that only some nodes execute this? specifically,
-                        // perhaps nodes only prune state from materializations they do lookups
-                        // into (resolving through query-through)?
-                        //
-                        // TODO: but then how do things get evicted from the last materialized node
-                        // within a given domain? maybe we need to special-case egress nodes?
-                        //
-                        // TODO: evict state for all successful lookups (what if some lookups were
-                        // made as part of a replay that missed?)
+                        // insted, we probably want the join to do the eviction. we achieve this by
+                        // only evicting from a after the replay has passed the join (or, more
+                        // generally, the operator that might perform lookups into a)
                         if backfill_keys.is_some() {
                             // first and foremost -- evict the source of the replay (if we own it).
                             // we only do this when the replay has reached its target, or if it's
@@ -1957,6 +1954,7 @@ impl Domain {
                                 }
                             }
 
+                            // next, evict any state that we had to look up to process this replay.
                             for lookup in lookups {
                                 if lookup.on == segment.node {
                                     // don't evict from our own state
