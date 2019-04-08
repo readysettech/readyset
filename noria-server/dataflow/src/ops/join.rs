@@ -751,8 +751,8 @@ mod tests {
         let me = 2.into();
         let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![
-            (l.as_global(), (vec![0], true)), /* join column for left */
-            (r.as_global(), (vec![0], true)), /* join column for right */
+            (l.as_global(), vec![0]), /* join column for left */
+            (r.as_global(), vec![0]), /* join column for right */
         ]
         .into_iter()
         .collect();

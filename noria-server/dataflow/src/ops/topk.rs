@@ -488,7 +488,7 @@ mod tests {
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 1);
-        assert_eq!(*idx.iter().next().unwrap().1, (vec![1], true));
+        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
     }
 
     #[test]

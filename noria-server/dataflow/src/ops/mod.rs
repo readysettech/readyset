@@ -325,7 +325,7 @@ pub mod test {
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);
-            for (tbl, (col, _)) in idx {
+            for (tbl, col) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
                     s.add_key(&col[..], None);
                 }
@@ -403,7 +403,7 @@ pub mod test {
             let global = self.nut.unwrap().as_global();
             let idx = self.graph[global].suggest_indexes(global);
             let mut state = MemoryState::default();
-            for (tbl, (col, _)) in idx {
+            for (tbl, col) in idx {
                 if tbl == base.as_global() {
                     state.add_key(&col[..], None);
                 }

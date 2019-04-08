@@ -268,7 +268,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], (vec![1], true));
+        assert_eq!(idx[&me], vec![1]);
     }
 
     #[test]
