@@ -52,7 +52,7 @@ impl Ingredient for Distinct {
         if rs.is_empty() {
             return ProcessingResult {
                 results: rs,
-                misses: vec![],
+                ..Default::default()
             };
         }
 
@@ -130,7 +130,7 @@ impl Ingredient for Distinct {
 
         ProcessingResult {
             results: output.into(),
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 

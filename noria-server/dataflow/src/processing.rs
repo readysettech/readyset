@@ -46,9 +46,25 @@ impl Miss {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
+crate struct Lookup {
+    /// The node we looked up into.
+    crate on: LocalNodeIndex,
+    /// The columns of `on` we were looking up on.
+    crate cols: Vec<usize>,
+    /// The key used for the lookup.
+    crate key: Vec<DataType>,
+}
+
+#[derive(Default)]
 crate struct ProcessingResult {
     pub(crate) results: Records,
     pub(crate) misses: Vec<Miss>,
+
+    /// Lookups performed during processing.
+    ///
+    /// NOTE: Only populated if the processed update was an upquery response.
+    pub(crate) lookups: Vec<Lookup>,
 }
 
 crate enum RawProcessingResult {

@@ -83,12 +83,13 @@ impl Ingredient for Rewrite {
     ) -> ProcessingResult {
         debug_assert!(from == *self.src || from == *self.signal);
         let mut misses = Vec::new();
+        let mut lookups = Vec::new();
         let mut emit_rs = Vec::with_capacity(rs.len());
 
         if rs.is_empty() {
             return ProcessingResult {
                 results: rs,
-                misses: vec![],
+                ..Default::default()
             };
         }
 
@@ -111,6 +112,14 @@ impl Ingredient for Rewrite {
                         record: r.extract().0,
                     });
                     continue;
+                }
+
+                if replay_key_cols.is_some() {
+                    lookups.push(Lookup {
+                        on: *self.signal,
+                        cols: vec![0],
+                        key: vec![key.clone()],
+                    });
                 }
 
                 let mut rc = rc.unwrap().peekable();
@@ -163,6 +172,7 @@ impl Ingredient for Rewrite {
 
         ProcessingResult {
             results: emit_rs.into(),
+            lookups,
             misses,
         }
     }

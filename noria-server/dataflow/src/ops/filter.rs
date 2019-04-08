@@ -115,7 +115,7 @@ impl Ingredient for Filter {
 
         ProcessingResult {
             results: rs,
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 

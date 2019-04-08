@@ -63,6 +63,7 @@ impl Ingredient for Latest {
             .expect("latest must have its own state materialized");
 
         let mut misses = Vec::new();
+        let mut lookups = Vec::new();
         let mut out = Vec::with_capacity(rs.len());
         {
             let currents = rs.into_iter().filter_map(|r| {
@@ -75,6 +76,14 @@ impl Ingredient for Latest {
 
                 match db.lookup(&[self.key], &KeyType::Single(&r[self.key])) {
                     LookupResult::Some(rs) => {
+                        if replay_key_cols.is_some() {
+                            lookups.push(Lookup {
+                                on: *us,
+                                cols: vec![self.key],
+                                key: vec![r[self.key].clone()],
+                            });
+                        }
+
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");
                         Some((r, rs))
                     }
@@ -109,6 +118,7 @@ impl Ingredient for Latest {
 
         ProcessingResult {
             results: out.into(),
+            lookups,
             misses,
         }
     }

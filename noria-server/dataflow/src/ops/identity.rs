@@ -43,7 +43,7 @@ impl Ingredient for Identity {
     ) -> ProcessingResult {
         ProcessingResult {
             results: rs,
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 

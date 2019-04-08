@@ -156,7 +156,7 @@ where
         if rs.is_empty() {
             return ProcessingResult {
                 results: rs,
-                misses: vec![],
+                ..Default::default()
             };
         }
 
@@ -181,6 +181,7 @@ where
             .expect("grouped operators must have their own state materialized");
 
         let mut misses = Vec::new();
+        let mut lookups = Vec::new();
         let mut out = Vec::new();
         {
             let out_key = &self.out_key;
@@ -208,6 +209,14 @@ where
                     let rs = {
                         match db.lookup(&out_key[..], &KeyType::from(&group[..])) {
                             LookupResult::Some(rs) => {
+                                if replay_key_cols.is_some() {
+                                    lookups.push(Lookup {
+                                        on: *us,
+                                        cols: out_key.clone(),
+                                        key: group.clone(),
+                                    });
+                                }
+
                                 debug_assert!(rs.len() <= 1, "a group had more than 1 result");
                                 rs
                             }
@@ -269,6 +278,7 @@ where
 
         ProcessingResult {
             results: out.into(),
+            lookups,
             misses,
         }
     }

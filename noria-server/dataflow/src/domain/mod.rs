@@ -506,7 +506,7 @@ impl Domain {
             self.process_times.start(me);
             self.process_ptimes.start(me);
             let mut m = Some(m);
-            let (misses, captured) = n.process(
+            let (misses, _, captured) = n.process(
                 &mut m,
                 None,
                 &mut self.state,
@@ -1721,7 +1721,7 @@ impl Domain {
                         }
 
                         // process the current message in this node
-                        let (mut misses, captured) = n.process(
+                        let (mut misses, lookups, captured) = n.process(
                             &mut m,
                             segment.partial_key.as_ref(),
                             &mut self.state,
@@ -1933,87 +1933,70 @@ impl Domain {
                         //
                         // TODO: but then how do things get evicted from the last materialized node
                         // within a given domain? maybe we need to special-case egress nodes?
+                        //
+                        // TODO: evict state for all successful lookups (what if some lookups were
+                        // made as part of a replay that missed?)
                         if backfill_keys.is_some() {
-                            let lookups =
-                                self.nodes[segment.node].borrow().suggest_indexes(0.into());
-                            // TODO: will it ever be the case that we do replays from a side that
-                            // the operator doesn't do lookups into? if so, this won't be enough.
-                            // TODO: the below assumes that a given operator only ever looks up
-                            // into a particular ancestor by a single column set.
-                            for (pni, columns) in lookups {
-                                if pni == 0.into() {
+                            // first and foremost -- evict the source of the replay (if we own it)
+                            // TODO
+                            // if pn.local_addr() == path[i - 1].node {
+                            //     // this is the node we are processing a replay _from_.
+                            //     // evict the state for the replay key.
+                            //     for key in backfill_keys.as_ref().unwrap().iter() {
+                            //         state.mark_hole(&key[..], tag);
+                            //     }
+
+                            for lookup in lookups {
+                                if lookup.on == segment.node {
                                     // don't evict from our own state
                                     continue;
                                 }
 
-                                // XXX: cache
-                                let pn = self
-                                    .nodes
-                                    .values()
-                                    .map(|n| n.borrow())
-                                    .find(|n| n.global_addr() == pni)
-                                    .expect("looking up into non-local node");
-
-                                // what keys do we evict?
-                                // we certainly need to evict the entry for the replay key in the
-                                // source node for the replay, but what else? things we lookup on
-                                // only? what if we have a materialized ancestor that we don't do
-                                // lookups into?
+                                let pn = self.nodes[lookup.on].borrow();
                                 if !pn.beyond_mat_frontier() {
+                                    // not supposed to evict from this ancestor
                                     continue;
                                 }
 
-                                let state = if let Some(state) = self.state.get_mut(segment.node) {
+                                let state = if let Some(state) = self.state.get_mut(lookup.on) {
                                     state
                                 } else {
-                                    continue;
+                                    unreachable!(
+                                        "lookup on non-materialized node {:?}",
+                                        pn.global_addr()
+                                    );
                                 };
 
-                                // NOTE: this won't underflow, since ingress nodes don't do lookups
-                                if pn.local_addr() == path[i - 1].node {
-                                    // this is the node we are processing a replay _from_.
-                                    // evict the state for the replay key.
-                                    for key in backfill_keys.as_ref().unwrap().iter() {
-                                        state.mark_hole(&key[..], tag);
-                                    }
-
-                                // TODO: can it be that we do lookups into the same node we're
-                                // doing the replay from by a different column?
-                                } else {
-                                    // this is a node that we were doing lookups into as part of
-                                    // the replay -- make sure we evict any state we may have
-                                    // populated there.
-                                    let mut evict_tag = None;
-                                    for (tag, rp) in &self.replay_paths {
-                                        match rp.trigger {
-                                            TriggerEndpoint::Local(..)
-                                            | TriggerEndpoint::End { .. } => {
-                                                if rp
-                                                    .path
-                                                    .last()
-                                                    .unwrap()
-                                                    .partial_key
-                                                    .as_ref()
-                                                    .unwrap()
-                                                    == &columns
-                                                {
-                                                    // this is the tag we would have used to fill a
-                                                    // lookup hole in this ancestor, so this is the
-                                                    // tag we need to evict from.
-                                                    evict_tag = Some(tag);
-                                                    break;
-                                                }
+                                // this is a node that we were doing lookups into as part of the
+                                // replay -- make sure we evict any state we may have added there.
+                                let mut evict_tag = None;
+                                for (&tag, rp) in &self.replay_paths {
+                                    match rp.trigger {
+                                        TriggerEndpoint::Local(..)
+                                        | TriggerEndpoint::End { .. } => {
+                                            if rp.path.last().unwrap().partial_key.as_ref().unwrap()
+                                                == &lookup.cols
+                                            {
+                                                // this is the tag we would have used to fill a
+                                                // lookup hole in this ancestor, so this is the
+                                                // tag we need to evict from.
+                                                // TODO: cache
+                                                evict_tag = Some(tag);
+                                                break;
                                             }
-                                            TriggerEndpoint::Start(..) | TriggerEndpoint::None => {}
                                         }
+                                        TriggerEndpoint::Start(..) | TriggerEndpoint::None => {}
                                     }
+                                }
 
-                                    if let Some(tag) = evict_tag {
-                                        // TODO: how do we figure out what lookups we did (and
-                                        // thus what keys we have to evict)?
-                                        // TODO: for backfill_keys { state.mark_hole(&key[..], tag); }
-                                        unimplemented!();
-                                    }
+                                if let Some(tag) = evict_tag {
+                                    state.mark_hole(&lookup.key[..], tag);
+                                } else {
+                                    unreachable!(
+                                        "no tag found for lookup target {:?}({:?})",
+                                        pn.global_addr(),
+                                        lookup.cols
+                                    );
                                 }
                             }
                         }

@@ -122,7 +122,7 @@ impl Ingredient for Trigger {
 
         ProcessingResult {
             results: rs,
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 

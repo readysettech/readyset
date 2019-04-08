@@ -259,7 +259,7 @@ impl Ingredient for Project {
 
         ProcessingResult {
             results: rs,
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 

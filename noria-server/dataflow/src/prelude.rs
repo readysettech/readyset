@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 // core types
 crate use processing::Ingredient;
-crate use processing::{Miss, ProcessingResult, RawProcessingResult, ReplayContext};
+crate use processing::{Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 crate type Edge = ();
 
 // dataflow types

@@ -189,7 +189,7 @@ impl Ingredient for Union {
         match self.emit {
             Emit::AllFrom(..) => ProcessingResult {
                 results: rs,
-                misses: Vec::new(),
+                ..Default::default()
             },
             Emit::Project { ref emit_l, .. } => {
                 let rs = rs
@@ -211,7 +211,7 @@ impl Ingredient for Union {
                     .collect();
                 ProcessingResult {
                     results: rs,
-                    misses: Vec::new(),
+                    ..Default::default()
                 }
             }
         }
@@ -272,7 +272,7 @@ impl Ingredient for Union {
                         // we clone above so that we can also return the processed results
                         return RawProcessingResult::Regular(ProcessingResult {
                             results: rs,
-                            misses: Vec::new(),
+                            ..Default::default()
                         });
                     } else {
                         unreachable!();
