@@ -1548,6 +1548,7 @@ impl Domain {
         'outer: loop {
             let ReplayPath {
                 ref path,
+                ref source,
                 notify_done,
                 ..
             } = self.replay_paths[&tag];
@@ -1937,14 +1938,24 @@ impl Domain {
                         // TODO: evict state for all successful lookups (what if some lookups were
                         // made as part of a replay that missed?)
                         if backfill_keys.is_some() {
-                            // first and foremost -- evict the source of the replay (if we own it)
-                            // TODO
-                            // if pn.local_addr() == path[i - 1].node {
-                            //     // this is the node we are processing a replay _from_.
-                            //     // evict the state for the replay key.
-                            //     for key in backfill_keys.as_ref().unwrap().iter() {
-                            //         state.mark_hole(&key[..], tag);
-                            //     }
+                            // first and foremost -- evict the source of the replay (if we own it).
+                            // we only do this when the replay has reached its target, or if it's
+                            // about to leave the domain, otherwise we might evict state that a
+                            // later operator (like a join) will still do lookups into.
+                            if i == path.len() - 1 {
+                                // only evict if we own the state where the replay originated
+                                if let Some(src) = source {
+                                    if self.nodes[*src].borrow().beyond_mat_frontier() {
+                                        let state = self
+                                            .state
+                                            .get_mut(*src)
+                                            .expect("replay sourced at non-materialized node");
+                                        for key in backfill_keys.as_ref().unwrap().iter() {
+                                            state.mark_hole(&key[..], tag);
+                                        }
+                                    }
+                                }
+                            }
 
                             for lookup in lookups {
                                 if lookup.on == segment.node {
