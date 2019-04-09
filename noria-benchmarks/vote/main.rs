@@ -292,6 +292,7 @@ where
     // this may change with https://github.com/rayon-rs/rayon/issues/544, but that's what we have
     // to do for now.
     let ndone: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
+    let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
 
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
@@ -349,7 +350,7 @@ where
         });
 
         ex.spawn(fut.map_err(move |e| {
-            if time::Instant::now() < end {
+            if time::Instant::now() < end && !errd.swap(true, atomic::Ordering::SeqCst) {
                 eprintln!("failed to enqueue request: {:?}", e)
             }
         }));
