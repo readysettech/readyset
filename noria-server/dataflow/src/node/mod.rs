@@ -195,6 +195,7 @@ impl Node {
         let mut n = self.mirror(inner);
         n.index = self.index;
         n.domain = self.domain;
+        n.purge = self.purge;
         self.taken = true;
 
         DanglingDomainNode(n)
