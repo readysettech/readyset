@@ -1355,6 +1355,12 @@ impl Domain {
                 trigger: TriggerEndpoint::Start(ref cols),
                 ref path,
                 ..
+            }
+            | ReplayPath {
+                source: Some(source),
+                trigger: TriggerEndpoint::Local(ref cols),
+                ref path,
+                ..
             } => {
                 let state = self
                     .state
@@ -1438,6 +1444,10 @@ impl Domain {
     ) {
         if let ReplayPath {
             trigger: TriggerEndpoint::Start(..),
+            ..
+        }
+        | ReplayPath {
+            trigger: TriggerEndpoint::Local(..),
             ..
         } = self.replay_paths[&tag]
         {
