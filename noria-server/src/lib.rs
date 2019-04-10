@@ -435,7 +435,7 @@ impl Default for Config {
             partial_enabled: true,
             domain_config: DomainConfig {
                 concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::new(0, 10_000),
+                replay_batch_timeout: time::Duration::new(0, 100_000),
             },
             persistence: Default::default(),
             heartbeat_every: time::Duration::from_secs(1),
