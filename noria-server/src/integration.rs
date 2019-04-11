@@ -1635,10 +1635,7 @@ fn materialization_frontier() {
     // seed articles
     a.insert(vec![1.into(), "Hello world #1".into()]).unwrap();
     a.insert(vec![2.into(), "Hello world #2".into()]).unwrap();
-
-    for _ in 0..10 {
-        sleep();
-    }
+    sleep();
 
     // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
     // we first "warm up" by reading both to ensure all other necessary state is present.
