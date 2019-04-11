@@ -445,7 +445,7 @@ impl Materializations {
     /// populating new materializations.
     pub(super) fn commit(
         &mut self,
-        graph: &Graph,
+        graph: &mut Graph,
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -609,10 +609,37 @@ impl Materializations {
             }
         }
 
+        for &ni in new {
+            // any nodes marked as .purge should have their state be beyond the materialization
+            // frontier. however, mir may have named an identity child instead of the node with a
+            // materialization, so let's make sure the label gets correctly applied: specifically,
+            // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
+            if graph[ni].purge && !self.have.contains_key(&ni) {
+                let mut it = graph
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                    .detach();
+                while let Some((_, pi)) = it.next(&*graph) {
+                    if !new.contains(&pi) {
+                        continue;
+                    }
+                    if !self.have.contains_key(&pi) {
+                        warn!(self.log, "no associated state with purged node";
+                              "node" => ni.index());
+                        continue;
+                    }
+                    assert!(
+                        self.partial.contains(&pi),
+                        "attempting to place full materialization beyond materialization frontier"
+                    );
+                    graph.node_weight_mut(pi).unwrap().purge = true;
+                }
+            }
+        }
+
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
-        let mut topo = petgraph::visit::Topo::new(graph);
-        while let Some(node) = topo.next(graph) {
+        let mut topo = petgraph::visit::Topo::new(&*graph);
+        while let Some(node) = topo.next(&*graph) {
             if graph[node].is_source() {
                 continue;
             }
@@ -732,6 +759,7 @@ impl Materializations {
                 .send_to_healthy(
                     box Packet::Ready {
                         node: n.local_addr(),
+                        purge: n.purge,
                         index: index_on,
                     },
                     workers,

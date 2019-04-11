@@ -214,6 +214,7 @@ pub enum Packet {
     /// updates.
     Ready {
         node: LocalNodeIndex,
+        purge: bool,
         index: HashSet<Vec<usize>>,
     },
 

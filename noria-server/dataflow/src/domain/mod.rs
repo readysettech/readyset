@@ -1145,8 +1145,10 @@ impl Domain {
                     Packet::Finish(tag, ni) => {
                         self.finish_replay(tag, ni, sends, executor);
                     }
-                    Packet::Ready { node, index } => {
+                    Packet::Ready { node, purge, index } => {
                         assert_eq!(self.mode, DomainMode::Forwarding);
+
+                        self.nodes[node].borrow_mut().purge = purge;
 
                         if !index.is_empty() {
                             let mut s: Box<State> = {
