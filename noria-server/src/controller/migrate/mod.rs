@@ -237,11 +237,14 @@ impl<'a> Migration<'a> {
         if let Entry::Vacant(e) = self.readers.entry(n) {
             // make a reader
             let r = node::special::Reader::new(n);
-            let r = if let Some(name) = name {
+            let mut r = if let Some(name) = name {
                 self.mainline.ingredients[n].named_mirror(r, name)
             } else {
                 self.mainline.ingredients[n].mirror(r)
             };
+            if r.name().starts_with("SHALLOW_") {
+                r.purge = true;
+            }
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(n, r, ());
             self.added.insert(r);
