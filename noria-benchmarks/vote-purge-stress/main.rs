@@ -41,6 +41,13 @@ fn main() {
                 .help("Time to batch replay requests for, in nanoseconds."),
         )
         .arg(
+            Arg::with_name("time")
+                .short("t")
+                .takes_value(true)
+                .default_value("10")
+                .help("Time to run benchmark for, in seconds."),
+        )
+        .arg(
             Arg::with_name("no-purge")
                 .long("no-purge")
                 .help("Disable purging"),
@@ -48,6 +55,7 @@ fn main() {
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
+    let runtime = value_t_or_exit!(args, "time", u64);
     let mut builder = Builder::default();
     if args.is_present("verbose") {
         builder.log_with(noria::logger_pls());
@@ -116,7 +124,7 @@ fn main() {
     let mut n = 0;
     let start = Instant::now();
     let mut stats = Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap();
-    while start.elapsed() < Duration::from_secs(10) {
+    while start.elapsed() < Duration::from_secs(runtime) {
         for _ in 0..1_000 {
             for &id in &[1, 2] {
                 let start = Instant::now();
