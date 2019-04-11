@@ -386,6 +386,11 @@ impl Materializations {
                         m.insert(index);
                     }
                 }
+            } else {
+                assert!(
+                    !graph[ni].purge,
+                    "full materialization placed beyond materialization frontier"
+                );
             }
 
             // no matter what happens, we're going to have to fulfill our replay obligations.

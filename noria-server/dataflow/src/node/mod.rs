@@ -31,7 +31,7 @@ pub struct Node {
     inner: NodeType,
     taken: bool,
 
-    purge: bool,
+    pub purge: bool,
 
     sharded_by: Sharding,
 }
