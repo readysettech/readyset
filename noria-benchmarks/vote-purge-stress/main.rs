@@ -17,11 +17,13 @@ CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
 CREATE TABLE Vote (article_id int, user int);
 
 # read queries
-QUERY SHALLOW_ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
+CREATE VIEW SHALLOW_VoteCount AS \
+  SELECT Vote.article_id, COUNT(user) AS votes FROM Vote GROUP BY Vote.article_id;
+
+QUERY SHALLOW_ArticleWithVoteCount: SELECT Article.id, title, SHALLOW_VoteCount.votes AS votes \
             FROM Article \
-            LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes \
-                       FROM Vote GROUP BY Vote.article_id) AS VoteCount \
-            ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
+            LEFT JOIN SHALLOW_VoteCount \
+            ON (Article.id = SHALLOW_VoteCount.article_id) WHERE Article.id = ?;";
 
 fn main() {
     let args = App::new("purge-stress")
@@ -48,8 +50,11 @@ fn main() {
                 .help("Time to run benchmark for, in seconds."),
         )
         .arg(
-            Arg::with_name("no-purge")
-                .long("no-purge")
+            Arg::with_name("purge")
+                .long("purge")
+                .takes_value(true)
+                .possible_values(&["none", "reader", "all"])
+                .default_value("none")
                 .help("Disable purging"),
         )
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
@@ -72,10 +77,11 @@ fn main() {
         value_t_or_exit!(args, "replay-timeout", u32),
     ));
 
-    let (recipe, view) = if args.is_present("no-purge") {
-        (RECIPE.replace("SHALLOW_", ""), "ArticleWithVoteCount")
-    } else {
-        (RECIPE.to_string(), "SHALLOW_ArticleWithVoteCount")
+    let (recipe, view) = match args.value_of("purge").unwrap() {
+        "all" => (RECIPE.to_string(), "SHALLOW_ArticleWithVoteCount"),
+        "reader" => (RECIPE.replace("SHALLOW_A", "A"), "ArticleWithVoteCount"),
+        "none" => (RECIPE.replace("SHALLOW_", ""), "ArticleWithVoteCount"),
+        _ => unreachable!(),
     };
 
     let mut rt = tokio::runtime::Runtime::new().unwrap();
@@ -135,6 +141,7 @@ fn main() {
         }
     }
 
+    println!("# purge mode: {}", args.value_of("purge").unwrap());
     println!(
         "# replays/s: {:.2}",
         n as f64 / start.elapsed().as_float_secs()
