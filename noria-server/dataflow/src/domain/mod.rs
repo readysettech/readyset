@@ -1988,8 +1988,12 @@ impl Domain {
 
                                     while let Some(pn) = tmp.pop() {
                                         if self.state.contains_key(pn) {
-                                            // already done with this
-                                            pns.push(pn);
+                                            if self.nodes[pn].borrow().beyond_mat_frontier() {
+                                                // we should evict from this!
+                                                pns.push(pn);
+                                            } else {
+                                                // we should _not_ evict from this
+                                            }
                                             continue;
                                         }
 
@@ -2000,17 +2004,7 @@ impl Domain {
                                         }
 
                                         for &ppn in pn.parents() {
-                                            if self.state.contains_key(ppn) {
-                                                if self.nodes[ppn].borrow().beyond_mat_frontier() {
-                                                    // we should evict from this!
-                                                    tmp.push(ppn);
-                                                } else {
-                                                    // we should _not_ evict from this
-                                                }
-                                            } else {
-                                                // further extraction is needed
-                                                tmp.push(ppn);
-                                            }
+                                            tmp.push(ppn);
                                         }
                                     }
                                     pns_for = Some(lookup.on);
@@ -2024,6 +2018,7 @@ impl Domain {
 
                                 for &pn in &pns {
                                     let state = self.state.get_mut(pn).unwrap();
+                                    assert!(state.is_partial());
 
                                     // this is a node that we were doing lookups into as part of
                                     // the replay -- make sure we evict any state we may have added
