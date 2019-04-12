@@ -614,7 +614,7 @@ impl Materializations {
             // frontier. however, mir may have named an identity child instead of the node with a
             // materialization, so let's make sure the label gets correctly applied: specifically,
             // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
-            if graph[ni].purge && !self.have.contains_key(&ni) {
+            if graph[ni].purge && !(self.have.contains_key(&ni) || graph[ni].is_reader()) {
                 let mut it = graph
                     .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
                     .detach();
