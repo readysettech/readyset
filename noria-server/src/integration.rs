@@ -1611,6 +1611,7 @@ fn materialization_frontier() {
             &["id", "votes"],
             Aggregation::COUNT.over(vote, 0, &[1]),
         );
+        mig.mark_shallow(vc);
 
         // add final join using first field from article and first from vc
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
