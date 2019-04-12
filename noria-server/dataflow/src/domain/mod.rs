@@ -1707,7 +1707,9 @@ impl Domain {
                             // will be evicted by our children when they process replays that use
                             // this state.
                             if n.beyond_mat_frontier() {
+                                let ni = n.global_addr().index();
                                 n.with_reader_mut(|r| {
+                                    trace!(self.log, "purging state from reader"; "node" => ni);
                                     r.writer_mut().unwrap().clear();
                                 })
                                 .is_ok();
@@ -1957,11 +1959,13 @@ impl Domain {
                             if i == path.len() - 1 {
                                 // only evict if we own the state where the replay originated
                                 if let Some(src) = source {
-                                    if self.nodes[*src].borrow().beyond_mat_frontier() {
+                                    let n = self.nodes[*src].borrow();
+                                    if n.beyond_mat_frontier() {
                                         let state = self
                                             .state
                                             .get_mut(*src)
                                             .expect("replay sourced at non-materialized node");
+                                        trace!(self.log, "clearing keys from purgeable replay source after replay"; "node" => n.global_addr().index(), "keys" => ?backfill_keys.as_ref().unwrap());
                                         for key in backfill_keys.as_ref().unwrap().iter() {
                                             state.mark_hole(&key[..], tag);
                                         }
@@ -2051,6 +2055,7 @@ impl Domain {
 
                                     if let Some(tag) = evict_tag {
                                         // NOTE: this assumes that the key order is the same
+                                        trace!(self.log, "clearing keys from purgeable materialization after replay"; "node" => self.nodes[pn].borrow().global_addr().index(), "key" => ?&lookup.key);
                                         state.mark_hole(&lookup.key[..], tag);
                                     } else {
                                         unreachable!(
