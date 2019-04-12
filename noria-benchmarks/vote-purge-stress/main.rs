@@ -79,7 +79,10 @@ fn main() {
 
     let (recipe, view) = match args.value_of("purge").unwrap() {
         "all" => (RECIPE.to_string(), "SHALLOW_ArticleWithVoteCount"),
-        "reader" => (RECIPE.replace("SHALLOW_A", "A"), "ArticleWithVoteCount"),
+        "reader" => (
+            RECIPE.replace("SHALLOW_V", "V"),
+            "SHALLOW_ArticleWithVoteCount",
+        ),
         "none" => (RECIPE.replace("SHALLOW_", ""), "ArticleWithVoteCount"),
         _ => unreachable!(),
     };
