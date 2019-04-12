@@ -27,6 +27,7 @@ pub struct Node {
     domain: Option<domain::Index>,
 
     fields: Vec<String>,
+    parents: Vec<LocalNodeIndex>,
     children: Vec<LocalNodeIndex>,
     inner: NodeType,
     taken: bool,
@@ -51,6 +52,7 @@ impl Node {
             domain: None,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
+            parents: Vec::new(),
             children: Vec::new(),
             inner: inner.into(),
             taken: false,
@@ -81,6 +83,11 @@ impl DanglingDomainNode {
         n.children = graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
             .filter(|&c| graph[c].domain() == dm)
+            .map(|ni| graph[ni].local_addr())
+            .collect();
+        n.parents = graph
+            .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+            .filter(|&c| !graph[c].is_source() && graph[c].domain() == dm)
             .map(|ni| graph[ni].local_addr())
             .collect();
         n
@@ -298,14 +305,14 @@ impl DerefMut for Node {
     }
 }
 
-// children
+// neighbors
 impl Node {
-    crate fn child(&self, i: usize) -> &LocalNodeIndex {
-        &self.children[i]
+    crate fn children(&self) -> &[LocalNodeIndex] {
+        &self.children
     }
 
-    crate fn nchildren(&self) -> usize {
-        self.children.len()
+    crate fn parents(&self) -> &[LocalNodeIndex] {
+        &self.parents
     }
 }
 

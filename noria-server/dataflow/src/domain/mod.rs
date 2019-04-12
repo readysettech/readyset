@@ -642,7 +642,8 @@ impl Domain {
             ref m => unreachable!("dispatch process got {:?}", m),
         }
 
-        let nchildren = self.nodes[me].borrow().nchildren();
+        // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
+        let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
             // avoid cloning if we can
             let mut m = if i == nchildren - 1 {
@@ -651,7 +652,7 @@ impl Domain {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            let childi = *self.nodes[me].borrow().child(i);
+            let childi = self.nodes[me].borrow().children()[i];
             let child_is_merger = {
                 // XXX: shouldn't NLL make this unnecessary?
                 let c = self.nodes[childi].borrow();
@@ -718,6 +719,8 @@ impl Domain {
                         for node in nodes {
                             for cn in self.nodes.iter_mut() {
                                 cn.1.borrow_mut().try_remove_child(node);
+                                // NOTE: since nodes are always removed leaves-first, it's not
+                                // important to update parent pointers here
                             }
                         }
                     }
@@ -1967,57 +1970,101 @@ impl Domain {
                             }
 
                             // next, evict any state that we had to look up to process this replay.
+                            let mut evict_tag = None;
+                            let mut pns_for = None;
+                            let mut pns = Vec::new();
+                            let mut tmp = Vec::new();
                             for lookup in lookups {
+                                // don't evict from our own state
                                 if lookup.on == segment.node {
-                                    // don't evict from our own state
                                     continue;
                                 }
 
-                                let pn = self.nodes[lookup.on].borrow();
-                                if !pn.beyond_mat_frontier() {
-                                    // not supposed to evict from this ancestor
-                                    continue;
-                                }
+                                // resolve any lookups through query-through nodes
+                                if pns_for != Some(lookup.on) {
+                                    pns.clear();
+                                    assert!(tmp.is_empty());
+                                    tmp.push(lookup.on);
 
-                                let state = if let Some(state) = self.state.get_mut(lookup.on) {
-                                    state
-                                } else {
-                                    unreachable!(
-                                        "lookup on non-materialized node {:?}",
-                                        pn.global_addr()
-                                    );
-                                };
+                                    while let Some(pn) = tmp.pop() {
+                                        if self.state.contains_key(pn) {
+                                            // already done with this
+                                            pns.push(pn);
+                                            continue;
+                                        }
 
-                                // this is a node that we were doing lookups into as part of the
-                                // replay -- make sure we evict any state we may have added there.
-                                let mut evict_tag = None;
-                                for (&tag, rp) in &self.replay_paths {
-                                    match rp.trigger {
-                                        TriggerEndpoint::Local(..)
-                                        | TriggerEndpoint::End { .. } => {
-                                            if rp.path.last().unwrap().partial_key.as_ref().unwrap()
-                                                == &lookup.cols
-                                            {
-                                                // this is the tag we would have used to fill a
-                                                // lookup hole in this ancestor, so this is the
-                                                // tag we need to evict from.
-                                                // TODO: cache
-                                                evict_tag = Some(tag);
-                                                break;
+                                        // this parent needs to be resolved further
+                                        let pn = self.nodes[pn].borrow();
+                                        if !pn.can_query_through() {
+                                            unreachable!("lookup into non-materialized, non-query-through node");
+                                        }
+
+                                        for &ppn in pn.parents() {
+                                            if self.state.contains_key(ppn) {
+                                                if self.nodes[ppn].borrow().beyond_mat_frontier() {
+                                                    // we should evict from this!
+                                                    tmp.push(ppn);
+                                                } else {
+                                                    // we should _not_ evict from this
+                                                }
+                                            } else {
+                                                // further extraction is needed
+                                                tmp.push(ppn);
                                             }
                                         }
-                                        TriggerEndpoint::Start(..) | TriggerEndpoint::None => {}
                                     }
+                                    pns_for = Some(lookup.on);
                                 }
 
-                                if let Some(tag) = evict_tag {
-                                    state.mark_hole(&lookup.key[..], tag);
-                                } else {
-                                    unreachable!(
-                                        "no tag found for lookup target {:?}({:?})",
-                                        pn.global_addr(),
-                                        lookup.cols
-                                    );
+                                let tag_match = |rp: &ReplayPath, pn| {
+                                    rp.path.last().unwrap().node == pn
+                                        && rp.path.last().unwrap().partial_key.as_ref().unwrap()
+                                            == &lookup.cols
+                                };
+
+                                for &pn in &pns {
+                                    let state = self.state.get_mut(pn).unwrap();
+
+                                    // this is a node that we were doing lookups into as part of
+                                    // the replay -- make sure we evict any state we may have added
+                                    // there.
+                                    if let Some(tag) = evict_tag {
+                                        if !tag_match(&self.replay_paths[&tag], pn) {
+                                            // we can't re-use this
+                                            evict_tag = None;
+                                        }
+                                    }
+
+                                    if evict_tag.is_none() {
+                                        for (&tag, rp) in &self.replay_paths {
+                                            match rp.trigger {
+                                                TriggerEndpoint::Local(..)
+                                                | TriggerEndpoint::End { .. } => {
+                                                    if tag_match(rp, pn) {
+                                                        // this is the tag we would have used to
+                                                        // fill a lookup hole in this ancestor, so
+                                                        // this is the tag we need to evict from.
+                                                        evict_tag = Some(tag);
+                                                        break;
+                                                    }
+                                                }
+                                                TriggerEndpoint::Start(..)
+                                                | TriggerEndpoint::None => {}
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(tag) = evict_tag {
+                                        // NOTE: this assumes that the key order is the same
+                                        state.mark_hole(&lookup.key[..], tag);
+                                    } else {
+                                        unreachable!(
+                                            "no tag found for lookup target {:?}({:?}) (really {:?})",
+                                            self.nodes[lookup.on].borrow().global_addr(),
+                                            lookup.cols,
+                                            self.nodes[pn].borrow().global_addr(),
+                                        );
+                                    }
                                 }
                             }
                         }
