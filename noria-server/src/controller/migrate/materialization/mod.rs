@@ -636,6 +636,32 @@ impl Materializations {
             }
         }
 
+        // check that we never have non-purge below purge
+        let mut non_purge = Vec::new();
+        for &ni in new {
+            if (graph[ni].is_reader() || self.have.contains_key(&ni)) && !graph[ni].purge {
+                for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    non_purge.push(pi);
+                }
+            }
+        }
+        while let Some(ni) = non_purge.pop() {
+            assert!(
+                !graph[ni].purge,
+                "found purge node {} above non-purge node",
+                ni.index()
+            );
+            if self.have.contains_key(&ni) {
+                // already shceduled to be checked
+                // NOTE: no need to check for readers here, since they can't be parents
+                continue;
+            }
+            for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                non_purge.push(pi);
+            }
+        }
+        drop(non_purge);
+
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(&*graph);
