@@ -63,6 +63,7 @@ impl VoteClient for LocalNoria {
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
+        s.purge = args.value_of("purge").unwrap().to_string();
         let g = s.start(ex, persistence);
 
         // prepopulate

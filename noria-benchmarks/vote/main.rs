@@ -691,6 +691,14 @@ fn main() {
                         .help("Send pointers instead of serializing data for writes"),
                 )
                 .arg(
+                    Arg::with_name("purge")
+                        .long("purge")
+                        .takes_value(true)
+                        .possible_values(&["none", "reader", "all"])
+                        .default_value("none")
+                        .help("Choose which views, if any, are placed beyond the materialization_frontier"),
+                )
+                .arg(
                     Arg::with_name("log-dir")
                         .long("log-dir")
                         .takes_value(true)

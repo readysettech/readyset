@@ -34,7 +34,7 @@ impl VoteClient for Conn {
                     if params.prime {
                         // for prepop, we need a mutator
                         future::Either::A(
-                            c.install_recipe(RECIPE)
+                            c.install_recipe(&RECIPE.replace("SHALLOW_", ""))
                                 .and_then(move |_| c.table("Article").map(move |a| (c, a)))
                                 .and_then(move |(c, a)| {
                                     a.perform_all((0..params.articles).map(|i| {
