@@ -14,7 +14,7 @@ use std::time;
 use stream_cancel::Valve;
 use tokio::prelude::*;
 use tokio_tower::multiplex::server;
-use tower_util::ServiceFn;
+use tower::service_fn;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -48,7 +48,7 @@ pub(super) fn listen(
                 stream.set_nodelay(true).expect("could not set TCP_NODELAY");
                 server::Server::new(
                     AsyncBincodeStream::from(stream).for_async(),
-                    ServiceFn::new(move |req| handle_message(req, &readers)),
+                    service_fn(move |req| handle_message(req, &readers)),
                 )
                 .map_err(|e| {
                     if let server::Error::Service(()) = e {

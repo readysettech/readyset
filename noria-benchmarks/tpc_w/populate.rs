@@ -23,7 +23,7 @@ fn populate(backend: &mut Backend, name: &'static str, mut records: Vec<Vec<Data
             mutator.insert(r).unwrap();
         }
 
-        let dur = start.elapsed().as_float_secs();
+        let dur = start.elapsed().as_secs_f64();
         println!(
             "Inserted {} {} in {:.2}s ({:.2} PUTs/sec)!",
             i,

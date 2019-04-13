@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::{fmt, io};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
+use tower::ServiceExt;
 use tower_balance::{choose, pool, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
-use tower_util::ext::ServiceExt;
 use vec_map::VecMap;
 
 type Transport = AsyncBincodeStream<

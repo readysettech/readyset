@@ -59,7 +59,6 @@ impl Backend {
     }
 
     fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
-        use std::fs::File;
         use std::io::Read;
 
         // Read schema file

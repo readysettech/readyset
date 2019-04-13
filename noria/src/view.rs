@@ -11,10 +11,10 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
+use tower::ServiceExt;
 use tower_balance::{choose, pool, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
-use tower_util::ServiceExt;
 
 type Transport = AsyncBincodeStream<
     tokio::net::tcp::TcpStream,

@@ -1471,7 +1471,6 @@ impl SqlToMirConverter {
         use crate::controller::sql::mir::grouped::make_grouped;
         use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
         use crate::controller::sql::mir::join::make_joins;
-        use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;

@@ -122,7 +122,7 @@ impl Backend {
         let start = time::Instant::now();
         self.g.install_recipe(&new_recipe).unwrap();
 
-        let dur = start.elapsed().as_float_secs();
+        let dur = start.elapsed().as_secs_f64();
         println!("Migrate query {}: ({:.2} sec)", query_name, dur,);
 
         self.r = new_recipe;
@@ -174,7 +174,7 @@ impl Backend {
                     }
                 }
             }
-            let dur = start.elapsed().as_float_secs();
+            let dur = start.elapsed().as_secs_f64();
             println!(
                 "{}: ({:.2} GETs/sec) (ok: {})!",
                 query_name,

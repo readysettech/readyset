@@ -143,6 +143,7 @@ impl<'a> Migration<'a> {
     ///
     /// Note that if a node is marked this way, all of its children transitively _also_ have to be
     /// marked.
+    #[cfg(test)]
     crate fn mark_shallow(&mut self, ni: NodeIndex) {
         info!(self.log,
               "marking node as beyond materialization frontier";

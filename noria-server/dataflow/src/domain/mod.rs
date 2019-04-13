@@ -1298,7 +1298,6 @@ impl Domain {
                     .iter_mut()
                     .filter_map(|(&tag, &mut (first, ref mut keys))| {
                         if !keys.is_empty() && now.duration_since(first) > to {
-                            use std::mem;
                             let l = keys.len();
                             Some((tag, mem::replace(keys, HashSet::with_capacity(l))))
                         } else {
@@ -2316,7 +2315,6 @@ impl Domain {
         mem::replace(&mut self.mode, was);
 
         if finished {
-            use std::mem;
             // node is now ready, and should start accepting "real" updates
             if let DomainMode::Replaying { passes, .. } =
                 mem::replace(&mut self.mode, DomainMode::Forwarding)

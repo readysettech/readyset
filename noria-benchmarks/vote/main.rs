@@ -25,7 +25,7 @@ thread_local! {
 }
 
 fn throughput(ops: usize, took: time::Duration) -> f64 {
-    ops as f64 / took.as_float_secs()
+    ops as f64 / took.as_secs_f64()
 }
 
 const MAX_BATCH_TIME_US: u32 = 1000;

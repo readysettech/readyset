@@ -605,7 +605,6 @@ fn reshard(
             n
         }
         Sharding::ByColumn(c, _) => {
-            use dataflow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
             n.shard_by(graph[src].sharded_by());
             n

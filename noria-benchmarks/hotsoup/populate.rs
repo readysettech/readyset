@@ -43,7 +43,7 @@ fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
         i += 1;
         s.clear();
     }
-    let dur = start.elapsed().as_float_secs();
+    let dur = start.elapsed().as_secs_f64();
     println!(
         "Inserted {} {} records in {:.2}s ({:.2} PUTs/sec)!",
         i,

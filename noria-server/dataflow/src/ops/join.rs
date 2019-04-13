@@ -429,8 +429,6 @@ impl Ingredient for Join {
 
             let mut other_rows_count = 0;
             for r in &mut rs[start..at] {
-                use std::mem;
-
                 // put something bogus in rs (which will be discarded anyway) so we can take r.
                 let r = mem::replace(r, Record::Positive(Vec::new()));
                 let (row, positive) = r.extract();

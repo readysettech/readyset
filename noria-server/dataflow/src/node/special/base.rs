@@ -310,7 +310,6 @@ mod tests {
     fn test_lots_of_changes_in_same_batch(mut state: Box<State>) {
         use node;
         use prelude::*;
-        use std::collections::HashMap;
 
         // most of this is from MockGraph
         let mut graph = Graph::new();

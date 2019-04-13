@@ -122,7 +122,6 @@ impl Reader {
     }
 
     crate fn state_size(&self) -> Option<u64> {
-        use common::SizeOf;
         self.writer.as_ref().map(|w| w.deep_size_of())
     }
 
@@ -132,7 +131,6 @@ impl Reader {
     crate fn evict_random_key(&mut self) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
-            use rand;
             let mut rng = rand::thread_rng();
             bytes_freed = handle.evict_random_key(&mut rng);
             handle.swap();

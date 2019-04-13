@@ -295,7 +295,6 @@ pub mod test {
         where
             I: Ingredient + Into<NodeOperator>,
         {
-            use petgraph;
             assert!(self.nut.is_none(), "only one node under test is supported");
 
             i.on_connected(&self.graph);
@@ -368,10 +367,7 @@ pub mod test {
 
             self.nodes = nodes
                 .into_iter()
-                .map(|(_, n)| {
-                    use std::cell;
-                    (n.local_addr(), cell::RefCell::new(n))
-                })
+                .map(|(_, n)| (n.local_addr(), cell::RefCell::new(n)))
                 .collect();
         }
 

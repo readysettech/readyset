@@ -45,6 +45,7 @@ serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
 tower-util = "0.1"
+tower = "0.1"
 
 # local deps
 dataflow = { path = "dataflow" }
