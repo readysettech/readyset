@@ -127,7 +127,7 @@ impl Ingredient for TopK {
         if rs.is_empty() {
             return ProcessingResult {
                 results: rs,
-                misses: vec![],
+                ..Default::default()
             };
         }
 
@@ -157,6 +157,7 @@ impl Ingredient for TopK {
         // current holds (Cow<Row>, bool) where bool = is_new
         let mut current: Vec<(Cow<[DataType]>, bool)> = Vec::new();
         let mut misses = Vec::new();
+        let mut lookups = Vec::new();
 
         macro_rules! post_group {
             ($out:ident, $current:ident, $grpk:expr, $k:expr, $order:expr) => {{
@@ -239,6 +240,14 @@ impl Ingredient for TopK {
                 // check out current state
                 match db.lookup(&group_by[..], &KeyType::from(&grp[..])) {
                     LookupResult::Some(rs) => {
+                        if replay_key_cols.is_some() {
+                            lookups.push(Lookup {
+                                on: *us,
+                                cols: group_by.clone(),
+                                key: grp.clone(),
+                            });
+                        }
+
                         missed = false;
                         grpk = rs.len();
                         current.extend(rs.into_iter().map(|r| (r, false)))
@@ -277,6 +286,7 @@ impl Ingredient for TopK {
 
         ProcessingResult {
             results: out.into(),
+            lookups,
             misses,
         }
     }
@@ -290,10 +300,8 @@ impl Ingredient for TopK {
         assert_eq!(key_columns, &self.group_by[..]);
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![(this, (self.group_by.clone(), true))]
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        vec![(this, self.group_by.clone())].into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -480,7 +488,7 @@ mod tests {
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 1);
-        assert_eq!(*idx.iter().next().unwrap().1, (vec![1], true));
+        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
     }
 
     #[test]

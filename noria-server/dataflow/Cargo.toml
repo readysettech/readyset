@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 bincode = "1.0.0"
-evmap = { git = "https://github.com/ms705/rust-evmap" }
+evmap = { git = "https://github.com/jonhoo/rust-evmap", branch = "eviction" }
 fnv = "1.0.5"
 futures = "0.1"
 itertools = "0.7.2"

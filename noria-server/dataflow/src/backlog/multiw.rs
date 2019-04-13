@@ -20,23 +20,49 @@ impl Handle {
 
     pub fn clear(&mut self, k: Key) {
         match *self {
-            Handle::Single(ref mut h) => h.clear(key_to_single(k).into_owned()),
-            Handle::Double(ref mut h) => h.clear(key_to_double(k).into_owned()),
-            Handle::Many(ref mut h) => h.clear(k.into_owned()),
+            Handle::Single(ref mut h) => {
+                h.clear(key_to_single(k).into_owned());
+            }
+            Handle::Double(ref mut h) => {
+                h.clear(key_to_double(k).into_owned());
+            }
+            Handle::Many(ref mut h) => {
+                h.clear(k.into_owned());
+            }
+        }
+    }
+
+    pub fn purge(&mut self) {
+        match *self {
+            Handle::Single(ref mut h) => {
+                h.purge();
+            }
+            Handle::Double(ref mut h) => {
+                h.purge();
+            }
+            Handle::Many(ref mut h) => {
+                h.purge();
+            }
         }
     }
 
     pub fn empty(&mut self, k: Key) {
         match *self {
-            Handle::Single(ref mut h) => h.empty(key_to_single(k).into_owned()),
-            Handle::Double(ref mut h) => h.empty(key_to_double(k).into_owned()),
-            Handle::Many(ref mut h) => h.empty(k.into_owned()),
+            Handle::Single(ref mut h) => {
+                h.empty(key_to_single(k).into_owned());
+            }
+            Handle::Double(ref mut h) => {
+                h.empty(key_to_double(k).into_owned());
+            }
+            Handle::Many(ref mut h) => {
+                h.empty(k.into_owned());
+            }
         }
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn empty_at_index(&mut self, index: usize) -> Option<&Vec<Vec<DataType>>> {
+    pub fn empty_at_index(&mut self, index: usize) -> Option<&[Vec<DataType>]> {
         match *self {
             Handle::Single(ref mut h) => h.empty_at_index(index).map(|r| r.1),
             Handle::Double(ref mut h) => h.empty_at_index(index).map(|r| r.1),
@@ -46,9 +72,15 @@ impl Handle {
 
     pub fn refresh(&mut self) {
         match *self {
-            Handle::Single(ref mut h) => h.refresh(),
-            Handle::Double(ref mut h) => h.refresh(),
-            Handle::Many(ref mut h) => h.refresh(),
+            Handle::Single(ref mut h) => {
+                h.refresh();
+            }
+            Handle::Double(ref mut h) => {
+                h.refresh();
+            }
+            Handle::Many(ref mut h) => {
+                h.refresh();
+            }
         }
     }
 

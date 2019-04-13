@@ -167,6 +167,13 @@ impl State for MemoryState {
             (self.state[index].key(), bytes)
         })
     }
+
+    fn clear(&mut self) {
+        for state in &mut self.state {
+            state.clear();
+        }
+        self.mem_size = 0;
+    }
 }
 
 impl MemoryState {

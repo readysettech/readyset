@@ -17,7 +17,7 @@ impl Node {
         swap: bool,
         output: &mut EnqueuedSends,
         ex: &mut Executor,
-    ) -> (Vec<Miss>, HashSet<Vec<DataType>>) {
+    ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
         let addr = self.local_addr();
@@ -28,7 +28,6 @@ impl Node {
                 m.map_data(|rs| {
                     materialize(rs, tag, state.get_mut(addr));
                 });
-                (vec![], HashSet::new())
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
@@ -66,26 +65,22 @@ impl Node {
                     }
                     None => unreachable!(),
                 }
-
-                (vec![], HashSet::new())
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
-                (vec![], HashSet::new())
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(m, on_shard.unwrap_or(0), output);
-                (vec![], HashSet::new())
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(m, addr, on_shard.is_some(), output);
-                (vec![], HashSet::new())
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
                 let mut captured = HashSet::new();
                 let mut misses = Vec::new();
+                let mut lookups = Vec::new();
                 let mut tracer;
 
                 {
@@ -125,6 +120,7 @@ impl Node {
                         {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
+                                lookups = m.lookups;
                                 misses = m.misses;
                             }
                             RawProcessingResult::CapturedFull => {
@@ -137,6 +133,7 @@ impl Node {
                             } => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
+                                // NOTE: no misses or lookups here since this is a union
                                 mem::replace(data, rows);
                                 captured = were_captured;
                                 if let ReplayContext::Partial { ref mut keys, .. } = replay {
@@ -184,7 +181,7 @@ impl Node {
 
                 if captured_full {
                     *m = None;
-                    return (vec![], HashSet::new());
+                    return Default::default();
                 }
 
                 let m = m.as_mut().unwrap();
@@ -217,14 +214,14 @@ impl Node {
                     }
                 }
 
-                (misses, captured)
+                return (misses, lookups, captured);
             }
             NodeType::Dropped => {
                 *m = None;
-                (vec![], HashSet::new())
             }
             NodeType::Source => unreachable!(),
         }
+        Default::default()
     }
 
     crate fn process_eviction(

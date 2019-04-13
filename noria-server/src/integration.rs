@@ -1589,6 +1589,85 @@ fn full_aggregation_with_bogokey() {
 }
 
 #[test]
+fn materialization_frontier() {
+    // set up graph
+    let mut g = start_simple_unsharded("materialization_frontier");
+    g.migrate(|mig| {
+        // migrate
+
+        // add article base node
+        let article = mig.add_base("article", &["id", "title"], Base::default());
+
+        // add vote base table
+        let vote = mig.add_base(
+            "vote",
+            &["user", "id"],
+            Base::default().with_key(vec![0, 1]),
+        );
+
+        // add vote count
+        let vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
+        mig.mark_shallow(vc);
+
+        // add final join using first field from article and first from vc
+        let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+        let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
+
+        let ri = mig.maintain_anonymous(end, &[0]);
+        mig.mark_shallow(ri);
+        (article, vote, vc, end)
+    });
+
+    let mut a = g.table("article").unwrap().into_sync();
+    let mut v = g.table("vote").unwrap().into_sync();
+    let mut r = g.view("awvc").unwrap().into_sync();
+
+    // seed votes
+    v.insert(vec!["a".into(), 1.into()]).unwrap();
+    v.insert(vec!["a".into(), 2.into()]).unwrap();
+    v.insert(vec!["b".into(), 1.into()]).unwrap();
+    v.insert(vec!["c".into(), 2.into()]).unwrap();
+    v.insert(vec!["d".into(), 2.into()]).unwrap();
+
+    // seed articles
+    a.insert(vec![1.into(), "Hello world #1".into()]).unwrap();
+    a.insert(vec![2.into(), "Hello world #2".into()]).unwrap();
+    sleep();
+
+    // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
+    // we first "warm up" by reading both to ensure all other necessary state is present.
+    let one = 1.into();
+    let two = 2.into();
+    assert_eq!(
+        r.lookup(&[one], true).unwrap(),
+        vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
+    );
+    assert_eq!(
+        r.lookup(&[two], true).unwrap(),
+        vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
+    );
+
+    for _ in 0..1_000 {
+        for &id in &[1, 2] {
+            let r = r.lookup(&[id.into()], true).unwrap();
+            match id {
+                1 => {
+                    assert_eq!(r, vec![vec![1.into(), "Hello world #1".into(), 2.into()]]);
+                }
+                2 => {
+                    assert_eq!(r, vec![vec![2.into(), "Hello world #2".into(), 3.into()]]);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
 fn crossing_migration() {
     // set up graph
     let mut g = start_simple("crossing_migration");

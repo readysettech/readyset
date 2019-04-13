@@ -808,7 +808,6 @@ impl ControllerInner {
         let mut key = self.ingredients[ni]
             .suggest_indexes(ni)
             .remove(&ni)
-            .map(|(c, _)| c)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {

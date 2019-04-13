@@ -27,9 +27,12 @@ pub struct Node {
     domain: Option<domain::Index>,
 
     fields: Vec<String>,
+    parents: Vec<LocalNodeIndex>,
     children: Vec<LocalNodeIndex>,
     inner: NodeType,
     taken: bool,
+
+    pub purge: bool,
 
     sharded_by: Sharding,
 }
@@ -49,9 +52,12 @@ impl Node {
             domain: None,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
+            parents: Vec::new(),
             children: Vec::new(),
             inner: inner.into(),
             taken: false,
+
+            purge: false,
 
             sharded_by: Sharding::None,
         }
@@ -77,6 +83,11 @@ impl DanglingDomainNode {
         n.children = graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
             .filter(|&c| graph[c].domain() == dm)
+            .map(|ni| graph[ni].local_addr())
+            .collect();
+        n.parents = graph
+            .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+            .filter(|&c| !graph[c].is_source() && graph[c].domain() == dm)
             .map(|ni| graph[ni].local_addr())
             .collect();
         n
@@ -191,6 +202,7 @@ impl Node {
         let mut n = self.mirror(inner);
         n.index = self.index;
         n.domain = self.domain;
+        n.purge = self.purge;
         self.taken = true;
 
         DanglingDomainNode(n)
@@ -264,7 +276,7 @@ impl Node {
         }
     }
 
-    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
+    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         match self.inner {
             NodeType::Internal(ref i) => i.suggest_indexes(n),
             NodeType::Base(ref b) => b.suggest_indexes(n),
@@ -293,19 +305,23 @@ impl DerefMut for Node {
     }
 }
 
-// children
+// neighbors
 impl Node {
-    crate fn child(&self, i: usize) -> &LocalNodeIndex {
-        &self.children[i]
+    crate fn children(&self) -> &[LocalNodeIndex] {
+        &self.children
     }
 
-    crate fn nchildren(&self) -> usize {
-        self.children.len()
+    crate fn parents(&self) -> &[LocalNodeIndex] {
+        &self.parents
     }
 }
 
 // attributes
 impl Node {
+    crate fn beyond_mat_frontier(&self) -> bool {
+        self.purge
+    }
+
     crate fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
     }

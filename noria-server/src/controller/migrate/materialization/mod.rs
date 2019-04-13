@@ -125,6 +125,9 @@ impl Materializations {
                 i
             } else {
                 n.suggest_indexes(ni)
+                    .into_iter()
+                    .map(|(k, c)| (k, (c, true)))
+                    .collect()
             };
 
             if indices.is_empty() && n.is_base() {
@@ -383,6 +386,11 @@ impl Materializations {
                         m.insert(index);
                     }
                 }
+            } else {
+                assert!(
+                    !graph[ni].purge,
+                    "full materialization placed beyond materialization frontier"
+                );
             }
 
             // no matter what happens, we're going to have to fulfill our replay obligations.
@@ -437,7 +445,7 @@ impl Materializations {
     /// populating new materializations.
     pub(super) fn commit(
         &mut self,
-        graph: &Graph,
+        graph: &mut Graph,
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -601,10 +609,63 @@ impl Materializations {
             }
         }
 
+        for &ni in new {
+            // any nodes marked as .purge should have their state be beyond the materialization
+            // frontier. however, mir may have named an identity child instead of the node with a
+            // materialization, so let's make sure the label gets correctly applied: specifically,
+            // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
+            if graph[ni].purge && !(self.have.contains_key(&ni) || graph[ni].is_reader()) {
+                let mut it = graph
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                    .detach();
+                while let Some((_, pi)) = it.next(&*graph) {
+                    if !new.contains(&pi) {
+                        continue;
+                    }
+                    if !self.have.contains_key(&pi) {
+                        warn!(self.log, "no associated state with purged node";
+                              "node" => ni.index());
+                        continue;
+                    }
+                    assert!(
+                        self.partial.contains(&pi),
+                        "attempting to place full materialization beyond materialization frontier"
+                    );
+                    graph.node_weight_mut(pi).unwrap().purge = true;
+                }
+            }
+        }
+
+        // check that we never have non-purge below purge
+        let mut non_purge = Vec::new();
+        for &ni in new {
+            if (graph[ni].is_reader() || self.have.contains_key(&ni)) && !graph[ni].purge {
+                for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    non_purge.push(pi);
+                }
+            }
+        }
+        while let Some(ni) = non_purge.pop() {
+            assert!(
+                !graph[ni].purge,
+                "found purge node {} above non-purge node",
+                ni.index()
+            );
+            if self.have.contains_key(&ni) {
+                // already shceduled to be checked
+                // NOTE: no need to check for readers here, since they can't be parents
+                continue;
+            }
+            for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                non_purge.push(pi);
+            }
+        }
+        drop(non_purge);
+
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
-        let mut topo = petgraph::visit::Topo::new(graph);
-        while let Some(node) = topo.next(graph) {
+        let mut topo = petgraph::visit::Topo::new(&*graph);
+        while let Some(node) = topo.next(&*graph) {
             if graph[node].is_source() {
                 continue;
             }
@@ -724,6 +785,7 @@ impl Materializations {
                 .send_to_healthy(
                     box Packet::Ready {
                         node: n.local_addr(),
+                        purge: n.purge,
                         index: index_on,
                     },
                     workers,

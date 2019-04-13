@@ -48,7 +48,7 @@ pub(super) enum ColumnChange {
 // crate viz for tests
 crate struct Migration<'a> {
     pub(super) mainline: &'a mut ControllerInner,
-    pub(super) added: Vec<NodeIndex>,
+    pub(super) added: HashSet<NodeIndex>,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
 
@@ -74,6 +74,9 @@ impl<'a> Migration<'a> {
         I: Into<NodeOperator>,
     {
         let mut i = node::Node::new(name.to_string(), fields, i.into());
+        if i.name().starts_with("SHALLOW_") {
+            i.purge = true;
+        }
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
         assert!(!parents.is_empty());
@@ -87,7 +90,7 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.push(ni);
+        self.added.insert(ni);
         // insert it into the graph
         for parent in parents {
             self.mainline.ingredients.add_edge(parent, ni, ());
@@ -122,13 +125,34 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.push(ni);
+        self.added.insert(ni);
         // insert it into the graph
         self.mainline
             .ingredients
             .add_edge(self.mainline.source, ni, ());
         // and tell the caller its id
         ni
+    }
+
+    /// Mark the given node as being beyond the materialization frontier.
+    ///
+    /// When a node is marked as such, it will quickly evict state after it is no longer
+    /// immediately useful, making such nodes generally mostly empty. This reduces read
+    /// performance (since most reads now need to do replays), but can significantly reduce memory
+    /// overhead and improve write performance.
+    ///
+    /// Note that if a node is marked this way, all of its children transitively _also_ have to be
+    /// marked.
+    crate fn mark_shallow(&mut self, ni: NodeIndex) {
+        info!(self.log,
+              "marking node as beyond materialization frontier";
+              "node" => ni.index(),
+        );
+        self.mainline.ingredients.node_weight_mut(ni).unwrap().purge = true;
+
+        if !self.added.contains(&ni) {
+            unimplemented!("marking existing node as beyond materialization frontier");
+        }
     }
 
     /// Returns the context of this migration
@@ -164,7 +188,7 @@ impl<'a> Migration<'a> {
         default: DataType,
     ) -> usize {
         // not allowed to add columns to new nodes
-        assert!(!self.added.iter().any(|&ni| ni == node));
+        assert!(!self.added.contains(&node));
 
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[node];
@@ -189,7 +213,7 @@ impl<'a> Migration<'a> {
     // crate viz for tests
     crate fn drop_column(&mut self, node: NodeIndex, column: usize) {
         // not allowed to drop columns from new nodes
-        assert!(!self.added.iter().any(|&ni| ni == node));
+        assert!(!self.added.contains(&node));
 
         let base = &mut self.mainline.ingredients[node];
         assert!(base.is_base());
@@ -213,13 +237,17 @@ impl<'a> Migration<'a> {
         if let Entry::Vacant(e) = self.readers.entry(n) {
             // make a reader
             let r = node::special::Reader::new(n);
-            let r = if let Some(name) = name {
+            let mut r = if let Some(name) = name {
                 self.mainline.ingredients[n].named_mirror(r, name)
             } else {
                 self.mainline.ingredients[n].mirror(r)
             };
+            if r.name().starts_with("SHALLOW_") {
+                r.purge = true;
+            }
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(n, r, ());
+            self.added.insert(r);
             e.insert(r);
         }
     }
@@ -264,12 +292,7 @@ impl<'a> Migration<'a> {
         let log = self.log;
         let start = self.start;
         let mut mainline = self.mainline;
-        let mut new: HashSet<_> = self.added.into_iter().collect();
-
-        // Readers are nodes too.
-        for (_parent, reader) in self.readers {
-            new.insert(reader);
-        }
+        let mut new = self.added;
 
         // Shard the graph as desired
         let mut swapped0 = if let Some(shards) = mainline.sharding {
@@ -536,7 +559,7 @@ impl<'a> Migration<'a> {
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
         mainline.materializations.commit(
-            &mainline.ingredients,
+            &mut mainline.ingredients,
             &new,
             &mut mainline.domains,
             &mainline.workers,

@@ -274,6 +274,11 @@ impl WriteHandle {
         }
         bytes_to_be_freed
     }
+
+    crate fn clear(&mut self) {
+        self.mem_size = 0;
+        self.handle.purge();
+    }
 }
 
 impl SizeOf for WriteHandle {

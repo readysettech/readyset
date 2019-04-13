@@ -6,11 +6,13 @@ CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
 CREATE TABLE Vote (article_id int, user int);
 
 # read queries
-QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
+CREATE VIEW SHALLOW_VoteCount AS \
+  SELECT Vote.article_id, COUNT(user) AS votes FROM Vote GROUP BY Vote.article_id;
+
+QUERY SHALLOW_ArticleWithVoteCount: SELECT Article.id, title, SHALLOW_VoteCount.votes AS votes \
             FROM Article \
-            LEFT JOIN (SELECT Vote.article_id, COUNT(user) AS votes \
-                       FROM Vote GROUP BY Vote.article_id) AS VoteCount \
-            ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
+            LEFT JOIN SHALLOW_VoteCount \
+            ON (Article.id = SHALLOW_VoteCount.article_id) WHERE Article.id = ?;";
 
 pub struct Graph {
     stupid: bool,
@@ -26,6 +28,7 @@ pub struct Builder {
     pub sharding: Option<usize>,
     pub logging: bool,
     pub threads: Option<usize>,
+    pub purge: String,
 }
 
 impl Default for Builder {
@@ -36,6 +39,7 @@ impl Default for Builder {
             sharding: None,
             logging: false,
             threads: None,
+            purge: "none".to_string(),
         }
     }
 }
@@ -76,10 +80,20 @@ impl Builder {
             .start_local()
             .map(move |wh| SyncHandle::from_executor(ex, wh));
 
+        let (recipe, view) = match &*self.purge {
+            "all" => (RECIPE.to_string(), "SHALLOW_ArticleWithVoteCount"),
+            "reader" => (
+                RECIPE.replace("SHALLOW_V", "V"),
+                "SHALLOW_ArticleWithVoteCount",
+            ),
+            "none" => (RECIPE.replace("SHALLOW_", ""), "ArticleWithVoteCount"),
+            _ => unreachable!(),
+        };
+
         let logging = self.logging;
         let stupid = self.stupid;
         graph
-            .and_then(|mut graph| graph.handle().install_recipe(RECIPE).map(move |_| graph))
+            .and_then(move |mut graph| graph.handle().install_recipe(&recipe).map(move |_| graph))
             .and_then(|mut graph| graph.handle().inputs().map(move |x| (graph, x)))
             .and_then(|(mut graph, inputs)| {
                 graph.handle().outputs().map(move |x| (graph, inputs, x))
@@ -93,7 +107,7 @@ impl Builder {
             .map(move |(graph, inputs, outputs)| Graph {
                 vote: inputs["Vote"],
                 article: inputs["Article"],
-                end: outputs["ArticleWithVoteCount"],
+                end: outputs[view],
                 stupid,
                 graph,
             })

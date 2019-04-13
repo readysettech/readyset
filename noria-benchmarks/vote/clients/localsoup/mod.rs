@@ -63,6 +63,8 @@ impl VoteClient for LocalNoria {
             x => Some(x),
         };
         s.stupid = args.is_present("stupid");
+        let purge = args.value_of("purge").unwrap().to_string();
+        s.purge = purge.clone();
         let g = s.start(ex, persistence);
 
         // prepopulate
@@ -96,10 +98,15 @@ impl VoteClient for LocalNoria {
                     }
 
                     // TODO: allow writes to propagate
+                    let view = if purge == "none" {
+                        "ArticleWithVoteCount"
+                    } else {
+                        "SHALLOW_ArticleWithVoteCount"
+                    };
 
                     g.graph
                         .handle()
-                        .view("ArticleWithVoteCount")
+                        .view(view)
                         .and_then(move |r| {
                             g.graph.handle().table("Vote").map(move |mut w| {
                                 if fudge {

@@ -106,6 +106,10 @@ name = "vote-dbtoaster-style"
 path = "vote-dbtoaster-style/main.rs"
 
 [[bin]]
+name = "vote-purge-stress"
+path = "vote-purge-stress/main.rs"
+
+[[bin]]
 name = "replay"
 path = "replay/main.rs"
 

@@ -52,7 +52,7 @@ impl Ingredient for Distinct {
         if rs.is_empty() {
             return ProcessingResult {
                 results: rs,
-                misses: vec![],
+                ..Default::default()
             };
         }
 
@@ -130,7 +130,7 @@ impl Ingredient for Distinct {
 
         ProcessingResult {
             results: output.into(),
-            misses: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -157,10 +157,8 @@ impl Ingredient for Distinct {
         true
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
-        vec![(this, (self.group_by.clone(), true))]
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        vec![(this, self.group_by.clone())].into_iter().collect()
     }
 }
 
