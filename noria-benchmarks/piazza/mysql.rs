@@ -10,11 +10,11 @@ extern crate rand;
 
 use mysql as my;
 use noria::DataType;
+use std::time;
 
 #[macro_use]
 mod populate;
-use populate::{Populate, NANOS_PER_SEC};
-use std::time;
+use populate::Populate;
 
 struct Backend {
     pool: mysql::Pool,
