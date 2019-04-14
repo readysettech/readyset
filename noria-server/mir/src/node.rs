@@ -10,8 +10,8 @@ use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use {FlowNode, MirNodeRef};
 use std::collections::HashMap;
+use {FlowNode, MirNodeRef};
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
@@ -242,11 +242,13 @@ impl MirNode {
                         self.columns
                             .iter()
                             .position(|cc| *cc == ac)
-                            .expect(&format!(
-                                "tried to look up non-existent column {:?} on node \
-                                 \"{}\" (columns: {:?})",
-                                c, self.name, self.columns
-                            ))
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "tried to look up non-existent column {:?} on node \
+                                     \"{}\" (columns: {:?})",
+                                    c, self.name, self.columns
+                                )
+                            })
                     };
                     // See if table mapping was passed in
                     match table_mapping {

@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn data_type_fungibility() {
         use std::convert::TryFrom;
 

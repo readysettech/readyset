@@ -101,7 +101,7 @@ pub(super) fn pull_required_base_columns(
         match table_mapping {
             Some(ref map) => {
                 for ancestor in mn.borrow().ancestors() {
-                    if ancestor.borrow().ancestors().len() == 0 {
+                    if ancestor.borrow().ancestors().is_empty() {
                         // base, do nothing
                         continue;
                     }
@@ -109,19 +109,21 @@ pub(super) fn pull_required_base_columns(
                         match c.table {
                             Some(ref table) => {
                                 let key = (c.name.to_owned(), Some(table.to_owned()));
-                                if !map.contains_key(&key) {
-                                    if !found.contains(&c) && has_column(ancestor, c) {
-                                        ancestor.borrow_mut().add_column(c.clone());
-                                        found.push(c);
-                                    }
+                                if !map.contains_key(&key)
+                                    && !found.contains(&c)
+                                    && has_column(ancestor, c)
+                                {
+                                    ancestor.borrow_mut().add_column(c.clone());
+                                    found.push(c);
                                 }
                             }
                             None => {
-                                if !map.contains_key(&(c.name.to_owned(), None)) {
-                                    if !found.contains(&c) && has_column(ancestor, c) {
-                                        ancestor.borrow_mut().add_column(c.clone());
-                                        found.push(c);
-                                    }
+                                if !map.contains_key(&(c.name.to_owned(), None))
+                                    && !found.contains(&c)
+                                    && has_column(ancestor, c)
+                                {
+                                    ancestor.borrow_mut().add_column(c.clone());
+                                    found.push(c);
                                 }
                             }
                         }
@@ -131,7 +133,7 @@ pub(super) fn pull_required_base_columns(
             }
             None => {
                 for ancestor in mn.borrow().ancestors() {
-                    if ancestor.borrow().ancestors().len() == 0 {
+                    if ancestor.borrow().ancestors().is_empty() {
                         // base, do nothing
                         continue;
                     }

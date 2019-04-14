@@ -134,12 +134,12 @@ impl Into<Records> for Vec<Record> {
 
 impl Into<Records> for Vec<Vec<DataType>> {
     fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
+        Records(self.into_iter().map(Into::into).collect())
     }
 }
 
 impl Into<Records> for Vec<(Vec<DataType>, bool)> {
     fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
+        Records(self.into_iter().map(Into::into).collect())
     }
 }

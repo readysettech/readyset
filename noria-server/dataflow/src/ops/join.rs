@@ -225,7 +225,7 @@ impl Ingredient for Join {
         self.right.remap(remap);
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn on_input(
         &mut self,
         _: &mut Executor,

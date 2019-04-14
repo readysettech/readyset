@@ -97,7 +97,7 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(|c| c.is_some())));
+        assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(Option::is_some)));
 
         paths
     }
@@ -105,6 +105,7 @@ impl<'a> Plan<'a> {
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
+    #[allow(clippy::cognitive_complexity)]
     pub(super) fn add(&mut self, index_on: Vec<usize>, replies: &mut DomainReplies) {
         if !self.partial && !self.paths.is_empty() {
             // non-partial views should not have one replay path per index. that would cause us to
@@ -125,7 +126,7 @@ impl<'a> Plan<'a> {
             let mut partial = None;
             if self.partial {
                 if let Some(&(_, ref cols)) = path.first() {
-                    assert!(cols.iter().all(|c| c.is_some()));
+                    assert!(cols.iter().all(Option::is_some));
                     let key: Vec<_> = cols.iter().map(|c| c.unwrap()).collect();
                     partial = Some(key);
                 } else {
@@ -144,7 +145,7 @@ impl<'a> Plan<'a> {
                 }
 
                 let key = if self.partial {
-                    Some(cols.into_iter().map(|c| c.unwrap()).collect::<Vec<_>>())
+                    Some(cols.into_iter().map(Option::unwrap).collect::<Vec<_>>())
                 } else {
                     None
                 };
@@ -169,10 +170,7 @@ impl<'a> Plan<'a> {
                 seen.insert(domain);
 
                 // we're not replaying through the starter node
-                let mut skip_first = 0;
-                if i == 0 {
-                    skip_first = 1;
-                }
+                let skip_first = if i == 0 { 1 } else { 0 };
 
                 // use the local index for each node
                 let locals: Vec<_> = nodes
@@ -282,7 +280,7 @@ impl<'a> Plan<'a> {
                             };
 
                             debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag.id());
-                            *trigger = TriggerEndpoint::End(selection, segments[0].0.clone());
+                            *trigger = TriggerEndpoint::End(selection, segments[0].0);
                         }
                     } else {
                         unreachable!();
@@ -322,7 +320,7 @@ impl<'a> Plan<'a> {
                                 box Packet::UpdateEgress {
                                     node: n.local_addr(),
                                     new_tx: None,
-                                    new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                                    new_tag: Some((tag, segments[i + 1].1[0].0)),
                                 },
                                 workers,
                             )
@@ -459,7 +457,7 @@ impl<'a> Plan<'a> {
 
             // we want to prefer source paths where we can translate all keys for the purposes of
             // partial -- but this only matters if we haven't already lost some keys.
-            if cols.iter().all(|c| c.is_some()) {
+            if cols.iter().all(Option::is_some) {
                 let first = cols[0].unwrap();
 
                 let mut universal_src = Vec::new();

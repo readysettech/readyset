@@ -28,8 +28,8 @@ impl SampleKeys {
             shopping_cart: vec![],
             country: vec![],
             rng: rand::thread_rng(),
-            item_write: item_write,
-            ol_write: ol_write,
+            item_write,
+            ol_write,
         };
 
         keys.get_countries(data_location);
@@ -165,7 +165,7 @@ impl SampleKeys {
         let mut s = String::new();
         while reader.read_line(&mut s).unwrap() > 0 {
             {
-                let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+                let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let o_id = i32::from_str(fields[0]).unwrap();
                 self.order.push(vec![o_id.into()]);
             }
@@ -180,7 +180,7 @@ impl SampleKeys {
         let mut s = String::new();
         while reader.read_line(&mut s).unwrap() > 0 {
             {
-                let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+                let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let i_id = i32::from_str(fields[0]).unwrap();
                 let i_subject = fields[5];
                 self.item.push(vec![i_id.into(), i_subject.into()]);
@@ -196,7 +196,7 @@ impl SampleKeys {
         let mut s = String::new();
         while reader.read_line(&mut s).unwrap() > 0 {
             {
-                let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+                let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let c_id = i32::from_str(fields[0]).unwrap();
                 let c_uname = fields[1];
                 self.customer.push(vec![c_id.into(), c_uname.into()]);
@@ -212,7 +212,7 @@ impl SampleKeys {
         let mut s = String::new();
         while reader.read_line(&mut s).unwrap() > 0 {
             {
-                let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+                let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let ol_o_id = i32::from_str(fields[1]).unwrap(); //
 
                 self.order_line.push(vec![ol_o_id.into()]);
@@ -228,7 +228,7 @@ impl SampleKeys {
         let mut s = String::new();
         while reader.read_line(&mut s).unwrap() > 0 {
             {
-                let fields: Vec<&str> = s.split("\t").map(str::trim).collect();
+                let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let co_name = fields[1];
                 self.country.push(vec![co_name.into()]);
             }

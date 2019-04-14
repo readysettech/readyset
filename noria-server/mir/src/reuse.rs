@@ -33,7 +33,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
     }
 }
 
-#[allow(clippy::cyclomatic_complexity)]
+#[allow(clippy::cognitive_complexity)]
 pub fn merge_mir_for_queries(
     log: &slog::Logger,
     new_query: &MirQuery,

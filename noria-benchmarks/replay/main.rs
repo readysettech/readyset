@@ -138,7 +138,7 @@ fn perform_primary_reads(
         let start = Instant::now();
         let rs = getter.lookup(&[id], true).unwrap();
         let elapsed = start.elapsed();
-        let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
+        let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         assert_eq!(rs.len(), 1);
         for j in 0..10 {
             assert_eq!(DataType::BigInt(i), rs[0][j]);
@@ -171,7 +171,7 @@ fn perform_secondary_reads(
         let getter = &mut getters[i as usize % (indices - 1)];
         let rs = getter.lookup(&[id], true).unwrap();
         let elapsed = start.elapsed();
-        let us = elapsed.as_secs() * 1_000_000 + elapsed.subsec_nanos() as u64 / 1_000;
+        let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         if skewed {
             assert_eq!(rs.len(), rows as usize);
         } else {

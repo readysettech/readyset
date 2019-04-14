@@ -286,7 +286,7 @@ impl<'a> Migration<'a> {
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     pub(super) fn commit(self) {
         info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
 

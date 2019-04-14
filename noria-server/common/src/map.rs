@@ -115,17 +115,17 @@ impl<T> Map<T> {
     }
 
     pub fn get(&self, addr: LocalNodeIndex) -> Option<&T> {
-        self.things.get(addr.id()).and_then(|v| v.as_ref())
+        self.things.get(addr.id()).and_then(Option::as_ref)
     }
 
     pub fn get_mut(&mut self, addr: LocalNodeIndex) -> Option<&mut T> {
-        self.things.get_mut(addr.id()).and_then(|v| v.as_mut())
+        self.things.get_mut(addr.id()).and_then(Option::as_mut)
     }
 
     pub fn contains_key(&self, addr: LocalNodeIndex) -> bool {
         self.things
             .get(addr.id())
-            .map(|v| v.is_some())
+            .map(Option::is_some)
             .unwrap_or(false)
     }
 
@@ -157,7 +157,7 @@ impl<T> Map<T> {
     }
 
     pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
-        Box::new(self.things.iter().filter_map(|t| t.as_ref()))
+        Box::new(self.things.iter().filter_map(Option::as_ref))
     }
 
     pub fn len(&self) -> usize {

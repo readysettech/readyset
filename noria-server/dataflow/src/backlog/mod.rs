@@ -138,7 +138,7 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .handle
             .meta_get_and(Cow::Borrowed(&*self.key), |rs| {
-                rs.iter().map(|r| r.deep_size_of()).sum()
+                rs.iter().map(SizeOf::deep_size_of).sum()
             })
             .map(|r| r.0.unwrap_or(0))
             .unwrap_or(0);

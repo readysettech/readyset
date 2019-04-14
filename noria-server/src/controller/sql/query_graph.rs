@@ -454,7 +454,7 @@ fn classify_conditionals(
     }
 }
 
-#[allow(clippy::cyclomatic_complexity)]
+#[allow(clippy::cognitive_complexity)]
 pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 

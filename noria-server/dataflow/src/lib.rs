@@ -3,6 +3,7 @@
 #![feature(box_patterns)]
 #![feature(crate_visibility_modifier)]
 #![deny(unused_extern_crates)]
+#![allow(clippy::redundant_closure)]
 
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;

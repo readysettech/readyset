@@ -122,7 +122,7 @@ impl Reader {
     }
 
     crate fn state_size(&self) -> Option<u64> {
-        self.writer.as_ref().map(|w| w.deep_size_of())
+        self.writer.as_ref().map(SizeOf::deep_size_of)
     }
 
     /// Evict a randomly selected key, returning the number of bytes evicted.
@@ -224,15 +224,9 @@ impl Reader {
             self.streamers.retain(|tx| {
                 left -= 1;
                 if left == 0 {
-                    tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                    tx.send(data.take().unwrap().into_iter().map(Into::into).collect())
                 } else {
-                    tx.send(
-                        data.clone()
-                            .unwrap()
-                            .into_iter()
-                            .map(|r| r.into())
-                            .collect(),
-                    )
+                    tx.send(data.clone().unwrap().into_iter().map(Into::into).collect())
                 }
                 .is_ok()
             });

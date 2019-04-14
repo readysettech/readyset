@@ -122,7 +122,7 @@ impl GroupedOperation for Aggregator {
         let group_cols = self
             .group
             .iter()
-            .map(|g| g.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn it_forwards() {
         let mut c = setup(true);
 
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn it_groups_by_multiple_columns() {
         let mut c = setup_multicolumn(true);
 

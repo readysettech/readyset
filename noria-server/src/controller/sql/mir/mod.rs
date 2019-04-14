@@ -791,14 +791,7 @@ impl SqlToMirConverter {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
-        let ucols: Vec<Column> = ancestors
-            .first()
-            .unwrap()
-            .borrow()
-            .columns()
-            .iter()
-            .cloned()
-            .collect();
+        let ucols: Vec<Column> = ancestors.first().unwrap().borrow().columns().to_vec();
         let num_ucols = ucols.len();
 
         let mut selected_cols = HashSet::new();
@@ -1450,7 +1443,7 @@ impl SqlToMirConverter {
     }
 
     /// Returns list of nodes added
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn make_nodes_for_selection(
         &mut self,
         name: &str,

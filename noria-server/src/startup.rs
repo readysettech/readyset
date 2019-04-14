@@ -269,7 +269,7 @@ fn listen_external<A: Authority + 'static>(
 
             let method = req.method().clone();
             let path = req.uri().path().to_string();
-            let query = req.uri().query().map(|s| s.to_owned());
+            let query = req.uri().query().map(ToOwned::to_owned);
             let event_tx = self.0.clone();
             Box::new(req.into_body().concat2().and_then(move |body| {
                 let body: Vec<u8> = body.iter().cloned().collect();

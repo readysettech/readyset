@@ -292,7 +292,7 @@ impl View {
 
     /// Get the schema definition of this view.
     pub fn schema(&self) -> Option<&[ColumnSpecification]> {
-        self.schema.as_ref().map(|s| s.as_slice())
+        self.schema.as_ref().map(Vec::as_slice)
     }
 
     /// Get the current size of this view.

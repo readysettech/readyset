@@ -150,7 +150,7 @@ pub(super) fn graphviz(
     // node descriptions.
     for index in graph.node_indices() {
         let node = &graph[index];
-        let materialization_status = materializations.get_status(&index, node);
+        let materialization_status = materializations.get_status(index, node);
         indentln(&mut s);
         s.push_str(&format!("n{}", index.index()));
         s.push_str(&node.describe(index, detailed, materialization_status));
@@ -222,7 +222,7 @@ impl ControllerInner {
                 // to individual query variables unfortunately. We'll probably want to factor this
                 // out into a helper method.
                 let nodes = if let Some(query) = query {
-                    let vars: Vec<_> = query.split("&").map(String::from).collect();
+                    let vars: Vec<_> = query.split('&').map(String::from).collect();
                     if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
                         self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
                     } else {
@@ -304,8 +304,8 @@ impl ControllerInner {
 
         let sender = TcpSender::connect(remote)?;
         let ws = Worker::new(sender);
-        self.workers.insert(msg.source.clone(), ws);
-        self.read_addrs.insert(msg.source.clone(), read_listen_addr);
+        self.workers.insert(msg.source, ws);
+        self.read_addrs.insert(msg.source, read_listen_addr);
 
         if self.workers.len() >= self.quorum {
             if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
@@ -703,7 +703,7 @@ impl ControllerInner {
             .map(|n| {
                 let base = &self.ingredients[n];
                 assert!(base.is_base());
-                (base.name().to_owned(), n.into())
+                (base.name().to_owned(), n)
             })
             .collect()
     }
@@ -768,7 +768,7 @@ impl ControllerInner {
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.view_schema(r);
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)].clone())
+                .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)])
                 .collect();
 
             ViewBuilder {
@@ -783,14 +783,13 @@ impl ControllerInner {
     fn view_schema(&self, view_ni: NodeIndex) -> Option<Vec<ColumnSpecification>> {
         let n = &self.ingredients[view_ni];
         let schema: Vec<_> = (0..n.fields().len())
-            .into_iter()
             .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
             .collect();
 
-        if schema.iter().any(|cs| cs.is_none()) {
+        if schema.iter().any(Option::is_none) {
             None
         } else {
-            Some(schema.into_iter().map(|cs| cs.unwrap()).collect())
+            Some(schema.into_iter().map(Option::unwrap).collect())
         }
     }
 
@@ -847,7 +846,7 @@ impl ControllerInner {
 
         Some(TableBuilder {
             txs,
-            addr: node.local_addr().into(),
+            addr: node.local_addr(),
             key,
             key_is_primary: is_primary,
             dropped: base_operator.get_dropped(),
@@ -865,19 +864,14 @@ impl ControllerInner {
         let domains = self
             .domains
             .iter_mut()
-            .flat_map(|(di, s)| {
+            .flat_map(|(&di, s)| {
                 s.send_to_healthy(box Packet::GetStatistics, workers)
                     .unwrap();
-                replies.wait_for_statistics(&s).into_iter().enumerate().map(
-                    move |(i, (domain_stats, node_stats))| {
-                        let node_map = node_stats
-                            .into_iter()
-                            .map(|(ni, ns)| (ni.into(), ns))
-                            .collect();
-
-                        ((di.clone(), i), (domain_stats, node_map))
-                    },
-                )
+                replies
+                    .wait_for_statistics(&s)
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(i, s)| ((di, i), s))
             })
             .collect();
 
@@ -1240,7 +1234,7 @@ impl ControllerInner {
             debug!(self.log, "Removed node {}", ni.index());
             domain_removals
                 .entry(self.ingredients[*ni].domain())
-                .or_insert(Vec::new())
+                .or_insert_with(Vec::new)
                 .push(self.ingredients[*ni].local_addr())
         }
 
@@ -1333,7 +1327,7 @@ impl ControllerInner {
 
 impl Drop for ControllerInner {
     fn drop(&mut self) {
-        for (_, d) in &mut self.domains {
+        for d in self.domains.values_mut() {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated

@@ -670,7 +670,7 @@ impl Domain {
         }
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn handle(
         &mut self,
         m: Box<Packet>,
@@ -782,12 +782,8 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::StateSizeProbe { node } => {
-                        let row_count = self.state.get(node).map(|state| state.rows()).unwrap_or(0);
-                        let mem_size = self
-                            .state
-                            .get(node)
-                            .map(|state| state.deep_size_of())
-                            .unwrap_or(0);
+                        let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
+                        let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
                         self.control_reply_tx
                             .send(ControlReplyPacket::StateSize(row_count, mem_size))
                             .unwrap();
@@ -1229,7 +1225,7 @@ impl Domain {
                                 } else {
                                     self.state
                                         .get(local_index)
-                                        .map(|state| state.deep_size_of())
+                                        .map(|s| s.deep_size_of())
                                         .unwrap_or(0)
                                 };
 
@@ -1543,7 +1539,7 @@ impl Domain {
         }
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
@@ -2604,7 +2600,7 @@ impl Domain {
                     self.state
                         .get(local_index)
                         .filter(|state| state.is_partial())
-                        .map(|state| state.deep_size_of())
+                        .map(|s| s.deep_size_of())
                         .unwrap_or(0)
                 }
             })

@@ -111,7 +111,7 @@ impl Ingredient for TopK {
         self.us = Some(remap[&us]);
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn on_input(
         &mut self,
         _: &mut Executor,
@@ -316,7 +316,7 @@ impl Ingredient for TopK {
         let group_cols = self
             .group_by
             .iter()
-            .map(|g| g.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
         format!("TopK γ[{}]", group_cols)

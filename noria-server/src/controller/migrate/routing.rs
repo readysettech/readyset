@@ -164,9 +164,13 @@ pub fn add(
             });
 
             // we need to hook the ingress node in between us and our remote parent
-            let old = graph.find_edge(parent, node).unwrap();
-            let was_materialized = graph.remove_edge(old).unwrap();
-            graph.add_edge(ingress, node, was_materialized);
+            #[allow(clippy::unit_arg)]
+            #[allow(clippy::let_unit_value)]
+            {
+                let old = graph.find_edge(parent, node).unwrap();
+                let was_materialized = graph.remove_edge(old).unwrap();
+                graph.add_edge(ingress, node, was_materialized);
+            }
 
             // we now need to refer to the ingress instead of the "real" parent
             swaps.insert((node, parent), ingress);
@@ -251,9 +255,13 @@ pub fn add(
             });
 
             // we need to hook the egress in between the ingress and its "real" parent
-            let old = graph.find_edge(sender, ingress).unwrap();
-            let was_materialized = graph.remove_edge(old).unwrap();
-            graph.add_edge(egress, ingress, was_materialized);
+            #[allow(clippy::unit_arg)]
+            #[allow(clippy::let_unit_value)]
+            {
+                let old = graph.find_edge(sender, ingress).unwrap();
+                let was_materialized = graph.remove_edge(old).unwrap();
+                graph.add_edge(egress, ingress, was_materialized);
+            }
 
             // NOTE: we *don't* need to update swaps here, because ingress doesn't care
         }
@@ -303,7 +311,7 @@ pub(super) fn connect(
                                 i,
                                 box Packet::UpdateEgress {
                                     node: sender_node.local_addr(),
-                                    new_tx: Some((node.into(), n.local_addr(), (n.domain(), i))),
+                                    new_tx: Some((node, n.local_addr(), (n.domain(), i))),
                                     new_tag: None,
                                 },
                                 workers,
@@ -320,7 +328,7 @@ pub(super) fn connect(
                         .send_to_healthy(
                             box Packet::UpdateEgress {
                                 node: sender_node.local_addr(),
-                                new_tx: Some((node.into(), n.local_addr(), (n.domain(), 0))),
+                                new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
                                 new_tag: None,
                             },
                             workers,

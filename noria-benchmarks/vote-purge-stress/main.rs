@@ -1,4 +1,5 @@
 #![feature(duration_float)]
+#![allow(clippy::many_single_char_names)]
 
 extern crate clap;
 extern crate futures;
@@ -147,7 +148,7 @@ fn main() {
     println!("# purge mode: {}", args.value_of("purge").unwrap());
     println!(
         "# replays/s: {:.2}",
-        n as f64 / start.elapsed().as_secs_f64()
+        f64::from(n) / start.elapsed().as_secs_f64()
     );
     println!("# op\tpct\ttime");
     println!("replay\t50\t{:.2}\tµs", stats.value_at_quantile(0.5));

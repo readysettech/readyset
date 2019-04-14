@@ -104,7 +104,7 @@ fn make(
 
     Backend {
         r: recipe,
-        g: g,
+        g,
         parallel_prepop: parallel,
         prepop_counts: HashMap::new(),
         barrier: Arc::new(Barrier::new(9)), // N.B.: # base tables

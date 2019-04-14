@@ -203,7 +203,7 @@ fn listen_df(
     let prefix = format!("{}-log-", log_prefix);
     let log_files: Vec<String> = fs::read_dir(".")
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
         .map(|e| e.path().to_string_lossy().into_owned())
         .filter(|path| path.starts_with(&prefix))

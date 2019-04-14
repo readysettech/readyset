@@ -90,7 +90,7 @@ named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
         expr: apply!(sql_parser::sql_query,) >>
         (match prefix {
             None => (false, None, expr),
-            Some(p) => (p.0.is_some(), p.1.map(|s| s.to_owned()), expr)
+            Some(p) => (p.0.is_some(), p.1.map(ToOwned::to_owned), expr)
         })
     )
 );

@@ -520,7 +520,7 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
     {
-        self.quick_n_dirty(i.into_iter().map(|r| r.into()).collect::<Vec<_>>())
+        self.quick_n_dirty(i.into_iter().map(Into::into).collect::<Vec<_>>())
     }
 
     /// Delete the row with the given key from this base table.

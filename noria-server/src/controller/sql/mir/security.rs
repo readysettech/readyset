@@ -51,18 +51,16 @@ impl SecurityBoundary for SqlToMirConverter {
         //     return (nodes_added, None, "".to_string());
         // }
 
-        let mut union: Option<MirNodeRef>;
-        let mut mapping: Option<HashMap<(String, Option<String>), String>>;
-
         // First, union the results from all ancestors
-        if !sec {
-            union = Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors));
-            mapping = None;
+        let (union, mapping) = if !sec {
+            (
+                Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors)),
+                None,
+            )
         } else {
             let (u, m) = self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors);
-            union = Some(u);
-            mapping = m;
-        }
+            (Some(u), m)
+        };
 
         match union {
             Some(node) => {
@@ -84,7 +82,7 @@ impl SecurityBoundary for SqlToMirConverter {
                 );
 
                 nodes_added.extend(grouped);
-                return (nodes_added, mapping, n);
+                (nodes_added, mapping, n)
             }
             None => {
                 panic!("union not computed correctly");

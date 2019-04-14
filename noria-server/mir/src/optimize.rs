@@ -140,7 +140,7 @@ fn to_conditions(
             MirNodeType::Filter { ref conditions } => {
                 // Note that this assumes that there is only ever one column being filtered on for
                 // each filter that is being merged.
-                let i = conditions.iter().position(|c| c.is_some()).unwrap();
+                let i = conditions.iter().position(Option::is_some).unwrap();
                 merged_conditions[i] = conditions[i].clone();
             }
             _ => unreachable!(),

@@ -93,15 +93,9 @@ impl Project {
 
     pub fn emits(&self) -> (&[usize], &[DataType], &[ProjectExpression]) {
         (
-            self.emit.as_ref().map(|e| e.as_slice()).unwrap_or(&[]),
-            self.additional
-                .as_ref()
-                .map(|e| e.as_slice())
-                .unwrap_or(&[]),
-            self.expressions
-                .as_ref()
-                .map(|e| e.as_slice())
-                .unwrap_or(&[]),
+            self.emit.as_ref().map(Vec::as_slice).unwrap_or(&[]),
+            self.additional.as_ref().map(Vec::as_slice).unwrap_or(&[]),
+            self.expressions.as_ref().map(Vec::as_slice).unwrap_or(&[]),
         )
     }
 }
@@ -280,7 +274,7 @@ impl Ingredient for Project {
         match self.emit.as_ref() {
             None => emit_cols.push("*".to_string()),
             Some(emit) => {
-                emit_cols.extend(emit.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+                emit_cols.extend(emit.iter().map(ToString::to_string).collect::<Vec<_>>());
 
                 if let Some(ref arithmetic) = self.expressions {
                     emit_cols.extend(

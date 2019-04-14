@@ -40,6 +40,7 @@ pub fn assign(
     };
 
     for node in topo_list {
+        #[allow(clippy::cognitive_complexity)]
         let assignment = (|| {
             let graph = &*graph;
             let n = &graph[node];

@@ -6,6 +6,7 @@ use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 
+#[allow(clippy::cognitive_complexity)]
 pub fn shard(
     log: &Logger,
     graph: &mut Graph,
@@ -40,7 +41,7 @@ pub fn shard(
         let mut need_sharding = if graph[node].is_internal() || graph[node].is_base() {
             // suggest_indexes is okay because `node` *must* be new, and therefore will return
             // global node indices.
-            graph[node].suggest_indexes(node.into())
+            graph[node].suggest_indexes(node)
         } else if graph[node].is_reader() {
             assert_eq!(input_shardings.len(), 1);
             let ni = input_shardings.keys().next().cloned().unwrap();
@@ -83,13 +84,14 @@ pub fn shard(
         if need_sharding.is_empty()
             && (input_shardings.len() == 1 || input_shardings.iter().all(|(_, &s)| s.is_none()))
         {
-            let mut s = input_shardings.iter().map(|(_, &s)| s).next().unwrap();
-            if input_shardings
+            let mut s = if input_shardings
                 .iter()
                 .any(|(_, &s)| s == Sharding::ForcedNone)
             {
-                s = Sharding::ForcedNone;
-            }
+                Sharding::ForcedNone
+            } else {
+                input_shardings.iter().map(|(_, &s)| s).next().unwrap()
+            };
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);

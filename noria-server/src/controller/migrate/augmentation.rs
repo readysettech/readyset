@@ -45,7 +45,7 @@ pub(super) fn inform(
             }
 
             let node = controller.ingredients.node_weight_mut(ni).unwrap().take();
-            let node = node.finalize(&mut controller.ingredients);
+            let node = node.finalize(&controller.ingredients);
             let graph = &controller.ingredients;
             // new parents already have the right child list
             let old_parents = graph

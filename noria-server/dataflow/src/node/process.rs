@@ -111,7 +111,7 @@ impl Node {
                     };
 
                     let mut set_replay_last = None;
-                    tracer = m.tracer().and_then(|t| t.take());
+                    tracer = m.tracer().and_then(Option::take);
                     m.map_data(|data| {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());

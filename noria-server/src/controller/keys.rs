@@ -14,7 +14,7 @@ pub fn provenance_of<F>(
 where
     F: FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex>,
 {
-    let path = vec![(node, columns.into_iter().map(|&v| Some(v)).collect())];
+    let path = vec![(node, columns.iter().map(|&v| Some(v)).collect())];
     trace(graph, &mut on_join, path)
 }
 
@@ -56,7 +56,7 @@ where
 
     // if all our inputs are None, our job is trivial
     // we just go trace back to all ancestors
-    if columns.iter().all(|c| c.is_none()) {
+    if columns.iter().all(Option::is_none) {
         // except if we're a join and on_join says to only walk through one...
         if n.is_internal() && n.is_join() {
             let idk = vec![None; cols];
@@ -105,7 +105,7 @@ where
         // way back to the root of the graph.
 
         // resolving to Some on self makes no sense...
-        assert!(columns.iter().all(|c| c.is_none()));
+        assert!(columns.iter().all(Option::is_none));
 
         if parents.len() != 1 {
             // TODO: we have a join-like thing, so we'd need to call on_join

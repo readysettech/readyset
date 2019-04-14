@@ -69,6 +69,7 @@ impl Materializations {
 
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
+    #[allow(clippy::cognitive_complexity)]
     fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) {
         // this code used to be a mess, and will likely be a mess this time around too.
         // but, let's try to start out in a principled way...
@@ -356,13 +357,13 @@ impl Materializations {
 
                 for path in paths {
                     for (pni, cols) in path.into_iter().skip(1) {
-                        if let Some(p) = cols.iter().position(|c| c.is_none()) {
+                        if let Some(p) = cols.iter().position(Option::is_none) {
                             warn!(self.log, "full because column {} does not resolve", index[p];
                                   "node" => ni.index(), "broken at" => pni.index());
                             able = false;
                             break 'attempt;
                         }
-                        let index: Vec<_> = cols.into_iter().map(|c| c.unwrap()).collect();
+                        let index: Vec<_> = cols.into_iter().map(Option::unwrap).collect();
                         if let Some(m) = self.have.get(&pni) {
                             if !m.contains(&index) {
                                 // we'd need to add an index to this view,
@@ -424,15 +425,15 @@ impl Materializations {
     /// if the node isn't materialized.
     pub(in crate::controller) fn get_status(
         &self,
-        index: &NodeIndex,
+        index: NodeIndex,
         node: &Node,
     ) -> MaterializationStatus {
-        let is_materialized = self.have.contains_key(index)
+        let is_materialized = self.have.contains_key(&index)
             || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
         if !is_materialized {
             MaterializationStatus::Not
-        } else if self.partial.contains(index) {
+        } else if self.partial.contains(&index) {
             MaterializationStatus::Partial
         } else {
             MaterializationStatus::Full
@@ -443,6 +444,7 @@ impl Materializations {
     ///
     /// This includes setting up replay paths, adding new indices to existing materializations, and
     /// populating new materializations.
+    #[allow(clippy::cognitive_complexity)]
     pub(super) fn commit(
         &mut self,
         graph: &mut Graph,
@@ -472,7 +474,7 @@ impl Materializations {
                 None
             }
 
-            for (&ni, _) in &self.added {
+            for &ni in self.added.keys() {
                 if self.partial.contains(&ni) {
                     continue;
                 }
@@ -500,7 +502,7 @@ impl Materializations {
 
                     for path in paths {
                         for (pni, columns) in path {
-                            if columns.iter().any(|c| c.is_none()) {
+                            if columns.iter().any(Option::is_none) {
                                 break;
                             } else if self.partial.contains(&pni) {
                                 for index in &self.have[&pni] {
@@ -517,7 +519,7 @@ impl Materializations {
                                     // is there a column we *don't* share?
                                     let unshared = index
                                         .iter()
-                                        .map(|&c| c)
+                                        .cloned()
                                         .find(|&c| !columns.contains(&Some(c)))
                                         .or_else(|| {
                                             columns

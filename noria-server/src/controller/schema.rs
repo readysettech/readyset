@@ -113,7 +113,7 @@ fn trace_column_type_on_path(
     log: &slog::Logger,
 ) -> Option<SqlType> {
     // column originates at last element of the path whose second element is not None
-    if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(|c| c.is_some())) {
+    if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
 
         // We invoked provenance_of with a singleton slice, so must have got

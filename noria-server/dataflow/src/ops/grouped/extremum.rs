@@ -174,7 +174,7 @@ impl GroupedOperation for ExtremumOperator {
         let group_cols = self
             .group
             .iter()
-            .map(|g| g.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
