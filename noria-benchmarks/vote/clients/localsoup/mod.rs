@@ -98,15 +98,10 @@ impl VoteClient for LocalNoria {
                     }
 
                     // TODO: allow writes to propagate
-                    let view = if purge == "none" {
-                        "ArticleWithVoteCount"
-                    } else {
-                        "SHALLOW_ArticleWithVoteCount"
-                    };
 
                     g.graph
                         .handle()
-                        .view(view)
+                        .view("ArticleWithVoteCount")
                         .and_then(move |r| {
                             g.graph.handle().table("Vote").map(move |mut w| {
                                 if fudge {

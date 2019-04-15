@@ -28,6 +28,7 @@ type Indices = HashSet<Vec<usize>>;
 ///
 /// Note that no matter what this is set to, all nodes whose name starts with `SHALLOW_` will be
 /// placed beyond the frontier.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FrontierStrategy {
     /// Place no nodes beyond the frontier (this is the default).
     None,

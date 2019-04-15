@@ -10,7 +10,7 @@ extern crate rand;
 use clap::{value_t_or_exit, App, Arg};
 use futures::Future;
 use hdrhistogram::Histogram;
-use noria::{Builder, DurabilityMode, PersistenceParameters, SyncHandle};
+use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters, SyncHandle};
 use std::time::{Duration, Instant};
 
 const RECIPE: &str = "# base tables
@@ -18,13 +18,13 @@ CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
 CREATE TABLE Vote (article_id int, user int);
 
 # read queries
-CREATE VIEW SHALLOW_VoteCount AS \
+CREATE VIEW VoteCount AS \
   SELECT Vote.article_id, COUNT(user) AS votes FROM Vote GROUP BY Vote.article_id;
 
-QUERY SHALLOW_ArticleWithVoteCount: SELECT Article.id, title, SHALLOW_VoteCount.votes AS votes \
+QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
             FROM Article \
-            LEFT JOIN SHALLOW_VoteCount \
-            ON (Article.id = SHALLOW_VoteCount.article_id) WHERE Article.id = ?;";
+            LEFT JOIN VoteCount \
+            ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
 
 fn main() {
     let args = App::new("purge-stress")
@@ -77,16 +77,16 @@ fn main() {
         0,
         value_t_or_exit!(args, "replay-timeout", u32),
     ));
-
-    let (recipe, view) = match args.value_of("purge").unwrap() {
-        "all" => (RECIPE.to_string(), "SHALLOW_ArticleWithVoteCount"),
-        "reader" => (
-            RECIPE.replace("SHALLOW_V", "V"),
-            "SHALLOW_ArticleWithVoteCount",
-        ),
-        "none" => (RECIPE.replace("SHALLOW_", ""), "ArticleWithVoteCount"),
+    match args.value_of("purge").unwrap() {
+        "all" => {
+            builder.set_frontier_strategy(FrontierStrategy::AllPartial);
+        }
+        "reader" => {
+            builder.set_frontier_strategy(FrontierStrategy::Readers);
+        }
+        "none" => {}
         _ => unreachable!(),
-    };
+    }
 
     let mut rt = tokio::runtime::Runtime::new().unwrap();
     let ex = rt.executor();
@@ -96,14 +96,14 @@ fn main() {
                 .start_local()
                 .map(move |wh| SyncHandle::from_executor(ex, wh))
                 .and_then(move |mut graph| {
-                    graph.handle().install_recipe(&recipe).map(move |_| graph)
+                    graph.handle().install_recipe(RECIPE).map(move |_| graph)
                 }),
         )
         .unwrap();
 
     let mut a = g.table("Article").unwrap().into_sync();
     let mut v = g.table("Vote").unwrap().into_sync();
-    let mut r = g.view(view).unwrap().into_sync();
+    let mut r = g.view("ArticleWithVoteCount").unwrap().into_sync();
 
     // seed articles
     a.insert(vec![1.into(), "Hello world #1".into()]).unwrap();

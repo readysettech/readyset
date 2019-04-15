@@ -1,5 +1,6 @@
 use crate::handle::{Handle, SyncHandle};
 use crate::Config;
+use crate::FrontierStrategy;
 use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
 use failure;
@@ -52,6 +53,11 @@ impl Builder {
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.config.partial_enabled = false;
+    }
+
+    /// Which nodes should be placed beyond the materialization frontier?
+    pub fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
+        self.config.frontier_strategy = f;
     }
 
     /// Set sharding policy for all subsequent migrations; `None` disables

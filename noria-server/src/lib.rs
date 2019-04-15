@@ -419,7 +419,7 @@ where
 crate struct Config {
     crate sharding: Option<usize>,
     crate partial_enabled: bool,
-    crate frontier_strategy: bool,
+    crate frontier_strategy: FrontierStrategy,
     crate domain_config: DomainConfig,
     crate persistence: PersistenceParameters,
     crate heartbeat_every: time::Duration,
