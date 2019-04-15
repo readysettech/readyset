@@ -523,7 +523,7 @@ impl Materializations {
         }
 
         // Mark nodes as beyond the frontier as dictated by the strategy
-        for &ni in self.added.keys() {
+        for &ni in new {
             let n = graph.node_weight_mut(ni).unwrap();
 
             // Normally, we only mark things that are materialized as .purge, but when it comes to
