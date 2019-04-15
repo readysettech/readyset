@@ -171,7 +171,7 @@ impl Node {
                     ))
                 }
                 NodeType::Internal(ref i) => {
-                    s.push_str("{{");
+                    s.push_str("{");
 
                     // Output node name and description. First row.
                     s.push_str(&format!(
@@ -184,7 +184,8 @@ impl Node {
 
                     // Output node outputs. Second row.
                     s.push_str(&format!(" | {}", self.fields().join(", \\n")));
-                    s.push_str(&format!(" | {} }}", sharding))
+                    s.push_str(&format!(" | {}", sharding));
+                    s.push_str("}");
                 }
             };
             s.push_str("\"]\n");
