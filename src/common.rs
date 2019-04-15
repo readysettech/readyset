@@ -933,6 +933,7 @@ named!(pub literal_expression<CompleteByteSlice, LiteralExpression>,
 named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
        many0!(
            do_parse!(
+               opt_multispace >>
                val: literal >>
                opt!(
                    do_parse!(
