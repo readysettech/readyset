@@ -904,7 +904,7 @@ impl ControllerInner {
                         node_stats
                             .into_iter()
                             .filter_map(|(ni, ns)| match ns.materialized {
-                                MaterializationStatus::Partial => Some((ni, ns.mem_size)),
+                                MaterializationStatus::Partial { .. } => Some((ni, ns.mem_size)),
                                 _ => None,
                             })
                     })

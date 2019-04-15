@@ -6,5 +6,7 @@ pub enum MaterializationStatus {
     /// Operator's state is fully materialized.
     Full,
     /// Operator's state is partially materialized.
-    Partial,
+    Partial {
+        beyond_materialization_frontier: bool,
+    },
 }

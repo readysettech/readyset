@@ -465,7 +465,9 @@ impl Materializations {
         if !is_materialized {
             MaterializationStatus::Not
         } else if self.partial.contains(&index) {
-            MaterializationStatus::Partial
+            MaterializationStatus::Partial {
+                beyond_materialization_frontier: node.purge,
+            }
         } else {
             MaterializationStatus::Full
         }
@@ -708,11 +710,14 @@ impl Materializations {
             }
         }
         while let Some(ni) = non_purge.pop() {
-            assert!(
-                !graph[ni].purge,
-                "found purge node {} above non-purge node",
-                ni.index()
-            );
+            if graph[ni].purge {
+                println!("{}", graphviz(graph, true, &self));
+                assert!(
+                    !graph[ni].purge,
+                    "found purge node {} above non-purge node",
+                    ni.index()
+                );
+            }
             if self.have.contains_key(&ni) {
                 // already shceduled to be checked
                 // NOTE: no need to check for readers here, since they can't be parents
