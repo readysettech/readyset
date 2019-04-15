@@ -252,4 +252,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn insert_with_leading_value_whitespace() {
+        let qstring = "INSERT INTO users (id, name) VALUES ( 42, \"test\");";
+
+        let res = insertion(CompleteByteSlice(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
 }
