@@ -526,6 +526,11 @@ impl Materializations {
         for &ni in new {
             let n = graph.node_weight_mut(ni).unwrap();
 
+            if (self.have.contains_key(&ni) || n.is_reader()) && !self.partial.contains(&ni) {
+                // full materializations cannot be beyond the frontier.
+                continue;
+            }
+
             // Normally, we only mark things that are materialized as .purge, but when it comes to
             // name matching, we don't do that since MIR will sometimes place the name of identity
             // nodes and the like. It's up to the user to make sure they don't match node names
