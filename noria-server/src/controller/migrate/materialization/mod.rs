@@ -23,6 +23,28 @@ mod plan;
 
 type Indices = HashSet<Vec<usize>>;
 
+/// Strategy for determining which (partial) materializations should be placed beyond the
+/// materialization frontier.
+///
+/// Note that no matter what this is set to, all nodes whose name starts with `SHALLOW_` will be
+/// placed beyond the frontier.
+pub enum FrontierStrategy {
+    /// Place no nodes beyond the frontier (this is the default).
+    None,
+    /// Place all partial materializations beyond the frontier.
+    AllPartial,
+    /// Place all partial readers beyond the frontier.
+    Readers,
+    /// Place all nodes whose name contain the given string beyond the frontier.
+    Match(String),
+}
+
+impl Default for FrontierStrategy {
+    fn default() -> Self {
+        FrontierStrategy::None
+    }
+}
+
 pub(in crate::controller) struct Materializations {
     log: Logger,
 
@@ -31,6 +53,7 @@ pub(in crate::controller) struct Materializations {
 
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
+    frontier_strategy: FrontierStrategy,
 
     tag_generator: AtomicUsize,
 }
@@ -46,6 +69,7 @@ impl Materializations {
 
             partial: HashSet::default(),
             partial_enabled: true,
+            frontier_strategy: FrontierStrategy::None,
 
             tag_generator: AtomicUsize::default(),
         }
@@ -59,6 +83,11 @@ impl Materializations {
     /// Disable partial materialization for all new materializations.
     pub(in crate::controller) fn disable_partial(&mut self) {
         self.partial_enabled = false;
+    }
+
+    /// Which nodes should be placed beyond the materialization frontier?
+    pub(in crate::controller) fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
+        self.frontier_strategy = f;
     }
 }
 
@@ -112,6 +141,7 @@ impl Materializations {
         // Find indices we need to add.
         for &ni in new {
             let n = &graph[ni];
+
             let mut indices = if n.is_reader() {
                 let key = n.with_reader(|r| r.key()).unwrap();
                 if key.is_none() {
@@ -486,6 +516,35 @@ impl Materializations {
                               "partial" => pi.index());
                     unimplemented!();
                 }
+            }
+        }
+
+        // Mark nodes as beyond the frontier as dictated by the strategy
+        for &ni in self.added.keys() {
+            let n = graph.node_weight_mut(ni).unwrap();
+
+            // Normally, we only mark things that are materialized as .purge, but when it comes to
+            // name matching, we don't do that since MIR will sometimes place the name of identity
+            // nodes and the like. It's up to the user to make sure they don't match node names
+            // that are, say, above a full materialization.
+            if let FrontierStrategy::Match(ref m) = self.frontier_strategy {
+                n.purge = n.purge || n.name().contains(m);
+                continue;
+            }
+            if n.name().starts_with("SHALLOW_") {
+                n.purge = true;
+                continue;
+            }
+
+            // For all other strategies, we only want to deal with partial indices
+            if !self.partial.contains(&ni) {
+                continue;
+            }
+
+            if let FrontierStrategy::AllPartial = self.frontier_strategy {
+                n.purge = true;
+            } else if let FrontierStrategy::Readers = self.frontier_strategy {
+                n.purge = n.purge || n.is_reader();
             }
         }
 

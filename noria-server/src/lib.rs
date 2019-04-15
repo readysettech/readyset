@@ -394,6 +394,7 @@ pub enum ReuseConfigType {
 
 pub use crate::builder::Builder;
 pub use crate::handle::{Handle, SyncHandle};
+pub use controller::migrate::materialization::FrontierStrategy;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
 pub use noria::*;
@@ -418,6 +419,7 @@ where
 crate struct Config {
     crate sharding: Option<usize>,
     crate partial_enabled: bool,
+    crate frontier_strategy: bool,
     crate domain_config: DomainConfig,
     crate persistence: PersistenceParameters,
     crate heartbeat_every: time::Duration,
@@ -434,6 +436,7 @@ impl Default for Config {
             #[cfg(not(test))]
             sharding: None,
             partial_enabled: true,
+            frontier_strategy: Default::default(),
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::new(0, 100_000),

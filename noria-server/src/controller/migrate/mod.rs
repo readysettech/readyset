@@ -31,7 +31,7 @@ use slog;
 
 mod assignment;
 mod augmentation;
-pub(super) mod materialization;
+crate mod materialization;
 mod routing;
 mod sharding;
 
@@ -74,9 +74,6 @@ impl<'a> Migration<'a> {
         I: Into<NodeOperator>,
     {
         let mut i = node::Node::new(name.to_string(), fields, i.into());
-        if i.name().starts_with("SHALLOW_") {
-            i.purge = true;
-        }
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
         assert!(!parents.is_empty());
