@@ -135,13 +135,11 @@ fn main() {
     let start = Instant::now();
     let mut stats = Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap();
     while start.elapsed() < Duration::from_secs(runtime) {
-        for _ in 0..1_000 {
-            for &id in &[1, 2] {
-                let start = Instant::now();
-                r.lookup(&[id.into()], true).unwrap();
-                stats.saturating_record(start.elapsed().as_micros() as u64);
-                n += 1;
-            }
+        for &id in &[1, 2] {
+            let start = Instant::now();
+            r.lookup(&[id.into()], true).unwrap();
+            stats.saturating_record(start.elapsed().as_micros() as u64);
+            n += 1;
         }
     }
 
