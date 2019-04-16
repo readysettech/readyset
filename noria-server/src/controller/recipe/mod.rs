@@ -532,9 +532,9 @@ impl Recipe {
             version: self.version + 1,
             inc: prior_inc,
             log: self.log.clone(),
+            security_config: self.security_config.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
-            security_config: None,
         };
 
         // apply changes
