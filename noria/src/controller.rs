@@ -500,6 +500,14 @@ where
         &mut self.handle
     }
 
+    /// Get statistics about the time spent processing different parts of the graph.
+    ///
+    /// See [`ControllerHandle::statistics`].
+    pub fn statistics(&mut self) -> Result<stats::GraphStats, failure::Error> {
+        let fut = self.handle.statistics();
+        self.run(fut)
+    }
+
     /// Enumerate all known base tables.
     ///
     /// See [`ControllerHandle::inputs`].

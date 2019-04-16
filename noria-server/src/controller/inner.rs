@@ -201,6 +201,9 @@ impl ControllerInner {
                 return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
             }
             (&Method::GET, "/get_statistics") => {
+                return Ok(Ok(format!("{:#?}", self.get_statistics())));
+            }
+            (&Method::POST, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
             _ => {}
@@ -859,6 +862,8 @@ impl ControllerInner {
 
     /// Get statistics about the time spent processing different parts of the graph.
     fn get_statistics(&mut self) -> GraphStats {
+        trace!(self.log, "asked to get statistics");
+        let log = &self.log;
         let workers = &self.workers;
         let replies = &mut self.replies;
         // TODO: request stats from domains in parallel.
@@ -866,6 +871,7 @@ impl ControllerInner {
             .domains
             .iter_mut()
             .flat_map(|(&di, s)| {
+                trace!(log, "requesting stats from domain"; "di" => di.index());
                 s.send_to_healthy(box Packet::GetStatistics, workers)
                     .unwrap();
                 replies
