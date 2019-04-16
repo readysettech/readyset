@@ -174,6 +174,7 @@ impl DomainBuilder {
             buffered_replay_requests: Default::default(),
             has_buffered_replay_requests: false,
             replay_batch_timeout: self.config.replay_batch_timeout,
+            timed_purges: Default::default(),
 
             concurrent_replays: 0,
             max_concurrent_replays: self.config.concurrent_replays,
@@ -190,6 +191,14 @@ impl DomainBuilder {
             process_ptimes: TimerSet::new(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct TimedPurge {
+    time: time::Instant,
+    view: LocalNodeIndex,
+    tag: Tag,
+    keys: HashSet<Vec<DataType>>,
 }
 
 pub struct Domain {
@@ -211,6 +220,7 @@ pub struct Domain {
     waiting: Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
     reader_triggered: Map<HashSet<Vec<DataType>>>,
+    timed_purges: VecDeque<TimedPurge>,
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
@@ -1314,6 +1324,23 @@ impl Domain {
             }
         }
 
+        while let Some(tp) = self.timed_purges.front() {
+            let now = time::Instant::now();
+            if tp.time <= now {
+                let tp = self.timed_purges.pop_front().unwrap();
+                let mut node = self.nodes[tp.view].borrow_mut();
+                trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                node.with_reader_mut(|r| {
+                    if let Some(wh) = r.writer_mut() {
+                        for key in tp.keys {
+                            wh.mut_with_key(&key[..]).mark_hole();
+                        }
+                    }
+                })
+                .unwrap();
+            }
+        }
+
         if top {
             while let Some(m) = self.delayed_for_self.pop_front() {
                 trace!(self.log, "handling local transmission");
@@ -2132,6 +2159,15 @@ impl Domain {
                         ReplayPieceContext::Partial { for_keys, ignore } => {
                             assert!(!ignore);
                             if dst_is_reader {
+                                if self.nodes[dst].borrow().beyond_mat_frontier() {
+                                    // make sure we eventually evict these from here
+                                    self.timed_purges.push_back(TimedPurge {
+                                        time: time::Instant::now() + time::Duration::from_secs(1),
+                                        keys: for_keys,
+                                        view: dst,
+                                        tag,
+                                    });
+                                }
                                 assert_ne!(finished_partial, 0);
                             } else if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
@@ -2624,20 +2660,37 @@ impl Domain {
         //self.total_time.start();
         //self.total_ptime.start();
         let res = match event {
-            PollEvent::ResumePolling => ProcessResult::KeepPolling(
-                self.group_commit_queues.duration_until_flush().or_else(|| {
-                    let now = time::Instant::now();
-                    self.buffered_replay_requests
-                        .iter()
-                        .filter(|&(_, &(_, ref keys))| !keys.is_empty())
-                        .map(|(_, &(first, _))| {
-                            self.replay_batch_timeout
-                                .checked_sub(now.duration_since(first))
-                                .unwrap_or(time::Duration::from_millis(0))
-                        })
-                        .min()
-                }),
-            ),
+            PollEvent::ResumePolling => {
+                // when do we need to be woken up again?
+                let now = time::Instant::now();
+                let opt1 = self
+                    .buffered_replay_requests
+                    .iter()
+                    .filter(|&(_, &(_, ref keys))| !keys.is_empty())
+                    .map(|(_, &(first, _))| {
+                        self.replay_batch_timeout
+                            .checked_sub(now.duration_since(first))
+                            .unwrap_or(time::Duration::from_millis(0))
+                    })
+                    .min();
+                let opt2 = self.group_commit_queues.duration_until_flush();
+                let opt3 = self.timed_purges.front().map(|tp| {
+                    if tp.time > now {
+                        tp.time - now
+                    } else {
+                        time::Duration::from_millis(0)
+                    }
+                });
+
+                let mut timeout = opt1.or(opt2).or(opt3);
+                if let Some(opt2) = opt2 {
+                    timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
+                }
+                if let Some(opt3) = opt3 {
+                    timeout = Some(std::cmp::min(timeout.unwrap(), opt3));
+                }
+                ProcessResult::KeepPolling(timeout)
+            }
             PollEvent::Process(packet) => {
                 if let Packet::Quit = *packet {
                     return ProcessResult::StopPolling;
@@ -2665,7 +2718,7 @@ impl Domain {
                     self.handle(m, sends, executor, true);
                 }
 
-                if self.has_buffered_replay_requests {
+                if self.has_buffered_replay_requests || !self.timed_purges.is_empty() {
                     self.handle(box Packet::Spin, sends, executor, true);
                 }
 
