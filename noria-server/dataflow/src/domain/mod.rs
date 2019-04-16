@@ -1338,6 +1338,8 @@ impl Domain {
                     }
                 })
                 .unwrap();
+            } else {
+                break;
             }
         }
 
