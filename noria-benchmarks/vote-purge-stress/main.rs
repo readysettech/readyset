@@ -140,6 +140,8 @@ fn main() {
             r.lookup(&[id.into()], true).unwrap();
             stats.saturating_record(start.elapsed().as_micros() as u64);
             n += 1;
+            // ensure that entry gets evicted
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 

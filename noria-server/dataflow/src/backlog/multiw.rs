@@ -32,20 +32,6 @@ impl Handle {
         }
     }
 
-    pub fn purge(&mut self) {
-        match *self {
-            Handle::Single(ref mut h) => {
-                h.purge();
-            }
-            Handle::Double(ref mut h) => {
-                h.purge();
-            }
-            Handle::Many(ref mut h) => {
-                h.purge();
-            }
-        }
-    }
-
     pub fn empty(&mut self, k: Key) {
         match *self {
             Handle::Single(ref mut h) => {
