@@ -16,10 +16,13 @@ use tokio::prelude::*;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
 
+/// Retry reads every this often.
+const RETRY_TIMEOUT_US: u64 = 1_000;
+
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const RETRY_TIMEOUT_US: u64 = 1_000;
+const TRIGGER_TIMEOUT_US: u64 = 50_000;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -167,7 +170,7 @@ fn handle_message(
                             v: ReadReply::Normal(Ok(ret)),
                         })))
                     } else {
-                        let trigger = time::Duration::from_micros(RETRY_TIMEOUT_US);
+                        let trigger = time::Duration::from_micros(TRIGGER_TIMEOUT_US);
                         let retry = time::Duration::from_micros(RETRY_TIMEOUT_US);
                         let now = time::Instant::now();
                         Either::A(Either::B(BlockingRead {
