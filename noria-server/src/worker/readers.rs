@@ -110,6 +110,7 @@ fn handle_message(
                     .enumerate();
 
                 let mut ready = true;
+                let mut replaying = false;
                 for (i, (key, v)) in found {
                     match v {
                         Ok(Some(rs)) => {
@@ -125,6 +126,7 @@ fn handle_message(
                         }
                         Ok(None) => {
                             // triggered partial replay
+                            replaying = true;
                         }
                     }
                 }
@@ -133,6 +135,14 @@ fn handle_message(
                     return Ok(Tagged {
                         tag,
                         v: ReadReply::Normal(Err(())),
+                    });
+                }
+
+                if !replaying {
+                    // we hit on all the keys!
+                    return Ok(Tagged {
+                        tag,
+                        v: ReadReply::Normal(Ok(ret)),
                     });
                 }
 
