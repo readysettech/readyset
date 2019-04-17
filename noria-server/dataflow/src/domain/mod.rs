@@ -1324,6 +1324,7 @@ impl Domain {
             }
         }
 
+        let mut swap = HashSet::new();
         while let Some(tp) = self.timed_purges.front() {
             let now = time::Instant::now();
             if tp.time <= now {
@@ -1335,13 +1336,23 @@ impl Domain {
                         for key in tp.keys {
                             wh.mut_with_key(&key[..]).mark_hole();
                         }
-                        wh.swap();
+                        swap.insert(tp.view);
                     }
                 })
                 .unwrap();
             } else {
                 break;
             }
+        }
+        for n in swap {
+            self.nodes[n]
+                .borrow_mut()
+                .with_reader_mut(|r| {
+                    if let Some(wh) = r.writer_mut() {
+                        wh.swap();
+                    }
+                })
+                .unwrap();
         }
 
         if top {
