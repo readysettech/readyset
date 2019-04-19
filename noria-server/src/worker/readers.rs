@@ -149,12 +149,10 @@ fn handle_message(
                     });
                 }
 
-                if !block {
-                    // trigger backfills for all the keys we missed on for later
-                    for key in &keys {
-                        if !key.is_empty() {
-                            reader.trigger(key);
-                        }
+                // trigger backfills for all the keys we missed on for later
+                for key in &keys {
+                    if !key.is_empty() {
+                        reader.trigger(key);
                     }
                 }
 
