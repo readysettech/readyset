@@ -17,7 +17,7 @@ use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::ActivationResult;
 use petgraph::visit::Bfs;
 use slog::Logger;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -47,6 +47,7 @@ pub(super) struct ControllerInner {
     recipe: Recipe,
 
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
+    pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
     pub(super) debug_channel: Option<SocketAddr>,
 
@@ -181,6 +182,24 @@ pub(super) fn graphviz(
 }
 
 impl ControllerInner {
+    pub(in crate::controller) fn topo_order(&self, new: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
+        let mut topo_list = Vec::with_capacity(new.len());
+        let mut topo = petgraph::visit::Topo::new(&self.ingredients);
+        while let Some(node) = topo.next(&self.ingredients) {
+            if node == self.source {
+                continue;
+            }
+            if self.ingredients[node].is_dropped() {
+                continue;
+            }
+            if !new.contains(&node) {
+                continue;
+            }
+            topo_list.push(node);
+        }
+        topo_list
+    }
+
     pub(super) fn external_request<A: Authority + 'static>(
         &mut self,
         method: hyper::Method,
@@ -452,6 +471,7 @@ impl ControllerInner {
             log,
 
             domains: Default::default(),
+            domain_nodes: Default::default(),
             channel_coordinator: cc,
             debug_channel: None,
             epoch: state.epoch,

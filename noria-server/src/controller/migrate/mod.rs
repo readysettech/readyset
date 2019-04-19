@@ -291,16 +291,15 @@ impl<'a> Migration<'a> {
         let start = self.start;
         let mut mainline = self.mainline;
         let mut new = self.added;
+        let mut topo = mainline.topo_order(&new);
 
         // Shard the graph as desired
         let mut swapped0 = if let Some(shards) = mainline.sharding {
-            sharding::shard(
-                &log,
-                &mut mainline.ingredients,
-                mainline.source,
-                &mut new,
-                shards,
-            )
+            let (t, swapped) =
+                sharding::shard(&log, &mut mainline.ingredients, &mut new, &topo, shards);
+            topo = t;
+
+            swapped
         } else {
             HashMap::default()
         };
@@ -309,13 +308,19 @@ impl<'a> Migration<'a> {
         assignment::assign(
             &log,
             &mut mainline.ingredients,
-            mainline.source,
-            &new,
+            &topo,
             &mut mainline.ndomains,
         );
 
         // Set up ingress and egress nodes
-        let swapped1 = routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
+        let swapped1 = routing::add(
+            &log,
+            &mut mainline.ingredients,
+            mainline.source,
+            &mut new,
+            &topo,
+        );
+        topo = mainline.topo_order(&new);
 
         // Merge the swap lists
         for ((dst, src), instead) in swapped1 {
@@ -443,7 +448,7 @@ impl<'a> Migration<'a> {
         }
 
         if let Some(shards) = mainline.sharding {
-            sharding::validate(&log, &mainline.ingredients, mainline.source, &new, shards)
+            sharding::validate(&log, &mainline.ingredients, &topo, shards)
         };
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -466,16 +471,29 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        let mut uninformed_domain_nodes = mainline
-            .ingredients
-            .node_indices()
-            .filter(|&ni| ni != mainline.source)
-            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
-            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
-                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
-                dns
-            });
+        for &ni in &new {
+            let n = &mainline.ingredients[ni];
+            if ni != mainline.source && !n.is_dropped() {
+                let di = n.domain();
+                mainline
+                    .domain_nodes
+                    .entry(di)
+                    .or_insert_with(Vec::new)
+                    .push(ni);
+            }
+        }
+        let mut uninformed_domain_nodes: HashMap<_, _> = changed_domains
+            .iter()
+            .map(|&di| {
+                let mut m = mainline.domain_nodes[&di]
+                    .iter()
+                    .cloned()
+                    .map(|ni| (ni, new.contains(&ni)))
+                    .collect::<Vec<_>>();
+                m.sort();
+                (di, m)
+            })
+            .collect();
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");

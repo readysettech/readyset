@@ -34,11 +34,7 @@ pub(super) fn inform(
             .map(|&(ni, _)| ni)
             .collect();
 
-        if old_nodes.len() == nodes.len() {
-            // some domains haven't changed at all
-            continue;
-        }
-
+        assert_ne!(old_nodes.len(), nodes.len());
         for (ni, new) in nodes {
             if !new {
                 continue;

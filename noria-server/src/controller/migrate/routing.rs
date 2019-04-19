@@ -22,26 +22,13 @@ pub fn add(
     graph: &mut Graph,
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
+    topo_list: &[NodeIndex],
 ) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
     // find all new nodes in topological order. we collect first since we'll be mutating the graph
     // below. it's convenient to have the nodes in topological order, because we then know that
     // we'll first add egress nodes, and then the related ingress nodes. if we're ever required to
     // add an ingress node, and its parent isn't an egress node, we know that we're seeing a
     // connection between an old node in one domain, and a new node in a different domain.
-    let mut topo_list = Vec::with_capacity(new.len());
-    let mut topo = petgraph::visit::Topo::new(&*graph);
-    while let Some(node) = topo.next(&*graph) {
-        if node == source {
-            continue;
-        }
-        if graph[node].is_dropped() {
-            continue;
-        }
-        if !new.contains(&node) {
-            continue;
-        }
-        topo_list.push(node);
-    }
 
     // we need to keep track of all the times we change the parent of a node (by replacing it with
     // an egress, and then with an ingress), since this remapping must be communicated to the nodes
@@ -63,7 +50,7 @@ pub fn add(
     // causing re-use of ingress and egress nodes that were added in a *previous* migration.
     //
     // we do this in a couple of passes, as described below.
-    for &node in &topo_list {
+    for &node in topo_list {
         let domain = graph[node].domain();
         let parents: Vec<_> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)

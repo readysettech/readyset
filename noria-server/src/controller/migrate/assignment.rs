@@ -3,15 +3,8 @@
 use dataflow::prelude::*;
 use petgraph;
 use slog::Logger;
-use std::collections::HashSet;
 
-pub fn assign(
-    log: &Logger,
-    graph: &mut Graph,
-    source: NodeIndex,
-    new: &HashSet<NodeIndex>,
-    ndomains: &mut usize,
-) {
+pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains: &mut usize) {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we generally want as few domains as possible, but in *some* cases we must make new ones.
     // specifically:
@@ -19,27 +12,12 @@ pub fn assign(
     //  - the child of a Sharder is always in a different domain from the sharder
     //  - shard merge nodes are never in the same domain as their sharded ancestors
 
-    let mut topo_list = Vec::with_capacity(new.len());
-    let mut topo = petgraph::visit::Topo::new(&*graph);
-    while let Some(node) = topo.next(&*graph) {
-        if node == source {
-            continue;
-        }
-        if graph[node].is_dropped() {
-            continue;
-        }
-        if !new.contains(&node) {
-            continue;
-        }
-        topo_list.push(node);
-    }
-
     let mut next_domain = || {
         *ndomains += 1;
         *ndomains - 1
     };
 
-    for node in topo_list {
+    for &node in topo_list {
         #[allow(clippy::cognitive_complexity)]
         let assignment = (|| {
             let graph = &*graph;
