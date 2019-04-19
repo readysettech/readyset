@@ -371,6 +371,7 @@ impl Packet {
 impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            Packet::Input { .. } => write!(f, "Packet::Input"),
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
             Packet::ReplayPiece {
                 ref link,
