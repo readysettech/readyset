@@ -410,7 +410,7 @@ where
     use tokio::prelude::*;
     use tokio_threadpool::blocking;
     let mut wrap = Some(f);
-    future::poll_fn(|| blocking(wrap.take().unwrap()))
+    future::poll_fn(|| blocking(|| wrap.take().unwrap()()))
         .wait()
         .unwrap()
 }
