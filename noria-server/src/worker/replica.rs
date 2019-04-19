@@ -37,6 +37,7 @@ pub(super) struct Replica {
 
     coord: Arc<ChannelCoordinator>,
 
+    retry: Option<Box<Packet>>,
     incoming: Valved<tokio::net::tcp::Incoming>,
     first_byte: FuturesUnordered<tokio::io::ReadExact<tokio::net::tcp::TcpStream, Vec<u8>>>,
     locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
@@ -77,6 +78,7 @@ impl Replica {
         Replica {
             coord: cc,
             domain,
+            retry: None,
             incoming: valve.wrap(on.incoming()),
             first_byte: FuturesUnordered::new(),
             locals,
@@ -353,24 +355,51 @@ impl Future for Replica {
                 let mut local_done = false;
                 let mut remote_done = false;
                 let mut check_local = true;
-                let readiness = loop {
+                let readiness = 'ready: loop {
+                    let d = &mut self.domain;
+                    let oob = &mut self.oob;
+                    let ob = &mut self.outbox;
+
+                    macro_rules! process {
+                        ($retry:expr, $p:expr, $pp:expr) => {{
+                            $retry = Some($p);
+                            let retry = &mut $retry;
+                            match tokio_threadpool::blocking(|| $pp(retry.take().unwrap())) {
+                                Ok(Async::Ready(ProcessResult::StopPolling)) => {
+                                    // domain got a message to quit
+                                    // TODO: should we finish up remaining work?
+                                    return Ok(Async::Ready(()));
+                                }
+                                Ok(Async::Ready(_)) => {}
+                                Ok(Async::NotReady) => {
+                                    // NOTE: the packet is still left in $retry, so we'll try again
+                                    break 'ready Async::NotReady;
+                                }
+                                Err(e) => {
+                                    unreachable!("trying to block without tokio runtime: {:?}", e)
+                                }
+                            }
+                        }};
+                    }
+
                     let mut interrupted = false;
+                    if let Some(p) = self.retry.take() {
+                        // first try the thing we failed to process last time again
+                        process!(self.retry, p, |p| d.on_event(
+                            oob,
+                            PollEvent::Process(p),
+                            ob
+                        ));
+                    }
+
                     for i in 0..FORCE_INPUT_YIELD_EVERY {
                         if !local_done && (check_local || remote_done) {
                             match self.locals.poll() {
-                                Ok(Async::Ready(Some(packet))) => {
-                                    let d = &mut self.domain;
-                                    let oob = &mut self.oob;
-                                    let ob = &mut self.outbox;
-
-                                    if let ProcessResult::StopPolling = crate::block_on(|| {
-                                        d.on_event(oob, PollEvent::Process(packet), ob)
-                                    }) {
-                                        // domain got a message to quit
-                                        // TODO: should we finish up remaining work?
-                                        return Ok(Async::Ready(()));
-                                    }
-                                }
+                                Ok(Async::Ready(Some(packet))) => process!(
+                                    self.retry,
+                                    packet,
+                                    |p| d.on_event(oob, PollEvent::Process(p), ob)
+                                ),
                                 Ok(Async::Ready(None)) => {
                                     // local input stream finished?
                                     // TODO: should we finish up remaining work?
@@ -389,25 +418,17 @@ impl Future for Replica {
 
                         if !remote_done && (!check_local || local_done) {
                             match self.inputs.poll() {
-                                Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => {
-                                    let d = &mut self.domain;
-                                    let oob = &mut self.oob;
-                                    let ob = &mut self.outbox;
-
-                                    if let ProcessResult::StopPolling = crate::block_on(|| {
-                                        d.on_event(oob, PollEvent::Process(packet), ob)
-                                    }) {
-                                        // domain got a message to quit
-                                        // TODO: should we finish up remaining work?
-                                        return Ok(Async::Ready(()));
-                                    }
-                                }
+                                Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => process!(
+                                    self.retry,
+                                    packet,
+                                    |p| d.on_event(oob, PollEvent::Process(p), ob)
+                                ),
                                 Ok(Async::Ready(Some((
                                     StreamYield::Finished(_stream),
                                     streami,
                                 )))) => {
-                                    self.oob.back.remove(&streami);
-                                    self.oob.pending.remove(&streami);
+                                    oob.back.remove(&streami);
+                                    oob.pending.remove(&streami);
                                     // FIXME: what about if a later flush flushes to this stream?
                                 }
                                 Ok(Async::Ready(None)) => {
@@ -470,7 +491,7 @@ impl Future for Replica {
                             {
                                 // the timer expired and we did some stuff
                                 // make sure we don't return while there's more work to do
-                                continue;
+                                task::current().notify();
                             }
                         }
                     }
