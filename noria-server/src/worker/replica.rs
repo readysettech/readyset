@@ -23,7 +23,6 @@ use slog;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
-use std::time;
 use stream_cancel::{Valve, Valved};
 use streamunordered::{StreamUnordered, StreamYield};
 use tokio;
@@ -58,7 +57,7 @@ pub(super) struct Replica {
     >,
 
     outbox: FnvHashMap<ReplicaIndex, VecDeque<Box<Packet>>>,
-    timeout: Option<tokio::timer::Delay>,
+    timeout: Option<tokio_os_timer::Delay>,
     oob: OutOfBand,
 }
 
@@ -270,7 +269,7 @@ impl Replica {
         Ok(true)
     }
 
-    fn try_timeout(&mut self) -> Poll<(), tokio::timer::Error> {
+    fn try_timeout(&mut self) -> Poll<(), io::Error> {
         if let Some(mut to) = self.timeout.take() {
             if let Async::Ready(()) = to.poll()? {
                 crate::block_on(|| {
@@ -482,10 +481,11 @@ impl Future for Replica {
                 ) {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
-                            self.timeout =
-                                Some(tokio::timer::Delay::new(time::Instant::now() + timeout));
+                            // tokio-timer has a resolution of 1ms, so we can't use it :'(
+                            // TODO: how about we don't create a new timer each time?
+                            self.timeout = Some(tokio_os_timer::Delay::new(timeout).unwrap());
 
-                            // we need to poll the delay to ensure we'll get woken up
+                            // we need to poll the timer to ensure we'll get woken up
                             if let Async::Ready(()) =
                                 self.try_timeout().context("check timeout after setting")?
                             {
