@@ -74,6 +74,7 @@ impl GroupCommitQueueSet {
     pub fn duration_until_flush(&self) -> Option<time::Duration> {
         self.pending_packets
             .values()
+            .filter(|(_, ps)| !ps.is_empty())
             .map(|p| {
                 self.params
                     .flush_timeout
