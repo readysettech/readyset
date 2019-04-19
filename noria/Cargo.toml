@@ -31,6 +31,7 @@ tokio = "0.1"
 bincode = "1.0.0"
 vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
+tokio-sync = "0.1"
 arccstr = "1.2.0"
 fnv = "1.0.5"
 chrono = { version = "0.4.0", features = ["serde"] }

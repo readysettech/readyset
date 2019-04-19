@@ -309,7 +309,7 @@ fn listen_df(
                         state_size.clone(),
                     );
 
-                    let (tx, rx) = futures::sync::mpsc::unbounded();
+                    let (tx, rx) = tokio_sync::mpsc::unbounded_channel();
 
                     // need to register the domain with the local channel coordinator.
                     // local first to ensure that we don't unnecessarily give away remote for a

@@ -39,7 +39,7 @@ pub(super) struct Replica {
     retry: Option<Box<Packet>>,
     incoming: Valved<tokio::net::tcp::Incoming>,
     first_byte: FuturesUnordered<tokio::io::ReadExact<tokio::net::tcp::TcpStream, Vec<u8>>>,
-    locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+    locals: tokio_sync::mpsc::UnboundedReceiver<Box<Packet>>,
     inputs: StreamUnordered<
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
@@ -66,7 +66,7 @@ impl Replica {
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
-        locals: futures::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+        locals: tokio_sync::mpsc::UnboundedReceiver<Box<Packet>>,
         ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
