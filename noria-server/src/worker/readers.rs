@@ -17,7 +17,7 @@ use tokio_tower::multiplex::server;
 use tower::service_fn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT_US: u64 = 1_000;
+const RETRY_TIMEOUT_US: u64 = 200;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -177,7 +177,7 @@ fn handle_message(
                             keys,
                             read: ret,
                             truth: s.clone(),
-                            retry: tokio::timer::Interval::new(now + retry, retry),
+                            retry: tokio_os_timer::Interval::new(retry).unwrap(),
                             trigger_timeout: trigger,
                             next_trigger: now,
                         }))
@@ -210,7 +210,7 @@ struct BlockingRead {
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
     truth: Readers,
-    retry: tokio::timer::Interval,
+    retry: tokio_os_timer::Interval,
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
 }
