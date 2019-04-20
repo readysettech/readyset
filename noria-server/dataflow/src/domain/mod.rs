@@ -163,6 +163,7 @@ impl DomainBuilder {
             waiting: Default::default(),
             reader_triggered: Default::default(),
             replay_paths: Default::default(),
+            replay_paths_by_dst: Default::default(),
 
             ingress_inject: Default::default(),
 
@@ -222,6 +223,8 @@ pub struct Domain {
     reader_triggered: Map<HashSet<Vec<DataType>>>,
     timed_purges: VecDeque<TimedPurge>,
 
+    replay_paths_by_dst: Map<HashMap<Vec<usize>, Vec<Tag>>>,
+
     concurrent_replays: usize,
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
@@ -253,24 +256,16 @@ impl Domain {
         miss_columns: &[usize],
         miss_in: LocalNodeIndex,
     ) {
-        let mut found = false;
-        let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
-        for tag in tags {
-            if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
-                continue;
+        let mut tags = Vec::new();
+        if let Some(ref candidates) = self.replay_paths_by_dst.get(miss_in) {
+            if let Some(ts) = candidates.get(miss_columns) {
+                // the clone is a bit sad; self.request_partial_replay doesn't use
+                // self.replay_paths_by_dst.
+                tags = ts.clone();
             }
-            {
-                let p = self.replay_paths[&tag].path.last().unwrap();
-                if p.node != miss_in {
-                    continue;
-                }
-                assert!(p.partial_key.is_some());
-                let pkey = p.partial_key.as_ref().unwrap();
-                if &pkey[..] != miss_columns {
-                    continue;
-                }
-            }
+        }
 
+        for &tag in &tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
             let key = miss_key.clone(); // :(
@@ -296,7 +291,6 @@ impl Domain {
                 // `Self::handle()`)
                 self.delayed_for_self
                     .push_back(box Packet::RequestPartialReplay { tag, key });
-                found = true;
                 continue;
             }
 
@@ -304,11 +298,9 @@ impl Domain {
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
             self.request_partial_replay(tag, key);
-            found = true;
-            continue;
         }
 
-        if !found {
+        if tags.is_empty() {
             unreachable!(format!(
                 "no tag found to fill missing value {:?} in {}.{:?}",
                 miss_key, miss_in, miss_columns
@@ -441,20 +433,23 @@ impl Domain {
                 // we just naively release one slot here, a union with two parents would mean that
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
-                let mut requests_satisfied = {
-                    let last = self.replay_paths[&tag].path.last().unwrap();
-                    self.replay_paths
-                        .iter()
-                        .filter(|&(_, p)| {
-                            if let TriggerEndpoint::End { .. } = p.trigger {
-                                let p = p.path.last().unwrap();
-                                p.node == last.node && p.partial_key == last.partial_key
-                            } else {
-                                false
-                            }
-                        })
-                        .count()
-                };
+                let mut requests_satisfied = 0;
+                let last = self.replay_paths[&tag].path.last().unwrap();
+                if let Some(ref cs) = self.replay_paths_by_dst.get(last.node) {
+                    if let Some(ref tags) = cs.get(last.partial_key.as_ref().unwrap()) {
+                        requests_satisfied = tags
+                            .iter()
+                            .filter(|tag| {
+                                if let TriggerEndpoint::End { .. } = self.replay_paths[tag].trigger
+                                {
+                                    true
+                                } else {
+                                    false
+                                }
+                            })
+                            .count();
+                    }
+                }
 
                 // we also sent that many requests *per key*.
                 requests_satisfied *= num;
@@ -577,6 +572,7 @@ impl Domain {
                 // but, for now, here we go:
                 // first, what partial replay paths go through this node?
                 let from = self.nodes[src].borrow().global_addr();
+                // TODO: this is a linear walk of replay paths -- we should make that not linear
                 let deps: Vec<_> = self
                     .replay_paths
                     .iter()
@@ -969,6 +965,16 @@ impl Domain {
                                 TriggerEndpoint::End { ask_all, options }
                             }
                         };
+
+                        if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
+                            let last = path.last().unwrap();
+                            self.replay_paths_by_dst
+                                .entry(last.node)
+                                .or_insert_with(HashMap::new)
+                                .entry(last.partial_key.clone().unwrap())
+                                .or_insert_with(Vec::new)
+                                .push(tag);
+                        }
 
                         self.replay_paths.insert(
                             tag,
@@ -2061,20 +2067,15 @@ impl Domain {
                                     }
 
                                     if evict_tag.is_none() {
-                                        for (&tag, rp) in &self.replay_paths {
-                                            match rp.trigger {
-                                                TriggerEndpoint::Local(..)
-                                                | TriggerEndpoint::End { .. } => {
-                                                    if tag_match(rp, pn) {
-                                                        // this is the tag we would have used to
-                                                        // fill a lookup hole in this ancestor, so
-                                                        // this is the tag we need to evict from.
-                                                        evict_tag = Some(tag);
-                                                        break;
-                                                    }
-                                                }
-                                                TriggerEndpoint::Start(..)
-                                                | TriggerEndpoint::None => {}
+                                        if let Some(ref cs) = self.replay_paths_by_dst.get(pn) {
+                                            if let Some(ref tags) = cs.get(&lookup.cols) {
+                                                // this is the tag we would have used to
+                                                // fill a lookup hole in this ancestor, so
+                                                // this is the tag we need to evict from.
+
+                                                // TODO: could there have been multiple
+                                                assert_eq!(tags.len(), 1);
+                                                evict_tag = Some(tags[0]);
                                             }
                                         }
                                     }
@@ -2395,6 +2396,7 @@ impl Domain {
             state: &mut StateMap,
             nodes: &mut DomainNodes,
         ) {
+            // TODO: this is a linear walk of replay paths -- we should make that not linear
             for (tag, ref path) in replay_paths {
                 if path.source == Some(node) {
                     // Check whether this replay path is for the same key.
