@@ -373,6 +373,12 @@ impl fmt::Debug for Packet {
         match *self {
             Packet::Input { .. } => write!(f, "Packet::Input"),
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
+            Packet::RequestReaderReplay { ref key, .. } => {
+                write!(f, "Packet::RequestReaderReplay({:?})", key)
+            }
+            Packet::RequestPartialReplay { ref tag, .. } => {
+                write!(f, "Packet::RequestPartialReplay({:?})", tag)
+            }
             Packet::ReplayPiece {
                 ref link,
                 ref tag,
