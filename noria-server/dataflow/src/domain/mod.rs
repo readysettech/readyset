@@ -173,7 +173,6 @@ impl DomainBuilder {
             channel_coordinator,
 
             buffered_replay_requests: Default::default(),
-            has_buffered_replay_requests: false,
             replay_batch_timeout: self.config.replay_batch_timeout,
             timed_purges: Default::default(),
 
@@ -235,7 +234,6 @@ pub struct Domain {
     channel_coordinator: Arc<ChannelCoordinator>,
 
     buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
-    has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
     delayed_for_self: VecDeque<Box<Packet>>,
 
@@ -1304,27 +1302,24 @@ impl Domain {
             }
         }
 
-        if self.has_buffered_replay_requests {
+        if !self.buffered_replay_requests.is_empty() {
             let now = time::Instant::now();
             let to = self.replay_batch_timeout;
-            self.has_buffered_replay_requests = false;
             let elapsed_replays: Vec<_> = {
-                let has = &mut self.has_buffered_replay_requests;
                 self.buffered_replay_requests
                     .iter_mut()
                     .filter_map(|(&tag, &mut (first, ref mut keys))| {
                         if !keys.is_empty() && now.duration_since(first) > to {
-                            let l = keys.len();
-                            Some((tag, mem::replace(keys, HashSet::with_capacity(l))))
+                            // will be removed by retain below
+                            Some((tag, mem::replace(keys, HashSet::new())))
                         } else {
-                            if !keys.is_empty() {
-                                *has = true;
-                            }
                             None
                         }
                     })
                     .collect()
             };
+            self.buffered_replay_requests
+                .retain(|_, (_, ref keys)| !keys.is_empty());
             for (tag, keys) in elapsed_replays {
                 self.seed_all(tag, keys, sends, executor);
             }
@@ -1507,18 +1502,14 @@ impl Domain {
             use std::collections::hash_map::Entry;
             let key = Vec::from(key);
             match self.buffered_replay_requests.entry(tag) {
-                Entry::Occupied(mut o) => {
-                    if o.get().1.is_empty() {
-                        o.get_mut().0 = time::Instant::now();
-                    }
+                Entry::Occupied(o) => {
+                    assert!(!o.get().1.is_empty());
                     o.into_mut().1.insert(key);
-                    self.has_buffered_replay_requests = true;
                 }
                 Entry::Vacant(v) => {
                     let mut ks = HashSet::new();
                     ks.insert(key);
                     v.insert((time::Instant::now(), ks));
-                    self.has_buffered_replay_requests = true;
                 }
             }
 
@@ -2721,7 +2712,7 @@ impl Domain {
                     self.handle(m, sends, executor, true);
                 }
 
-                if self.has_buffered_replay_requests || !self.timed_purges.is_empty() {
+                if !self.buffered_replay_requests.is_empty() || !self.timed_purges.is_empty() {
                     self.handle(box Packet::Spin, sends, executor, true);
                 }
 
