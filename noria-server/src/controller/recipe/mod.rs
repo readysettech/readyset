@@ -76,6 +76,7 @@ fn is_ident(chr: u8) -> bool {
     is_alphanumeric(chr) || chr as char == '_'
 }
 
+use nom::*;
 named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
     do_parse!(
         prefix: opt!(do_parse!(
