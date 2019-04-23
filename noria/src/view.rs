@@ -237,6 +237,26 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
 
     fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
         // TODO: optimize for when there's only one shard
+        if self.shards.len() == 1 {
+            return future::Either::A(
+                self.shards[0]
+                    .call(
+                        ReadQuery::Normal {
+                            target: (self.node, 0),
+                            keys,
+                            block,
+                        }
+                        .into(),
+                    )
+                    .map_err(ViewError::from)
+                    .and_then(|reply| match reply.v {
+                        ReadReply::Normal(Ok(rows)) => Ok(rows),
+                        ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                        _ => unreachable!(),
+                    }),
+            );
+        }
+
         assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for key in keys {
@@ -245,41 +265,43 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         }
 
         let node = self.node;
-        futures::stream::futures_ordered(
-            self.shards
-                .iter_mut()
-                .enumerate()
-                .zip(shard_queries.into_iter())
-                .filter_map(|((shardi, shard), shard_queries)| {
-                    if shard_queries.is_empty() {
-                        // poll_ready reserves a sender slot which we have to release
-                        // we do that by dropping the old handle and replacing it with a clone
-                        // https://github.com/tokio-rs/tokio/issues/898
-                        *shard = shard.clone();
-                        None
-                    } else {
-                        Some(((shardi, shard), shard_queries))
-                    }
-                })
-                .map(move |((shardi, shard), shard_queries)| {
-                    shard
-                        .call(
-                            ReadQuery::Normal {
-                                target: (node, shardi),
-                                keys: shard_queries,
-                                block,
-                            }
-                            .into(),
-                        )
-                        .map_err(ViewError::from)
-                        .and_then(|reply| match reply.v {
-                            ReadReply::Normal(Ok(rows)) => Ok(rows),
-                            ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                            _ => unreachable!(),
-                        })
-                }),
+        future::Either::B(
+            futures::stream::futures_ordered(
+                self.shards
+                    .iter_mut()
+                    .enumerate()
+                    .zip(shard_queries.into_iter())
+                    .filter_map(|((shardi, shard), shard_queries)| {
+                        if shard_queries.is_empty() {
+                            // poll_ready reserves a sender slot which we have to release
+                            // we do that by dropping the old handle and replacing it with a clone
+                            // https://github.com/tokio-rs/tokio/issues/898
+                            *shard = shard.clone();
+                            None
+                        } else {
+                            Some(((shardi, shard), shard_queries))
+                        }
+                    })
+                    .map(move |((shardi, shard), shard_queries)| {
+                        shard
+                            .call(
+                                ReadQuery::Normal {
+                                    target: (node, shardi),
+                                    keys: shard_queries,
+                                    block,
+                                }
+                                .into(),
+                            )
+                            .map_err(ViewError::from)
+                            .and_then(|reply| match reply.v {
+                                ReadReply::Normal(Ok(rows)) => Ok(rows),
+                                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                                _ => unreachable!(),
+                            })
+                    }),
+            )
+            .concat2(),
         )
-        .concat2()
     }
 }
 
