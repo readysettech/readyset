@@ -47,7 +47,7 @@ pub(super) fn make_universe_naming_consistent(
 
     while !nodes_to_rewrite.is_empty() {
         let node_to_rewrite = nodes_to_rewrite.pop().unwrap();
-        for mut col in &mut node_to_rewrite.borrow_mut().columns {
+        for col in &mut node_to_rewrite.borrow_mut().columns {
             let mut _res = {
                 match col.table {
                     Some(ref table) => {
