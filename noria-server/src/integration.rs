@@ -2384,6 +2384,108 @@ fn remove_query() {
 }
 
 #[test]
+fn albums() {
+    let mut b = Builder::default();
+    //b.disable_partial();
+    b.set_sharding(None);
+    //b.log_with(crate::logger_pls());
+    let mut g = b.start_simple().unwrap();
+    g.install_recipe(
+        "CREATE TABLE friend (usera int, userb int);
+                 CREATE TABLE album (a_id text, u_id int, public tinyint(1));
+                 CREATE TABLE photo (p_id text, album text);",
+    )
+    .unwrap();
+    g.extend_recipe("VIEW album_friends: \
+                   (SELECT album.a_id AS aid, friend.userb AS uid FROM album JOIN friend ON (album.u_id = friend.usera) WHERE album.public = 0) \
+                   UNION \
+                   (SELECT album.a_id AS aid, friend.usera AS uid FROM album JOIN friend ON (album.u_id = friend.userb) WHERE album.public = 0) \
+                   UNION \
+                   (SELECT album.a_id AS aid, album.u_id AS uid FROM album WHERE album.public = 0);
+QUERY private_photos: \
+SELECT photo.p_id FROM photo JOIN album_friends ON (photo.album = album_friends.aid) WHERE album_friends.uid = ? AND photo.album = ?;
+QUERY public_photos: \
+SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE album.public = 1 AND album.a_id = ?;").unwrap();
+
+    let mut friends = g.table("friend").unwrap().into_sync();
+    let mut albums = g.table("album").unwrap().into_sync();
+    let mut photos = g.table("photo").unwrap().into_sync();
+
+    // four users: 1, 2, 3, and 4
+    // 1 and 2 are friends, 3 is a friend of 1 but not 2
+    // 4 isn't friends with anyone
+    //
+    // four albums: x, y, z, and q; one authored by each user
+    // z is public.
+    //
+    // there's one photo in each album
+    //
+    // what should each user be able to see?
+    //
+    //  - 1 should be able to see albums x, y, and z
+    //  - 2 should be able to see albums x, y, and z
+    //  - 3 should be able to see albums x and z
+    //  - 4 should be able to see albums z and q
+    friends
+        .perform_all(vec![vec![1.into(), 2.into()], vec![3.into(), 1.into()]])
+        .unwrap();
+    albums
+        .perform_all(vec![
+            vec!["x".into(), 1.into(), 0.into()],
+            vec!["y".into(), 2.into(), 0.into()],
+            vec!["z".into(), 3.into(), 1.into()],
+            vec!["q".into(), 4.into(), 0.into()],
+        ])
+        .unwrap();
+    photos
+        .perform_all(vec![
+            vec!["a".into(), "x".into()],
+            vec!["b".into(), "y".into()],
+            vec!["c".into(), "z".into()],
+            vec!["d".into(), "q".into()],
+        ])
+        .unwrap();
+
+    let mut private = g.view("private_photos").unwrap().into_sync();
+    let mut public = g.view("public_photos").unwrap().into_sync();
+    let mut get = move |uid: usize, aid: &str| -> Vec<_> {
+        // combine private and public results
+        // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we try both O:)
+        let v = private
+            .lookup(&[uid.into(), aid.into()], true)
+            .unwrap()
+            .into_iter()
+            .chain(private.lookup(&[aid.into(), uid.into()], true).unwrap())
+            .chain(public.lookup(&[aid.into()], true).unwrap())
+            .collect();
+        eprintln!("check {} as {}: {:?}", aid, uid, v);
+        v
+    };
+
+    sleep();
+
+    assert_eq!(get(1, "x").len(), 1);
+    assert_eq!(get(1, "y").len(), 1);
+    assert_eq!(get(1, "z").len(), 1);
+    assert_eq!(get(1, "q").len(), 0);
+
+    assert_eq!(get(2, "x").len(), 1);
+    assert_eq!(get(2, "y").len(), 1);
+    assert_eq!(get(2, "z").len(), 1);
+    assert_eq!(get(2, "q").len(), 0);
+
+    assert_eq!(get(3, "x").len(), 1);
+    assert_eq!(get(3, "y").len(), 0);
+    assert_eq!(get(3, "z").len(), 1);
+    assert_eq!(get(3, "q").len(), 0);
+
+    assert_eq!(get(4, "x").len(), 0);
+    assert_eq!(get(4, "y").len(), 0);
+    assert_eq!(get(4, "z").len(), 1);
+    assert_eq!(get(4, "q").len(), 1);
+}
+
+#[test]
 fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 
