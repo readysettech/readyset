@@ -213,8 +213,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                         client: hyper::Client::new(),
                     },
                     1,
-                )
-                .unwrap_or_else(|_| panic!("no running tokio executor")),
+                ),
             })
         })
     }
