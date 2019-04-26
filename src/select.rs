@@ -426,11 +426,14 @@ mod tests {
     #[test]
     fn termination() {
         let qstring_sem = "select id, name from users;";
+        let qstring_nosem = "select id, name from users";
         let qstring_linebreak = "select id, name from users\n";
 
         let r1 = selection(CompleteByteSlice(qstring_sem.as_bytes())).unwrap();
-        let r2 = selection(CompleteByteSlice(qstring_linebreak.as_bytes())).unwrap();
+        let r2 = selection(CompleteByteSlice(qstring_nosem.as_bytes())).unwrap();
+        let r3 = selection(CompleteByteSlice(qstring_linebreak.as_bytes())).unwrap();
         assert_eq!(r1, r2);
+        assert_eq!(r2, r3);
     }
 
     #[test]
