@@ -2379,8 +2379,10 @@ fn remove_query() {
         .unwrap();
     sleep();
 
-    assert_eq!(qa.lookup(&[0.into()], true).unwrap().len(), 3);
-    assert_eq!(qb.lookup(&[0.into()], true).unwrap().len(), 1);
+    match qb.lookup(&[0.into()], true).unwrap_err() {
+        noria::error::ViewError::NotYetAvailable => {}
+        e => unreachable!("{:?}", e),
+    }
 }
 
 #[test]
