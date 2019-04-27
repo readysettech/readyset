@@ -23,7 +23,8 @@ fn main() {
             let conn = postgres::Connection::connect(
                 "postgresql://postgres@localhost:5432",
                 postgres::TlsMode::None,
-            ).unwrap();
+            )
+            .unwrap();
             MysqlIntermediary::run_on_tcp(Postgres::new(conn), s).unwrap();
         }
     });
@@ -268,10 +269,14 @@ fn answer_rows<W: io::Write>(
                     match col.coltype {
                         ColumnType::MYSQL_TYPE_SHORT => writer.write_col(row.get::<_, i16>(c))?,
                         ColumnType::MYSQL_TYPE_LONG => writer.write_col(row.get::<_, i32>(c))?,
-                        ColumnType::MYSQL_TYPE_LONGLONG => writer.write_col(row.get::<_, i64>(c))?,
+                        ColumnType::MYSQL_TYPE_LONGLONG => {
+                            writer.write_col(row.get::<_, i64>(c))?
+                        }
                         ColumnType::MYSQL_TYPE_FLOAT => writer.write_col(row.get::<_, f32>(c))?,
                         ColumnType::MYSQL_TYPE_DOUBLE => writer.write_col(row.get::<_, f64>(c))?,
-                        ColumnType::MYSQL_TYPE_STRING => writer.write_col(row.get::<_, String>(c))?,
+                        ColumnType::MYSQL_TYPE_STRING => {
+                            writer.write_col(row.get::<_, String>(c))?
+                        }
                         ct => unimplemented!(
                             "don't know how to translate PostgreSQL \
                              argument type {:?} into MySQL value",

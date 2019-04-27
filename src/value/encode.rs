@@ -416,7 +416,8 @@ impl ToMysqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(
             format!("{:04}-{:02}-{:02}", self.year(), self.month(), self.day()).as_bytes(),
-        ).map(|_| ())
+        )
+        .map(|_| ())
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
@@ -446,8 +447,10 @@ impl ToMysqlValue for NaiveDateTime {
                     self.minute(),
                     self.second(),
                     us
-                ).as_bytes(),
-            ).map(|_| ())
+                )
+                .as_bytes(),
+            )
+            .map(|_| ())
         } else {
             w.write_lenenc_str(
                 format!(
@@ -458,8 +461,10 @@ impl ToMysqlValue for NaiveDateTime {
                     self.hour(),
                     self.minute(),
                     self.second()
-                ).as_bytes(),
-            ).map(|_| ())
+                )
+                .as_bytes(),
+            )
+            .map(|_| ())
         }
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
@@ -566,9 +571,9 @@ impl ToMysqlValue for myc::value::Value {
                     + chrono::Duration::minutes(m as i64)
                     + chrono::Duration::seconds(s as i64)
                     + chrono::Duration::microseconds(us as i64))
-                    .to_std()
-                    .expect("only positive times at the moment")
-                    .to_mysql_text(w)
+                .to_std()
+                .expect("only positive times at the moment")
+                .to_mysql_text(w)
             }
         }
     }
@@ -630,9 +635,9 @@ impl ToMysqlValue for myc::value::Value {
                     + chrono::Duration::minutes(m as i64)
                     + chrono::Duration::seconds(s as i64)
                     + chrono::Duration::microseconds(us as i64))
-                    .to_std()
-                    .expect("only positive times at the moment")
-                    .to_mysql_bin(w, c)
+                .to_std()
+                .expect("only positive times at the moment")
+                .to_mysql_bin(w, c)
             }
         }
     }
