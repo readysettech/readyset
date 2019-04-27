@@ -135,7 +135,7 @@ pub struct Column {
 
 pub use errorcodes::ErrorKind;
 pub use params::{ParamParser, ParamValue, Params};
-pub use resultset::{QueryResultWriter, RowWriter, StatementMetaWriter, InitWriter};
+pub use resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
@@ -175,7 +175,9 @@ pub trait MysqlShim<W: Write> {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
 
     /// Called when client switches database.
-    fn on_init(&mut self, _: &str, _: InitWriter<W>) -> Result<(), Self::Error> { Ok(()) }
+    fn on_init(&mut self, _: &str, _: InitWriter<W>) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -349,9 +351,9 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     };
                     self.shim.on_init(
                         ::std::str::from_utf8(schema)
-                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                                    w
-                                    )?;
+                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                        w,
+                    )?;
                 }
                 Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;

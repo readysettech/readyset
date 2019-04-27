@@ -109,26 +109,18 @@ mod tests {
         let (_, p) = pr.next().unwrap().unwrap();
         let (_, handshake) = client_handshake(&p).unwrap();
         println!("{:?}", handshake);
-        assert!(
-            handshake
-                .capabilities
-                .contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
-        );
-        assert!(
-            handshake
-                .capabilities
-                .contains(CapabilityFlags::CLIENT_MULTI_RESULTS)
-        );
-        assert!(
-            !handshake
-                .capabilities
-                .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
-        );
-        assert!(
-            !handshake
-                .capabilities
-                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
-        );
+        assert!(handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_LONG_PASSWORD));
+        assert!(handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_MULTI_RESULTS));
+        assert!(!handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB));
+        assert!(!handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
         assert_eq!(handshake.collation, UTF8_GENERAL_CI);
         assert_eq!(handshake.username, &b"jon"[..]);
         assert_eq!(handshake.maxps, 16777216);
@@ -152,10 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn it_handles_list_fields(){
-       // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
-       // in a future version. The mysql command line tool issues one of these commands after
-       // switching databases with USE <DB>.
+    fn it_handles_list_fields() {
+        // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
+        // in a future version. The mysql command line tool issues one of these commands after
+        // switching databases with USE <DB>.
         let data = &[
             0x21, 0x00, 0x00, 0x00, 0x04, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,

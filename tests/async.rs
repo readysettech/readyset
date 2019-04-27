@@ -105,11 +105,12 @@ where
 
         let mut core = Core::new().unwrap();
         let handle = core.handle();
-        let db =
-            core.run(mysql_async::Conn::new(
+        let db = core
+            .run(mysql_async::Conn::new(
                 &format!("mysql://127.0.0.1:{}", port),
                 &handle,
-            )).unwrap();
+            ))
+            .unwrap();
         core.run(c(db).into_future()).unwrap();
         jh.join().unwrap().unwrap();
     }
@@ -121,7 +122,8 @@ fn it_connects() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|_| Ok(()))
+    )
+    .test(|_| Ok(()))
 }
 
 #[test]
@@ -130,7 +132,8 @@ fn it_pings() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| db.ping().map(|_| ()))
+    )
+    .test(|db| db.ping().map(|_| ()))
 }
 
 #[test]
@@ -139,7 +142,8 @@ fn empty_response() {
         |_, w| w.completed(0, 0),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -161,7 +165,8 @@ fn no_rows() {
         move |_, w| w.start(&cols[..])?.finish(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -177,7 +182,8 @@ fn no_columns() {
         move |_, w| w.start(&[])?.finish(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -193,7 +199,8 @@ fn no_columns_but_rows() {
         move |_, w| w.start(&[])?.write_col(42).map(|_| ()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -210,7 +217,8 @@ fn error_response() {
         move |_, w| w.error(err.0, err.1.as_bytes()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo").then(|r| {
             match r {
                 Ok(_) => assert!(false),
@@ -247,7 +255,8 @@ fn empty_on_drop() {
         move |_, w| w.start(&cols[..]).map(|_| ()),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -273,7 +282,8 @@ fn it_queries_nulls() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -301,7 +311,8 @@ fn it_queries() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -340,7 +351,8 @@ fn it_queries_many_rows() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.query("SELECT a, b FROM foo")
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -392,18 +404,19 @@ fn it_prepares() {
             w.write_col(1024i16)?;
             w.finish()
         },
-    ).with_params(params)
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 1);
-                    assert_eq!(rs[0].len(), 1);
-                    assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
-                    Ok(())
-                })
-        })
+    )
+    .with_params(params)
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 1);
+                assert_eq!(rs[0].len(), 1);
+                assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -502,28 +515,30 @@ fn insert_exec() {
 
             w.completed(42, 1)
         },
-    ).with_params(params)
-        .test(|db| {
-            db.prep_exec(
-                "INSERT INTO `users` \
-                 (`username`, `email`, `password_digest`, `created_at`, \
-                 `session_token`, `rss_token`, `mailing_list_token`) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "user199",
-                    "user199@example.com",
-                    "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka",
-                    mysql_async::Value::Date(2018, 4, 6, 13, 0, 56, 0),
-                    "token199",
-                    "rsstoken199",
-                    "mtok199",
-                ),
-            ).and_then(|res| {
-                assert_eq!(res.affected_rows(), 42);
-                assert_eq!(res.last_insert_id(), Some(1));
-                Ok(())
-            })
+    )
+    .with_params(params)
+    .test(|db| {
+        db.prep_exec(
+            "INSERT INTO `users` \
+             (`username`, `email`, `password_digest`, `created_at`, \
+             `session_token`, `rss_token`, `mailing_list_token`) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "user199",
+                "user199@example.com",
+                "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka",
+                mysql_async::Value::Date(2018, 4, 6, 13, 0, 56, 0),
+                "token199",
+                "rsstoken199",
+                "mtok199",
+            ),
+        )
+        .and_then(|res| {
+            assert_eq!(res.affected_rows(), 42);
+            assert_eq!(res.last_insert_id(), Some(1));
+            Ok(())
         })
+    })
 }
 
 #[test]
@@ -562,18 +577,19 @@ fn send_long() {
             w.write_col(1024i16)?;
             w.finish()
         },
-    ).with_params(params)
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("SELECT a FROM b WHERE c = ?", (b"Hello world",))
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 1);
-                    assert_eq!(rs[0].len(), 1);
-                    assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
-                    Ok(())
-                })
-        })
+    )
+    .with_params(params)
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("SELECT a FROM b WHERE c = ?", (b"Hello world",))
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 1);
+                assert_eq!(rs[0].len(), 1);
+                assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -611,22 +627,23 @@ fn it_prepares_many() {
             w.write_row(&[1024i16, 1025i16])?;
             w.finish()
         },
-    ).with_params(Vec::new())
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("SELECT a, b FROM x", ())
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 2);
-                    assert_eq!(rs[0].len(), 2);
-                    assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
-                    assert_eq!(rs[0].get::<i16, _>(1), Some(1025));
-                    assert_eq!(rs[1].len(), 2);
-                    assert_eq!(rs[1].get::<i16, _>(0), Some(1024));
-                    assert_eq!(rs[1].get::<i16, _>(1), Some(1025));
-                    Ok(())
-                })
-        })
+    )
+    .with_params(Vec::new())
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("SELECT a, b FROM x", ())
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 2);
+                assert_eq!(rs[0].len(), 2);
+                assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
+                assert_eq!(rs[0].get::<i16, _>(1), Some(1025));
+                assert_eq!(rs[1].len(), 2);
+                assert_eq!(rs[1].get::<i16, _>(0), Some(1024));
+                assert_eq!(rs[1].get::<i16, _>(1), Some(1025));
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -652,16 +669,17 @@ fn prepared_empty() {
             assert!(!params.is_empty());
             w.completed(0, 0)
         },
-    ).with_params(params)
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 0);
-                    Ok(())
-                })
-        })
+    )
+    .with_params(params)
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("SELECT a FROM b WHERE c = ?", (42i16,))
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 0);
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -684,18 +702,19 @@ fn prepared_no_params() {
             w.write_col(1024i16)?;
             w.finish()
         },
-    ).with_params(params)
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("foo", ())
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 1);
-                    assert_eq!(rs[0].len(), 1);
-                    assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
-                    Ok(())
-                })
-        })
+    )
+    .with_params(params)
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("foo", ())
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 1);
+                assert_eq!(rs[0].len(), 1);
+                assert_eq!(rs[0].get::<i16, _>(0), Some(1024));
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -752,21 +771,23 @@ fn prepared_nulls() {
             w.write_row(vec![None::<i16>, Some(42)])?;
             w.finish()
         },
-    ).with_params(params)
-        .with_columns(cols2)
-        .test(|db| {
-            db.prep_exec(
-                "SELECT a, b FROM x WHERE c = ? AND d = ?",
-                (mysql_async::Value::NULL, 42),
-            ).and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 1);
-                    assert_eq!(rs[0].len(), 2);
-                    assert_eq!(rs[0].get::<Option<i16>, _>(0), Some(None));
-                    assert_eq!(rs[0].get::<i16, _>(1), Some(42));
-                    Ok(())
-                })
+    )
+    .with_params(params)
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec(
+            "SELECT a, b FROM x WHERE c = ? AND d = ?",
+            (mysql_async::Value::NULL, 42),
+        )
+        .and_then(|r| r.collect::<mysql_async::Row>())
+        .and_then(|(_, rs)| {
+            assert_eq!(rs.len(), 1);
+            assert_eq!(rs[0].len(), 2);
+            assert_eq!(rs[0].get::<Option<i16>, _>(0), Some(None));
+            assert_eq!(rs[0].get::<i16, _>(1), Some(42));
+            Ok(())
         })
+    })
 }
 
 #[test]
@@ -782,15 +803,16 @@ fn prepared_no_rows() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&cols[..])?.finish(),
-    ).with_columns(cols2)
-        .test(|db| {
-            db.prep_exec("SELECT a, b FROM foo", ())
-                .and_then(|r| r.collect::<mysql_async::Row>())
-                .and_then(|(_, rs)| {
-                    assert_eq!(rs.len(), 0);
-                    Ok(())
-                })
-        })
+    )
+    .with_columns(cols2)
+    .test(|db| {
+        db.prep_exec("SELECT a, b FROM foo", ())
+            .and_then(|r| r.collect::<mysql_async::Row>())
+            .and_then(|(_, rs)| {
+                assert_eq!(rs.len(), 0);
+                Ok(())
+            })
+    })
 }
 
 #[test]
@@ -799,7 +821,8 @@ fn prepared_no_cols_but_rows() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&[])?.write_col(42).map(|_| ()),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.prep_exec("SELECT a, b FROM foo", ())
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {
@@ -815,7 +838,8 @@ fn prepared_no_cols() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| w.start(&[])?.finish(),
-    ).test(|db| {
+    )
+    .test(|db| {
         db.prep_exec("SELECT a, b FROM foo", ())
             .and_then(|r| r.collect::<mysql_async::Row>())
             .and_then(|(_, rs)| {

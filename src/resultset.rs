@@ -15,8 +15,7 @@ pub struct InitWriter<'a, W: Write + 'a> {
 
 impl<'a, W: Write + 'a> InitWriter<'a, W> {
     /// Tell client that database context has been changed
-    pub fn ok(self) -> io::Result<()>
-    {
+    pub fn ok(self) -> io::Result<()> {
         writers::write_ok_packet(self.writer, 0, 0, StatusFlags::empty())
     }
 

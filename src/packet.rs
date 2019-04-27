@@ -207,17 +207,18 @@ fn packet<'a>(input: &'a [u8]) -> IResult<&'a [u8], (u8, Packet<'a>)> {
                 };
                 (nseq, pkt)
             }
-        ) >> last: onepacket >> ({
-            let seq = last.0;
-            let pkt = if let Some(mut pkt) = full.1 {
-                assert_eq!(last.0, full.0 + 1);
-                pkt.extend(last.1);
-                pkt
-            } else {
-                Packet(last.1, Vec::new())
-            };
-            (seq, pkt)
-        })
+        ) >> last: onepacket
+            >> ({
+                let seq = last.0;
+                let pkt = if let Some(mut pkt) = full.1 {
+                    assert_eq!(last.0, full.0 + 1);
+                    pkt.extend(last.1);
+                    pkt
+                } else {
+                    Packet(last.1, Vec::new())
+                };
+                (seq, pkt)
+            })
     )
 }
 
