@@ -79,8 +79,7 @@ CREATE VIEW user_comments AS SELECT comments.user_id AS id, COUNT(comments.id) A
 
 CREATE VIEW user_stories AS SELECT stories.user_id AS id, COUNT(stories.id) AS stories FROM stories GROUP BY stories.user_id;
 
-CREATE VIEW user_stats AS
-SELECT users.id, user_comments.comments, user_stories.stories FROM users LEFT JOIN user_comments ON (users.id = user_comments.id) LEFT JOIN user_stories ON (users.id = user_stories.id);
+CREATE VIEW user_stats AS SELECT users.id, user_comments.comments, user_stories.stories FROM users LEFT JOIN user_comments ON (users.id = user_comments.id) LEFT JOIN user_stories ON (users.id = user_stories.id);
 
 CREATE VIEW user_comment_karma AS SELECT comment_with_votes.user_id AS id, SUM(comment_with_votes.score) AS karma FROM comment_with_votes GROUP BY comment_with_votes.user_id;
 
@@ -119,7 +118,7 @@ VIEW q_11: SELECT story_with_votes.id, story_with_votes.always_null, story_with_
 VIEW q_12: SELECT tag_filters.id, tag_filters.created_at, tag_filters.updated_at, tag_filters.user_id, tag_filters.tag_id FROM tag_filters WHERE tag_filters.user_id = ?
 VIEW q_13: SELECT read_ribbons.id, read_ribbons.is_following, read_ribbons.created_at, read_ribbons.updated_at, read_ribbons.user_id, read_ribbons.story_id FROM read_ribbons WHERE read_ribbons.user_id = ? AND read_ribbons.story_id = ?
 VIEW q_14: SELECT taggings.story_id FROM taggings WHERE taggings.story_id = ?
-VIEW q_15: SELECT stories.id FROM stories WHERE stories.merged_story_id = ?" to Soup as VIEW q_15
+VIEW q_15: SELECT stories.id FROM stories WHERE stories.merged_story_id = ?
 VIEW q_16: SELECT suggested_titles.id, suggested_titles.story_id, suggested_titles.user_id, suggested_titles.title FROM suggested_titles WHERE suggested_titles.story_id = ?
 VIEW q_17: SELECT comment_with_votes.id, comment_with_votes.created_at, comment_with_votes.updated_at, comment_with_votes.short_id, comment_with_votes.story_id, comment_with_votes.user_id, comment_with_votes.parent_comment_id, comment_with_votes.thread_id, comment_with_votes.comment, comment_with_votes.markeddown_comment, comment_with_votes.is_deleted, comment_with_votes.is_moderated, comment_with_votes.is_from_email, comment_with_votes.hat_id, comment_with_votes.fulltext, comment_with_votes.upvotes, comment_with_votes.downvotes, comment_with_votes.score FROM comment_with_votes WHERE comment_with_votes.story_id = ? ORDER BY score DESC
 VIEW q_18: SELECT suggested_taggings.id, suggested_taggings.story_id, suggested_taggings.tag_id, suggested_taggings.user_id FROM suggested_taggings WHERE suggested_taggings.story_id = ?
@@ -127,7 +126,7 @@ VIEW q_19: SELECT votes.id, votes.user_id, votes.story_id, votes.comment_id, vot
 VIEW q_20: SELECT taggings.id, taggings.story_id, taggings.tag_id FROM taggings WHERE taggings.story_id = ?
 VIEW q_21: SELECT tags.id, tags.tag, tags.description, tags.privileged, tags.is_media, tags.inactive, tags.hotness_mod FROM tags WHERE tags.id = ?
 VIEW q_22: SELECT hidden_stories.id, hidden_stories.user_id, hidden_stories.story_id FROM hidden_stories WHERE hidden_stories.user_id = ? AND hidden_stories.story_id = ?
-VIEW q_23: SELECT users.id, users.username, users.email, users.password_digest, users.created_at, users.is_admin, users.password_reset_token, users.session_token, users.about, users.invited_by_user_id, users.is_moderator, users.pushover_mentions, users.rss_token, users.mailing_list_token, users.mailing_list_mode, users.karma, users.banned_at, users.banned_by_user_id, users.banned_reason, users.deleted_at, users.disabled_invite_at, users.disabled_invite_by_user_id, users.disabled_invite_reason, users.settings FROM users WHERE users.username =
+VIEW q_23: SELECT users.id, users.username, users.email, users.password_digest, users.created_at, users.is_admin, users.password_reset_token, users.session_token, users.about, users.invited_by_user_id, users.is_moderator, users.pushover_mentions, users.rss_token, users.mailing_list_token, users.mailing_list_mode, users.karma, users.banned_at, users.banned_by_user_id, users.banned_reason, users.deleted_at, users.disabled_invite_at, users.disabled_invite_by_user_id, users.disabled_invite_reason, users.settings FROM users WHERE users.username = ?
 VIEW q_24: SELECT saved_stories.id, saved_stories.created_at, saved_stories.updated_at, saved_stories.user_id, saved_stories.story_id FROM saved_stories WHERE saved_stories.user_id = ? AND saved_stories.story_id = ?
 VIEW q_25: SELECT user_stats.id, user_stats.comments, user_stats.stories FROM user_stats WHERE user_stats.id = ?
 VIEW q_26: SELECT BOUNDARY_notifications.notifications FROM BOUNDARY_notifications WHERE BOUNDARY_notifications.user_id = ?
