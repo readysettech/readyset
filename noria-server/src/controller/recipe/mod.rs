@@ -588,16 +588,21 @@ impl Recipe {
             .collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();
+
+        let linecount = lines.len();
+        let mut i = 1;
         for l in lines {
-            if !l.ends_with(';') {
+            if !l.ends_with(';') && i < linecount {
                 q.push_str(l);
                 q.push_str(" ");
             } else {
-                // end of query
+                // either line ends with semicolor, or it does not and this is the last line
+                // in both cases, we're at the end of the query
                 q.push_str(l);
                 query_strings.push(q);
                 q = String::new();
             }
+            i += 1;
         }
 
         let parsed_queries = query_strings
@@ -807,5 +812,15 @@ mod tests {
         let r2 = r1.extend(r2_txt).unwrap();
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 4);
+    }
+
+    #[test]
+    fn it_handles_missing_semicolon() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "QUERY q_0: SELECT a FROM b;\nVIEW q_1: SELECT x FROM y";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.expressions.len(), 2);
     }
 }
