@@ -4,14 +4,13 @@ extern crate msql_srv;
 extern crate mysql_async;
 extern crate mysql_common as myc;
 extern crate nom;
-extern crate tokio_core;
+extern crate tokio;
 
 use futures::{Future, IntoFuture};
 use mysql_async::prelude::*;
 use std::io;
 use std::net;
 use std::thread;
-use tokio_core::reactor::Core;
 
 use msql_srv::{
     Column, ErrorKind, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
@@ -93,7 +92,7 @@ where
 
     fn test<C, F>(self, c: C)
     where
-        F: IntoFuture<Item = (), Error = mysql_async::errors::Error>,
+        F: IntoFuture<Item = (), Error = mysql_async::error::Error>,
         C: FnOnce(mysql_async::Conn) -> F,
     {
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -103,15 +102,11 @@ where
             MysqlIntermediary::run_on_tcp(self, s)
         });
 
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
-        let db = core
-            .run(mysql_async::Conn::new(
-                &format!("mysql://127.0.0.1:{}", port),
-                &handle,
-            ))
-            .unwrap();
-        core.run(c(db).into_future()).unwrap();
+        tokio::runtime::current_thread::block_on_all(
+            mysql_async::Conn::new(format!("mysql://127.0.0.1:{}", port)).and_then(|conn| c(conn)),
+        )
+        .unwrap();
+
         jh.join().unwrap().unwrap();
     }
 }
@@ -222,10 +217,11 @@ fn error_response() {
         db.query("SELECT a, b FROM foo").then(|r| {
             match r {
                 Ok(_) => assert!(false),
-                Err(mysql_async::errors::Error(
-                    mysql_async::errors::ErrorKind::Server(ref state, code, ref msg),
-                    _,
-                )) => {
+                Err(mysql_async::error::Error::Server(mysql_async::error::ServerError {
+                    code,
+                    message: ref msg,
+                    ref state,
+                })) => {
                     assert_eq!(
                         state,
                         &String::from_utf8(err.0.sqlstate().to_vec()).unwrap()
