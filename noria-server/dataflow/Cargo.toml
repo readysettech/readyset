@@ -35,6 +35,7 @@ common = { path = "../common" }
 noria = { path = "../../noria" }
 
 [dependencies.rocksdb]
-git = "https://github.com/ekmartin/rust-rocksdb.git"
+git = "https://github.com/rust-rocksdb/rust-rocksdb.git"
+default-features = false
 features = ["lz4"]
-branch = "custom"
+rev = "184440b2095979baeb747ccf300022198e9606ed"

@@ -1,6 +1,6 @@
 use bincode;
 use itertools::Itertools;
-use rocksdb::{self, ColumnFamily, SliceTransform, SliceTransformFns, WriteBatch};
+use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde;
 use tempfile::{tempdir, TempDir};
 
@@ -34,17 +34,8 @@ struct PersistentMeta {
 
 #[derive(Clone)]
 struct PersistentIndex {
-    column_family: ColumnFamily,
+    column_family: String,
     columns: Vec<usize>,
-}
-
-impl PersistentIndex {
-    fn new(column_family: ColumnFamily, columns: Vec<usize>) -> Self {
-        Self {
-            column_family,
-            columns,
-        }
-    }
 }
 
 /// PersistentState stores data in RocksDB.
@@ -65,75 +56,6 @@ pub struct PersistentState {
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
     _directory: Option<TempDir>,
-}
-
-struct PrefixTransform;
-
-// SliceTransforms are used to create prefixes of all inserted keys, which can then be used for
-// both bloom filters and hash structure lookups.
-impl SliceTransformFns for PrefixTransform {
-    // Selects a prefix of `key` without the epoch or sequence number.
-    //
-    // The RocksDB docs state the following:
-    // > If non-nullptr, use the specified function to determine the
-    // > prefixes for keys.  These prefixes will be placed in the filter.
-    // > Depending on the workload, this can reduce the number of read-IOP
-    // > cost for scans when a prefix is passed via ReadOptions to
-    // > db.NewIterator(). For prefix filtering to work properly,
-    // > "prefix_extractor" and "comparator" must be such that the following
-    // > properties hold:
-    //
-    // > 1) key.starts_with(prefix(key))
-    // > 2) Compare(prefix(key), key) <= 0.
-    // > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
-    // > 4) prefix(prefix(key)) == prefix(key)
-    //
-    // NOTE(ekmartin): Encoding the key size in the key increases the total size with 8 bytes.
-    // If we really wanted to avoid this while still maintaining the same serialization scheme
-    // we could do so by figuring out how many bytes our bincode serialized KeyType takes
-    // up here in transform_fn. Example:
-    // Double((DataType::Int(1), DataType::BigInt(10))) would be serialized as:
-    // 1u32 (enum type), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
-    // By stepping through the serialized bytes and checking each enum variant we would know
-    // when we reached the end, and could then with certainty say whether we'd already
-    // prefix transformed this key before or not
-    // (without including the byte size of Vec<DataType>).
-    fn transform<'a>(&mut self, key: &'a [u8]) -> &'a [u8] {
-        // We'll have to make sure this isn't the META_KEY even when we're filtering it out
-        // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
-        // HashLinkedList memtable factory.
-        if key == META_KEY {
-            return key;
-        }
-
-        // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
-        let size_offset = 8;
-        let key_size: u64 = bincode::deserialize(&key[..size_offset]).unwrap();
-        let prefix_len = size_offset + key_size as usize;
-        // Strip away the key suffix if we haven't already done so:
-        &key[..prefix_len]
-    }
-
-    // Decides which keys the prefix transform should apply to.
-    fn in_domain(&mut self, key: &[u8]) -> bool {
-        key != META_KEY
-    }
-}
-
-impl SizeOf for PersistentState {
-    fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
-    }
-
-    fn deep_size_of(&self) -> u64 {
-        self.db
-            .as_ref()
-            .unwrap()
-            .property_int_value("rocksdb.estimate-live-data-size")
-            .unwrap()
-    }
 }
 
 impl State for PersistentState {
@@ -168,7 +90,7 @@ impl State for PersistentState {
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("lookup on non-indexed column set");
-        let cf = self.indices[index_id].column_family;
+        let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
         let prefix = Self::serialize_prefix(&key);
         let data = if index_id == 0 && self.has_unique_index {
             // This is a primary key, so we know there's only one row to retrieve
@@ -206,31 +128,32 @@ impl State for PersistentState {
         // We'll store all the pointers (or values if this is index 0) for
         // this index in its own column family:
         let index_id = self.indices.len().to_string();
-        let column_family = self
-            .db
-            .as_mut()
-            .unwrap()
-            .create_cf(&index_id, &self.db_opts)
-            .unwrap();
+        let db = self.db.as_mut().unwrap();
+        db.create_cf(&index_id, &self.db_opts).unwrap();
 
         // Build the new index for existing values:
         if !self.indices.is_empty() {
-            for chunk in self.all_rows().chunks(INDEX_BATCH_SIZE).into_iter() {
+            let first_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
+            let iter = db
+                .full_iterator_cf(first_cf, rocksdb::IteratorMode::Start)
+                .unwrap();
+            for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
                 let mut batch = WriteBatch::default();
                 for (ref pk, ref value) in chunk {
                     let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
                     let index_key = Self::build_key(&row, columns);
                     let key = Self::serialize_secondary(&index_key, pk);
-                    batch.put_cf(column_family, &key, value).unwrap();
+                    let cf = db.cf_handle(&index_id).unwrap();
+                    batch.put_cf(cf, &key, value).unwrap();
                 }
 
-                self.db.as_ref().unwrap().write(batch).unwrap();
+                db.write(batch).unwrap();
             }
         }
 
         self.indices.push(PersistentIndex {
             columns: cols,
-            column_family,
+            column_family: index_id.to_string(),
         });
 
         self.persist_meta();
@@ -255,6 +178,7 @@ impl State for PersistentState {
         let cf = db.cf_handle("0").unwrap();
         let total_keys = db
             .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+            .unwrap()
             .unwrap() as usize;
 
         (total_keys / self.indices.len())
@@ -310,13 +234,13 @@ impl PersistentState {
         // We use a column for each index, and one for meta information.
         // When opening the DB the exact same column families needs to be used,
         // so we'll have to retrieve the existing ones first:
-        let column_family_names = match DB::list_cf(&opts, &full_name) {
+        let column_families = match DB::list_cf(&opts, &full_name) {
             Ok(cfs) => cfs,
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
-        let make_cfs = || {
-            column_family_names
+        let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
+            column_families
                 .iter()
                 .map(|cf| {
                     ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
@@ -332,22 +256,22 @@ impl PersistentState {
             ::std::thread::sleep(::std::time::Duration::from_millis(50));
             db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
         }
-        let mut db = db.unwrap();
+        let db = db.unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices: Vec<PersistentIndex> = meta
             .indices
             .into_iter()
             .enumerate()
-            .map(|(i, columns)| {
-                let cf = db.cf_handle(&i.to_string()).unwrap();
-                PersistentIndex::new(cf, columns)
+            .map(|(i, columns)| PersistentIndex {
+                column_family: i.to_string(),
+                columns,
             })
             .collect();
 
         // If there are more column families than indices (-1 to account for the default column
         // family) we probably crashed while trying to build the last index (in Self::add_key), so
         // we'll throw away our progress and try re-building it again later:
-        if column_family_names.len() - 1 > indices.len() {
+        if column_families.len() - 1 > indices.len() {
             db.drop_cf(&indices.len().to_string()).unwrap();
         }
 
@@ -364,15 +288,19 @@ impl PersistentState {
         if primary_key.is_some() && state.indices.is_empty() {
             // This is the first time we're initializing this PersistentState,
             // so persist the primary key index right away.
-            let cf = state
+            state
                 .db
                 .as_mut()
                 .unwrap()
                 .create_cf("0", &state.db_opts)
                 .unwrap();
-            state
-                .indices
-                .push(PersistentIndex::new(cf, primary_key.unwrap().to_vec()));
+
+            let persistent_index = PersistentIndex {
+                column_family: "0".to_string(),
+                columns: primary_key.unwrap().to_vec(),
+            };
+
+            state.indices.push(persistent_index);
             state.persist_meta();
         }
 
@@ -385,16 +313,16 @@ impl PersistentState {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let key_len = 0; // variable key length
+        let user_key_length = 0; // variable key length
         let bloom_bits_per_key = 10;
         let hash_table_ratio = 0.75;
         let index_sparseness = 16;
-        opts.set_plain_table_factory(
-            key_len,
+        opts.set_plain_table_factory(&PlainTableFactoryOptions {
+            user_key_length,
             bloom_bits_per_key,
             hash_table_ratio,
             index_sparseness,
-        );
+        });
 
         if let Some(ref path) = params.log_dir {
             // Append the db name to the WAL path to ensure
@@ -402,8 +330,8 @@ impl PersistentState {
             opts.set_wal_dir(path.join(&name));
         }
 
-        // Create prefixes with PrefixTransform on all new inserted keys:
-        let transform = SliceTransform::create("key", Box::new(PrefixTransform));
+        // Create prefixes using `prefix_transform` on all new inserted keys:
+        let transform = SliceTransform::create("key", prefix_transform, Some(in_domain));
         opts.set_prefix_extractor(transform);
 
         // Assigns the number of threads for compactions and flushes in RocksDB.
@@ -472,7 +400,7 @@ impl PersistentState {
     //
     // * Unique Primary Keys
     // (size, key), where size is the serialized byte size of `key`
-    // (used in PrefixTransform::transform).
+    // (used in `prefix_transform`).
     //
     // * Non-unique Primary Keys
     // (size, key, epoch, seq), where epoch is incremented on each recover, and seq is a
@@ -511,9 +439,9 @@ impl PersistentState {
     }
 
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
-    fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> {
+    fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_ {
         let db = self.db.as_ref().unwrap();
-        let cf = self.indices[0].column_family;
+        let cf = db.cf_handle(&self.indices[0].column_family).unwrap();
         db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
             .unwrap()
     }
@@ -539,7 +467,8 @@ impl PersistentState {
 
         // First insert the actual value for our primary index:
         let serialized_row = bincode::serialize(&r).unwrap();
-        let value_cf = self.indices[0].column_family;
+        let db = self.db.as_ref().unwrap();
+        let value_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
         batch
             .put_cf(value_cf, &serialized_pk, &serialized_row)
             .unwrap();
@@ -549,16 +478,15 @@ impl PersistentState {
             // Construct a key with the index values, and serialize it with bincode:
             let key = Self::build_key(&r, &index.columns);
             let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
-            batch
-                .put_cf(index.column_family, &serialized_key, &serialized_row)
-                .unwrap();
+            let cf = db.cf_handle(&index.column_family).unwrap();
+            batch.put_cf(cf, &serialized_key, &serialized_row).unwrap();
         }
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         let db = self.db.as_ref().unwrap();
         let pk_index = &self.indices[0];
-        let value_cf = pk_index.column_family;
+        let value_cf = db.cf_handle(&pk_index.column_family).unwrap();
         let mut do_remove = move |primary_key: &[u8]| {
             // Delete the value row first (primary index):
             batch.delete_cf(value_cf, &primary_key).unwrap();
@@ -567,9 +495,8 @@ impl PersistentState {
             for index in self.indices[1..].iter() {
                 let key = Self::build_key(&r, &index.columns);
                 let serialized_key = Self::serialize_secondary(&key, primary_key);
-                batch
-                    .delete_cf(index.column_family, &serialized_key)
-                    .unwrap();
+                let cf = db.cf_handle(&index.column_family).unwrap();
+                batch.delete_cf(cf, &serialized_key).unwrap();
             }
         };
 
@@ -600,6 +527,71 @@ impl PersistentState {
                 .expect("tried removing non-existant row");
             do_remove(&key[..]);
         };
+    }
+}
+
+// SliceTransforms are used to create prefixes of all inserted keys, which can then be used for
+// both bloom filters and hash structure lookups.
+//
+// Selects a prefix of `key` without the epoch or sequence number.
+//
+// The RocksDB docs state the following:
+// > If non-nullptr, use the specified function to determine the
+// > prefixes for keys.  These prefixes will be placed in the filter.
+// > Depending on the workload, this can reduce the number of read-IOP
+// > cost for scans when a prefix is passed via ReadOptions to
+// > db.NewIterator(). For prefix filtering to work properly,
+// > "prefix_extractor" and "comparator" must be such that the following
+// > properties hold:
+//
+// > 1) key.starts_with(prefix(key))
+// > 2) Compare(prefix(key), key) <= 0.
+// > 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
+// > 4) prefix(prefix(key)) == prefix(key)
+//
+// NOTE(ekmartin): Encoding the key size in the key increases the total size with 8 bytes.
+// If we really wanted to avoid this while still maintaining the same serialization scheme
+// we could do so by figuring out how many bytes our bincode serialized KeyType takes
+// up here in transform_fn. Example:
+// Double((DataType::Int(1), DataType::BigInt(10))) would be serialized as:
+// 1u32 (enum type), 0u32 (enum variant), 1i32 (value), 1u32 (enum variant), 1i64 (value)
+// By stepping through the serialized bytes and checking each enum variant we would know
+// when we reached the end, and could then with certainty say whether we'd already
+// prefix transformed this key before or not
+// (without including the byte size of Vec<DataType>).
+fn prefix_transform<'a>(key: &'a [u8]) -> &'a [u8] {
+    // We'll have to make sure this isn't the META_KEY even when we're filtering it out
+    // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
+    // HashLinkedList memtable factory.
+    if key == META_KEY {
+        return key;
+    }
+
+    // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
+    let size_offset = 8;
+    let key_size: u64 = bincode::deserialize(&key[..size_offset]).unwrap();
+    let prefix_len = size_offset + key_size as usize;
+    // Strip away the key suffix if we haven't already done so:
+    &key[..prefix_len]
+}
+
+// Decides which keys the prefix transform should apply to.
+fn in_domain(key: &[u8]) -> bool {
+    key != META_KEY
+}
+
+impl SizeOf for PersistentState {
+    fn size_of(&self) -> u64 {
+        use std::mem::size_of;
+
+        size_of::<Self>() as u64
+    }
+
+    fn deep_size_of(&self) -> u64 {
+        let db = self.db.as_ref().unwrap();
+        db.property_int_value("rocksdb.estimate-live-data-size")
+            .unwrap()
+            .unwrap()
     }
 }
 
@@ -1141,8 +1133,7 @@ mod tests {
         let data = (DataType::from(1), DataType::from(10));
         let r = KeyType::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
-        let mut transform_fns = PrefixTransform;
-        let prefix = transform_fns.transform(&k);
+        let prefix = prefix_transform(&k);
         let size: u64 = bincode::deserialize(&prefix).unwrap();
         assert_eq!(size, bincode::serialized_size(&data).unwrap());
 
@@ -1155,11 +1146,11 @@ mod tests {
 
         // 3) If Compare(k1, k2) <= 0, then Compare(prefix(k1), prefix(k2)) <= 0
         let other_k = PersistentState::serialize_prefix(&r);
-        let other_prefix = transform_fns.transform(&other_k);
+        let other_prefix = prefix_transform(&other_k);
         assert!(k <= other_k);
         assert!(prefix <= other_prefix);
 
         // 4) prefix(prefix(key)) == prefix(key)
-        assert_eq!(prefix, transform_fns.transform(&prefix));
+        assert_eq!(prefix, prefix_transform(&prefix));
     }
 }
