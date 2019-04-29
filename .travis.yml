@@ -50,17 +50,13 @@ jobs:
         - touch ./src/lib.rs && cargo clippy -- -D warnings
     - stage: coverage
       sudo: required
-      addons:
-        apt:
-          packages:
-            - libssl-dev
-      rust: nightly
-      env: CACHE_NAME=coverage
+      dist: trusty
+      cache: false
+      services:
+        - docker
       script:
-        - RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin || true
-        - cargo tarpaulin --out Xml
+        - docker run --security-opt seccomp=unconfined -v "$PWD:/volume" xd009642/tarpaulin:latest sh -c "cargo tarpaulin --out Xml"
         - bash <(curl -s https://codecov.io/bash)
-        - cargo clean -p msql-srv # ensure we don't cache build for coverage
 stages:
  - check
  - test
