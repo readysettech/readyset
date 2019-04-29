@@ -1,21 +1,67 @@
 language: rust
-sudo: required
-dist: trusty
-addons:
-    apt:
-        packages:
-            - libssl-dev
 cache: cargo
 rust:
   - stable
   - beta
   - nightly
-matrix:
+os: linux
+
+# always test things that aren't pushes (like PRs)
+# never test tags or pushes to non-master branches (wait for PR)
+# https://github.com/travis-ci/travis-ci/issues/2200#issuecomment-441395545)
+if: type != push OR (tag IS blank AND branch = master)
+
+jobs:
   allow_failures:
     - rust: nightly
-after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-    bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
-    cargo tarpaulin --out Xml
-    bash <(curl -s https://codecov.io/bash)
-  fi
+  include:
+    - &check
+      stage: check # do a pre-screen to make sure this is even worth testing
+      script: cargo check --all-targets
+      rust: stable
+    - <<: *check # also test oldest known-good stable
+      rust: 1.31.1
+    - stage: test
+      rust: stable
+      os: osx
+    - rust: stable
+      os: windows
+    - stage: lint # we lint on beta to future-proof
+      name: "Rust: beta, rustfmt"
+      rust: beta
+      script:
+        - rustup component add rustfmt-preview
+        - cargo fmt -v -- --check
+    - name: "Rust: nightly, rustfmt" # and on nightly with allow_fail
+      rust: nightly
+      script:
+        - rustup component add rustfmt-preview
+        - cargo fmt -v -- --check
+    - name: "Rust: beta, clippy"
+      rust: beta
+      script:
+        - rustup component add clippy-preview
+        - touch ./src/lib.rs && cargo clippy -- -D warnings
+    - name: "Rust: nightly, clippy"
+      rust: nightly
+      script:
+        - rustup component add clippy-preview
+        - touch ./src/lib.rs && cargo clippy -- -D warnings
+    - stage: coverage
+      sudo: required
+      addons:
+        apt:
+          packages:
+            - libssl-dev
+      rust: nightly
+      env: CACHE_NAME=coverage
+      script:
+        - RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin || true
+        - cargo tarpaulin --out Xml
+        - bash <(curl -s https://codecov.io/bash)
+        - cargo clean -p msql-srv # ensure we don't cache build for coverage
+stages:
+ - check
+ - test
+ - lint
+ - coverage
