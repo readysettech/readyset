@@ -977,6 +977,18 @@ mod tests {
         mig.graph().node_weight(na).unwrap()
     }
 
+    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
+        let na = inc
+            .get_flow_node_address(name, 0)
+            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
+        let children: Vec<_> = mig
+            .graph()
+            .neighbors_directed(na, petgraph::EdgeDirection::Outgoing)
+            .collect();
+        assert_eq!(children.len(), 1);
+        mig.graph().node_weight(children[0]).unwrap()
+    }
+
     /// Helper to compute a query ID hash via the same method as in `QueryGraph::signature()`.
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
@@ -1200,6 +1212,37 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 3);
             // should have ended up with a different leaf node
             assert_ne!(qfp.query_leaf, leaf);
+        });
+    }
+
+    #[test]
+    fn it_orders_parameter_columns() {
+        // set up graph
+        let mut g = integration::start_simple("it_orders_parameter_columns");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), age int);",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with two parameters
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name = ? AND id = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // fields should be projected in query order
+            assert_eq!(get_node(&inc, mig, &qfp.name).fields(), &["id", "name"]);
+            // key columns should be in opposite order (i.e., the order of parameters in the query)
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1, 0]))
+                .unwrap();
         });
     }
 
