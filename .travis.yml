@@ -19,8 +19,9 @@ jobs:
       stage: check # do a pre-screen to make sure this is even worth testing
       script: cargo check --all-targets
       rust: stable
+      # <1.32.0 doesn't work because of associated items on type aliases
     - <<: *check # also test oldest known-good stable
-      rust: 1.31.1
+      rust: 1.32.0
     - stage: test
       rust: stable
       os: osx
