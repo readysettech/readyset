@@ -89,11 +89,16 @@ named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
             (public, name)
         )) >>
         expr: apply!(sql_parser::sql_query,) >>
+        opt!(complete!(multispace)) >>
         (match prefix {
             None => (false, None, expr),
             Some(p) => (p.0.is_some(), p.1.map(ToOwned::to_owned), expr)
         })
     )
+);
+
+named!(query_exprs<&[u8], (Vec<(bool, Option<String>, SqlQuery)>)>,
+    many1!(query_expr)
 );
 
 #[allow(unused)]
@@ -605,35 +610,35 @@ impl Recipe {
             i += 1;
         }
 
-        let parsed_queries = query_strings
-            .iter()
-            .map(|q| (q, query_expr(q.as_bytes())))
-            .collect::<Vec<_>>();
-
-        if !parsed_queries
-            .iter()
-            .all(|pq| pq.1.is_done() && pq.1.remaining_input().as_ref().unwrap().is_empty())
-        {
-            // something went wrong for some query, let's check what it was!
-            for pq in parsed_queries {
-                // should have consumed all input
-                assert!(pq.1.remaining_input().as_ref().unwrap().is_empty());
-                // did we get a parse error?
-                match pq.1 {
+        let parsed_queries = query_strings.iter().fold(
+            Vec::new(),
+            |mut acc: Vec<Result<(bool, Option<String>, SqlQuery), String>>, q| {
+                match query_exprs(q.as_bytes()) {
                     nom::IResult::Error(e) => {
-                        return Err(format!("Query \"{}\", parse error: {}", pq.0, e));
+                        // we got a parse error
+                        acc.push(Err(format!("Query \"{}\", parse error: {}", q, e)));
                     }
-                    nom::IResult::Done(_, _) => (),
+                    nom::IResult::Done(remainder, parsed) => {
+                        // should have consumed all input
+                        assert!(
+                            remainder.is_empty(),
+                            format!(
+                                "failed to parse the complete recipe; left with: {}",
+                                str::from_utf8(remainder).unwrap()
+                            )
+                        );
+                        acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
+                    }
                     nom::IResult::Incomplete(_) => unreachable!(),
                 }
-            }
-            return Err("Failed to parse recipe!".to_string());
-        }
+                acc
+            },
+        );
 
         Ok(parsed_queries
             .into_iter()
-            .map(|(_, t)| {
-                let pr = t.unwrap().1;
+            .map(|pr| {
+                let pr = pr.unwrap();
                 (pr.1, pr.2, pr.0)
             })
             .collect::<Vec<_>>())
@@ -819,6 +824,27 @@ mod tests {
         let r2 = r1.extend(r2_txt).unwrap();
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 4);
+    }
+
+    #[test]
+    fn it_handles_multiple_statements_per_line() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "  QUERY q_0: SELECT a FROM b; QUERY q_1: SELECT x FROM y;";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.expressions.len(), 2);
+    }
+
+    #[test]
+    fn it_handles_spaces() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "  QUERY q_0: SELECT a FROM b;\
+                      QUERY q_1: SELECT x FROM y;";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.expressions.len(), 2);
     }
 
     #[test]
