@@ -504,7 +504,7 @@ impl ToMysqlValue for Duration {
         let h = s / 3600;
         let m = (s % 3600) / 60;
         let s = s % 60;
-        let us = self.subsec_nanos() / 1_000;
+        let us = self.subsec_micros();
         if us != 0 {
             w.write_lenenc_str(format!("{:02}:{:02}:{:02}.{:06}", h, m, s, us).as_bytes())
                 .map(|_| ())
@@ -513,6 +513,8 @@ impl ToMysqlValue for Duration {
                 .map(|_| ())
         }
     }
+
+    #[allow(clippy::many_single_char_names)]
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let s = self.as_secs();
         let d = s / (24 * 3600);
@@ -520,7 +522,7 @@ impl ToMysqlValue for Duration {
         let h = (s % (24 * 3600)) / 3600;
         let m = (s % 3600) / 60;
         let s = s % 60;
-        let us = self.subsec_nanos() / 1_000;
+        let us = self.subsec_micros();
 
         match c.coltype {
             ColumnType::MYSQL_TYPE_TIME => {
@@ -547,6 +549,7 @@ impl ToMysqlValue for Duration {
 }
 
 impl ToMysqlValue for myc::value::Value {
+    #[allow(clippy::many_single_char_names)]
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match *self {
             myc::value::Value::NULL => None::<u8>.to_mysql_text(w),
@@ -555,8 +558,8 @@ impl ToMysqlValue for myc::value::Value {
             myc::value::Value::UInt(n) => n.to_mysql_text(w),
             myc::value::Value::Float(f) => f.to_mysql_text(w),
             myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd(y as i32, mo as u32, d as u32)
-                    .and_hms_micro(h as u32, mi as u32, s as u32, us)
+                NaiveDate::from_ymd(i32::from(y), u32::from(mo), u32::from(d))
+                    .and_hms_micro(u32::from(h), u32::from(mi), u32::from(s), us)
                     .to_mysql_text(w)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
@@ -566,17 +569,19 @@ impl ToMysqlValue for myc::value::Value {
                         "negative times not yet supported",
                     ));
                 }
-                (chrono::Duration::days(d as i64)
-                    + chrono::Duration::hours(h as i64)
-                    + chrono::Duration::minutes(m as i64)
-                    + chrono::Duration::seconds(s as i64)
-                    + chrono::Duration::microseconds(us as i64))
+                (chrono::Duration::days(i64::from(d))
+                    + chrono::Duration::hours(i64::from(h))
+                    + chrono::Duration::minutes(i64::from(m))
+                    + chrono::Duration::seconds(i64::from(s))
+                    + chrono::Duration::microseconds(i64::from(us)))
                 .to_std()
                 .expect("only positive times at the moment")
                 .to_mysql_text(w)
             }
         }
     }
+
+    #[allow(clippy::many_single_char_names)]
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match *self {
             myc::value::Value::NULL => unreachable!(),
@@ -589,28 +594,26 @@ impl ToMysqlValue for myc::value::Value {
                 // smallest containing type, and then call on that
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
                 if signed {
-                    if n >= i8::min_value() as i64 && n <= i8::max_value() as i64 {
+                    if n >= i64::from(i8::min_value()) && n <= i64::from(i8::max_value()) {
                         (n as i8).to_mysql_bin(w, c)
-                    } else if n >= i16::min_value() as i64 && n <= i16::max_value() as i64 {
+                    } else if n >= i64::from(i16::min_value()) && n <= i64::from(i16::max_value()) {
                         (n as i16).to_mysql_bin(w, c)
-                    } else if n >= i32::min_value() as i64 && n <= i32::max_value() as i64 {
+                    } else if n >= i64::from(i32::min_value()) && n <= i64::from(i32::max_value()) {
                         (n as i32).to_mysql_bin(w, c)
                     } else {
                         n.to_mysql_bin(w, c)
                     }
                 } else if n < 0 {
                     Err(bad(self, c))
+                } else if n <= i64::from(u8::max_value()) {
+                    (n as u8).to_mysql_bin(w, c)
+                } else if n <= i64::from(u16::max_value()) {
+                    (n as u16).to_mysql_bin(w, c)
+                } else if n <= i64::from(u32::max_value()) {
+                    (n as u32).to_mysql_bin(w, c)
                 } else {
-                    if n <= u8::max_value() as i64 {
-                        (n as u8).to_mysql_bin(w, c)
-                    } else if n <= u16::max_value() as i64 {
-                        (n as u16).to_mysql_bin(w, c)
-                    } else if n <= u32::max_value() as i64 {
-                        (n as u32).to_mysql_bin(w, c)
-                    } else {
-                        // must work since u64::max_value() > i64::max_value(), and n >= 0
-                        (n as u64).to_mysql_bin(w, c)
-                    }
+                    // must work since u64::max_value() > i64::max_value(), and n >= 0
+                    (n as u64).to_mysql_bin(w, c)
                 }
             }
             myc::value::Value::UInt(n) => {
@@ -619,8 +622,8 @@ impl ToMysqlValue for myc::value::Value {
             }
             myc::value::Value::Float(f) => f.to_mysql_bin(w, c),
             myc::value::Value::Date(y, mo, d, h, mi, s, us) => {
-                NaiveDate::from_ymd(y as i32, mo as u32, d as u32)
-                    .and_hms_micro(h as u32, mi as u32, s as u32, us)
+                NaiveDate::from_ymd(i32::from(y), u32::from(mo), u32::from(d))
+                    .and_hms_micro(u32::from(h), u32::from(mi), u32::from(s), us)
                     .to_mysql_bin(w, c)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
@@ -630,11 +633,11 @@ impl ToMysqlValue for myc::value::Value {
                         "negative times not yet supported",
                     ));
                 }
-                (chrono::Duration::days(d as i64)
-                    + chrono::Duration::hours(h as i64)
-                    + chrono::Duration::minutes(m as i64)
-                    + chrono::Duration::seconds(s as i64)
-                    + chrono::Duration::microseconds(us as i64))
+                (chrono::Duration::days(i64::from(d))
+                    + chrono::Duration::hours(i64::from(h))
+                    + chrono::Duration::minutes(i64::from(m))
+                    + chrono::Duration::seconds(i64::from(s))
+                    + chrono::Duration::microseconds(i64::from(us)))
                 .to_std()
                 .expect("only positive times at the moment")
                 .to_mysql_bin(w, c)

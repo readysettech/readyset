@@ -110,8 +110,8 @@ pub struct QueryResultWriter<'a, W: Write + 'a> {
 impl<'a, W: Write> QueryResultWriter<'a, W> {
     pub(crate) fn new(writer: &'a mut PacketWriter<W>, is_bin: bool) -> Self {
         QueryResultWriter {
-            is_bin: is_bin,
-            writer: writer,
+            is_bin,
+            writer,
             last_end: None,
         }
     }
@@ -219,7 +219,7 @@ where
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
             result: Some(result),
-            columns: columns,
+            columns,
             bitmap_len,
             data: Vec::new(),
 

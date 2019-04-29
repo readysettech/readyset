@@ -2816,8 +2816,8 @@ impl ErrorKind {
     /// conditions within the class. `000` means 'no subclass'.
     ///
     /// See also https://mariadb.com/kb/en/library/sqlstate/
-    pub fn sqlstate(&self) -> &'static [u8; 5] {
-        match *self {
+    pub fn sqlstate(self) -> &'static [u8; 5] {
+        match self {
             ErrorKind::ER_BAD_HOST_ERROR
             | ErrorKind::ER_HANDSHAKE_ERROR
             | ErrorKind::ER_UNKNOWN_COM_ERROR
