@@ -308,10 +308,12 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     )?;
                 }
                 Command::Execute { stmt, params } => {
-                    let state = stmts.get_mut(&stmt).ok_or(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("asked to execute unknown statement {}", stmt),
-                    ))?;
+                    let state = stmts.get_mut(&stmt).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("asked to execute unknown statement {}", stmt),
+                        )
+                    })?;
                     {
                         let params = params::ParamParser::new(params, state);
                         let w = QueryResultWriter::new(&mut self.writer, true);
@@ -322,10 +324,12 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                 Command::SendLongData { stmt, param, data } => {
                     stmts
                         .get_mut(&stmt)
-                        .ok_or(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("got long data packet for unknown statement {}", stmt),
-                        ))?
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("got long data packet for unknown statement {}", stmt),
+                            )
+                        })?
                         .long_data
                         .entry(param)
                         .or_insert_with(Vec::new)
