@@ -610,8 +610,15 @@ impl Recipe {
             .map(|q| (q, query_expr(q.as_bytes())))
             .collect::<Vec<_>>();
 
-        if !parsed_queries.iter().all(|pq| pq.1.is_done()) {
+        if !parsed_queries
+            .iter()
+            .all(|pq| pq.1.is_done() && pq.1.remaining_input().as_ref().unwrap().is_empty())
+        {
+            // something went wrong for some query, let's check what it was!
             for pq in parsed_queries {
+                // should have consumed all input
+                assert!(pq.1.remaining_input().as_ref().unwrap().is_empty());
+                // did we get a parse error?
                 match pq.1 {
                     nom::IResult::Error(e) => {
                         return Err(format!("Query \"{}\", parse error: {}", pq.0, e));
