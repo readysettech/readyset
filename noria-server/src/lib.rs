@@ -398,6 +398,11 @@ pub use noria::consensus::LocalAuthority;
 pub use noria::*;
 pub use petgraph::graph::NodeIndex;
 
+#[doc(hidden)]
+pub mod manual {
+    pub use crate::controller::migrate::Migration;
+}
+
 use dataflow::DomainConfig;
 use std::time;
 

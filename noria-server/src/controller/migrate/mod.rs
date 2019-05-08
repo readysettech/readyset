@@ -46,7 +46,7 @@ pub(super) enum ColumnChange {
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
 /// graph until the `Migration` is committed (using `Migration::commit`).
 // crate viz for tests
-crate struct Migration<'a> {
+pub struct Migration<'a> {
     pub(super) mainline: &'a mut ControllerInner,
     pub(super) added: HashSet<NodeIndex>,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
@@ -66,7 +66,7 @@ impl<'a> Migration<'a> {
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
     // crate viz for tests
-    crate fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
+    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
     where
         S1: ToString,
         S2: ToString,
@@ -100,7 +100,7 @@ impl<'a> Migration<'a> {
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
     // crate viz for tests
-    crate fn add_base<S1, FS, S2>(
+    pub fn add_base<S1, FS, S2>(
         &mut self,
         name: S1,
         fields: FS,
@@ -179,7 +179,7 @@ impl<'a> Migration<'a> {
     /// Note that a default value must be provided such that old writes can be converted into this
     /// new type.
     // crate viz for tests
-    crate fn add_column<S: ToString>(
+    pub fn add_column<S: ToString>(
         &mut self,
         node: NodeIndex,
         field: S,
@@ -209,7 +209,7 @@ impl<'a> Migration<'a> {
 
     /// Drop a column from a base node.
     // crate viz for tests
-    crate fn drop_column(&mut self, node: NodeIndex, column: usize) {
+    pub fn drop_column(&mut self, node: NodeIndex, column: usize) {
         // not allowed to drop columns from new nodes
         assert!(!self.added.contains(&node));
 
@@ -253,8 +253,7 @@ impl<'a> Migration<'a> {
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
-    #[cfg(test)]
-    crate fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
         self.ensure_reader_for(n, None);
         let ri = self.readers[&n];
 
@@ -268,7 +267,7 @@ impl<'a> Migration<'a> {
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
-    pub(super) fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize]) {
         self.ensure_reader_for(n, Some(name));
 
         let ri = self.readers[&n];

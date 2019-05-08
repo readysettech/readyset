@@ -73,8 +73,8 @@ impl<A: Authority + 'static> Handle<A> {
         })
     }
 
-    #[cfg(test)]
-    fn migrate<F, T>(&mut self, f: F) -> T
+    #[doc(hidden)]
+    pub fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
