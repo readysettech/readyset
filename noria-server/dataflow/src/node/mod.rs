@@ -13,7 +13,7 @@ pub mod special;
 pub use self::special::StreamUpdate;
 
 mod ntype;
-crate use self::ntype::NodeType; // crate viz for tests
+pub use self::ntype::NodeType; // crate viz for tests
 
 mod debug;
 

@@ -1,4 +1,3 @@
-#[cfg(test)]
 use crate::controller::migrate::Migration;
 use crate::startup::Event;
 use dataflow::prelude::*;
@@ -73,8 +72,8 @@ impl<A: Authority + 'static> Handle<A> {
         })
     }
 
-    #[cfg(test)]
-    crate fn migrate<F, T>(&mut self, f: F) -> T
+    #[doc(hidden)]
+    pub fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
@@ -214,8 +213,8 @@ impl<A: Authority> SyncHandle<A> {
         self.sh.as_mut().unwrap().run(fut)
     }
 
-    #[cfg(test)]
-    crate fn migrate<F, T>(&mut self, f: F) -> T
+    #[doc(hidden)]
+    pub fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,

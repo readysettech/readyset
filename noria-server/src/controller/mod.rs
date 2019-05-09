@@ -132,7 +132,6 @@ pub(super) fn main<A: Authority + 'static>(
                         warn!(log, "client hung up for 404");
                     }
                 }
-                #[cfg(test)]
                 Event::ManualMigration { f, done } => {
                     if let Some(ref mut ctrl) = controller {
                         if !ctrl.workers.is_empty() {
