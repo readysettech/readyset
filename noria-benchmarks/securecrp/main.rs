@@ -173,7 +173,7 @@ fn main() {
     }
 
     thread::sleep(time::Duration::from_millis(2000));
-    backend.login(make_user(user)).is_ok();
+    let _ = backend.login(make_user(user)).is_ok();
 
     if args.is_present("populate") {
         test_populate::create_papers(&mut backend);

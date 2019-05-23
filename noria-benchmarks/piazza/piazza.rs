@@ -300,7 +300,7 @@ fn main() {
     println!("Login in users...");
     for i in 0..nlogged {
         let start = time::Instant::now();
-        backend.login(make_user(i)).is_ok();
+        let _ = backend.login(make_user(i)).is_ok();
         let dur = start.elapsed().as_secs_f64();
         println!("Migration {} took {:.2}s!", i, dur,);
 
