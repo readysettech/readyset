@@ -8,7 +8,6 @@ use noria::consensus::Authority;
 use noria::ControllerDescriptor;
 use rand;
 use slog;
-use std::boxed::FnBox;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -38,7 +37,7 @@ crate enum Event {
     #[cfg(test)]
     IsReady(futures::sync::oneshot::Sender<bool>),
     ManualMigration {
-        f: Box<FnBox(&mut crate::controller::migrate::Migration) + Send + 'static>,
+        f: Box<FnOnce(&mut crate::controller::migrate::Migration) + Send + 'static>,
         done: futures::sync::oneshot::Sender<()>,
     },
 }

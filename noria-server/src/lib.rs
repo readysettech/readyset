@@ -354,7 +354,6 @@
 #![feature(box_syntax)]
 #![feature(nll)]
 #![feature(try_blocks)]
-#![feature(fnbox)]
 #![feature(vec_remove_item)]
 #![feature(crate_visibility_modifier)]
 #![deny(missing_docs)]
