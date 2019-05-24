@@ -250,7 +250,8 @@ impl Future for BlockingRead {
                                 key.clear();
                             }
                             Err(()) => {
-                                unreachable!("map became not ready?");
+                                // map has been deleted, so server is shutting down
+                                return Err(());
                             }
                             Ok(None) => {
                                 if now > self.next_trigger {
