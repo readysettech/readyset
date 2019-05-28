@@ -15,9 +15,10 @@ fn main() {
                                      url text, PRIMARY KEY(aid));
                CREATE TABLE Vote (aid int, uid int);
 
-               # read queries
+               # internal view, for shorthand below
                VoteCount: SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
+               # queryable materialized view
                QUERY ArticleWithVoteCount: \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \

@@ -7,9 +7,12 @@ fn main() {
     // inline recipe definition
     let sql1 = "Article: CREATE TABLE Article (aid int, title varchar(255), \
                 url text, PRIMARY KEY(aid));";
+    // two internal views: you cannot query these directly from clients, but you can write
+    // other view definitions that use them.
     let sql2 = "Vote: CREATE TABLE Vote (aid int, uid int);";
     let sql3 = "VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                 FROM Vote GROUP BY Vote.aid;";
+    // externally queryable materialized view
     let sql4 = "QUERY ArticleWithVoteCount: \
                 SELECT Article.aid, title, url, VoteCount.votes AS votes \
                 FROM Article, VoteCount \
