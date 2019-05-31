@@ -39,7 +39,7 @@ tower-service = "0.2"
 tower-balance = "0.1"
 tower-discover = "0.1"
 tower-buffer = "0.1"
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
+tokio-tower = "0.1"
 tower-util = "0.1"
 tower = "0.1"
 slab = "0.4"
