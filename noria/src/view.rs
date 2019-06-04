@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
 use tower::ServiceExt;
-use tower_balance::{choose, pool, Pool};
+use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
 
@@ -54,12 +54,7 @@ impl Service<()> for ViewEndpoint {
 }
 
 pub(crate) type ViewRpc = Buffer<
-    Pool<
-        choose::RoundRobin,
-        multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>,
-        (),
-        Tagged<ReadQuery>,
-    >,
+    Pool<multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>, (), Tagged<ReadQuery>>,
     Tagged<ReadQuery>,
 >;
 
@@ -173,11 +168,7 @@ impl ViewBuilder {
                             .loaded_above(0.2)
                             .underutilized_below(0.00001)
                             .max_services(Some(32))
-                            .build(
-                                multiplex::client::Maker::new(ViewEndpoint(addr)),
-                                (),
-                                choose::RoundRobin::default(),
-                            ),
+                            .build(multiplex::client::Maker::new(ViewEndpoint(addr)), ()),
                         1,
                     );
                     h.insert(c.clone());

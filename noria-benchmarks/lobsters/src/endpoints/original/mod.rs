@@ -15,7 +15,7 @@ use my::prelude::*;
 pub(crate) fn notifications(
     c: my::Conn,
     uid: u32,
-) -> impl Future<Item = my::Conn, Error = my::errors::Error> {
+) -> impl Future<Item = my::Conn, Error = my::error::Error> {
     c.drop_exec(
         "SELECT COUNT(*) \
                      FROM `replying_comments_for_count`

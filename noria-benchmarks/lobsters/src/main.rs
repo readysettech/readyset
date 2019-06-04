@@ -6,11 +6,9 @@ extern crate mysql_async as my;
 
 use clap::{App, Arg};
 use futures::future::Either;
-use futures::Future;
+use futures::{Future, IntoFuture, Stream};
 use my::prelude::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::time;
 use trawler::{LobstersRequest, UserId};
 
@@ -25,37 +23,36 @@ enum Variant {
     Natural,
 }
 
-struct MysqlSpawner {
-    opts: my::OptsBuilder,
-    variant: Variant,
-    simulate_shards: Option<u32>,
+#[derive(Clone, Debug)]
+enum MaybeConn {
+    Connected(my::Pool),
+    None(my::OptsBuilder),
 }
-impl MysqlSpawner {
-    fn new(opts: my::OptsBuilder, v: Variant, simulate_shards: Option<u32>) -> Self {
-        MysqlSpawner {
-            opts,
-            variant: v,
-            simulate_shards,
+
+impl MaybeConn {
+    fn pool(&mut self) -> &mut my::Pool {
+        match *self {
+            MaybeConn::Connected(ref mut pool) => pool,
+            MaybeConn::None(ref opts) => {
+                let c = my::Pool::new(opts.clone());
+                let _ = std::mem::replace(self, MaybeConn::Connected(c));
+                self.pool()
+            }
         }
     }
 }
 
 struct MysqlTrawler {
-    c: my::Pool,
+    c: MaybeConn,
     variant: Variant,
-    tokens: RefCell<HashMap<u32, String>>,
+    tokens: HashMap<u32, String>,
     simulate_shards: Option<u32>,
 }
 impl MysqlTrawler {
-    fn new(
-        handle: &tokio_core::reactor::Handle,
-        variant: Variant,
-        opts: my::Opts,
-        simulate_shards: Option<u32>,
-    ) -> Self {
+    fn new(variant: Variant, opts: my::OptsBuilder, simulate_shards: Option<u32>) -> Self {
         MysqlTrawler {
-            c: my::Pool::new(opts, handle),
-            tokens: HashMap::new().into(),
+            c: MaybeConn::None(opts),
+            tokens: HashMap::new(),
             simulate_shards,
             variant,
         }
@@ -72,67 +69,75 @@ impl Drop for MysqlTrawler {
 mod endpoints;
 
 impl trawler::LobstersClient for MysqlTrawler {
-    type Factory = MysqlSpawner;
+    type Error = my::error::Error;
+    type RequestFuture = Box<futures::Future<Item = (), Error = Self::Error> + Send>;
+    type SetupFuture = Box<futures::Future<Item = (), Error = Self::Error> + Send>;
 
-    fn spawn(spawner: &mut Self::Factory, handle: &tokio_core::reactor::Handle) -> Self {
-        MysqlTrawler::new(
-            handle,
-            spawner.variant,
-            spawner.opts.clone().into(),
-            spawner.simulate_shards,
-        )
-    }
-
-    fn setup(spawner: &mut Self::Factory) {
-        let mut core = tokio_core::reactor::Core::new().unwrap();
-        let mut opts = spawner.opts.clone();
-        opts.pool_min(None::<usize>);
-        opts.pool_max(None::<usize>);
-        let db: String = my::Opts::from(opts.clone()).get_db_name().unwrap().clone();
-        let c = my::Pool::new(opts, &core.handle());
-        core.run(
-            c.get_conn()
-                .and_then(|c| c.drop_query(&format!("DROP DATABASE {}", db)))
-                .and_then(|c| c.drop_query(&format!("CREATE DATABASE {}", db)))
-                .and_then(|c| c.drop_query(&format!("USE {}", db))),
-        )
-        .unwrap();
-        let mut current_q = String::new();
-        let schema = match spawner.variant {
-            Variant::Original => ORIGINAL_SCHEMA,
-            Variant::Noria => NORIA_SCHEMA,
-            Variant::Natural => NATURAL_SCHEMA,
+    fn setup(&mut self) -> Self::SetupFuture {
+        let mut opts = if let MaybeConn::None(ref opts) = self.c {
+            opts.clone()
+        } else {
+            unreachable!("connection established before setup");
         };
-        for q in schema.lines() {
-            if q.starts_with("--") || q.is_empty() {
-                continue;
-            }
-            if !current_q.is_empty() {
-                current_q.push_str(" ");
-            }
-            current_q.push_str(q);
-            if current_q.ends_with(';') {
-                core.run(c.get_conn().and_then(|c| c.drop_query(&current_q)))
-                    .unwrap();
-                current_q.clear();
-            }
-        }
+        opts.pool_constraints(my::PoolConstraints::new(1, 1));
+        let variant = self.variant;
+        let db: String = my::Opts::from(opts.clone())
+            .get_db_name()
+            .unwrap()
+            .to_string();
+        let c = my::Pool::new(opts);
+        let db_drop = format!("DROP DATABASE {}", db);
+        let db_create = format!("CREATE DATABASE {}", db);
+        let db_use = format!("USE {}", db);
+        Box::new(
+            c.get_conn()
+                .and_then(move |c| c.drop_query(&db_drop))
+                .and_then(move |c| c.drop_query(&db_create))
+                .and_then(move |c| c.drop_query(&db_use))
+                .then(move |r| {
+                    let c = r.unwrap();
+                    let schema = match variant {
+                        Variant::Original => ORIGINAL_SCHEMA,
+                        Variant::Noria => NORIA_SCHEMA,
+                        Variant::Natural => NATURAL_SCHEMA,
+                    };
+                    futures::stream::iter_ok(schema.lines())
+                        .fold((c, String::new()), move |(c, mut current_q), line| {
+                            if line.starts_with("--") || line.is_empty() {
+                                return Either::A(Ok((c, current_q)).into_future());
+                            }
+                            if !current_q.is_empty() {
+                                current_q.push_str(" ");
+                            }
+                            current_q.push_str(line);
+                            if current_q.ends_with(';') {
+                                Either::B(c.drop_query(&current_q).then(
+                                    move |r| -> Result<_, my::error::Error> {
+                                        let c = r.unwrap();
+                                        current_q.clear();
+                                        Ok((c, current_q))
+                                    },
+                                ))
+                            } else {
+                                Either::A(Ok((c, current_q)).into_future())
+                            }
+                        })
+                        .map(|_| ())
+                }),
+        )
     }
 
     fn handle(
-        this: Rc<Self>,
+        &mut self,
         acting_as: Option<UserId>,
         req: trawler::LobstersRequest,
-    ) -> Box<futures::Future<Item = time::Duration, Error = ()>> {
-        let sent = time::Instant::now();
-
-        let c = this.c.get_conn();
+    ) -> Self::RequestFuture {
+        let c = self.c.pool().get_conn();
 
         let c = if let Some(u) = acting_as {
-            let this = this.clone();
+            let tokens = self.tokens.get(&u).cloned();
             Either::A(c.and_then(move |c| {
-                let tokens = this.tokens.borrow();
-                if let Some(u) = tokens.get(&u) {
+                if let Some(u) = tokens {
                     Either::A(c.drop_exec(
                         "SELECT users.* \
                          FROM users WHERE users.session_token = ?",
@@ -225,7 +230,7 @@ impl trawler::LobstersClient for MysqlTrawler {
                     }
                     LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
                     LobstersRequest::Story(id) => {
-                        endpoints::$module::story::handle(c, acting_as, this.simulate_shards, id)
+                        endpoints::$module::story::handle(c, acting_as, self.simulate_shards, id)
                     }
                     LobstersRequest::StoryVote(story, v) => {
                         endpoints::$module::story_vote::handle(c, acting_as, story, v)
@@ -243,7 +248,7 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
         };
 
-        let c = match this.variant {
+        let c = match self.variant {
             Variant::Original => handle_req!(original, req),
             Variant::Noria => handle_req!(noria, req),
             Variant::Natural => handle_req!(natural, req),
@@ -251,14 +256,15 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         // notifications
         let c = if let Some(uid) = acting_as {
+            let variant = self.variant;
             Either::A(c.and_then(move |(c, with_notifications)| {
                 if !with_notifications {
                     return Either::A(futures::future::ok(c));
                 }
 
-                Either::B(match this.variant {
+                Either::B(match variant {
                     Variant::Original => Box::new(endpoints::original::notifications(c, uid))
-                        as Box<Future<Item = my::Conn, Error = my::errors::Error>>,
+                        as Box<Future<Item = my::Conn, Error = my::error::Error> + Send>,
                     Variant::Noria => Box::new(endpoints::noria::notifications(c, uid)),
                     Variant::Natural => Box::new(endpoints::natural::notifications(c, uid)),
                 })
@@ -267,12 +273,7 @@ impl trawler::LobstersClient for MysqlTrawler {
             Either::B(c.map(|(c, _)| c))
         };
 
-        Box::new(
-            c.map_err(|e| {
-                eprintln!("{:?}", e);
-            })
-            .map(move |_| sent.elapsed()),
-        )
+        Box::new(c.map(move |_| ()))
     }
 }
 
@@ -391,17 +392,8 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_min(Some(50usize));
-    opts.pool_max(Some(50usize));
-    let mut s = MysqlSpawner::new(opts, variant, simulate_shards);
+    opts.pool_constraints(my::PoolConstraints::new(50, 50));
+    let s = MysqlTrawler::new(variant, opts.into(), simulate_shards);
 
-    if !args.is_present("prime") {
-        let mut core = tokio_core::reactor::Core::new().unwrap();
-        use trawler::LobstersClient;
-        let c = Rc::new(MysqlTrawler::spawn(&mut s, &core.handle()));
-        core.run(MysqlTrawler::handle(c, None, LobstersRequest::Frontpage))
-            .unwrap();
-    }
-
-    wl.run::<MysqlTrawler, _>(s, args.is_present("prime"));
+    wl.run(s, args.is_present("prime"));
 }

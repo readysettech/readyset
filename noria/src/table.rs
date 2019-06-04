@@ -15,7 +15,7 @@ use std::{fmt, io};
 use tokio::prelude::*;
 use tokio_tower::multiplex;
 use tower::ServiceExt;
-use tower_balance::{choose, pool, Pool};
+use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
 use vec_map::VecMap;
@@ -64,7 +64,6 @@ impl Service<()> for TableEndpoint {
 
 pub(crate) type TableRpc = Buffer<
     Pool<
-        choose::RoundRobin,
         multiplex::client::Maker<TableEndpoint, Tagged<LocalOrNot<Input>>>,
         (),
         Tagged<LocalOrNot<Input>>,
@@ -181,11 +180,7 @@ impl TableBuilder {
                                     .loaded_above(0.2)
                                     .underutilized_below(0.00001)
                                     .max_services(Some(32))
-                                    .build(
-                                        multiplex::client::Maker::new(TableEndpoint(addr)),
-                                        (),
-                                        choose::RoundRobin::default(),
-                                    ),
+                                    .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
                                 1,
                             );
                             h.insert(c.clone());

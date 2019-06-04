@@ -10,8 +10,8 @@ default = []
 
 [dependencies]
 trawler = "0.5.10"
-mysql_async = "0.14"
-tokio-core = "0.1"
+mysql_async = "0.19"
+tokio = "0.1"
 clap = "2.31"
 futures = "0.1"
 chrono = "0.4"

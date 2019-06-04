@@ -8,9 +8,9 @@ pub(crate) fn handle<F>(
     c: F,
     _acting_as: Option<UserId>,
     uid: UserId,
-) -> Box<Future<Item = (my::Conn, bool), Error = my::errors::Error>>
+) -> Box<Future<Item = (my::Conn, bool), Error = my::error::Error> + Send>
 where
-    F: 'static + Future<Item = my::Conn, Error = my::errors::Error>,
+    F: 'static + Future<Item = my::Conn, Error = my::error::Error> + Send,
 {
     Box::new(
         c.and_then(move |c| {

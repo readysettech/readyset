@@ -11,9 +11,9 @@ pub(crate) fn handle<F>(
     id: CommentId,
     story: StoryId,
     parent: Option<CommentId>,
-) -> Box<Future<Item = (my::Conn, bool), Error = my::errors::Error>>
+) -> Box<Future<Item = (my::Conn, bool), Error = my::error::Error> + Send>
 where
-    F: 'static + Future<Item = my::Conn, Error = my::errors::Error>,
+    F: 'static + Future<Item = my::Conn, Error = my::error::Error> + Send,
 {
     let user = acting_as.unwrap();
     Box::new(
