@@ -16,9 +16,9 @@ extern crate nom_sql;
 extern crate lazy_static;
 #[macro_use]
 extern crate slog;
-extern crate slog_term;
-
 extern crate regex;
+extern crate slog_term;
+extern crate tokio;
 
 mod backend;
 mod convert;
@@ -29,12 +29,14 @@ mod utils;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
+use noria::{SyncControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
 use std::io::{self, BufReader, BufWriter};
 use std::net;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use tokio::prelude::*;
 
 use backend::NoriaBackend;
 
@@ -114,24 +116,30 @@ fn main() {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
+    let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
+    zk_auth.log_with(log.clone());
+
+    debug!(log, "Connecting to Noria...",);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
+    debug!(log, "Connected!");
+
     let mut threads = Vec::new();
     let mut i = 0;
     while let Ok((s, _)) = listener.accept() {
         s.set_nodelay(true).unwrap();
 
-        let builder = thread::Builder::new().name(format!("handler{}", i));
+        let builder = thread::Builder::new().name(format!("conn-{}", i));
 
         let (auto_increments, query_cache, log) =
             (auto_increments.clone(), query_cache.clone(), log.clone());
 
-        let zk_addr = zk_addr.clone();
-        let deployment = deployment.clone();
+        let ch = ch.clone();
 
         let jh = builder
             .spawn(move || {
                 let b = NoriaBackend::new(
-                    &zk_addr,
-                    &deployment,
+                    ch,
                     auto_increments,
                     query_cache,
                     slowlog,
@@ -160,4 +168,6 @@ fn main() {
             .map_err(|e| e.downcast::<io::Error>().unwrap())
             .unwrap();
     }
+
+    rt.shutdown_on_idle().wait().unwrap();
 }
