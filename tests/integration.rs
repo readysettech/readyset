@@ -1,13 +1,5 @@
-extern crate msql_srv;
-extern crate mysql;
-extern crate nom_sql;
-extern crate noria_server;
 #[macro_use]
 extern crate slog;
-extern crate tokio;
-extern crate zookeeper;
-
-extern crate noria_mysql;
 
 use std::collections::HashMap;
 use std::env;

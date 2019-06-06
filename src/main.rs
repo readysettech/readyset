@@ -2,23 +2,14 @@
 #![feature(nll)]
 #![feature(allow_fail)]
 
-extern crate arccstr;
-extern crate chrono;
 #[macro_use]
 extern crate clap;
-extern crate noria;
 #[macro_use]
 extern crate failure;
-extern crate msql_srv;
-extern crate nom_sql;
-
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate slog;
-extern crate regex;
-extern crate slog_term;
-extern crate tokio;
 
 mod backend;
 mod convert;
@@ -38,7 +29,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use tokio::prelude::*;
 
-use backend::NoriaBackend;
+use crate::backend::NoriaBackend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.

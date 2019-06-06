@@ -17,11 +17,11 @@ use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 use std::time;
 
-use convert::ToDataType;
-use referred_tables::ReferredTables;
-use rewrite;
-use schema::{self, schema_for_column, Schema};
-use utils;
+use crate::convert::ToDataType;
+use crate::referred_tables::ReferredTables;
+use crate::rewrite;
+use crate::schema::{self, schema_for_column, Schema};
+use crate::utils;
 
 #[derive(Clone)]
 enum PreparedStatement {
