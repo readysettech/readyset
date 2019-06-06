@@ -2,6 +2,7 @@
 name = "noria-mysql"
 version = "0.1.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
+edition = "2018"
 
 [dependencies]
 arccstr = "1.1.0"

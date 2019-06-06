@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use convert::ToDataType;
+use crate::convert::ToDataType;
 use msql_srv::ParamParser;
 use nom_sql::{
     ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
