@@ -19,7 +19,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria_server::{Builder, ZookeeperAuthority};
+use noria_server::{Builder, SyncControllerHandle, ZookeeperAuthority};
+use tokio::prelude::*;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use noria_mysql::NoriaBackend;
@@ -107,24 +108,22 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let deployment_id = deployment.name.clone();
+    let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment.name)).unwrap();
+    zk_auth.log_with(logger.clone());
+
+    debug!(logger, "Connecting to Noria...",);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
+    debug!(logger, "Connected!");
 
     // no need for a barrier here since accept() acts as one
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let b = NoriaBackend::new(
-            zk_addr,
-            &deployment_id,
-            auto_increments,
-            query_cache,
-            false,
-            true,
-            true,
-            logger,
-        );
+        let b = NoriaBackend::new(ch, auto_increments, query_cache, false, true, true, logger);
 
         MysqlIntermediary::run_on_tcp(b, s).unwrap();
+        rt.shutdown_on_idle().wait().unwrap();
     });
 
     let mut builder = mysql::OptsBuilder::default();

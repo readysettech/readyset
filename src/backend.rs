@@ -1,4 +1,6 @@
-use noria::{SyncControllerHandle, DataType, SyncTable, SyncView, TableOperation, ZookeeperAuthority};
+use noria::{
+    DataType, SyncControllerHandle, SyncTable, SyncView, TableOperation, ZookeeperAuthority,
+};
 
 use failure;
 use msql_srv::{self, *};
@@ -46,22 +48,13 @@ impl fmt::Debug for PreparedStatement {
 
 struct NoriaBackendInner {
     noria: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
-    _rt: tokio::runtime::Runtime,
     inputs: BTreeMap<String, SyncTable>,
     outputs: BTreeMap<String, SyncView>,
 }
 
 impl NoriaBackendInner {
-    fn new(zk_addr: &str, deployment: &str, log: &slog::Logger) -> Self {
-        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
-        zk_auth.log_with(log.clone());
-
-        debug!(log, "Connecting to Noria...",);
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let executor = rt.executor();
-        let mut ch = SyncControllerHandle::new(zk_auth, executor).unwrap();
-
-        let b = NoriaBackendInner {
+    fn new(mut ch: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>) -> Self {
+        NoriaBackendInner {
             inputs: ch
                 .inputs()
                 .expect("couldn't get inputs from Noria")
@@ -75,12 +68,7 @@ impl NoriaBackendInner {
                 .map(|(n, _)| (n.clone(), ch.view(&n).unwrap().into_sync()))
                 .collect::<BTreeMap<String, SyncView>>(),
             noria: ch,
-            _rt: rt,
-        };
-
-        debug!(log, "Connected!");
-
-        b
+        }
     }
 
     fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut SyncTable {
@@ -141,8 +129,7 @@ pub struct NoriaBackend {
 
 impl NoriaBackend {
     pub fn new(
-        zk_addr: &str,
-        deployment: &str,
+        ch: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         slowlog: bool,
@@ -151,7 +138,7 @@ impl NoriaBackend {
         log: slog::Logger,
     ) -> Self {
         NoriaBackend {
-            inner: NoriaBackendInner::new(zk_addr, deployment, &log),
+            inner: NoriaBackendInner::new(ch),
             log: log,
 
             auto_increments: auto_increments,
@@ -741,7 +728,10 @@ impl NoriaBackend {
             putter.insert_or_update(buf[0].clone(), updates)
         } else {
             trace!(self.log, "inserting {:?}", buf);
-            let buf: Vec<_> = buf.into_iter().map(|r| TableOperation::Insert(r.into())).collect();
+            let buf: Vec<_> = buf
+                .into_iter()
+                .map(|r| TableOperation::Insert(r.into()))
+                .collect();
             putter.perform_all(buf)
         };
 
