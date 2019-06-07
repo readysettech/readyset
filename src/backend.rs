@@ -46,14 +46,14 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
-struct NoriaBackendInner {
-    noria: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
+struct NoriaBackendInner<E> {
+    noria: SyncControllerHandle<ZookeeperAuthority, E>,
     inputs: BTreeMap<String, SyncTable>,
     outputs: BTreeMap<String, SyncView>,
 }
 
-impl NoriaBackendInner {
-    fn new(mut ch: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>) -> Self {
+impl<E> NoriaBackendInner<E> where E: tokio::executor::Executor {
+    fn new(mut ch: SyncControllerHandle<ZookeeperAuthority, E>) -> Self {
         NoriaBackendInner {
             inputs: ch
                 .inputs()
@@ -106,8 +106,8 @@ impl NoriaBackendInner {
     }
 }
 
-pub struct NoriaBackend {
-    inner: NoriaBackendInner,
+pub struct NoriaBackend<E> {
+    inner: NoriaBackendInner<E>,
     log: slog::Logger,
 
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
@@ -127,9 +127,9 @@ pub struct NoriaBackend {
     static_responses: bool,
 }
 
-impl NoriaBackend {
+impl<E> NoriaBackend<E> where E: tokio::executor::Executor {
     pub fn new(
-        ch: SyncControllerHandle<ZookeeperAuthority, tokio::runtime::TaskExecutor>,
+        ch: SyncControllerHandle<ZookeeperAuthority, E>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         slowlog: bool,
@@ -858,7 +858,7 @@ impl NoriaBackend {
     }
 }
 
-impl<W: io::Write> MysqlShim<W> for NoriaBackend {
+impl<W: io::Write, E> MysqlShim<W> for NoriaBackend<E> where E: tokio::executor::Executor {
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
 
