@@ -86,30 +86,27 @@ impl Builder {
             _ => unreachable!(),
         }
 
-        let graph = g
-            .start_local()
-            .map(move |wh| SyncHandle::from_executor(ex, wh));
-
         let logging = self.logging;
         let stupid = self.stupid;
-        graph
-            .and_then(move |mut graph| graph.handle().install_recipe(RECIPE).map(move |_| graph))
-            .and_then(|mut graph| graph.handle().inputs().map(move |x| (graph, x)))
-            .and_then(|(mut graph, inputs)| {
-                graph.handle().outputs().map(move |x| (graph, inputs, x))
-            })
+        g.start_local()
+            .and_then(|wh| wh.ready())
+            .and_then(|mut wh| wh.install_recipe(RECIPE).map(move |_| wh))
+            .and_then(|wh| wh.ready())
+            .and_then(|mut wh| wh.inputs().map(move |x| (wh, x)))
+            .and_then(|(wh, x)| wh.ready().map(move |wh| (wh, x)))
+            .and_then(|(mut wh, inputs)| wh.outputs().map(move |x| (wh, inputs, x)))
             .inspect(move |(_, inputs, outputs)| {
                 if logging {
                     println!("inputs {:?}", inputs);
                     println!("outputs {:?}", outputs);
                 }
             })
-            .map(move |(graph, inputs, outputs)| Graph {
+            .map(move |(wh, inputs, outputs)| Graph {
                 vote: inputs["Vote"],
                 article: inputs["Article"],
                 end: outputs["ArticleWithVoteCount"],
                 stupid,
-                graph,
+                graph: SyncHandle::from_executor(ex, wh),
             })
     }
 }

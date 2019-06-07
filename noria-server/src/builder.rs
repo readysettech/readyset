@@ -146,7 +146,7 @@ impl Builder {
         self.start(Arc::new(LocalAuthority::new()))
             .and_then(|mut wh| {
                 #[cfg(test)]
-                return wh.ready();
+                return wh.backend_ready();
                 #[cfg(not(test))]
                 Ok(wh)
             })

@@ -218,6 +218,30 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         })
     }
 
+    /// Check that the `ControllerHandle` can accept another request.
+    ///
+    /// Note that this method _must_ return `Async::Ready` before any other methods that return
+    /// a `Future` on `ControllerHandle` can be called.
+    pub fn poll_ready(&mut self) -> Poll<(), failure::Error> {
+        match self.handle.poll_ready() {
+            Ok(Async::Ready(_)) => Ok(Async::Ready(())),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => Err(failure::Error::from_boxed_compat(e)),
+        }
+    }
+
+    /// A future that resolves when the controller can accept more messages.
+    ///
+    /// When this future resolves, you it is safe to call any methods that require `poll_ready` to
+    /// have returned `Async::Ready`.
+    pub fn ready(self) -> impl Future<Item = Self, Error = failure::Error> {
+        let mut rdy = Some(self);
+        future::poll_fn(move || -> Poll<_, failure::Error> {
+            try_ready!(rdy.as_mut().unwrap().poll_ready());
+            Ok(Async::Ready(rdy.take().unwrap()))
+        })
+    }
+
     /// Create a `ControllerHandle` that bootstraps a connection to Noria via the configuration
     /// stored in the given `authority`.
     ///
@@ -232,6 +256,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// Enumerate all known base tables.
     ///
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn inputs(
         &mut self,
     ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> + Send {
@@ -248,6 +274,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// Enumerate all known external views.
     ///
     /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn outputs(
         &mut self,
     ) -> impl Future<Item = BTreeMap<String, NodeIndex>, Error = failure::Error> + Send {
@@ -262,6 +290,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Obtain a `View` that allows you to query the given external view.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn view(&mut self, name: &str) -> impl Future<Item = View, Error = failure::Error> + Send {
         // This call attempts to detect if this function is being called in a loop. If this is
         // getting false positives, then it is safe to increase the allowed hit count, however, the
@@ -290,6 +320,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
 
     /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
     /// given base table.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn table(
         &mut self,
         name: &str,
@@ -347,6 +379,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn statistics(
         &mut self,
     ) -> impl Future<Item = stats::GraphStats, Error = failure::Error> + Send {
@@ -354,11 +388,15 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Flush all partial state, evicting all rows present.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn flush_partial(&mut self) -> impl Future<Item = (), Error = failure::Error> + Send {
         self.rpc("flush_partial", (), "failed to flush partial")
     }
 
     /// Extend the existing recipe with the given set of queries.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn extend_recipe(
         &mut self,
         recipe_addition: &str,
@@ -367,6 +405,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Replace the existing recipe with this one.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn install_recipe(
         &mut self,
         new_recipe: &str,
@@ -375,11 +415,15 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Fetch a graphviz description of the dataflow graph.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> + Send {
         self.rpc("graphviz", (), "failed to fetch graphviz output")
     }
 
     /// Fetch a simplified graphviz description of the dataflow graph.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn simple_graphviz(&mut self) -> impl Future<Item = String, Error = failure::Error> + Send {
         self.rpc(
             "simple_graphviz",
@@ -389,6 +433,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     }
 
     /// Remove the given external view from the graph.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn remove_node(
         &mut self,
         view: NodeIndex,
@@ -408,7 +454,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     {
         SyncControllerHandle {
             executor,
-            handle: self.clone(),
+            handle: Some(self.clone()),
         }
     }
 }
@@ -420,7 +466,7 @@ pub struct SyncControllerHandle<A, E>
 where
     A: 'static + Authority,
 {
-    handle: ControllerHandle<A>,
+    handle: Option<ControllerHandle<A>>,
     executor: E,
 }
 
@@ -471,8 +517,14 @@ where
                 fut.then(move |r| tx.send(r)).map_err(|_| unreachable!()),
             ))
             .expect("runtime went away");
-        let handle = rx.wait().expect("runtime went away")?;
+        let handle = Some(rx.wait().expect("runtime went away")?);
         Ok(SyncControllerHandle { executor, handle })
+    }
+
+    fn ready(&mut self) -> Result<(), failure::Error> {
+        let rdy = self.handle.take().unwrap();
+        self.handle = Some(rdy.ready().wait()?);
+        Ok(())
     }
 
     #[doc(hidden)]
@@ -495,15 +547,16 @@ where
     }
 
     /// Get a handle to the underlying asynchronous controller handle.
-    pub fn handle(&mut self) -> &mut ControllerHandle<A> {
-        &mut self.handle
+    pub fn handle(&mut self) -> Result<&mut ControllerHandle<A>, failure::Error> {
+        self.ready()?;
+        Ok(self.handle.as_mut().unwrap())
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     ///
     /// See [`ControllerHandle::statistics`].
     pub fn statistics(&mut self) -> Result<stats::GraphStats, failure::Error> {
-        let fut = self.handle.statistics();
+        let fut = self.handle()?.statistics();
         self.run(fut)
     }
 
@@ -511,7 +564,7 @@ where
     ///
     /// See [`ControllerHandle::inputs`].
     pub fn inputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
-        let fut = self.handle.inputs();
+        let fut = self.handle()?.inputs();
         self.run(fut)
     }
 
@@ -519,7 +572,7 @@ where
     ///
     /// See [`ControllerHandle::outputs`].
     pub fn outputs(&mut self) -> Result<BTreeMap<String, NodeIndex>, failure::Error> {
-        let fut = self.handle.outputs();
+        let fut = self.handle()?.outputs();
         self.run(fut)
     }
 
@@ -527,7 +580,7 @@ where
     ///
     /// See [`ControllerHandle::table`].
     pub fn table<S: AsRef<str>>(&mut self, table: S) -> Result<Table, failure::Error> {
-        let fut = self.handle.table(table.as_ref());
+        let fut = self.handle()?.table(table.as_ref());
         self.run(fut)
     }
 
@@ -535,7 +588,7 @@ where
     ///
     /// See [`ControllerHandle::view`].
     pub fn view<S: AsRef<str>>(&mut self, view: S) -> Result<View, failure::Error> {
-        let fut = self.handle.view(view.as_ref());
+        let fut = self.handle()?.view(view.as_ref());
         self.run(fut)
     }
 
@@ -546,7 +599,7 @@ where
         &mut self,
         r: S,
     ) -> Result<ActivationResult, failure::Error> {
-        let fut = self.handle.install_recipe(r.as_ref());
+        let fut = self.handle()?.install_recipe(r.as_ref());
         self.run(fut)
     }
 
@@ -557,7 +610,7 @@ where
         &mut self,
         r: S,
     ) -> Result<ActivationResult, failure::Error> {
-        let fut = self.handle.extend_recipe(r.as_ref());
+        let fut = self.handle()?.extend_recipe(r.as_ref());
         self.run(fut)
     }
 
@@ -565,7 +618,7 @@ where
     ///
     /// See [`ControllerHandle::graphviz`].
     pub fn graphviz(&mut self) -> Result<String, failure::Error> {
-        let fut = self.handle.graphviz();
+        let fut = self.handle()?.graphviz();
         self.run(fut)
     }
 
@@ -573,7 +626,7 @@ where
     ///
     /// See [`ControllerHandle::remove_node`].
     pub fn remove_node(&mut self, view: NodeIndex) -> Result<(), failure::Error> {
-        let fut = self.handle.remove_node(view);
+        let fut = self.handle()?.remove_node(view);
         self.run(fut)
     }
 }

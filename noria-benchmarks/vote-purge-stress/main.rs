@@ -94,10 +94,9 @@ fn main() {
         .block_on(
             builder
                 .start_local()
-                .map(move |wh| SyncHandle::from_executor(ex, wh))
-                .and_then(move |mut graph| {
-                    graph.handle().install_recipe(RECIPE).map(move |_| graph)
-                }),
+                .and_then(|wh| wh.ready())
+                .and_then(|mut wh| wh.install_recipe(RECIPE).map(move |_| wh))
+                .map(move |wh| SyncHandle::from_executor(ex, wh)),
         )
         .unwrap();
 
