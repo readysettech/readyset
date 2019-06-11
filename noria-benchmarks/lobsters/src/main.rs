@@ -296,6 +296,13 @@ fn main() {
                 .help("Reuest load scale factor for workload"),
         )
         .arg(
+            Arg::with_name("in-flight")
+                .long("in-flight")
+                .takes_value(true)
+                .default_value("50")
+                .help("Number of allowed concurrent requests"),
+        )
+        .arg(
             Arg::with_name("issuers")
                 .short("i")
                 .long("issuers")
@@ -372,6 +379,7 @@ fn main() {
         simulate_shards.is_none() || value_t_or_exit!(args, "memscale", f64) == 1.0,
         "cannot simulate sharding with memscale != 1 (b/c of NUM_STORIES)"
     );
+    let in_flight = value_t_or_exit!(args, "in-flight", usize);
 
     let mut wl = trawler::WorkloadBuilder::default();
     wl.scale(
@@ -383,7 +391,7 @@ fn main() {
         time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
         time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
     )
-    .in_flight(50);
+    .in_flight(in_flight);
 
     if let Some(h) = args.value_of("histogram") {
         wl.with_histogram(h);
@@ -392,7 +400,7 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_constraints(my::PoolConstraints::new(50, 50));
+    opts.pool_constraints(my::PoolConstraints::new(in_flight, in_flight));
     let s = MysqlTrawler::new(variant, opts.into(), simulate_shards);
 
     wl.run(s, args.is_present("prime"));
