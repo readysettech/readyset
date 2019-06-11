@@ -21,81 +21,86 @@ where
                 "SELECT  `tags`.* FROM `tags` \
                  WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test')",
             )
-        }).map(|(c, tag)| (c, tag.unwrap().get::<u32, _>("id")))
-            .and_then(move |(c, tag)| {
-                // check that story id isn't already assigned
-                c.drop_exec(
-                    "SELECT  1 AS one FROM `stories` \
-                     WHERE `stories`.`short_id` = ?",
-                    (::std::str::from_utf8(&id[..]).unwrap(),),
-                ).map(move |c| (c, tag))
-            })
-            .map(|c| {
-                // TODO: check for similar stories if there's a url
-                // SELECT  `stories`.*
-                // FROM `stories`
-                // WHERE `stories`.`url` IN (
-                //  'https://google.com/test',
-                //  'http://google.com/test',
-                //  'https://google.com/test/',
-                //  'http://google.com/test/',
-                //  ... etc
-                // )
-                // AND (is_expired = 0 OR is_moderated = 1)
-                c
-            })
-            .map(|c| {
-                // TODO
-                // real impl queries `tags` and `users` again here..?
-                c
-            })
-            .and_then(move |(c, tag)| {
-                // TODO: real impl checks *new* short_id and duplicate urls *again*
-                // TODO: sometimes submit url
+        })
+        .map(|(c, tag)| (c, tag.unwrap().get::<u32, _>("id")))
+        .and_then(move |(c, tag)| {
+            // check that story id isn't already assigned
+            c.drop_exec(
+                "SELECT  1 AS one FROM `stories` \
+                 WHERE `stories`.`short_id` = ?",
+                (::std::str::from_utf8(&id[..]).unwrap(),),
+            )
+            .map(move |c| (c, tag))
+        })
+        .map(|c| {
+            // TODO: check for similar stories if there's a url
+            // SELECT  `stories`.*
+            // FROM `stories`
+            // WHERE `stories`.`url` IN (
+            //  'https://google.com/test',
+            //  'http://google.com/test',
+            //  'https://google.com/test/',
+            //  'http://google.com/test/',
+            //  ... etc
+            // )
+            // AND (is_expired = 0 OR is_moderated = 1)
+            c
+        })
+        .map(|c| {
+            // TODO
+            // real impl queries `tags` and `users` again here..?
+            c
+        })
+        .and_then(move |(c, tag)| {
+            // TODO: real impl checks *new* short_id and duplicate urls *again*
+            // TODO: sometimes submit url
 
-                // NOTE: MySQL technically does everything inside this and_then in a transaction,
-                // but let's be nice to it
-                c.prep_exec(
-                    "INSERT INTO `stories` \
-                     (`created_at`, `user_id`, `title`, \
-                     `description`, `short_id`, `markeddown_description`) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        chrono::Local::now().naive_local(),
-                        user,
-                        title,
-                        "to infinity", // lorem ipsum?
-                        ::std::str::from_utf8(&id[..]).unwrap(),
-                        "<p>to infinity</p>\n",
-                    ),
-                ).and_then(|q| {
-                        let story = q.last_insert_id().unwrap();
-                        q.drop_result().map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        t.drop_exec(
-                            "INSERT INTO `taggings` (`story_id`, `tag_id`) \
-                             VALUES (?, ?)",
-                            (story, tag),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        t.drop_exec(
-                            "SELECT  `votes`.* FROM `votes` \
-                             WHERE `votes`.`user_id` = ? \
-                             AND `votes`.`story_id` = ? \
-                             AND `votes`.`comment_id` IS NULL",
-                            (user, story),
-                        ).map(move |t| (t, story))
-                    })
-                    .and_then(move |(t, story)| {
-                        t.drop_exec(
-                            "INSERT INTO `votes` (`user_id`, `story_id`, `vote`) \
-                             VALUES (?, ?, ?)",
-                            (user, story, 1),
-                        )
-                    })
+            // NOTE: MySQL technically does everything inside this and_then in a transaction,
+            // but let's be nice to it
+            c.prep_exec(
+                "INSERT INTO `stories` \
+                 (`created_at`, `user_id`, `title`, \
+                 `description`, `short_id`, `markeddown_description`) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    chrono::Local::now().naive_local(),
+                    user,
+                    title,
+                    "to infinity", // lorem ipsum?
+                    ::std::str::from_utf8(&id[..]).unwrap(),
+                    "<p>to infinity</p>\n",
+                ),
+            )
+            .and_then(|q| {
+                let story = q.last_insert_id().unwrap();
+                q.drop_result().map(move |t| (t, story))
             })
-            .map(|c| (c, false)),
+            .and_then(move |(t, story)| {
+                t.drop_exec(
+                    "INSERT INTO `taggings` (`story_id`, `tag_id`) \
+                     VALUES (?, ?)",
+                    (story, tag),
+                )
+                .map(move |t| (t, story))
+            })
+            .and_then(move |(t, story)| {
+                t.drop_exec(
+                    "SELECT  `votes`.* FROM `votes` \
+                     WHERE `votes`.`user_id` = ? \
+                     AND `votes`.`story_id` = ? \
+                     AND `votes`.`comment_id` IS NULL",
+                    (user, story),
+                )
+                .map(move |t| (t, story))
+            })
+            .and_then(move |(t, story)| {
+                t.drop_exec(
+                    "INSERT INTO `votes` (`user_id`, `story_id`, `vote`) \
+                     VALUES (?, ?, ?)",
+                    (user, story, 1),
+                )
+            })
+        })
+        .map(|c| (c, false)),
     )
 }
