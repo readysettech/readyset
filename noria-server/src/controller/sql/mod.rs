@@ -531,7 +531,11 @@ impl SqlIncorporator {
             universe.clone(),
         )?;
 
-        trace!(self.log, "Unoptimized MIR:\n{}", og_mir.to_graphviz().unwrap());
+        trace!(
+            self.log,
+            "Unoptimized MIR:\n{}",
+            og_mir.to_graphviz().unwrap()
+        );
 
         // run MIR-level optimizations
         let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
