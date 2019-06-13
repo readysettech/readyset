@@ -1,5 +1,5 @@
-use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, Compare, IResult};
 use nom::types::CompleteByteSlice;
+use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
