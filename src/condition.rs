@@ -241,7 +241,16 @@ named!(predicate<CompleteByteSlice, ConditionExpression>,
                       tag_no_case!("in") >>
                       multispace >>
                       sq: nested_selection >>
-                      (ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(sq))))
+                      ({
+                          let nested = ConditionExpression::Base(
+                              ConditionBase::NestedSelect(Box::new(sq))
+                          );
+                          if neg.is_some() {
+                              ConditionExpression::NegationOp(Box::new(nested))
+                          } else {
+                              nested
+                          }
+                      })
                   )
                 | do_parse!(
                       neg: opt!(preceded!(opt_multispace, tag_no_case!("not"))) >>
@@ -249,7 +258,14 @@ named!(predicate<CompleteByteSlice, ConditionExpression>,
                       tag_no_case!("in") >>
                       multispace >>
                       vl: delimited!(tag!("("), value_list, tag!(")")) >>
-                      (ConditionExpression::Base(ConditionBase::LiteralList(vl)))
+                      ({
+                          let list = ConditionExpression::Base(ConditionBase::LiteralList(vl));
+                          if neg.is_some() {
+                              ConditionExpression::NegationOp(Box::new(list))
+                          } else {
+                              list
+                          }
+                      })
                   )
             )
         ) >>
