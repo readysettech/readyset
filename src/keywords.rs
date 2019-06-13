@@ -65,6 +65,7 @@ named!(keyword_d_to_i<CompleteByteSlice, CompleteByteSlice>,
         | terminated!(tag_no_case!("FOREIGN"), keyword_follow_char)
         | terminated!(tag_no_case!("FROM"), keyword_follow_char)
         | terminated!(tag_no_case!("FULL"), keyword_follow_char)
+        | terminated!(tag_no_case!("FULLTEXT"), keyword_follow_char)
         | terminated!(tag_no_case!("GLOB"), keyword_follow_char)
         | terminated!(tag_no_case!("GROUP"), keyword_follow_char)
         | terminated!(tag_no_case!("HAVING"), keyword_follow_char)

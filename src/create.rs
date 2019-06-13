@@ -808,4 +808,63 @@ mod tests {
         let res = view_creation(CompleteByteSlice(qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
+
+    #[test]
+    fn lobsters_indexes() {
+        let qstring = "CREATE TABLE `comments` (
+            `id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `hat_id` int,
+            fulltext INDEX `index_comments_on_comment`  (`comment`),
+            INDEX `confidence_idx`  (`confidence`),
+            UNIQUE INDEX `short_id`  (`short_id`),
+            INDEX `story_id_short_id`  (`story_id`, `short_id`),
+            INDEX `thread_id`  (`thread_id`),
+            INDEX `index_comments_on_user_id`  (`user_id`))
+            ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("comments"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("comments.id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::new(Column::from("comments.hat_id"), SqlType::Int(32),),
+                ],
+                keys: Some(vec![
+                    TableKey::FulltextKey(
+                        Some("index_comments_on_comment".into()),
+                        vec![Column::from("comments.comment")]
+                    ),
+                    TableKey::Key(
+                        "confidence_idx".into(),
+                        vec![Column::from("comments.confidence")]
+                    ),
+                    TableKey::UniqueKey(
+                        Some("short_id".into()),
+                        vec![Column::from("comments.short_id")]
+                    ),
+                    TableKey::Key(
+                        "story_id_short_id".into(),
+                        vec![
+                            Column::from("comments.story_id"),
+                            Column::from("comments.short_id")
+                        ]
+                    ),
+                    TableKey::Key("thread_id".into(), vec![Column::from("comments.thread_id")]),
+                    TableKey::Key(
+                        "index_comments_on_user_id".into(),
+                        vec![Column::from("comments.user_id")]
+                    ),
+                ]),
+            }
+        );
+    }
 }
