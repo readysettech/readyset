@@ -279,13 +279,15 @@ impl Ingredient for Union {
                     }
                 }
 
-                if self.replay_key.is_none() || self.replay_pieces.is_empty() {
+                let replay_key = self.replay_key.as_ref().and_then(|rks| rks.get(&from));
+                if replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
                     return RawProcessingResult::Regular(
                         self.on_input(ex, from, rs, tracer, None, n, s),
                     );
                 }
 
+                let k = replay_key.unwrap();
                 // partial replays are flowing through us, and at least one piece is being waited
                 // for. we need to keep track of any records that succeed a replay piece (and thus
                 // aren't included in it) before the other pieces come in. note that it's perfectly
@@ -293,7 +295,6 @@ impl Ingredient for Union {
                 // in the downstream node. in fact, we *must* forward them, becuase there may be
                 // *other* nodes downstream that do *not* have holes for the key in question.
                 for r in &rs {
-                    let k = &self.replay_key.as_ref().unwrap()[&from];
                     // XXX: the clone + collect here is really sad
                     if let Some(ref mut pieces) = self
                         .replay_pieces
