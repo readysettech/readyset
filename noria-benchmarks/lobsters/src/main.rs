@@ -386,6 +386,7 @@ fn main() {
         value_t_or_exit!(args, "memscale", f64),
         value_t_or_exit!(args, "reqscale", f64),
     )
+    .warmup_scale(3000.0)
     .issuers(value_t_or_exit!(args, "issuers", usize))
     .time(
         time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
