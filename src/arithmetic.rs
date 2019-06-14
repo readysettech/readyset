@@ -97,8 +97,8 @@ named!(pub arithmetic_cast<CompleteByteSlice, (ArithmeticBase, Option<SqlType>)>
     )
 );
 
-/// Parse standard math operators.
-/// TODO(malte): this doesn't currently observe operator precedence.
+// Parse standard math operators.
+// TODO(malte): this doesn't currently observe operator precedence.
 named!(pub arithmetic_operator<CompleteByteSlice, ArithmeticOperator>,
     alt!(
           map!(tag!("+"), |_| ArithmeticOperator::Add)
@@ -108,7 +108,7 @@ named!(pub arithmetic_operator<CompleteByteSlice, ArithmeticOperator>,
     )
 );
 
-/// Base case for nested arithmetic expressions: column name or literal.
+// Base case for nested arithmetic expressions: column name or literal.
 named!(pub arithmetic_base<CompleteByteSlice, ArithmeticBase>,
     alt!(
           map!(integer_literal, |il| ArithmeticBase::Scalar(il))
@@ -116,8 +116,8 @@ named!(pub arithmetic_base<CompleteByteSlice, ArithmeticBase>,
     )
 );
 
-/// Parse simple arithmetic expressions combining literals, and columns and literals.
-/// TODO(malte): this doesn't currently support nested expressions.
+// Parse simple arithmetic expressions combining literals, and columns and literals.
+// TODO(malte): this doesn't currently support nested expressions.
 named!(pub arithmetic_expression<CompleteByteSlice, ArithmeticExpression>,
     do_parse!(
         left: arithmetic_cast >>

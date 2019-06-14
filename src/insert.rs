@@ -46,14 +46,15 @@ impl fmt::Display for InsertStatement {
                         .map(|l| l.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
-                )).collect::<Vec<_>>()
+                ))
+                .collect::<Vec<_>>()
                 .join(", ")
         )
     }
 }
 
-/// Parse rule for a SQL insert query.
-/// TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
+// Parse rule for a SQL insert query.
+// TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
 named!(pub insertion<CompleteByteSlice, InsertStatement>,
     do_parse!(
         tag_no_case!("insert") >>

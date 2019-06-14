@@ -131,7 +131,7 @@ impl fmt::Display for SelectStatement {
     }
 }
 
-/// Parse GROUP BY clause
+// Parse GROUP BY clause
 named!(group_by_clause<CompleteByteSlice, GroupByClause>,
     do_parse!(
         opt_multispace >>
@@ -154,7 +154,7 @@ named!(group_by_clause<CompleteByteSlice, GroupByClause>,
     )
 );
 
-/// Parse LIMIT clause
+// Parse LIMIT clause
 named!(pub limit_clause<CompleteByteSlice, LimitClause>,
     do_parse!(
         opt_multispace >>
@@ -179,7 +179,7 @@ named!(pub limit_clause<CompleteByteSlice, LimitClause>,
     }))
 );
 
-/// Parse JOIN clause
+// Parse JOIN clause
 named!(join_clause<CompleteByteSlice, JoinClause>,
     do_parse!(
         opt_multispace >>
@@ -220,7 +220,7 @@ named!(join_clause<CompleteByteSlice, JoinClause>,
     }))
 );
 
-/// Different options for the right hand side of the join operator in a `join_clause`
+// Different options for the right hand side of the join operator in a `join_clause`
 named!(join_rhs<CompleteByteSlice, JoinRightSide>,
     alt!(
           do_parse!(
@@ -243,7 +243,7 @@ named!(join_rhs<CompleteByteSlice, JoinRightSide>,
     )
 );
 
-/// Parse WHERE clause of a selection
+// Parse WHERE clause of a selection
 named!(pub where_clause<CompleteByteSlice, ConditionExpression>,
     do_parse!(
         opt_multispace >>
@@ -254,7 +254,7 @@ named!(pub where_clause<CompleteByteSlice, ConditionExpression>,
     )
 );
 
-/// Parse rule for a SQL selection query.
+// Parse rule for a SQL selection query.
 named!(pub selection<CompleteByteSlice, SelectStatement>,
     do_parse!(
         select: nested_selection >>

@@ -94,7 +94,7 @@ impl fmt::Display for CreateViewStatement {
     }
 }
 
-/// MySQL grammar element for index column definition (§13.1.18, index_col_name)
+// MySQL grammar element for index column definition (§13.1.18, index_col_name)
 named!(pub index_col_name<CompleteByteSlice, (Column, Option<u16>, Option<OrderType>)>,
     do_parse!(
         column: column_identifier_no_alias >>
@@ -105,7 +105,7 @@ named!(pub index_col_name<CompleteByteSlice, (Column, Option<u16>, Option<OrderT
     )
 );
 
-/// Helper for list of index columns
+// Helper for list of index columns
 named!(pub index_col_list<CompleteByteSlice, Vec<Column> >,
        many0!(
            do_parse!(
@@ -124,7 +124,7 @@ named!(pub index_col_list<CompleteByteSlice, Vec<Column> >,
        )
 );
 
-/// Parse rule for an individual key specification.
+// Parse rule for an individual key specification.
 named!(pub key_specification<CompleteByteSlice, TableKey>,
     alt!(
           do_parse!(
@@ -190,7 +190,7 @@ named!(pub key_specification<CompleteByteSlice, TableKey>,
     )
 );
 
-/// Parse rule for a comma-separated list.
+// Parse rule for a comma-separated list.
 named!(pub key_specification_list<CompleteByteSlice, Vec<TableKey>>,
        many1!(
            do_parse!(
@@ -208,7 +208,7 @@ named!(pub key_specification_list<CompleteByteSlice, Vec<TableKey>>,
        )
 );
 
-/// Parse rule for a comma-separated list.
+// Parse rule for a comma-separated list.
 named!(pub field_specification_list<CompleteByteSlice, Vec<ColumnSpecification> >,
        many1!(
            do_parse!(
@@ -245,7 +245,7 @@ named!(pub field_specification_list<CompleteByteSlice, Vec<ColumnSpecification> 
        )
 );
 
-/// Parse rule for a column definition contraint.
+// Parse rule for a column definition contraint.
 named!(pub column_constraint<CompleteByteSlice, Option<ColumnConstraint>>,
     alt!(
           do_parse!(
@@ -321,8 +321,8 @@ named!(pub column_constraint<CompleteByteSlice, Option<ColumnConstraint>>,
     )
 );
 
-/// Parse rule for a SQL CREATE TABLE query.
-/// TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
+// Parse rule for a SQL CREATE TABLE query.
+// TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
 named!(pub creation<CompleteByteSlice, CreateTableStatement>,
     do_parse!(
         tag_no_case!("create") >>
@@ -400,7 +400,7 @@ named!(pub creation<CompleteByteSlice, CreateTableStatement>,
     )
 );
 
-/// Parse rule for a SQL CREATE VIEW query.
+// Parse rule for a SQL CREATE VIEW query.
 named!(pub view_creation<CompleteByteSlice, CreateViewStatement>,
     do_parse!(
         tag_no_case!("create") >>

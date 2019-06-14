@@ -104,7 +104,7 @@ impl fmt::Display for ConditionExpression {
     }
 }
 
-/// Parse a conditional expression into a condition tree structure
+// Parse a conditional expression into a condition tree structure
 named!(pub condition_expr<CompleteByteSlice, ConditionExpression>,
        alt!(
            do_parse!(

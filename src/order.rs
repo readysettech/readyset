@@ -49,7 +49,7 @@ named!(pub order_type<CompleteByteSlice, OrderType>,
     )
 );
 
-/// Parse ORDER BY clause
+// Parse ORDER BY clause
 named!(pub order_clause<CompleteByteSlice, OrderClause>,
     do_parse!(
         opt_multispace >>
