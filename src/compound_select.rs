@@ -51,7 +51,7 @@ impl fmt::Display for CompoundSelectStatement {
     }
 }
 
-/// Parse compound operator
+// Parse compound operator
 named!(compound_op<CompleteByteSlice, CompoundSelectOperator>,
     alt!(
           do_parse!(
@@ -78,7 +78,7 @@ named!(compound_op<CompleteByteSlice, CompoundSelectOperator>,
     )
 );
 
-/// Parse compound selection
+// Parse compound selection
 named!(pub compound_selection<CompleteByteSlice, CompoundSelectStatement>,
     do_parse!(
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>

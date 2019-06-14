@@ -331,7 +331,7 @@ named!(pub precision<CompleteByteSlice, (u8, Option<u8>)>,
                tag!(")"))
 );
 
-/// A SQL type specifier.
+// A SQL type specifier.
 named!(pub type_identifier<CompleteByteSlice, SqlType>,
     alt!(
           do_parse!(
@@ -485,8 +485,8 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
        )
 );
 
-/// Parses the arguments for an agregation function, and also returns whether the distinct flag is
-/// present.
+// Parses the arguments for an agregation function, and also returns whether the distinct flag is
+// present.
 named!(pub function_arguments<CompleteByteSlice, (Column, bool)>,
        do_parse!(
            distinct: opt!(do_parse!(
@@ -561,7 +561,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
     )
 );
 
-/// Parses a SQL column identifier in the table.column format
+// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier_no_alias<CompleteByteSlice, Column>,
     alt!(
         do_parse!(
@@ -595,7 +595,7 @@ named!(pub column_identifier_no_alias<CompleteByteSlice, Column>,
     )
 );
 
-/// Parses a SQL column identifier in the table.column format
+// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier<CompleteByteSlice, Column>,
     alt!(
         do_parse!(
@@ -640,7 +640,7 @@ named!(pub column_identifier<CompleteByteSlice, Column>,
     )
 );
 
-/// Parses a SQL identifier (alphanumeric and "_").
+// Parses a SQL identifier (alphanumeric and "_").
 named!(pub sql_identifier<CompleteByteSlice, CompleteByteSlice>,
     alt!(
           do_parse!(
@@ -653,7 +653,7 @@ named!(pub sql_identifier<CompleteByteSlice, CompleteByteSlice>,
     )
 );
 
-/// Parse an unsigned integer.
+// Parse an unsigned integer.
 named!(pub unsigned_number<CompleteByteSlice, u64>,
     do_parse!(
         d: digit >>
@@ -661,7 +661,7 @@ named!(pub unsigned_number<CompleteByteSlice, u64>,
     )
 );
 
-/// Parse a terminator that ends a SQL statement.
+// Parse a terminator that ends a SQL statement.
 named!(pub statement_terminator<CompleteByteSlice, ()>,
     do_parse!(
         delimited!(
@@ -677,7 +677,7 @@ named!(pub opt_multispace<CompleteByteSlice, Option<CompleteByteSlice>>,
        opt!(multispace)
 );
 
-/// Parse binary comparison operators
+// Parse binary comparison operators
 named!(pub binary_comparison_operator<CompleteByteSlice, Operator>,
     alt!(
            map!(tag_no_case!("not_like"), |_| Operator::NotLike)
@@ -693,7 +693,7 @@ named!(pub binary_comparison_operator<CompleteByteSlice, Operator>,
     )
 );
 
-/// Parse rule for AS-based aliases for SQL entities.
+// Parse rule for AS-based aliases for SQL entities.
 named!(pub as_alias<CompleteByteSlice, &str>,
     do_parse!(
         multispace >>
@@ -741,7 +741,7 @@ named!(pub assignment_expr_list<CompleteByteSlice, Vec<(Column, FieldValueExpres
        )
 );
 
-/// Parse rule for a comma-separated list of fields without aliases.
+// Parse rule for a comma-separated list of fields without aliases.
 named!(pub field_list<CompleteByteSlice, Vec<Column> >,
        many0!(
            do_parse!(
@@ -759,7 +759,7 @@ named!(pub field_list<CompleteByteSlice, Vec<Column> >,
        )
 );
 
-/// Parse list of column/field definitions.
+// Parse list of column/field definitions.
 named!(pub field_definition_expr<CompleteByteSlice, Vec<FieldDefinitionExpression>>,
        many0!(
            do_parse!(

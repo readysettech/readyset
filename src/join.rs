@@ -84,7 +84,7 @@ impl fmt::Display for JoinConstraint {
     }
 }
 
-/// Parse binary comparison operators
+// Parse binary comparison operators
 named!(pub join_operator<CompleteByteSlice, JoinOperator>,
         alt!(
               map!(tag_no_case!("join"), |_| JoinOperator::Join)

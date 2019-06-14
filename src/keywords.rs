@@ -151,7 +151,7 @@ named!(keyword_t_to_z<CompleteByteSlice, CompleteByteSlice>,
     )
 );
 
-/// Matches any SQL reserved keyword
+// Matches any SQL reserved keyword
 named!(pub sql_keyword<CompleteByteSlice, CompleteByteSlice>,
     do_parse!(
         kw: alt!(
