@@ -62,6 +62,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(inner, negate);
         }
         ConditionExpression::Base(_) => {}
+        ConditionExpression::Arithmetic(_) => unimplemented!()
     }
 }
 

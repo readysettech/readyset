@@ -26,6 +26,7 @@ fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subque
             NestedSelect(_) => vec![Subquery::InComparison(cb)],
             _ => vec![],
         },
+        Arithmetic(_) => unimplemented!(),
     }
 }
 

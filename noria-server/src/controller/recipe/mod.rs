@@ -76,28 +76,29 @@ fn is_ident(chr: u8) -> bool {
     is_alphanumeric(chr) || chr as char == '_'
 }
 
+use nom::types::CompleteByteSlice;
 use nom::*;
-named!(query_expr<&[u8], (bool, Option<String>, SqlQuery)>,
+named!(query_expr<CompleteByteSlice, (bool, Option<String>, SqlQuery)>,
     do_parse!(
         prefix: opt!(do_parse!(
-            public: opt!(alt_complete!(tag_no_case!("query") | tag_no_case!("view"))) >>
-            opt!(complete!(multispace)) >>
-            name: opt!(terminated!(map_res!(take_while1!(is_ident), str::from_utf8),
-                                   opt!(complete!(multispace)))) >>
+            public: opt!(alt!(tag_no_case!("query") | tag_no_case!("view"))) >>
+            opt!(multispace) >>
+            name: opt!(terminated!(take_while1_s!(is_ident), opt!(multispace))) >>
             tag!(":") >>
-            opt!(complete!(multispace)) >>
+            opt!(multispace) >>
             (public, name)
         )) >>
         expr: apply!(sql_parser::sql_query,) >>
-        opt!(complete!(multispace)) >>
+        opt!(multispace) >>
         (match prefix {
             None => (false, None, expr),
-            Some(p) => (p.0.is_some(), p.1.map(ToOwned::to_owned), expr)
+            Some(p) => (p.0.is_some(),
+                        p.1.map(|s| str::from_utf8(s.as_bytes()).unwrap().into()), expr)
         })
     )
 );
 
-named!(query_exprs<&[u8], (Vec<(bool, Option<String>, SqlQuery)>)>,
+named!(query_exprs<CompleteByteSlice, (Vec<(bool, Option<String>, SqlQuery)>)>,
     many1!(query_expr)
 );
 
@@ -613,23 +614,22 @@ impl Recipe {
         let parsed_queries = query_strings.iter().fold(
             Vec::new(),
             |mut acc: Vec<Result<(bool, Option<String>, SqlQuery), String>>, q| {
-                match query_exprs(q.as_bytes()) {
-                    nom::IResult::Error(e) => {
+                match query_exprs(CompleteByteSlice(q.as_bytes())) {
+                    Result::Err(e) => {
                         // we got a parse error
                         acc.push(Err(format!("Query \"{}\", parse error: {}", q, e)));
                     }
-                    nom::IResult::Done(remainder, parsed) => {
+                    Result::Ok((remainder, parsed)) => {
                         // should have consumed all input
                         assert!(
                             remainder.is_empty(),
                             format!(
                                 "failed to parse the complete recipe; left with: {}",
-                                str::from_utf8(remainder).unwrap()
+                                str::from_utf8(*remainder).unwrap()
                             )
                         );
                         acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
                     }
-                    nom::IResult::Incomplete(_) => unreachable!(),
                 }
                 acc
             },

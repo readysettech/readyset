@@ -451,6 +451,7 @@ fn classify_conditionals(
         ConditionExpression::NegationOp(_) => {
             panic!("negation should have been removed earlier");
         }
+        ConditionExpression::Arithmetic(_) => unimplemented!()
     }
 }
 

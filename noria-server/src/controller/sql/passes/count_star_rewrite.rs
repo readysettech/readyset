@@ -37,6 +37,7 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
         ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner),
         ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner),
         ConditionExpression::Base(_) => unreachable!(),
+        ConditionExpression::Arithmetic(_) => unimplemented!(),
     }
 }
 
