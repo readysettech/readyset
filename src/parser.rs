@@ -40,7 +40,7 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-named!(sql_query<CompleteByteSlice, SqlQuery>,
+named!(pub sql_query<CompleteByteSlice, SqlQuery>,
     alt!(
           do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
         | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
