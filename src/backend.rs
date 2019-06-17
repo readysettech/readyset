@@ -52,7 +52,10 @@ struct NoriaBackendInner<E> {
     outputs: BTreeMap<String, SyncView>,
 }
 
-impl<E> NoriaBackendInner<E> where E: tokio::executor::Executor {
+impl<E> NoriaBackendInner<E>
+where
+    E: tokio::executor::Executor,
+{
     fn new(mut ch: SyncControllerHandle<ZookeeperAuthority, E>) -> Self {
         NoriaBackendInner {
             inputs: ch
@@ -127,7 +130,10 @@ pub struct NoriaBackend<E> {
     static_responses: bool,
 }
 
-impl<E> NoriaBackend<E> where E: tokio::executor::Executor {
+impl<E> NoriaBackend<E>
+where
+    E: tokio::executor::Executor,
+{
     pub fn new(
         ch: SyncControllerHandle<ZookeeperAuthority, E>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
@@ -858,7 +864,10 @@ impl<E> NoriaBackend<E> where E: tokio::executor::Executor {
     }
 }
 
-impl<W: io::Write, E> MysqlShim<W> for NoriaBackend<E> where E: tokio::executor::Executor {
+impl<W: io::Write, E> MysqlShim<W> for &mut NoriaBackend<E>
+where
+    E: tokio::executor::Executor,
+{
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
 

@@ -18,18 +18,16 @@ mod rewrite;
 mod schema;
 mod utils;
 
+use crate::backend::NoriaBackend;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{SyncControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
 use std::io::{self, BufReader, BufWriter};
-use std::net;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tokio::prelude::*;
-
-use crate::backend::NoriaBackend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -98,7 +96,11 @@ fn main() {
     let sanitize = !matches.is_present("no-sanitize");
     let static_responses = !matches.is_present("no-static-responses");
 
-    let listener = net::TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
+    let listener = tokio::net::tcp::TcpListener::bind(&std::net::SocketAddr::new(
+        std::net::Ipv4Addr::LOCALHOST.into(),
+        port,
+    ))
+    .unwrap();
 
     let log = logger_pls();
 
@@ -111,13 +113,30 @@ fn main() {
     zk_auth.log_with(log.clone());
 
     debug!(log, "Connecting to Noria...",);
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
     let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
     debug!(log, "Connected!");
 
+    let ctrlc = rt.block_on(future::lazy(tokio_signal::ctrl_c)).unwrap();
+    let mut listener = listener.incoming().select(ctrlc.then(|r| match r {
+        Ok(_) => Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c")),
+        Err(e) => Err(e),
+    }));
+
     let mut threads = Vec::new();
     let mut i = 0;
-    while let Ok((s, _)) = listener.accept() {
+    while let Ok((Some(s), l)) = rt.block_on(listener.into_future()) {
+        listener = l;
+
+        // one day, when msql-srv is async, this won't be necessary
+        let s = {
+            use std::os::unix::io::AsRawFd;
+            use std::os::unix::io::FromRawFd;
+            let s2 = unsafe { std::net::TcpStream::from_raw_fd(s.as_raw_fd()) };
+            std::mem::forget(s); // don't drop, which would close
+            s2.set_nonblocking(false).unwrap();
+            s2
+        };
         s.set_nodelay(true).unwrap();
 
         let builder = thread::Builder::new().name(format!("conn-{}", i));
@@ -129,7 +148,7 @@ fn main() {
 
         let jh = builder
             .spawn(move || {
-                let b = NoriaBackend::new(
+                let mut b = NoriaBackend::new(
                     ch,
                     auto_increments,
                     query_cache,
@@ -139,7 +158,8 @@ fn main() {
                     log,
                 );
                 let rs = s.try_clone().unwrap();
-                if let Err(e) = MysqlIntermediary::run_on(b, BufReader::new(rs), BufWriter::new(s))
+                if let Err(e) =
+                    MysqlIntermediary::run_on(&mut b, BufReader::new(rs), BufWriter::new(s))
                 {
                     match e.kind() {
                         io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
@@ -153,6 +173,9 @@ fn main() {
         threads.push(jh);
         i += 1;
     }
+
+    drop(ch);
+    info!(log, "Exiting...");
 
     for t in threads.drain(..) {
         t.join()
