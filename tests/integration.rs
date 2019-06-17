@@ -112,9 +112,9 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let b = NoriaBackend::new(ch, auto_increments, query_cache, false, true, true, logger);
+        let mut b = NoriaBackend::new(ch, auto_increments, query_cache, false, true, true, logger);
 
-        MysqlIntermediary::run_on_tcp(b, s).unwrap();
+        MysqlIntermediary::run_on_tcp(&mut b, s).unwrap();
         rt.shutdown_on_idle().wait().unwrap();
     });
 
