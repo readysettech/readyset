@@ -34,8 +34,3 @@ path = "src/lib.rs"
 ###[patch."https://github.com/mit-pdos/noria.git"]
 ###noria = { path = "../noria/noria/" }
 ###noria-server = { path = "../noria/noria-server/" }
-
-[patch.crates-io]
-tower-balance = { git = "https://github.com/tower-rs/tower.git" }
-tower-load = { git = "https://github.com/tower-rs/tower.git" }
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
