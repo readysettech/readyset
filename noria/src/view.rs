@@ -166,10 +166,10 @@ impl ViewBuilder {
                         pool::Builder::new()
                             .urgency(0.03)
                             .loaded_above(0.2)
-                            .underutilized_below(0.00001)
+                            .underutilized_below(0.000000001)
                             .max_services(Some(32))
                             .build(multiplex::client::Maker::new(ViewEndpoint(addr)), ()),
-                        1,
+                        50,
                     );
                     h.insert(c.clone());
                     Ok((addr, c))
