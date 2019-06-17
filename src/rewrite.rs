@@ -8,6 +8,7 @@ fn collapse_where_in_recursive(
     rewrite_literals: bool,
 ) -> Option<(usize, Vec<Literal>)> {
     match *expr {
+        ConditionExpression::Arithmetic(_) => unimplemented!(),
         ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)) => {
             *leftmost_param_index += 1;
             None

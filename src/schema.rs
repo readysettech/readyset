@@ -20,7 +20,7 @@ pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
             SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
             SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
             SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
-            SqlType::DateTime => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
+            SqlType::DateTime(_) => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
             SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_DOUBLE,
             SqlType::Decimal(_, _) => msql_srv::ColumnType::MYSQL_TYPE_DECIMAL,
             _ => unimplemented!(),

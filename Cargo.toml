@@ -8,10 +8,10 @@ edition = "2018"
 arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
-msql-srv = "0.6"
+msql-srv = "0.8"
 noria = { git = "https://github.com/mit-pdos/noria.git" }
 lazy_static = "1.0.0"
-nom-sql = "0.0.4"
+nom-sql = "0.0.6"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
@@ -21,7 +21,7 @@ chrono = "0.4"
 tokio-signal = "0.2"
 
 [dev-dependencies]
-mysql = "12.0.4"
+mysql = "16"
 zookeeper = "0.5.4"
 noria-server = { git = "https://github.com/mit-pdos/noria.git" }
 

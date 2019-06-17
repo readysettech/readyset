@@ -868,6 +868,8 @@ impl<W: io::Write, E> MysqlShim<W> for &mut NoriaBackend<E>
 where
     E: tokio::executor::Executor,
 {
+    type Error = io::Error;
+
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
 
