@@ -21,9 +21,8 @@ hyper = "0.12.0"
 mio = "0.6.9"
 nom = "^4.0.0"
 nom-sql = "0.0.6"
-mysql = "14.0.0"
 petgraph = { version = "0.4.11", features = ["serde-1"] }
-rand = "0.5.0"
+rand = "0.6.0"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.4.0"
@@ -45,7 +44,7 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
-tokio-tower = "0.1"
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
 tower-util = "0.1"
 tower = "0.1"
 
@@ -61,9 +60,10 @@ default-features = false
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
-toml = "0.4.1"
+toml = "0.5"
 diff = "0.1.10"
 tempfile = "3.0.2"
+mysql = "16.0.0"
 
 [lib]
 name = "noria_server"

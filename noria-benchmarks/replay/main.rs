@@ -7,21 +7,20 @@ extern crate noria;
 extern crate rand;
 extern crate zookeeper;
 
+use clap::{App, Arg};
+use hdrhistogram::Histogram;
+use itertools::Itertools;
+use noria::{
+    Builder, DataType, DurabilityMode, PersistenceParameters, SyncHandle, ZookeeperAuthority,
+};
+use rand::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-
-use clap::{App, Arg};
-use hdrhistogram::Histogram;
-use itertools::Itertools;
 use zookeeper::ZooKeeper;
-
-use noria::{
-    Builder, DataType, DurabilityMode, PersistenceParameters, SyncHandle, ZookeeperAuthority,
-};
 
 // If we .batch_put a huge amount of rows we'll end up with a deadlock when the base
 // domains fill up their TCP buffers trying to send ACKs (which the batch putter
@@ -109,7 +108,7 @@ fn perform_reads(
         vec![SKEWED_KEY]
     } else {
         let mut rng = rand::thread_rng();
-        rand::seq::sample_iter(&mut rng, 0..rows, reads as usize).unwrap()
+        (0..rows).choose_multiple(&mut rng, reads as usize)
     };
 
     if use_secondary {

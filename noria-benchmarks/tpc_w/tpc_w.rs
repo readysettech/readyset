@@ -8,7 +8,7 @@ extern crate clap;
 
 use crate::parameters::SampleKeys;
 use noria::{Builder, LocalAuthority, SyncHandle};
-use rand::Rng;
+use rand::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Barrier};
 use std::thread::JoinHandle;
@@ -39,7 +39,7 @@ fn get_queries(recipe_location: &str, random: bool) -> Vec<String> {
 
     if random {
         let mut rng = rand::thread_rng();
-        rng.shuffle(queries.as_mut_slice());
+        queries.as_mut_slice().shuffle(&mut rng);
     }
 
     queries

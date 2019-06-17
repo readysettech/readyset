@@ -8,9 +8,3 @@ members = [
 
 [profile.release]
 debug=true
-
-[patch.crates-io]
-tower-balance = { git = "https://github.com/tower-rs/tower.git" }
-tower-load = { git = "https://github.com/tower-rs/tower.git" }
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
-trawler = { git = "https://github.com/jonhoo/trawler.git", branch = "revamp" }

@@ -1,6 +1,5 @@
 use noria::DataType;
-use rand;
-use rand::Rng;
+use rand::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -13,7 +12,7 @@ pub struct SampleKeys {
     order_line: Vec<Vec<DataType>>,
     shopping_cart: Vec<Vec<DataType>>,
     country: Vec<Vec<DataType>>,
-    rng: rand::ThreadRng,
+    rng: ThreadRng,
     item_write: f32,
     ol_write: f32,
 }
@@ -241,33 +240,33 @@ impl SampleKeys {
     }
 
     fn customer_id(&mut self) -> DataType {
-        self.rng.choose(self.customer.as_slice()).unwrap()[0].clone()
+        self.customer.as_slice().choose(&mut self.rng).unwrap()[0].clone()
     }
 
     fn customer_uname(&mut self) -> DataType {
-        self.rng.choose(self.customer.as_slice()).unwrap()[1].clone()
+        self.customer.as_slice().choose(&mut self.rng).unwrap()[1].clone()
     }
 
     fn item_id(&mut self) -> DataType {
         let nrecords = ((self.item.len() as f32) * self.item_write) as usize;
         let slice = self.item.chunks(nrecords).next().unwrap();
-        self.rng.choose(slice).unwrap()[0].clone()
+        slice.choose(&mut self.rng).unwrap()[0].clone()
     }
 
     fn item_subject(&mut self) -> DataType {
         let nrecords = ((self.item.len() as f32) * self.item_write) as usize;
         let slice = self.item.chunks(nrecords).next().unwrap();
-        self.rng.choose(slice).unwrap()[1].clone()
+        slice.choose(&mut self.rng).unwrap()[1].clone()
     }
 
     fn ol_o_id(&mut self) -> DataType {
         let nrecords = ((self.order_line.len() as f32) * self.ol_write) as usize;
         let slice = self.item.chunks(nrecords).next().unwrap();
-        self.rng.choose(slice).unwrap()[0].clone()
+        slice.choose(&mut self.rng).unwrap()[0].clone()
     }
 
     fn order_id(&mut self) -> DataType {
-        self.rng.choose(self.order.as_slice()).unwrap()[0].clone()
+        self.order.as_slice().choose(&mut self.rng).unwrap()[0].clone()
     }
 
     fn shopping_cart_id(&self) -> DataType {
@@ -275,6 +274,6 @@ impl SampleKeys {
     }
 
     fn country_name(&mut self) -> DataType {
-        self.rng.choose(self.country.as_slice()).unwrap()[0].clone()
+        self.country.as_slice().choose(&mut self.rng).unwrap()[0].clone()
     }
 }

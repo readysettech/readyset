@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 nom-sql = "0.0.6"
-regex = "1.0.0"
+regex = "1"
 slog = "2.4.0"
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 

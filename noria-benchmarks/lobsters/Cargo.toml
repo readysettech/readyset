@@ -9,7 +9,7 @@ orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "failure"]
 default = []
 
 [dependencies]
-trawler = "0.5.10"
+trawler = "0.6"
 mysql_async = "0.19"
 tokio = "0.1"
 clap = "2.31"
@@ -17,9 +17,9 @@ futures = "0.1"
 chrono = "0.4"
 
 failure = { version = "0.1.1", optional = true }
-rusoto_core = { optional = true, version = "0.34" }
-rusoto_sts = { optional = true, version = "0.34" }
-tsunami = { optional = true, version = "0.7.1" }
+rusoto_core = { optional = true, version = "0.39" }
+rusoto_sts = { optional = true, version = "0.39" }
+tsunami = { optional = true, version = "0.8" }
 
 [[bin]]
 name = "lobsters"

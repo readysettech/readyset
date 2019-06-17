@@ -295,63 +295,69 @@ fn main() {
         1,
         tsunami::MachineSetup::new(stype, SOUP_AMI, move |host| {
             // ensure we don't have stale soup (yuck)
-            host.just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
+            let _ = host
+                .just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
                 .is_ok();
 
             // check out desired branch (if any)
             if let Some(ref branch) = xbranch {
                 eprintln!(" -> checking out branch '{}'", branch);
-                host.just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
+                let _ = host
+                    .just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
                     .is_ok();
             }
 
             if do_perf.is_active() {
                 // allow kernel debugging
-                host.just_exec(&[
-                    "echo",
-                    "0",
-                    "|",
-                    "sudo",
-                    "tee",
-                    "/proc/sys/kernel/kptr_restrict",
-                ])?
-                .is_ok();
-                host.just_exec(&[
-                    "echo",
-                    "-1",
-                    "|",
-                    "sudo",
-                    "tee",
-                    "/proc/sys/kernel/perf_event_paranoid",
-                ])?
-                .is_ok();
+                let _ = host
+                    .just_exec(&[
+                        "echo",
+                        "0",
+                        "|",
+                        "sudo",
+                        "tee",
+                        "/proc/sys/kernel/kptr_restrict",
+                    ])?
+                    .is_ok();
+                let _ = host
+                    .just_exec(&[
+                        "echo",
+                        "-1",
+                        "|",
+                        "sudo",
+                        "tee",
+                        "/proc/sys/kernel/perf_event_paranoid",
+                    ])?
+                    .is_ok();
 
                 // get flamegraph
-                host.just_exec(&[
-                    "git",
-                    "clone",
-                    "https://github.com/brendangregg/FlameGraph.git",
-                ])?
-                .is_ok();
+                let _ = host
+                    .just_exec(&[
+                        "git",
+                        "clone",
+                        "https://github.com/brendangregg/FlameGraph.git",
+                    ])?
+                    .is_ok();
             }
 
             eprintln!(" -> setting up mssql ramdisk");
-            host.just_exec(&["sudo", "/opt/mssql/ramdisk.sh"])?.is_ok();
+            let _ = host.just_exec(&["sudo", "/opt/mssql/ramdisk.sh"])?.is_ok();
 
             let build = |host: &tsunami::Session| {
                 eprintln!(" -> building noria-server");
-                host.just_exec(&[
-                    "cd",
-                    "noria",
-                    "&&",
-                    "cargo",
-                    "b",
-                    "--release",
-                    "--bin",
-                    "noria-server",
-                    "2>&1",
-                ])?
-                .is_ok();
+                let _ = host
+                    .just_exec(&[
+                        "cd",
+                        "noria",
+                        "&&",
+                        "cargo",
+                        "b",
+                        "--release",
+                        "--bin",
+                        "noria-server",
+                        "2>&1",
+                    ])?
+                    .is_ok();
                 Ok(())
             };
 
@@ -370,30 +376,33 @@ fn main() {
         "client",
         if cohost_clients { 1 } else { nclients as u32 },
         tsunami::MachineSetup::new(ctype, SOUP_AMI, move |host| {
-            host.just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
+            let _ = host
+                .just_exec(&["git", "-C", "noria", "pull", "2>&1"])?
                 .is_ok();
 
             // check out desired branch (if any)
             if let Some(ref branch) = branch {
                 eprintln!(" -> checking out branch '{}'", branch);
-                host.just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
+                let _ = host
+                    .just_exec(&["git", "-C", "noria", "checkout", branch, "2>&1"])?
                     .is_ok();
             }
 
             let build = |host: &tsunami::Session| {
                 eprintln!(" -> building vote client on client");
-                host.just_exec(&[
-                    "cd",
-                    "noria",
-                    "&&",
-                    "cargo",
-                    "b",
-                    "--release",
-                    "--bin",
-                    "vote",
-                    "2>&1",
-                ])?
-                .is_ok();
+                let _ = host
+                    .just_exec(&[
+                        "cd",
+                        "noria",
+                        "&&",
+                        "cargo",
+                        "b",
+                        "--release",
+                        "--bin",
+                        "vote",
+                        "2>&1",
+                    ])?
+                    .is_ok();
                 Ok(())
             };
 
@@ -602,7 +611,7 @@ fn main() {
 
         if keep {
             eprintln!(" -> delaying shutdown; press enter to clean up");
-            io::stdin().read(&mut [0u8]).is_ok();
+            let _ = io::stdin().read(&mut [0u8]).is_ok();
         }
 
         Ok(())

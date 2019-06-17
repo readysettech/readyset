@@ -1,9 +1,8 @@
 use common::SizeOf;
 use fnv::FnvBuildHasher;
 use prelude::*;
+use rand::prelude::*;
 use std::borrow::Cow;
-
-use rand::{Rng, ThreadRng};
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.

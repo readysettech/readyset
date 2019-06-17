@@ -7,7 +7,7 @@ extern crate clap;
 
 use failure::ResultExt;
 use hdrhistogram::Histogram;
-use rand::Rng;
+use rand::prelude::*;
 use std::cell::RefCell;
 use std::fs;
 use std::mem;
@@ -150,7 +150,7 @@ where
                         run_generator(
                             handle,
                             ex,
-                            rand::distributions::Range::new(1, articles + 1),
+                            rand::distributions::Uniform::new(1, articles + 1),
                             target,
                             global_args,
                         )
@@ -264,7 +264,7 @@ where
     let end = start + warmup + runtime;
 
     let max_batch_time = time::Duration::new(0, MAX_BATCH_TIME_US * 1_000);
-    let interarrival = rand::distributions::exponential::Exp::new(target * 1e-9);
+    let interarrival = rand::distributions::Exp::new(target * 1e-9);
 
     let every = value_t_or_exit!(global_args, "ratio", u32);
 
@@ -361,8 +361,6 @@ where
         let now = time::Instant::now();
         // NOTE: while, not if, in case we start falling behind
         while next <= now {
-            use rand::distributions::Distribution;
-
             // only queue a new request if we're told to. if this is not the case, we've
             // just been woken up so we can realize we need to send a batch
             let id = id_rng.sample(&mut rng) as i32;

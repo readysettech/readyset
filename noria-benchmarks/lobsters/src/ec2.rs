@@ -50,7 +50,7 @@ fn git_and_cargo(
     eprintln!(" -> git reset");
     ssh.cmd(&format!("bash -c 'git -C {} reset --hard 2>&1'", dir))
         .map(|out| {
-            let out = out.trim_right();
+            let out = out.trim_end();
             if !out.is_empty() && !out.contains("Already up-to-date.") {
                 eprintln!("{}", out);
             }
@@ -63,7 +63,7 @@ fn git_and_cargo(
             dir, branch
         ))
         .map(|out| {
-            let out = out.trim_right();
+            let out = out.trim_end();
             if !out.is_empty() {
                 eprintln!("{}", out);
             }
@@ -73,7 +73,7 @@ fn git_and_cargo(
     eprintln!(" -> git update");
     ssh.cmd(&format!("bash -c 'git -C {} pull 2>&1'", dir))
         .map(|out| {
-            let out = out.trim_right();
+            let out = out.trim_end();
             if !out.is_empty() && !out.contains("Already up-to-date.") {
                 eprintln!("{}", out);
             }
@@ -83,7 +83,7 @@ fn git_and_cargo(
         eprintln!(" -> force local noria");
         ssh.cmd(&format!("sed -i -e 's/^###//g' {}/Cargo.toml", dir))
             .map(|out| {
-                let out = out.trim_right();
+                let out = out.trim_end();
                 if !out.is_empty() {
                     eprintln!("{}", out);
                 }
@@ -106,7 +106,7 @@ fn git_and_cargo(
         };
         ssh.cmd(&cmd)
             .map(|out| {
-                let out = out.trim_right();
+                let out = out.trim_end();
                 if !out.is_empty() {
                     eprintln!("{}", out);
                 }
@@ -309,7 +309,7 @@ fn main() {
                             .unwrap()
                             .cmd("bash -c 'pkill -9 -f noria-server 2>&1'")
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> force stopped noria...\n{}", out);
                                 }
@@ -320,7 +320,7 @@ fn main() {
                             .unwrap()
                             .cmd("bash -c 'pkill -9 -f noria-mysql 2>&1'")
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> force stopped shim...\n{}", out);
                                 }
@@ -336,7 +336,7 @@ fn main() {
                                  --clean --deployment trawler",
                             )
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> wiped noria state...\n{}", out);
                                 }
@@ -355,7 +355,7 @@ fn main() {
                         .unwrap()
                         .cmd("bash -c 'sudo systemctl start mariadb 2>&1'")
                         .map(|out| {
-                            let out = out.trim_right();
+                            let out = out.trim_end();
                             if !out.is_empty() {
                                 eprintln!(" -> started mysql...\n{}", out);
                             }
@@ -432,7 +432,7 @@ fn main() {
                         ip
                     ))
                     .map(|out| {
-                        let out = out.trim_right();
+                        let out = out.trim_end();
                         if !out.is_empty() {
                             eprintln!(" -> priming finished...\n{}", out);
                         }
@@ -460,7 +460,7 @@ fn main() {
                         ip
                     ))
                     .map(|out| {
-                        let out = out.trim_right();
+                        let out = out.trim_end();
                         if !out.is_empty() {
                             eprintln!(" -> warming finished...\n{}", out);
                         }
@@ -514,7 +514,7 @@ fn main() {
                     .as_mut()
                     .unwrap()
                     .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
-                let sload = sload.trim_right();
+                let sload = sload.trim_end();
 
                 // gather client load
                 let cload = trawler
@@ -522,7 +522,7 @@ fn main() {
                     .as_mut()
                     .unwrap()
                     .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
-                let cload = cload.trim_right();
+                let cload = cload.trim_end();
 
                 load.write_all(format!("{} {} ", scale, backend).as_bytes())?;
                 load.write_all(sload.as_bytes())?;
@@ -558,7 +558,7 @@ fn main() {
                             .unwrap()
                             .cmd("bash -c 'sudo systemctl stop mariadb 2>&1'")
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> stopped mysql...\n{}", out);
                                 }
@@ -592,7 +592,7 @@ fn main() {
                             .unwrap()
                             .cmd("bash -c 'pkill -f noria-server 2>&1'")
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> stopped noria...\n{}", out);
                                 }
@@ -603,7 +603,7 @@ fn main() {
                             .unwrap()
                             .cmd("bash -c 'pkill -f noria-mysql 2>&1'")
                             .map(|out| {
-                                let out = out.trim_right();
+                                let out = out.trim_end();
                                 if !out.is_empty() {
                                     eprintln!(" -> stopped shim...\n{}", out);
                                 }

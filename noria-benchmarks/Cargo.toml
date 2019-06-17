@@ -13,31 +13,31 @@ chrono = { version = "0.4.0", features = ["serde"] }
 noria = { path = "../noria-server", package = "noria-server" }
 nom-sql = "0.0.6"
 regex = "1.0.0"
-itertools = "0.7.2"
+itertools = "0.8"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
 slog-term = "2.4.0"
 vec_map = { version = "0.8.0" }
 rayon = "1.0"
 ssh2 = "0.3"
-shellwords = "0.1"
+shellwords = "1"
 zookeeper = "0.5.3"
 
 # for benchmarks
 # cli
 clap = "2.25.0"
 # distributions
-rand = "0.5.0"
-zipf = "4.0.0"
+rand = "0.6"
+zipf = "5"
 # sampling
 hdrhistogram = "6.1"
 # mssql
 futures-state-stream = "0.1"
 tiberius = "0.3.1"
 # mysql
-mysql = "14.0.0"
+mysql = "16.0.0"
 # memcached
-memcached-rs = "0.3.0"
+memcached-rs = "0.4"
 # mio
 mio = "0.6.9"
 # futures
@@ -45,10 +45,10 @@ futures = "0.1.14"
 futures-cpupool = "0.1.8"
 tokio = "0.1"
 # ec2
-rusoto_core = { optional = true, version = "0.34" }
-rusoto_sts = { optional = true, version = "0.34" }
-tsunami = { optional = true, version = "0.7.1" }
-timeout-readwrite = "0.1"
+rusoto_core = { optional = true, version = "0.39" }
+rusoto_sts = { optional = true, version = "0.39" }
+tsunami = { optional = true, version = "0.8" }
+timeout-readwrite = "0.2"
 ctrlc = "3.1"
 failure = "0.1"
 tower-service = "0.2"

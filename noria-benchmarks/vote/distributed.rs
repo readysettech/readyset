@@ -286,7 +286,7 @@ fn run_one(args: &clap::ArgMatches, first: bool, nservers: u32, nclients: u32) {
                 .just_exec(&["git", "-C", "distributary", "rev-parse", "HEAD"])
                 .context("git rev-parse HEAD")?
                 .map_err(failure::err_msg)?;
-            eprintln!("==> revision: {}", rev.trim_right());
+            eprintln!("==> revision: {}", rev.trim_end());
             servers[0]
                 .ssh
                 .as_ref()
@@ -516,7 +516,7 @@ fn run_one(args: &clap::ArgMatches, first: bool, nservers: u32, nclients: u32) {
                 eprintln!("{}", stderr);
             } else if !stderr.is_empty() {
                 eprintln!("{} reported:", clients[i].public_dns);
-                let stderr = stderr.trim_right().replace('\n', "\n > ");
+                let stderr = stderr.trim_end().replace('\n', "\n > ");
                 eprintln!(" > {}", stderr);
             }
 
@@ -541,11 +541,11 @@ fn run_one(args: &clap::ArgMatches, first: bool, nservers: u32, nclients: u32) {
             let mut stderr = String::new();
             souplet.stderr().read_to_string(&mut stderr)?;
             souplet.read_to_string(&mut stdout)?;
-            let stdout = stdout.trim_right();
+            let stdout = stdout.trim_end();
             if !stdout.is_empty() {
                 println!("{}", stdout.replace('\n', "\n >> "));
             }
-            let stderr = stderr.trim_right();
+            let stderr = stderr.trim_end();
             if !stderr.is_empty() {
                 println!("{}", stderr.replace('\n', "\n !> "));
             }
@@ -572,7 +572,7 @@ fn ec2_instance_type_cores(it: &str) -> Option<u16> {
         "nano" | "micro" | "small" => Some(1),
         "medium" | "large" => Some(2),
         t if t.ends_with("xlarge") => {
-            let mult = t.trim_right_matches("xlarge").parse::<u16>().unwrap_or(1);
+            let mult = t.trim_end_matches("xlarge").parse::<u16>().unwrap_or(1);
             Some(4 * mult)
         }
         _ => None,

@@ -253,7 +253,7 @@ fn run_one(args: &clap::ArgMatches, nservers: u32) -> Result<f64, failure::Error
                 eprintln!("{}", stderr);
             } else if !stderr.is_empty() {
                 eprintln!("{} reported:", servers[i].public_dns);
-                let stderr = stderr.trim_right().replace('\n', "\n > ");
+                let stderr = stderr.trim_end().replace('\n', "\n > ");
                 eprintln!(" > {}", stderr);
             }
 
@@ -268,7 +268,7 @@ fn run_one(args: &clap::ArgMatches, nservers: u32) -> Result<f64, failure::Error
             .cmd("awk '{print $1\" \"$2}' /proc/loadavg")?;
         // stop iterating through scales for this backend if it's not keeping up
         let load: f64 = load
-            .trim_right()
+            .trim_end()
             .split_whitespace()
             .next()
             .and_then(|l| l.parse().ok())
