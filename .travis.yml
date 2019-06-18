@@ -1,7 +1,7 @@
 dist: trusty
 language: rust
 rust:
-  - nightly-2018-11-23
+  - nightly-2019-06-18
 cache: cargo
 script:
   - cargo check --all --all-targets
