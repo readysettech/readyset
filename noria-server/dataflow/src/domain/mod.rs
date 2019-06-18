@@ -189,6 +189,9 @@ impl DomainBuilder {
             wait_time: Timer::new(),
             process_times: TimerSet::new(),
             process_ptimes: TimerSet::new(),
+
+            total_replay_time: Timer::new(),
+            total_forward_time: Timer::new(),
         }
     }
 }
@@ -245,6 +248,11 @@ pub struct Domain {
     wait_time: Timer<SimpleTracker, RealTime>,
     process_times: TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
     process_ptimes: TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
+
+    /// time spent processing replays
+    total_replay_time: Timer<SimpleTracker, RealTime>,
+    /// time spent processing ordinary, forward updates
+    total_forward_time: Timer<SimpleTracker, RealTime>,
 }
 
 impl Domain {
@@ -688,10 +696,14 @@ impl Domain {
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
+                self.total_forward_time.start();
                 self.dispatch(m, sends, executor);
+                self.total_forward_time.stop();
             }
             Packet::ReplayPiece { .. } => {
+                self.total_replay_time.start();
                 self.handle_replay(m, sends, executor);
+                self.total_replay_time.stop();
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(m, sends);
@@ -1029,6 +1041,7 @@ impl Domain {
                         assert_eq!(self.replay_paths[&tag].source, Some(from));
 
                         let start = time::Instant::now();
+                        self.total_replay_time.start();
                         info!(self.log, "starting replay");
 
                         // we know that the node is materialized, as the migration coordinator
@@ -1152,6 +1165,7 @@ impl Domain {
                                 })
                                 .unwrap();
                         }
+                        self.total_replay_time.stop();
 
                         self.handle_replay(p, sends, executor);
                     }
@@ -1218,6 +1232,8 @@ impl Domain {
                         let domain_stats = noria::debug::stats::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
+                            total_replay_time: self.total_replay_time.num_nanoseconds(),
+                            total_forward_time: self.total_forward_time.num_nanoseconds(),
                             wait_time: self.wait_time.num_nanoseconds(),
                         };
 

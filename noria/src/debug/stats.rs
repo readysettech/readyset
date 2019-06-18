@@ -15,6 +15,10 @@ pub struct DomainStats {
     pub total_time: u64,
     /// Total thread time elapsed while processing in this domain.
     pub total_ptime: u64,
+    /// Total wall-clock time spent processing replays in this domain.
+    pub total_replay_time: u64,
+    /// Total wall-clock time spent processing forward updates in this domain.
+    pub total_forward_time: u64,
     /// Total wall-clock time spent waiting for work in this domain.
     pub wait_time: u64,
 }
