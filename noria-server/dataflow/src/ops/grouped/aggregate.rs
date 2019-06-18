@@ -96,7 +96,7 @@ impl GroupedOperation for Aggregator {
     fn apply(
         &self,
         current: Option<&DataType>,
-        diffs: &mut Iterator<Item = Self::Diff>,
+        diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> DataType {
         let n = match current {
             Some(&DataType::Int(n)) => i64::from(n),

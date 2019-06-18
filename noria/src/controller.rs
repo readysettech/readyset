@@ -59,7 +59,7 @@ where
     type Error = failure::Error;
 
     // TODO: existential type
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send>;
+    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
@@ -360,7 +360,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         path: &'static str,
         r: Q,
         err: &'static str,
-    ) -> Box<Future<Item = R, Error = failure::Error> + Send>
+    ) -> Box<dyn Future<Item = R, Error = failure::Error> + Send>
     where
         for<'de> R: Deserialize<'de>,
         R: Send,

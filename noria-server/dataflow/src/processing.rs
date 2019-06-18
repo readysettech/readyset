@@ -163,7 +163,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_input(
         &mut self,
-        executor: &mut Executor,
+        executor: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -175,7 +175,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_input_raw(
         &mut self,
-        executor: &mut Executor,
+        executor: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
@@ -216,7 +216,7 @@ where
         _key: &KeyType,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         None
     }
 
@@ -235,7 +235,7 @@ where
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states
             .get(parent)
             .and_then(move |state| match state.lookup(columns, key) {

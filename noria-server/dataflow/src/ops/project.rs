@@ -139,7 +139,7 @@ impl Ingredient for Project {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
@@ -222,7 +222,7 @@ impl Ingredient for Project {
 
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         from: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
@@ -507,7 +507,7 @@ mod tests {
     }
 
     fn setup_query_through(
-        mut state: Box<State>,
+        mut state: Box<dyn State>,
         permutation: &[usize],
         additional: Option<Vec<DataType>>,
         expressions: Option<Vec<ProjectExpression>>,

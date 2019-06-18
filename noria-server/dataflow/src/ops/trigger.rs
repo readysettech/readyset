@@ -34,7 +34,7 @@ impl Trigger {
         }
     }
 
-    fn create_universes<I>(&self, executor: &mut Executor, requests: I)
+    fn create_universes<I>(&self, executor: &mut dyn Executor, requests: I)
     where
         I: IntoIterator<Item = HashMap<String, DataType>>,
     {
@@ -43,7 +43,7 @@ impl Trigger {
         }
     }
 
-    fn trigger(&self, executor: &mut Executor, ids: Vec<DataType>) {
+    fn trigger(&self, executor: &mut dyn Executor, ids: Vec<DataType>) {
         if ids.is_empty() {
             return;
         }
@@ -82,7 +82,7 @@ impl Ingredient for Trigger {
 
     fn on_input(
         &mut self,
-        executor: &mut Executor,
+        executor: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

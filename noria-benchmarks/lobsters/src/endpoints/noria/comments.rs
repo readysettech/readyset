@@ -10,7 +10,7 @@ use trawler::UserId;
 pub(crate) fn handle<F>(
     c: F,
     acting_as: Option<UserId>,
-) -> Box<Future<Item = (my::Conn, bool), Error = my::error::Error> + Send>
+) -> Box<dyn Future<Item = (my::Conn, bool), Error = my::error::Error> + Send>
 where
     F: 'static + Future<Item = my::Conn, Error = my::error::Error> + Send,
 {

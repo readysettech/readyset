@@ -105,10 +105,10 @@ impl GroupedOperation for ExtremumOperator {
     fn apply(
         &self,
         current: Option<&DataType>,
-        diffs: &mut Iterator<Item = Self::Diff>,
+        diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
-        // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
+        // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
         if let Some(data) = current {
             match *data {

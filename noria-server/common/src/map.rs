@@ -142,21 +142,23 @@ impl<T> Map<T> {
         ret
     }
 
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (LocalNodeIndex, &'a T)> + 'a> {
+    pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = (LocalNodeIndex, &'a T)> + 'a> {
         Box::new(self.things.iter().enumerate().filter_map(|(i, t)| {
             t.as_ref()
                 .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (LocalNodeIndex, &'a mut T)> + 'a> {
+    pub fn iter_mut<'a>(
+        &'a mut self,
+    ) -> Box<dyn Iterator<Item = (LocalNodeIndex, &'a mut T)> + 'a> {
         Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
             t.as_mut()
                 .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
-    pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
+    pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a T> + 'a> {
         Box::new(self.things.iter().filter_map(Option::as_ref))
     }
 
@@ -237,7 +239,7 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
 
 impl<T: 'static> IntoIterator for Map<T> {
     type Item = (LocalNodeIndex, T);
-    type IntoIter = Box<Iterator<Item = Self::Item>>;
+    type IntoIter = Box<dyn Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
         Box::new(
             self.things

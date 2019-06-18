@@ -46,7 +46,7 @@ impl Ingredient for Latest {
 
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

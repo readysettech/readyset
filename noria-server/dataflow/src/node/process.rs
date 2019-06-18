@@ -16,7 +16,7 @@ impl Node {
         on_shard: Option<usize>,
         swap: bool,
         output: &mut EnqueuedSends,
-        ex: &mut Executor,
+        ex: &mut dyn Executor,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
@@ -305,7 +305,7 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
 
 #[allow(clippy::borrowed_box)]
 // crate visibility due to use by tests
-crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<State>>) {
+crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<dyn State>>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope

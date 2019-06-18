@@ -315,7 +315,7 @@ impl SingleState {
         keys.iter().map(|k| self.state.evict(k)).sum()
     }
 
-    pub(super) fn values<'a>(&'a self) -> Box<Iterator<Item = &'a Vec<Row>> + 'a> {
+    pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Vec<Row>> + 'a> {
         match self.state {
             KeyedState::Single(ref map) => Box::new(map.values()),
             KeyedState::Double(ref map) => Box::new(map.values()),

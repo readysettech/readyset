@@ -152,7 +152,7 @@ impl GroupedOperation for GroupConcat {
     fn apply(
         &self,
         current: Option<&DataType>,
-        diffs: &mut Iterator<Item = Self::Diff>,
+        diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;

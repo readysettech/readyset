@@ -55,7 +55,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn apply(
         &self,
         current: Option<&DataType>,
-        diffs: &mut Iterator<Item = Self::Diff>,
+        diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> DataType;
 
     fn description(&self, detailed: bool) -> String;
@@ -143,7 +143,7 @@ where
 
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

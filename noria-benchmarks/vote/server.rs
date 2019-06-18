@@ -186,7 +186,7 @@ impl<'a> Server<'a> {
     pub(crate) fn write_stats(
         &mut self,
         backend: &Backend,
-        w: &mut io::Write,
+        w: &mut dyn io::Write,
     ) -> Result<(), Error> {
         // first, get uptime (for load avgs)
         let mut c = self.server.exec(&["uptime"])?;

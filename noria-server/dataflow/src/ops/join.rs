@@ -228,7 +228,7 @@ impl Ingredient for Join {
     #[allow(clippy::cognitive_complexity)]
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,

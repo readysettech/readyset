@@ -14,7 +14,7 @@ pub(crate) struct Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = Box<Future<Item = Self, Error = failure::Error> + Send>;
+    type Future = Box<dyn Future<Item = Self, Error = failure::Error> + Send>;
     fn new(
         _: tokio::runtime::TaskExecutor,
         params: Parameters,
@@ -69,7 +69,7 @@ impl VoteClient for Conn {
 impl Service<ReadRequest> for Conn {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
+    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         self.r
@@ -104,7 +104,7 @@ impl Service<ReadRequest> for Conn {
 impl Service<WriteRequest> for Conn {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<Future<Item = (), Error = failure::Error> + Send>;
+    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())

@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(b.unmodified, true);
     }
 
-    fn test_lots_of_changes_in_same_batch(mut state: Box<State>) {
+    fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
         use node;
         use prelude::*;
 

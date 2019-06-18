@@ -6,7 +6,7 @@ use std::time;
 use super::Backend;
 use noria::{DataType, SyncTable};
 
-fn do_put<'a>(mutator: &'a mut SyncTable, tx: bool) -> Box<FnMut(Vec<DataType>) + 'a> {
+fn do_put<'a>(mutator: &'a mut SyncTable, tx: bool) -> Box<dyn FnMut(Vec<DataType>) + 'a> {
     if tx {
         // Box::new(move |v| assert!(mutator.transactional.insert(v, Token::empty()).is_ok())),
         unimplemented!()

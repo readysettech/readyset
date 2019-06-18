@@ -143,7 +143,7 @@ pub enum DualTcpStream<S, T, T2, D> {
     Passthrough(AsyncBincodeStream<S, T, Tagged<()>, D>),
     Upgrade(
         AsyncBincodeStream<S, T2, Tagged<()>, D>,
-        Box<FnMut(T2) -> T + Send + Sync>,
+        Box<dyn FnMut(T2) -> T + Send + Sync>,
     ),
 }
 

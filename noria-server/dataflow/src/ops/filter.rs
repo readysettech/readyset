@@ -74,7 +74,7 @@ impl Ingredient for Filter {
 
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         _: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
@@ -178,7 +178,7 @@ impl Ingredient for Filter {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         self.lookup(*self.src, columns, key, nodes, states)
             .and_then(|result| {
                 let f = self.filter.clone();

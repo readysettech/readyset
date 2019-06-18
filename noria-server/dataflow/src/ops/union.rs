@@ -178,7 +178,7 @@ impl Ingredient for Union {
 
     fn on_input(
         &mut self,
-        _: &mut Executor,
+        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
@@ -219,7 +219,7 @@ impl Ingredient for Union {
 
     fn on_input_raw(
         &mut self,
-        ex: &mut Executor,
+        ex: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         tracer: &mut Tracer,

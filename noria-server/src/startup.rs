@@ -37,7 +37,7 @@ crate enum Event {
     #[cfg(test)]
     IsReady(futures::sync::oneshot::Sender<bool>),
     ManualMigration {
-        f: Box<FnOnce(&mut crate::controller::migrate::Migration) + Send + 'static>,
+        f: Box<dyn FnOnce(&mut crate::controller::migrate::Migration) + Send + 'static>,
         done: futures::sync::oneshot::Sender<()>,
     },
 }
@@ -231,7 +231,7 @@ fn listen_external<A: Authority + 'static>(
         type ReqBody = hyper::Body;
         type ResBody = hyper::Body;
         type Error = hyper::Error;
-        type Future = Box<Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send>;
+        type Future = Box<dyn Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send>;
 
         fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
             let mut res = Response::builder();

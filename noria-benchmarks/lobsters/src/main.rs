@@ -70,8 +70,8 @@ mod endpoints;
 
 impl trawler::LobstersClient for MysqlTrawler {
     type Error = my::error::Error;
-    type RequestFuture = Box<futures::Future<Item = (), Error = Self::Error> + Send>;
-    type SetupFuture = Box<futures::Future<Item = (), Error = Self::Error> + Send>;
+    type RequestFuture = Box<dyn futures::Future<Item = (), Error = Self::Error> + Send>;
+    type SetupFuture = Box<dyn futures::Future<Item = (), Error = Self::Error> + Send>;
 
     fn setup(&mut self) -> Self::SetupFuture {
         let mut opts = if let MaybeConn::None(ref opts) = self.c {
@@ -264,7 +264,7 @@ impl trawler::LobstersClient for MysqlTrawler {
 
                 Either::B(match variant {
                     Variant::Original => Box::new(endpoints::original::notifications(c, uid))
-                        as Box<Future<Item = my::Conn, Error = my::error::Error> + Send>,
+                        as Box<dyn Future<Item = my::Conn, Error = my::error::Error> + Send>,
                     Variant::Noria => Box::new(endpoints::noria::notifications(c, uid)),
                     Variant::Natural => Box::new(endpoints::natural::notifications(c, uid)),
                 })

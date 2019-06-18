@@ -483,7 +483,7 @@ impl Domain {
         }
     }
 
-    fn dispatch(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: &mut Executor) {
+    fn dispatch(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: &mut dyn Executor) {
         let src = m.src();
         let me = m.dst();
 
@@ -679,7 +679,7 @@ impl Domain {
         &mut self,
         m: Box<Packet>,
         sends: &mut EnqueuedSends,
-        executor: &mut Executor,
+        executor: &mut dyn Executor,
         top: bool,
     ) {
         self.wait_time.stop();
@@ -1164,7 +1164,7 @@ impl Domain {
                         self.nodes[node].borrow_mut().purge = purge;
 
                         if !index.is_empty() {
-                            let mut s: Box<State> = {
+                            let mut s: Box<dyn State> = {
                                 let n = self.nodes[node].borrow();
                                 let params = &self.persistence_parameters;
                                 match (n.get_base(), &params.mode) {
@@ -1393,7 +1393,7 @@ impl Domain {
         tag: Tag,
         keys: HashSet<Vec<DataType>>,
         sends: &mut EnqueuedSends,
-        ex: &mut Executor,
+        ex: &mut dyn Executor,
     ) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
@@ -1486,7 +1486,7 @@ impl Domain {
         tag: Tag,
         key: &[DataType],
         sends: &mut EnqueuedSends,
-        ex: &mut Executor,
+        ex: &mut dyn Executor,
     ) {
         if let ReplayPath {
             trigger: TriggerEndpoint::Start(..),
@@ -1582,7 +1582,7 @@ impl Domain {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut Executor) {
+    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut dyn Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
@@ -2290,7 +2290,7 @@ impl Domain {
         tag: Tag,
         node: LocalNodeIndex,
         sends: &mut EnqueuedSends,
-        ex: &mut Executor,
+        ex: &mut dyn Executor,
     ) {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
@@ -2646,7 +2646,7 @@ impl Domain {
 
     pub fn on_event(
         &mut self,
-        executor: &mut Executor,
+        executor: &mut dyn Executor,
         event: PollEvent,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
