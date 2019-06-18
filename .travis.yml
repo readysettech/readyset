@@ -2,7 +2,7 @@ dist: trusty
 language: rust
 cache: cargo
 rust:
-  - nightly-2019-05-22
+  - nightly-2019-06-18
 env:
   - SETTLE_TIME=2000
 script:
