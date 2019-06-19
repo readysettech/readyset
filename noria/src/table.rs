@@ -2,7 +2,6 @@ use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::internal::*;
-use crate::BoxDynError;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
@@ -66,12 +65,10 @@ pub(crate) type TableRpc = Buffer<
     Pool<
         multiplex::client::Maker<TableEndpoint, Tagged<LocalOrNot<Input>>>,
         (),
-        Tagged<LocalOrNot<Input>>,
+        tokio_tower::Request<Tagged<LocalOrNot<Input>>>,
     >,
-    Tagged<LocalOrNot<Input>>,
+    tokio_tower::Request<Tagged<LocalOrNot<Input>>>,
 >;
-
-type E = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error;
 
 /// A failed [`Table`] operation.
 #[derive(Debug)]
@@ -85,12 +82,18 @@ pub struct AsyncTableError {
     pub error: TableError,
 }
 
-impl From<BoxDynError<E>> for AsyncTableError {
-    fn from(e: BoxDynError<E>) -> Self {
+impl From<TableError> for AsyncTableError {
+    fn from(e: TableError) -> Self {
         AsyncTableError {
             table: None,
-            error: TableError::from(e.into_inner()),
+            error: e,
         }
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync>> for AsyncTableError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        AsyncTableError::from(TableError::from(e))
     }
 }
 
@@ -113,12 +116,12 @@ pub enum TableError {
 
     /// The underlying connection to Noria produced an error.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] BoxDynError<<TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error>),
+    TransportError(#[cause] failure::Error),
 }
 
-impl From<E> for TableError {
-    fn from(e: E) -> Self {
-        TableError::TransportError(BoxDynError::from(e))
+impl From<Box<dyn std::error::Error + Send + Sync>> for TableError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        TableError::TransportError(failure::Error::from_boxed_compat(e))
     }
 }
 
@@ -249,7 +252,8 @@ impl fmt::Debug for Table {
 
 impl Service<Input> for Table {
     type Error = TableError;
-    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
+    type Response =
+        <TableRpc as Service<tokio_tower::Request<Tagged<LocalOrNot<Input>>>>>::Response;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     existential type Future: Future<Item = Tagged<()>, Error = TableError>;
 
@@ -268,14 +272,13 @@ impl Service<Input> for Table {
         if self.shards.len() == 1 {
             future::Either::A(
                 self.shards[0]
-                    .call(
+                    .call(tokio_tower::Request::from(Tagged::from(
                         if self.dst_is_local {
                             unsafe { LocalOrNot::for_local_transfer(i) }
                         } else {
                             LocalOrNot::new(i)
-                        }
-                        .into(),
-                    )
+                        },
+                    )))
                     .map_err(TableError::from),
             )
         } else {
@@ -321,7 +324,7 @@ impl Service<Input> for Table {
                         })
                     };
 
-                    wait_for.push(self.shards[s].call(p.into()));
+                    wait_for.push(self.shards[s].call(tokio_tower::Request::from(Tagged::from(p))));
                 } else {
                     // poll_ready reserves a sender slot which we have to release
                     // we do that by dropping the old handle and replacing it with a clone
@@ -486,10 +489,7 @@ impl Table {
         <Self as Service<Request>>::Future: Send,
     {
         self.ready()
-            .map_err(|e| match e {
-                TableError::TransportError(e) => AsyncTableError::from(e),
-                e => unreachable!("{:?}", e),
-            })
+            .map_err(AsyncTableError::from)
             .and_then(move |mut svc| {
                 svc.call(r).then(move |r| match r {
                     Ok(_) => Ok(svc),

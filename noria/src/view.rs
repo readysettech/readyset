@@ -1,5 +1,4 @@
 use crate::data::*;
-use crate::BoxDynError;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use nom_sql::ColumnSpecification;
@@ -54,11 +53,13 @@ impl Service<()> for ViewEndpoint {
 }
 
 pub(crate) type ViewRpc = Buffer<
-    Pool<multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>, (), Tagged<ReadQuery>>,
-    Tagged<ReadQuery>,
+    Pool<
+        multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>,
+        (),
+        tokio_tower::Request<Tagged<ReadQuery>>,
+    >,
+    tokio_tower::Request<Tagged<ReadQuery>>,
 >;
-
-type E = <ViewRpc as Service<Tagged<ReadQuery>>>::Error;
 
 /// A failed [`View`] operation.
 #[derive(Debug)]
@@ -72,18 +73,18 @@ pub struct AsyncViewError {
     pub error: ViewError,
 }
 
-impl From<E> for AsyncViewError {
-    fn from(e: E) -> Self {
+impl From<ViewError> for AsyncViewError {
+    fn from(e: ViewError) -> Self {
         AsyncViewError {
             view: None,
-            error: ViewError::from(e),
+            error: e,
         }
     }
 }
 
-impl From<BoxDynError<E>> for AsyncViewError {
-    fn from(e: BoxDynError<E>) -> Self {
-        From::from(e.into_inner())
+impl From<Box<dyn std::error::Error + Send + Sync>> for AsyncViewError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        AsyncViewError::from(ViewError::from(e))
     }
 }
 
@@ -95,12 +96,12 @@ pub enum ViewError {
     NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] BoxDynError<E>),
+    TransportError(#[cause] failure::Error),
 }
 
-impl From<E> for ViewError {
-    fn from(e: E) -> Self {
-        ViewError::TransportError(BoxDynError::from(e))
+impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        ViewError::TransportError(failure::Error::from_boxed_compat(e))
     }
 }
 
@@ -231,14 +232,13 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         if self.shards.len() == 1 {
             return future::Either::A(
                 self.shards[0]
-                    .call(
+                    .call(tokio_tower::Request::from(Tagged::from(
                         ReadQuery::Normal {
                             target: (self.node, 0),
                             keys,
                             block,
-                        }
-                        .into(),
-                    )
+                        },
+                    )))
                     .map_err(ViewError::from)
                     .and_then(|reply| match reply.v {
                         ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -275,14 +275,13 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                     })
                     .map(move |((shardi, shard), shard_queries)| {
                         shard
-                            .call(
+                            .call(tokio_tower::Request::from(Tagged::from(
                                 ReadQuery::Normal {
                                     target: (node, shardi),
                                     keys: shard_queries,
                                     block,
-                                }
-                                .into(),
-                            )
+                                },
+                            )))
                             .map_err(ViewError::from)
                             .and_then(|reply| match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -320,9 +319,9 @@ impl View {
                     .map_err(AsyncViewError::from)
                     .and_then(move |mut svc| {
                         svc.call(
-                            ReadQuery::Size {
+                            Tagged::from(ReadQuery::Size {
                                 target: (node, shardi),
-                            }
+                            })
                             .into(),
                         )
                         .map_err(AsyncViewError::from)
@@ -350,10 +349,7 @@ impl View {
         block: bool,
     ) -> impl Future<Item = (Self, Vec<Datas>), Error = AsyncViewError> + Send {
         self.ready()
-            .map_err(|e| match e {
-                ViewError::NotYetAvailable => unreachable!("can't occur in poll_ready"),
-                ViewError::TransportError(e) => AsyncViewError::from(e),
-            })
+            .map_err(AsyncViewError::from)
             .and_then(move |mut svc| {
                 svc.call((keys, block)).then(move |res| match res {
                     Ok(res) => Ok((svc, res)),

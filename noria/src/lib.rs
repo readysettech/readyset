@@ -241,28 +241,3 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         }
     }
 }
-
-/// A `Box<dyn ::std::error::Error>` while we're waiting on rust-lang/rust#58974.
-pub struct BoxDynError<E>(E);
-use std::fmt;
-impl<E: fmt::Display + fmt::Debug> ::std::error::Error for BoxDynError<E> {}
-impl<E: fmt::Display + fmt::Debug> fmt::Debug for BoxDynError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(&self.0, f)
-    }
-}
-impl<E: fmt::Display + fmt::Debug> fmt::Display for BoxDynError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
-impl<E> From<E> for BoxDynError<E> {
-    fn from(e: E) -> Self {
-        BoxDynError(e)
-    }
-}
-impl<E> BoxDynError<E> {
-    fn into_inner(self) -> E {
-        self.0
-    }
-}
