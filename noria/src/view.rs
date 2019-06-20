@@ -179,12 +179,14 @@ impl ViewBuilder {
         }))
         .map(move |shards| {
             let (addrs, conns) = shards.into_iter().unzip();
+            let tracer = tokio_trace::dispatcher::get_default(|d| d.clone());
             View {
                 node,
                 schema,
                 columns,
                 shard_addrs: addrs,
                 shards: conns,
+                tracer,
             }
         })
     }
@@ -202,6 +204,8 @@ pub struct View {
 
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
+
+    tracer: tokio_trace::Dispatch,
 }
 
 impl fmt::Debug for View {
@@ -228,17 +232,26 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
     }
 
     fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
-        // TODO: optimize for when there's only one shard
+        let span = if crate::trace_next_op() {
+            Some(tokio_trace::trace_span!("view-request", ?keys))
+        } else {
+            None
+        };
+
         if self.shards.len() == 1 {
+            let mut request = tokio_tower::Request::from(Tagged::from(ReadQuery::Normal {
+                target: (self.node, 0),
+                keys,
+                block,
+            }));
+
+            if let Some(span) = span {
+                span.in_scope(|| tokio_trace::trace!("submit request"));
+                request = request.with_span(span);
+            }
             return future::Either::A(
                 self.shards[0]
-                    .call(tokio_tower::Request::from(Tagged::from(
-                        ReadQuery::Normal {
-                            target: (self.node, 0),
-                            keys,
-                            block,
-                        },
-                    )))
+                    .call(request)
                     .map_err(ViewError::from)
                     .and_then(|reply| match reply.v {
                         ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -248,6 +261,9 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
             );
         }
 
+        if let Some(ref span) = span {
+            span.in_scope(|| tokio_trace::trace!("shard request"));
+        }
         assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for key in keys {
@@ -274,14 +290,22 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                         }
                     })
                     .map(move |((shardi, shard), shard_queries)| {
+                        let mut request =
+                            tokio_tower::Request::from(Tagged::from(ReadQuery::Normal {
+                                target: (node, shardi),
+                                keys: shard_queries,
+                                block,
+                            }));
+
+                        if let Some(ref span) = span {
+                            let span =
+                                tokio_trace::trace_span!(parent: span, "request-shard", shardi);
+                            span.in_scope(|| tokio_trace::trace!("submit request shard"));
+                            request = request.with_span(span);
+                        }
+
                         shard
-                            .call(tokio_tower::Request::from(Tagged::from(
-                                ReadQuery::Normal {
-                                    target: (node, shardi),
-                                    keys: shard_queries,
-                                    block,
-                                },
-                            )))
+                            .call(request)
                             .map_err(ViewError::from)
                             .and_then(|reply| match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -386,24 +410,28 @@ impl View {
 pub struct SyncView(Option<View>);
 
 macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {
-        match $self
+    ($self:ident.$method:ident($($args:expr),*)) => {{
+        let mut view = $self
             .0
             .take()
-            .expect("tried to use View after its transport has failed")
-            .$method($($args),*)
-            .wait()
-        {
-            Ok((this, res)) => {
+            .expect("tried to use View after its transport has failed");
+        let tracer = std::mem::replace(&mut view.tracer, tokio_trace::Dispatch::none());
+        let res = tokio_trace::dispatcher::with_default(&tracer, move || view.$method($($args),*).wait());
+        match res {
+            Ok((mut this, res)) => {
+                std::mem::replace(&mut this.tracer, tracer);
                 $self.0 = Some(this);
                 Ok(res)
             }
-            Err(e) => {
+            Err(mut e) => {
+                if let Some(ref mut view) = e.view {
+                    std::mem::replace(&mut view.tracer, tracer);
+                }
                 $self.0 = e.view;
                 Err(e.error)
             },
         }
-    };
+    }};
 }
 
 #[allow(clippy::len_without_is_empty)]

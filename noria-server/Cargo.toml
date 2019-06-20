@@ -36,6 +36,8 @@ async-bincode = "0.4.5"
 tokio-threadpool = "0.1"
 tokio-io-pool = "0.1.1"
 tokio-sync = "0.1"
+tokio-trace = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio-trace-fmt = { git = "https://github.com/tokio-rs/tokio-trace-nursery.git" }
 streamunordered = "0.4.0"
 bufstream = { version = "0.1.3", features = [ "tokio" ] }
 stream-cancel = "0.4"
