@@ -233,7 +233,11 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
 
     fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
         let span = if crate::trace_next_op() {
-            Some(tokio_trace::trace_span!("view-request", ?keys))
+            Some(tokio_trace::trace_span!(
+                "view-request",
+                ?keys,
+                node = self.node.index()
+            ))
         } else {
             None
         };

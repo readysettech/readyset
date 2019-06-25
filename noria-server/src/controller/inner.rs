@@ -868,6 +868,7 @@ impl ControllerInner {
 
         Some(TableBuilder {
             txs,
+            ni: node.global_addr(),
             addr: node.local_addr(),
             key,
             key_is_primary: is_primary,

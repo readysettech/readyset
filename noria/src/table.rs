@@ -7,6 +7,7 @@ use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures::stream::futures_unordered::FuturesUnordered;
 use nom_sql::CreateTableStatement;
+use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -147,6 +148,7 @@ impl fmt::Debug for Input {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableBuilder {
     pub txs: Vec<SocketAddr>,
+    pub ni: NodeIndex,
     pub addr: LocalNodeIndex,
     pub key_is_primary: bool,
     pub key: Vec<usize>,
@@ -196,6 +198,7 @@ impl TableBuilder {
             let (addrs, conns) = shards.into_iter().unzip();
             let dispatch = tokio_trace::dispatcher::get_default(|d| d.clone());
             Table {
+                ni: self.ni,
                 node: self.addr,
                 key: self.key,
                 key_is_primary: self.key_is_primary,
@@ -223,6 +226,7 @@ impl TableBuilder {
 /// call `Table::into_exclusive`.
 #[derive(Clone)]
 pub struct Table {
+    ni: NodeIndex,
     node: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
@@ -242,6 +246,7 @@ pub struct Table {
 impl fmt::Debug for Table {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Table")
+            .field("ni", &self.ni)
             .field("node", &self.node)
             .field("key_is_primary", &self.key_is_primary)
             .field("key", &self.key)
@@ -271,7 +276,10 @@ impl Service<Input> for Table {
 
     fn call(&mut self, mut i: Input) -> Self::Future {
         let span = if crate::trace_next_op() {
-            Some(tokio_trace::trace_span!("table-request"))
+            Some(tokio_trace::trace_span!(
+                "table-request",
+                base = self.ni.index()
+            ))
         } else {
             None
         };
