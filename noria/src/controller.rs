@@ -173,7 +173,7 @@ where
     handle: Buffer<Controller<A>, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
-    tracer: tokio_trace::Dispatch,
+    tracer: tracing::Dispatch,
 }
 
 impl<A> Clone for ControllerHandle<A>
@@ -206,7 +206,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn make(authority: Arc<A>) -> impl Future<Item = Self, Error = failure::Error> {
         // need to use lazy otherwise current executor won't be known
         future::lazy(move || {
-            let tracer = tokio_trace::dispatcher::get_default(|d| d.clone());
+            let tracer = tracing::dispatcher::get_default(|d| d.clone());
             Ok(ControllerHandle {
                 views: Default::default(),
                 domains: Default::default(),
@@ -472,7 +472,7 @@ where
     A: 'static + Authority,
 {
     handle: Option<ControllerHandle<A>>,
-    tracer: tokio_trace::Dispatch,
+    tracer: tracing::Dispatch,
     executor: E,
 }
 

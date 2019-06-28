@@ -179,7 +179,7 @@ impl ViewBuilder {
         }))
         .map(move |shards| {
             let (addrs, conns) = shards.into_iter().unzip();
-            let tracer = tokio_trace::dispatcher::get_default(|d| d.clone());
+            let tracer = tracing::dispatcher::get_default(|d| d.clone());
             View {
                 node,
                 schema,
@@ -205,7 +205,7 @@ pub struct View {
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
 
-    tracer: tokio_trace::Dispatch,
+    tracer: tracing::Dispatch,
 }
 
 impl fmt::Debug for View {
@@ -233,7 +233,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
 
     fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
         let span = if crate::trace_next_op() {
-            Some(tokio_trace::trace_span!(
+            Some(tracing::trace_span!(
                 "view-request",
                 ?keys,
                 node = self.node.index()
@@ -250,7 +250,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
             }));
 
             if let Some(span) = span {
-                span.in_scope(|| tokio_trace::trace!("submit request"));
+                span.in_scope(|| tracing::trace!("submit request"));
                 request = request.with_span(span);
             }
             return future::Either::A(
@@ -266,7 +266,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         }
 
         if let Some(ref span) = span {
-            span.in_scope(|| tokio_trace::trace!("shard request"));
+            span.in_scope(|| tracing::trace!("shard request"));
         }
         assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
@@ -302,9 +302,8 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                             }));
 
                         if let Some(ref span) = span {
-                            let span =
-                                tokio_trace::trace_span!(parent: span, "request-shard", shardi);
-                            span.in_scope(|| tokio_trace::trace!("submit request shard"));
+                            let span = tracing::trace_span!(parent: span, "request-shard", shardi);
+                            span.in_scope(|| tracing::trace!("submit request shard"));
                             request = request.with_span(span);
                         }
 
@@ -419,8 +418,8 @@ macro_rules! sync {
             .0
             .take()
             .expect("tried to use View after its transport has failed");
-        let tracer = std::mem::replace(&mut view.tracer, tokio_trace::Dispatch::none());
-        let res = tokio_trace::dispatcher::with_default(&tracer, move || view.$method($($args),*).wait());
+        let tracer = std::mem::replace(&mut view.tracer, tracing::Dispatch::none());
+        let res = tracing::dispatcher::with_default(&tracer, move || view.$method($($args),*).wait());
         match res {
             Ok((mut this, res)) => {
                 std::mem::replace(&mut this.tracer, tracer);

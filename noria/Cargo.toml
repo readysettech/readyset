@@ -40,7 +40,7 @@ tower-balance = { git = "https://github.com/tower-rs/tower.git" }
 tower-discover = "0.1"
 tower-buffer = "0.1"
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "tokio-trace" }
-tokio-trace = { git = "https://github.com/tokio-rs/tokio.git" }
+tracing = { git = "https://github.com/tokio-rs/tracing.git" }
 tower-util = "0.1"
 tower = "0.1"
 slab = "0.4"

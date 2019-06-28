@@ -196,7 +196,7 @@ impl TableBuilder {
         )
         .map(move |shards| {
             let (addrs, conns) = shards.into_iter().unzip();
-            let dispatch = tokio_trace::dispatcher::get_default(|d| d.clone());
+            let dispatch = tracing::dispatcher::get_default(|d| d.clone());
             Table {
                 ni: self.ni,
                 node: self.addr,
@@ -240,7 +240,7 @@ pub struct Table {
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
 
-    dispatch: tokio_trace::Dispatch,
+    dispatch: tracing::Dispatch,
 }
 
 impl fmt::Debug for Table {
@@ -276,7 +276,7 @@ impl Service<Input> for Table {
 
     fn call(&mut self, mut i: Input) -> Self::Future {
         let span = if crate::trace_next_op() {
-            Some(tokio_trace::trace_span!(
+            Some(tracing::trace_span!(
                 "table-request",
                 base = self.ni.index()
             ))
@@ -296,7 +296,7 @@ impl Service<Input> for Table {
             }));
 
             if let Some(span) = span {
-                span.in_scope(|| tokio_trace::trace!("submit request"));
+                span.in_scope(|| tracing::trace!("submit request"));
                 request = request.with_span(span);
             }
             future::Either::A(self.shards[0].call(request).map_err(TableError::from))
@@ -311,7 +311,7 @@ impl Service<Input> for Table {
             let key_col = self.key[0];
 
             if let Some(ref span) = span {
-                span.in_scope(|| tokio_trace::trace!("shard request"));
+                span.in_scope(|| tracing::trace!("shard request"));
             }
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
             for r in i.data.drain(..) {
@@ -347,8 +347,8 @@ impl Service<Input> for Table {
                     };
                     let mut request = tokio_tower::Request::from(Tagged::from(p));
                     if let Some(ref span) = span {
-                        let span = tokio_trace::trace_span!(parent: span, "request-shard", s);
-                        span.in_scope(|| tokio_trace::trace!("submit request shard"));
+                        let span = tracing::trace_span!(parent: span, "request-shard", s);
+                        span.in_scope(|| tracing::trace!("submit request shard"));
                         request = request.with_span(span);
                     }
 
@@ -666,8 +666,8 @@ macro_rules! sync {
             .0
             .take()
             .expect("tried to use Table after its transport has failed");
-        let tracer = std::mem::replace(&mut table.dispatch, tokio_trace::Dispatch::none());
-        let res = tokio_trace::dispatcher::with_default(&tracer, move || table.$method($($args),*).wait());
+        let tracer = std::mem::replace(&mut table.dispatch, tracing::Dispatch::none());
+        let res = tracing::dispatcher::with_default(&tracer, move || table.$method($($args),*).wait());
         match res {
             Ok(mut this) => {
                 std::mem::replace(&mut this.dispatch, tracer);

@@ -132,9 +132,8 @@ impl Builder {
     ///
     /// The returned handle executes all operations synchronously on a tokio runtime.
     pub fn start_simple(&self) -> Result<SyncHandle<LocalAuthority>, failure::Error> {
-        let tracer =
-            tokio_trace::Dispatch::new(tokio_trace_fmt::FmtSubscriber::builder().full().finish());
-        let mut rt = tokio_trace::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new)?;
+        let tracer = tracing::Dispatch::new(tracing_fmt::FmtSubscriber::builder().finish());
+        let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new)?;
         let wh = rt.block_on(self.start_local())?;
         Ok(SyncHandle::from_existing(rt, wh))
     }
