@@ -57,7 +57,7 @@
                       $("#mat-status").text("Partial");
                     }
                   }
-                  $("#mem-size").text(stats["mem_size"] + " bytes");
+                  $("#mem-size").text(filesize(stats["mem_size"]));
                 }
               });
             });
