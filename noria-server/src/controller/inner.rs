@@ -220,7 +220,7 @@ impl ControllerInner {
                 return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
             }
             (&Method::GET, "/get_statistics") => {
-                return Ok(Ok(format!("{:#?}", self.get_statistics())));
+                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
             (&Method::POST, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
