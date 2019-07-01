@@ -44,6 +44,7 @@
             $.each(data["domains"], function (idx, domain) {
               $.each(domain[1], function (ni, stats) {
                 if (ni == node) {
+                  $("#node-id").text(ni);
                   $("#node-name").text(node_data[ni]["name"]);
                   $("#desc").text(stats["desc"]);
                   $("#mat-status").text(stats["materialized"]);
