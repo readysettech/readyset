@@ -17,3 +17,7 @@ function instanceFormatter(value, row, index) {
 function nodeFormatter(value, row, index) {
   return "<a href=\"node.html?n=" + value + "\">" + value + "</a>";
 }
+
+function domainFormatter(value, row, index) {
+  return "<a href=\"domain.html?d=" + value + "\">" + value + "</a>";
+}
