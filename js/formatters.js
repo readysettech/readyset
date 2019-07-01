@@ -13,3 +13,7 @@ function booleanFormatter(value) {
 function instanceFormatter(value, row, index) {
   return "<a href=\"nodes.html?i=" + value + "\">" + value + "</a>";
 }
+
+function nodeFormatter(value, row, index) {
+  return "<a href=\"node.html?n=" + value + "\">" + value + "</a>";
+}
