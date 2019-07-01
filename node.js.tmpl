@@ -47,7 +47,16 @@
                   $("#node-id").text(ni);
                   $("#node-name").text(node_data[ni]["name"]);
                   $("#desc").text(stats["desc"]);
-                  $("#mat-status").text(stats["materialized"]);
+                  mat_stats = stats["materialized"];
+                  if (mat_stats == "Not" || mat_stats == "Full") {
+                    $("#mat-status").text(mat_stats);
+                  } else if ("Partial" in mat_stats) {
+                    if (mat_stats["beyond_materialization_frontier"]) {
+                      $("#mat-status").text("Partial (beyond materialization frontier)");
+                    } else {
+                      $("#mat-status").text("Partial");
+                    }
+                  }
                   $("#mem-size").text(stats["mem_size"] + " bytes");
                 }
               });
