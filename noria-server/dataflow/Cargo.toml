@@ -28,7 +28,7 @@ jemallocator = "0.3"
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
-timekeeper = {version = "0.3.0", default-features = false }
+timekeeper = { git = "https://github.com/ms705/timekeeper", default-features = false }
 rocksdb = {version = "0.12.2", default-features = false, features = ["lz4"] }
 
 # local deps

@@ -690,7 +690,9 @@ impl Domain {
         executor: &mut dyn Executor,
         top: bool,
     ) {
-        self.wait_time.stop();
+        if self.wait_time.is_running() {
+            self.wait_time.stop();
+        }
         m.trace(PacketEvent::Handle);
 
         match *m {
@@ -1391,7 +1393,9 @@ impl Domain {
                 self.handle(m, sends, executor, false);
             }
         }
-        self.wait_time.start();
+        if !self.wait_time.is_running() {
+            self.wait_time.start();
+        }
     }
 
     fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
@@ -2632,7 +2636,6 @@ impl Domain {
         self.control_reply_tx
             .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
             .unwrap();
-        self.wait_time.start();
     }
 
     pub fn update_state_sizes(&mut self) {
@@ -2674,7 +2677,9 @@ impl Domain {
         event: PollEvent,
         sends: &mut EnqueuedSends,
     ) -> ProcessResult {
-        self.wait_time.stop();
+        if self.wait_time.is_running() {
+            self.wait_time.stop();
+        }
         //self.total_time.start();
         //self.total_ptime.start();
         let res = match event {
@@ -2743,7 +2748,9 @@ impl Domain {
                 ProcessResult::Processed
             }
         };
-        self.wait_time.start();
+        if !self.wait_time.is_running() {
+            self.wait_time.start();
+        }
         res
     }
 }
