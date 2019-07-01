@@ -12,7 +12,8 @@ if len(sys.argv) < 2:
 page = sys.argv[1]
 
 context = {}
-context["NAVBAR"] = pystache.render(open("navbar.tmpl").read())
+context['{}_ACTIVE'.format(page)] = 'active';
+context["NAVBAR"] = pystache.render(open("navbar.tmpl").read(), context)
 context["MAIN"] = pystache.render(open("{}.tmpl".format(page)).read())
 context["PAGE_JS"] = pystache.render(open("{}.js.tmpl".format(page)).read())
 
