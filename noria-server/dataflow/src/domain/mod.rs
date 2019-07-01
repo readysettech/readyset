@@ -997,6 +997,7 @@ impl Domain {
                         );
                     }
                     Packet::RequestReaderReplay { key, cols, node } => {
+                        self.total_replay_time.start();
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
@@ -1026,6 +1027,7 @@ impl Domain {
                         {
                             self.find_tags_and_replay(key, &cols[..], node);
                         }
+                        self.total_replay_time.stop();
                     }
                     Packet::RequestPartialReplay { tag, key } => {
                         trace!(
@@ -1034,7 +1036,9 @@ impl Domain {
                            "tag" => tag.id(),
                            "key" => format!("{:?}", key)
                         );
+                        self.total_replay_time.start();
                         self.seed_replay(tag, &key[..], sends, executor);
+                        self.total_replay_time.stop();
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
@@ -1165,12 +1169,14 @@ impl Domain {
                                 })
                                 .unwrap();
                         }
-                        self.total_replay_time.stop();
-
                         self.handle_replay(p, sends, executor);
+
+                        self.total_replay_time.stop();
                     }
                     Packet::Finish(tag, ni) => {
+                        self.total_replay_time.start();
                         self.finish_replay(tag, ni, sends, executor);
+                        self.total_replay_time.stop();
                     }
                     Packet::Ready { node, purge, index } => {
                         assert_eq!(self.mode, DomainMode::Forwarding);
@@ -1318,6 +1324,7 @@ impl Domain {
             }
         }
 
+        self.total_replay_time.start();
         if !self.buffered_replay_requests.is_empty() {
             let now = time::Instant::now();
             let to = self.replay_batch_timeout;
@@ -1340,6 +1347,7 @@ impl Domain {
                 self.seed_all(tag, keys, sends, executor);
             }
         }
+        self.total_replay_time.stop();
 
         let mut swap = HashSet::new();
         while let Some(tp) = self.timed_purges.front() {
