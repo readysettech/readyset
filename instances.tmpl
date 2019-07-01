@@ -6,16 +6,17 @@
             <div id="error-msg" class="alert alert-danger alert-dismissible fade" role="alert">
               <strong>Error</strong> Message.
             </div>
-
           </div>
 
-          <table id="instance-table">
-            <thead>
-              <tr>
-                <th data-field="0" data-sortable="true" data-formatter="instanceFormatter">Instance address</th>
-                <th data-field="1" data-sortable="true" data-formatter="booleanFormatter">Healthy</th>
-                <th data-field="2" data-sortable="true" data-formatter="durationFormatter">Time since heartbeat [sec]</th>
-              </tr>
-            </thead>
-          </table>
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3">
+            <table id="instance-table">
+              <thead>
+                <tr>
+                  <th data-field="0" data-sortable="true" data-formatter="instanceFormatter">Instance address</th>
+                  <th data-field="1" data-sortable="true" data-formatter="booleanFormatter">Healthy</th>
+                  <th data-field="2" data-sortable="true" data-formatter="durationFormatter">Time since heartbeat [sec]</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
         </main>
