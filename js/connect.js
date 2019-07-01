@@ -1,5 +1,12 @@
       var controller_addr = localStorage.getItem("noria_controller_addr");
 
+      function connect(controller_addr) {
+        localStorage.setItem("noria_controller_addr", controller_addr);
+        $("#controller-addr-edit").addClass("d-none");
+        $("#controller-addr").removeClass("d-none");
+        $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
+      }
+
       /* Controller connection handling */
       if (controller_addr) {
         $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
@@ -19,9 +26,13 @@
       });
       $("#controller-addr-connect").click(function() {
         controller_addr = $("#controller-addr-input").val();
-        localStorage.setItem("noria_controller_addr", controller_addr);
-        $("#controller-addr-edit").addClass("d-none");
-        $("#controller-addr").removeClass("d-none");
-        $("#controller-addr").html("Connected to Noria controller at: <b>" + controller_addr + "</b>");
+        connect(controller_addr);
+      });
+      $("#controller-addr-input").keyup(function (evt) {
+        if (evt["which"] == 13) {
+          // enter/return
+          controller_addr = $("#controller-addr-input").val();
+          connect(controller_addr);
+        }
       });
 
