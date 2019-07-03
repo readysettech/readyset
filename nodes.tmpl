@@ -10,7 +10,7 @@
 
           <h3>Vertices</h3>
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3">
-            <table id="node-table">
+            <table id="node-table" data-sort-stable="true" data-sortable="true" data-pagination="true" data-search="true">
               <thead>
                 <tr>
                   <th data-field="0" data-sortable="true" data-formatter="nodeFormatter">ID</th>
@@ -23,11 +23,14 @@
 
           <h3>Domains</h3>
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3">
-            <table id="domain-table">
+            <table id="domain-table" data-sort-stable="true" data-sortable="true" data-sort-name="0">
               <thead>
                 <tr>
                   <th data-field="0" data-sortable="true" data-formatter="domainFormatter">ID</th>
                   <th data-field="1" data-sortable="true"># nodes</th>
+                  <th data-field="2" data-sortable="true" data-formatter="readableNanosecondFormatter">Fwd time</th>
+                  <th data-field="3" data-sortable="true" data-formatter="readableNanosecondFormatter">Upq time</th>
+                  <th data-field="4" data-sortable="true" data-formatter="readableNanosecondFormatter">Wait time</th>
                 </tr>
               </thead>
             </table>

@@ -27,7 +27,7 @@
             $("#error-msg").removeClass("show");
             var domains = [];
             $.each(data["domains"], function (idx, ds) {
-              domains.push([idx, Object.keys(ds[1]).length]);
+              domains.push([idx, Object.keys(ds[1]).length, ds[0]["total_forward_time"], ds[0]["total_replay_time"], ds[0]["wait_time"]]);
             });
             $("#domain-table").bootstrapTable('load', domains);
           },

@@ -21,3 +21,18 @@ function nodeFormatter(value, row, index) {
 function domainFormatter(value, row, index) {
   return "<a href=\"domain.html?d=" + value + "\">" + value + "</a>";
 }
+
+function readableNanosecondFormatter(value) {
+  if (value > 1000 * 1000 * 1000) {
+    // > 1sec
+    return (value / (1000.0 * 1000.0 * 1000.0)) + " sec";
+  } else if (value > 1000 * 1000) {
+    // < 1sec > 1msec
+    return (value / (1000.0 * 1000.0)) + " msec";
+  } else if (value > 1000) {
+    // < 1msec > 1µsec
+    return (value / 1000.0) + " µsec";
+  } else {
+    return value + " ns";
+  }
+}

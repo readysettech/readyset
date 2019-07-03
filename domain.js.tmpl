@@ -1,4 +1,19 @@
     <script>
+      function readableNanosecondFormatter(value) {
+        if (value > 1000 * 1000 * 1000) {
+          // > 1sec
+          return (value / (1000.0 * 1000.0 * 1000.0)) + " sec";
+        } else if (value > 1000 * 1000) {
+          // < 1sec > 1msec
+          return (value / (1000.0 * 1000.0)) + " msec";
+        } else if (value > 1000) {
+          // < 1msec > 1µsec
+          return (value / 1000.0) + " µsec";
+        } else {
+          return value + " ns";
+        }
+      }
+
       // https://stackoverflow.com/a/21903119
       var getUrlParameter = function getUrlParameter(sParam) {
           var sPageURL = decodeURIComponent(window.location.search.substring(1)),
@@ -44,9 +59,9 @@
             $.each(data["domains"], function (idx, ds) {
               if (idx == dom_id) {
                 $("#domain-id").text(idx);
-                $("#dom-stats-forward").text(ds[0]["total_forward_time"]);
-                $("#dom-stats-replay").text(ds[0]["total_replay_time"]);
-                $("#dom-stats-wait").text(ds[0]["wait_time"]);
+                $("#dom-stats-forward").text(readableNanosecondFormatter(ds[0]["total_forward_time"]));
+                $("#dom-stats-replay").text(readableNanosecondFormatter(ds[0]["total_replay_time"]));
+                $("#dom-stats-wait").text(readableNanosecondFormatter(ds[0]["wait_time"]));
                 $("#nodes").text(Object.keys(ds[1]).length);
               }
             });
