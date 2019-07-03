@@ -1326,8 +1326,8 @@ impl Domain {
             }
         }
 
-        self.total_replay_time.start();
         if !self.buffered_replay_requests.is_empty() {
+            self.total_replay_time.start();
             let now = time::Instant::now();
             let to = self.replay_batch_timeout;
             let elapsed_replays: Vec<_> = {
@@ -1348,8 +1348,8 @@ impl Domain {
             for (tag, keys) in elapsed_replays {
                 self.seed_all(tag, keys, sends, executor);
             }
+            self.total_replay_time.stop();
         }
-        self.total_replay_time.stop();
 
         let mut swap = HashSet::new();
         while let Some(tp) = self.timed_purges.front() {
