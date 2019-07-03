@@ -99,10 +99,10 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 /// Extract a copy of all values in the record being targeted by the group
 fn get_group_values(group_by: &[usize], row: &Record) -> Vec<DataType> {
     let mut group = Vec::with_capacity(group_by.len() + 1);
-    for group_idx in group_by.iter() {
-        group.push(row[*group_idx].clone())
+    for &group_idx in group_by {
+        group.push(row[group_idx].clone())
     }
-    debug_assert!(group.len() == group_by.len());
+    debug_assert_eq!(group.len(), group_by.len());
     group
 }
 
