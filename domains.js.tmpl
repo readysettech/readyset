@@ -1,5 +1,5 @@
     <script>
-      $("#node-table").bootstrapTable();
+      $("#domain-table").bootstrapTable();
 
       // https://stackoverflow.com/a/21903119
       var getUrlParameter = function getUrlParameter(sParam) {
@@ -18,20 +18,17 @@
       };
 
       function update() {
-        var inst = getUrlParameter("i");
-        var resturl = "http://" + controller_addr + "/nodes";
-
-        if (inst != undefined) {
-          resturl = "http://" + controller_addr + "/nodes?w=" + inst;
-        }
-
+        var stats_url = "http://" + controller_addr + "/get_statistics";
         $.ajax({
-          url: resturl,
+          url: stats_url,
           dataType: "json",
           success: function(data) {
             $("#error-msg").removeClass("show");
-            $("#node-table").bootstrapTable('load', data);
-            feather.replace()
+            var domains = [];
+            $.each(data["domains"], function (idx, ds) {
+              domains.push([idx, Object.keys(ds[1]).length, ds[0]["total_forward_time"], ds[0]["total_replay_time"], ds[0]["wait_time"]]);
+            });
+            $("#domain-table").bootstrapTable('load', domains);
           },
           error: function(e) {
             $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
