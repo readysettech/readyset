@@ -1,6 +1,6 @@
 dist: trusty
 language: rust
-cache: cargo
+cache: false
 rust:
   - nightly-2019-06-18
 env:
