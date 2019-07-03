@@ -98,6 +98,12 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 
 /// Extract a copy of all values in the record being targeted by the group
 fn get_group_values(group_by: &[usize], row: &Record) -> Vec<DataType> {
+    // This attribute is only here, because `is_sorted` is unstable. I didn't
+    // want to add a `feature` to the crate for a debug assertion thus I guarded
+    // both the `feature` and this assertion are with `cfg(debug)` (see also
+    // `lib.rs`)
+    #[cfg(debug)]
+    debug_assert!(group_by.is_sorted());
     let mut group = Vec::with_capacity(group_by.len() + 1);
     for &group_idx in group_by {
         group.push(row[group_idx].clone())

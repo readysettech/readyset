@@ -2,6 +2,9 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 #![feature(crate_visibility_modifier)]
+// Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
+// conditionally to avoid requiring another unstable feature for release builds.
+#![cfg_attr(debug, feature(is_sorted))]
 #![deny(unused_extern_crates)]
 #![allow(clippy::redundant_closure)]
 
