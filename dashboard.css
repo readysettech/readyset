@@ -49,6 +49,11 @@ body {
   color: inherit;
 }
 
+.sidebar .pl-2 .nav-link {
+  padding-left: 32px;
+  font-weight: 300;
+}
+
 .sidebar-heading {
   font-size: .75rem;
   text-transform: uppercase;
