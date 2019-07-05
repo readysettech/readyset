@@ -2,6 +2,7 @@ use fnv::FnvBuildHasher;
 use rahashmap::HashMap as RaHashMap;
 use std::rc::Rc;
 
+use super::mk_key::MakeKey;
 use common::SizeOf;
 use prelude::*;
 
@@ -64,31 +65,11 @@ impl KeyedState {
     pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
             KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove(&(key[0].clone(), key[1].clone())),
-            KeyedState::Tri(ref mut m) => {
-                m.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
-            }
-            KeyedState::Quad(ref mut m) => m.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-            )),
-            KeyedState::Quin(ref mut m) => m.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-                key[4].clone(),
-            )),
-            KeyedState::Sex(ref mut m) => m.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-                key[4].clone(),
-                key[5].clone(),
-            )),
+            KeyedState::Double(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Sex(ref mut m) => m.remove(&MakeKey::from_key(key)),
         }
         .map(|rows| {
             rows.iter()

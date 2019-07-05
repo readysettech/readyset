@@ -1,3 +1,4 @@
+use super::mk_key::MakeKey;
 use common::SizeOf;
 use prelude::*;
 use rand::prelude::*;
@@ -10,6 +11,28 @@ pub(super) struct SingleState {
     partial: bool,
     rows: usize,
 }
+
+macro_rules! insert_row_match_impl {
+    ($self:expr, $r:expr, $map:expr) => {{
+        let key = MakeKey::from_row(&$self.key, &*$r);
+        match $map.entry(key) {
+            Entry::Occupied(mut rs) => rs.get_mut().push($r),
+            Entry::Vacant(..) if $self.partial => return false,
+            rs @ Entry::Vacant(..) => rs.or_default().push($r),
+        }
+    }};
+}
+
+macro_rules! remove_row_match_impl {
+    ($self:expr, $r:expr, $do_remove:expr, $map:expr) => {{
+        // TODO: can we avoid the Clone here?
+        let key = MakeKey::from_row(&$self.key, $r);
+        if let Some(ref mut rs) = $map.get_mut(&key) {
+            return $do_remove(&mut $self.rows, rs);
+        }
+    }};
+}
+
 impl SingleState {
     pub(super) fn new(columns: &[usize], partial: bool) -> Self {
         Self {
@@ -40,68 +63,11 @@ impl SingleState {
                 }
                 map.insert(r[self.key[0]].clone(), vec![r]);
             }
-            KeyedState::Double(ref mut map) => {
-                let key = (r[self.key[0]].clone(), r[self.key[1]].clone());
-                match map.entry(key) {
-                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if self.partial => return false,
-                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                }
-            }
-            KeyedState::Tri(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                );
-                match map.entry(key) {
-                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if self.partial => return false,
-                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                }
-            }
-            KeyedState::Quad(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                );
-                match map.entry(key) {
-                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if self.partial => return false,
-                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                }
-            }
-            KeyedState::Quin(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                    r[self.key[4]].clone(),
-                );
-                match map.entry(key) {
-                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if self.partial => return false,
-                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                }
-            }
-            KeyedState::Sex(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                    r[self.key[4]].clone(),
-                    r[self.key[5]].clone(),
-                );
-                match map.entry(key) {
-                    Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                    Entry::Vacant(..) if self.partial => return false,
-                    rs @ Entry::Vacant(..) => rs.or_default().push(r),
-                }
-            }
+            KeyedState::Double(ref mut map) => insert_row_match_impl!(self, r, map),
+            KeyedState::Tri(ref mut map) => insert_row_match_impl!(self, r, map),
+            KeyedState::Quad(ref mut map) => insert_row_match_impl!(self, r, map),
+            KeyedState::Quin(ref mut map) => insert_row_match_impl!(self, r, map),
+            KeyedState::Sex(ref mut map) => insert_row_match_impl!(self, r, map),
         }
 
         self.rows += 1;
@@ -134,59 +100,11 @@ impl SingleState {
                     return do_remove(&mut self.rows, rs);
                 }
             }
-            KeyedState::Double(ref mut map) => {
-                // TODO: can we avoid the Clone here?
-                let key = (r[self.key[0]].clone(), r[self.key[1]].clone());
-                if let Some(ref mut rs) = map.get_mut(&key) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::Tri(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                );
-                if let Some(ref mut rs) = map.get_mut(&key) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::Quad(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                );
-                if let Some(ref mut rs) = map.get_mut(&key) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::Quin(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                    r[self.key[4]].clone(),
-                );
-                if let Some(ref mut rs) = map.get_mut(&key) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::Sex(ref mut map) => {
-                let key = (
-                    r[self.key[0]].clone(),
-                    r[self.key[1]].clone(),
-                    r[self.key[2]].clone(),
-                    r[self.key[3]].clone(),
-                    r[self.key[4]].clone(),
-                    r[self.key[5]].clone(),
-                );
-                if let Some(ref mut rs) = map.get_mut(&key) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
+            KeyedState::Double(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
+            KeyedState::Tri(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
+            KeyedState::Quad(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
+            KeyedState::Quin(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
+            KeyedState::Sex(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
         }
         None
     }
@@ -243,31 +161,11 @@ impl SingleState {
     pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
             KeyedState::Single(ref mut map) => map.remove(&key[0]),
-            KeyedState::Double(ref mut map) => map.remove(&(key[0].clone(), key[1].clone())),
-            KeyedState::Tri(ref mut map) => {
-                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
-            }
-            KeyedState::Quad(ref mut map) => map.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-            )),
-            KeyedState::Quin(ref mut map) => map.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-                key[4].clone(),
-            )),
-            KeyedState::Sex(ref mut map) => map.remove(&(
-                key[0].clone(),
-                key[1].clone(),
-                key[2].clone(),
-                key[3].clone(),
-                key[4].clone(),
-                key[5].clone(),
-            )),
+            KeyedState::Double(ref mut map) => map.remove(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut map) => map.remove(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut map) => map.remove(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut map) => map.remove(&MakeKey::from_key(key)),
+            KeyedState::Sex(ref mut map) => map.remove(&MakeKey::from_key(key)),
         };
         // mark_hole should only be called on keys we called mark_filled on
         removed

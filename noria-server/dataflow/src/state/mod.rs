@@ -2,6 +2,7 @@ mod keyed_state;
 mod memory_state;
 mod persistent_state;
 mod single_state;
+mod mk_key;
 
 use std::borrow::Cow;
 use std::ops::Deref;
