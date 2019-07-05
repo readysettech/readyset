@@ -13,7 +13,7 @@ pub(super) struct SingleState {
 }
 
 macro_rules! insert_row_match_impl {
-    ($self:expr, $r:expr, $map:expr) => {{
+    ($self:ident, $r:ident, $map:ident) => {{
         let key = MakeKey::from_row(&$self.key, &*$r);
         match $map.entry(key) {
             Entry::Occupied(mut rs) => rs.get_mut().push($r),
@@ -24,7 +24,7 @@ macro_rules! insert_row_match_impl {
 }
 
 macro_rules! remove_row_match_impl {
-    ($self:expr, $r:expr, $do_remove:expr, $map:expr) => {{
+    ($self:ident, $r:ident, $do_remove:ident, $map:ident) => {{
         // TODO: can we avoid the Clone here?
         let key = MakeKey::from_row(&$self.key, $r);
         if let Some(ref mut rs) = $map.get_mut(&key) {
