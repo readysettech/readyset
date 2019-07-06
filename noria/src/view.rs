@@ -53,12 +53,8 @@ impl Service<()> for ViewEndpoint {
 }
 
 pub(crate) type ViewRpc = Buffer<
-    Pool<
-        multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>,
-        (),
-        tokio_tower::Request<Tagged<ReadQuery>>,
-    >,
-    tokio_tower::Request<Tagged<ReadQuery>>,
+    Pool<multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>, (), Tagged<ReadQuery>>,
+    Tagged<ReadQuery>,
 >;
 
 /// A failed [`View`] operation.
@@ -243,16 +239,15 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         };
 
         if self.shards.len() == 1 {
-            let mut request = tokio_tower::Request::from(Tagged::from(ReadQuery::Normal {
+            let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
                 keys,
                 block,
-            }));
+            });
 
-            if let Some(span) = span {
-                span.in_scope(|| tracing::trace!("submit request"));
-                request = request.with_span(span);
-            }
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("submit request");
+
             return future::Either::A(
                 self.shards[0]
                     .call(request)
@@ -294,18 +289,21 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                         }
                     })
                     .map(move |((shardi, shard), shard_queries)| {
-                        let mut request =
-                            tokio_tower::Request::from(Tagged::from(ReadQuery::Normal {
-                                target: (node, shardi),
-                                keys: shard_queries,
-                                block,
-                            }));
+                        let request = Tagged::from(ReadQuery::Normal {
+                            target: (node, shardi),
+                            keys: shard_queries,
+                            block,
+                        });
 
-                        if let Some(ref span) = span {
-                            let span = tracing::trace_span!(parent: span, "request-shard", shardi);
-                            span.in_scope(|| tracing::trace!("submit request shard"));
-                            request = request.with_span(span);
-                        }
+                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        // make a span per shard
+                        let span = if span.is_some() {
+                            Some(tracing::trace_span!("view-shard", shardi))
+                        } else {
+                            None
+                        };
+                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        tracing::trace!("submit request shard");
 
                         shard
                             .call(request)

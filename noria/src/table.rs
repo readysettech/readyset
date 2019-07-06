@@ -66,9 +66,9 @@ pub(crate) type TableRpc = Buffer<
     Pool<
         multiplex::client::Maker<TableEndpoint, Tagged<LocalOrNot<Input>>>,
         (),
-        tokio_tower::Request<Tagged<LocalOrNot<Input>>>,
+        Tagged<LocalOrNot<Input>>,
     >,
-    tokio_tower::Request<Tagged<LocalOrNot<Input>>>,
+    Tagged<LocalOrNot<Input>>,
 >;
 
 /// A failed [`Table`] operation.
@@ -262,8 +262,7 @@ impl fmt::Debug for Table {
 
 impl Service<Input> for Table {
     type Error = TableError;
-    type Response =
-        <TableRpc as Service<tokio_tower::Request<Tagged<LocalOrNot<Input>>>>>::Response;
+    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     existential type Future: Future<Item = Tagged<()>, Error = TableError>;
 
@@ -289,16 +288,14 @@ impl Service<Input> for Table {
         // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
 
         if self.shards.len() == 1 {
-            let mut request = tokio_tower::Request::from(Tagged::from(if self.dst_is_local {
+            let request = Tagged::from(if self.dst_is_local {
                 unsafe { LocalOrNot::for_local_transfer(i) }
             } else {
                 LocalOrNot::new(i)
-            }));
+            });
 
-            if let Some(span) = span {
-                span.in_scope(|| tracing::trace!("submit request"));
-                request = request.with_span(span);
-            }
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("submit request");
             future::Either::A(self.shards[0].call(request).map_err(TableError::from))
         } else {
             if self.key.is_empty() {
@@ -310,9 +307,8 @@ impl Service<Input> for Table {
             }
             let key_col = self.key[0];
 
-            if let Some(ref span) = span {
-                span.in_scope(|| tracing::trace!("shard request"));
-            }
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("shard request");
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
             for r in i.data.drain(..) {
                 let shard = {
@@ -345,12 +341,16 @@ impl Service<Input> for Table {
                             data: rs,
                         })
                     };
-                    let mut request = tokio_tower::Request::from(Tagged::from(p));
-                    if let Some(ref span) = span {
-                        let span = tracing::trace_span!(parent: span, "request-shard", s);
-                        span.in_scope(|| tracing::trace!("submit request shard"));
-                        request = request.with_span(span);
-                    }
+                    let request = Tagged::from(p);
+
+                    // make a span per shard
+                    let span = if span.is_some() {
+                        Some(tracing::trace_span!("table-shard", s))
+                    } else {
+                        None
+                    };
+                    let _guard = span.as_ref().map(tracing::Span::enter);
+                    tracing::trace!("submit request shard");
 
                     wait_for.push(self.shards[s].call(request));
                 } else {
