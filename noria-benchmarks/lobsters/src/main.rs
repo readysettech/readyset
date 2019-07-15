@@ -47,6 +47,7 @@ struct MysqlTrawler {
     variant: Variant,
     tokens: HashMap<u32, String>,
     simulate_shards: Option<u32>,
+    reset: bool,
 }
 impl MysqlTrawler {
     fn new(variant: Variant, opts: my::OptsBuilder, simulate_shards: Option<u32>) -> Self {
@@ -55,6 +56,7 @@ impl MysqlTrawler {
             tokens: HashMap::new(),
             simulate_shards,
             variant,
+            reset: false,
         }
     }
 }
@@ -149,6 +151,18 @@ impl trawler::LobstersClient for MysqlTrawler {
             }))
         } else {
             Either::B(c)
+        };
+
+        // Give shim a heads up that we have finished priming.
+        let c = if let trawler::LobstersRequest::Story(..) = req {
+            if !self.reset {
+                self.reset = true;
+                Either::B(c.and_then(|c| c.drop_query("SET @primed = 1")))
+            } else {
+                Either::A(c)
+            }
+        } else {
+            Either::A(c)
         };
 
         // TODO: traffic management
