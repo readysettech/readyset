@@ -1,5 +1,4 @@
 use crate::data::*;
-use crate::BoxDynError;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use nom_sql::ColumnSpecification;
@@ -58,8 +57,6 @@ pub(crate) type ViewRpc = Buffer<
     Tagged<ReadQuery>,
 >;
 
-type E = <ViewRpc as Service<Tagged<ReadQuery>>>::Error;
-
 /// A failed [`View`] operation.
 #[derive(Debug)]
 pub struct AsyncViewError {
@@ -72,18 +69,18 @@ pub struct AsyncViewError {
     pub error: ViewError,
 }
 
-impl From<E> for AsyncViewError {
-    fn from(e: E) -> Self {
+impl From<ViewError> for AsyncViewError {
+    fn from(e: ViewError) -> Self {
         AsyncViewError {
             view: None,
-            error: ViewError::from(e),
+            error: e,
         }
     }
 }
 
-impl From<BoxDynError<E>> for AsyncViewError {
-    fn from(e: BoxDynError<E>) -> Self {
-        From::from(e.into_inner())
+impl From<Box<dyn std::error::Error + Send + Sync>> for AsyncViewError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        AsyncViewError::from(ViewError::from(e))
     }
 }
 
@@ -95,12 +92,12 @@ pub enum ViewError {
     NotYetAvailable,
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] BoxDynError<E>),
+    TransportError(#[cause] failure::Error),
 }
 
-impl From<E> for ViewError {
-    fn from(e: E) -> Self {
-        ViewError::TransportError(BoxDynError::from(e))
+impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        ViewError::TransportError(failure::Error::from_boxed_compat(e))
     }
 }
 
@@ -178,12 +175,14 @@ impl ViewBuilder {
         }))
         .map(move |shards| {
             let (addrs, conns) = shards.into_iter().unzip();
+            let tracer = tracing::dispatcher::get_default(|d| d.clone());
             View {
                 node,
                 schema,
                 columns,
                 shard_addrs: addrs,
                 shards: conns,
+                tracer,
             }
         })
     }
@@ -201,6 +200,8 @@ pub struct View {
 
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
+
+    tracer: tracing::Dispatch,
 }
 
 impl fmt::Debug for View {
@@ -227,18 +228,29 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
     }
 
     fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
-        // TODO: optimize for when there's only one shard
+        let span = if crate::trace_next_op() {
+            Some(tracing::trace_span!(
+                "view-request",
+                ?keys,
+                node = self.node.index()
+            ))
+        } else {
+            None
+        };
+
         if self.shards.len() == 1 {
+            let request = Tagged::from(ReadQuery::Normal {
+                target: (self.node, 0),
+                keys,
+                block,
+            });
+
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("submit request");
+
             return future::Either::A(
                 self.shards[0]
-                    .call(
-                        ReadQuery::Normal {
-                            target: (self.node, 0),
-                            keys,
-                            block,
-                        }
-                        .into(),
-                    )
+                    .call(request)
                     .map_err(ViewError::from)
                     .and_then(|reply| match reply.v {
                         ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -248,6 +260,9 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
             );
         }
 
+        if let Some(ref span) = span {
+            span.in_scope(|| tracing::trace!("shard request"));
+        }
         assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for key in keys {
@@ -274,15 +289,24 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                         }
                     })
                     .map(move |((shardi, shard), shard_queries)| {
+                        let request = Tagged::from(ReadQuery::Normal {
+                            target: (node, shardi),
+                            keys: shard_queries,
+                            block,
+                        });
+
+                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        // make a span per shard
+                        let span = if span.is_some() {
+                            Some(tracing::trace_span!("view-shard", shardi))
+                        } else {
+                            None
+                        };
+                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        tracing::trace!("submit request shard");
+
                         shard
-                            .call(
-                                ReadQuery::Normal {
-                                    target: (node, shardi),
-                                    keys: shard_queries,
-                                    block,
-                                }
-                                .into(),
-                            )
+                            .call(request)
                             .map_err(ViewError::from)
                             .and_then(|reply| match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok(rows),
@@ -320,9 +344,9 @@ impl View {
                     .map_err(AsyncViewError::from)
                     .and_then(move |mut svc| {
                         svc.call(
-                            ReadQuery::Size {
+                            Tagged::from(ReadQuery::Size {
                                 target: (node, shardi),
-                            }
+                            })
                             .into(),
                         )
                         .map_err(AsyncViewError::from)
@@ -350,10 +374,7 @@ impl View {
         block: bool,
     ) -> impl Future<Item = (Self, Vec<Datas>), Error = AsyncViewError> + Send {
         self.ready()
-            .map_err(|e| match e {
-                ViewError::NotYetAvailable => unreachable!("can't occur in poll_ready"),
-                ViewError::TransportError(e) => AsyncViewError::from(e),
-            })
+            .map_err(AsyncViewError::from)
             .and_then(move |mut svc| {
                 svc.call((keys, block)).then(move |res| match res {
                     Ok(res) => Ok((svc, res)),
@@ -390,24 +411,28 @@ impl View {
 pub struct SyncView(Option<View>);
 
 macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {
-        match $self
+    ($self:ident.$method:ident($($args:expr),*)) => {{
+        let mut view = $self
             .0
             .take()
-            .expect("tried to use View after its transport has failed")
-            .$method($($args),*)
-            .wait()
-        {
-            Ok((this, res)) => {
+            .expect("tried to use View after its transport has failed");
+        let tracer = std::mem::replace(&mut view.tracer, tracing::Dispatch::none());
+        let res = tracing::dispatcher::with_default(&tracer, move || view.$method($($args),*).wait());
+        match res {
+            Ok((mut this, res)) => {
+                std::mem::replace(&mut this.tracer, tracer);
                 $self.0 = Some(this);
                 Ok(res)
             }
-            Err(e) => {
+            Err(mut e) => {
+                if let Some(ref mut view) = e.view {
+                    std::mem::replace(&mut view.tracer, tracer);
+                }
                 $self.0 = e.view;
                 Err(e.error)
             },
         }
-    };
+    }};
 }
 
 #[allow(clippy::len_without_is_empty)]

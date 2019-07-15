@@ -141,6 +141,7 @@ pub mod internal;
 
 pub use crate::consensus::ZookeeperAuthority;
 use crate::internal::*;
+use std::cell::RefCell;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -154,6 +155,27 @@ pub mod prelude {
 pub mod error {
     pub use crate::table::TableError;
     pub use crate::view::ViewError;
+}
+
+thread_local! {
+    static TRACE_NEXT: RefCell<bool> = RefCell::new(false);
+}
+fn trace_next_op() -> bool {
+    TRACE_NEXT.with(|tn| {
+        let mut tn = tn.borrow_mut();
+        let yes = *tn;
+        *tn = false;
+        yes
+    })
+}
+
+/// The next Noria read or write issued from the current thread will be traced using tokio-trace.
+///
+/// The trace output is visible by setting the environment variable `RUST_LOG=trace`.
+pub fn trace_my_next_op() {
+    TRACE_NEXT.with(|tn| {
+        *tn.borrow_mut() = true;
+    })
 }
 
 #[derive(Debug, Default)]
@@ -239,30 +261,5 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         ref x => {
             unimplemented!("asked to shard on value {:?}", x);
         }
-    }
-}
-
-/// A `Box<dyn ::std::error::Error>` while we're waiting on rust-lang/rust#58974.
-pub struct BoxDynError<E>(E);
-use std::fmt;
-impl<E: fmt::Display + fmt::Debug> ::std::error::Error for BoxDynError<E> {}
-impl<E: fmt::Display + fmt::Debug> fmt::Debug for BoxDynError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(&self.0, f)
-    }
-}
-impl<E: fmt::Display + fmt::Debug> fmt::Display for BoxDynError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
-impl<E> From<E> for BoxDynError<E> {
-    fn from(e: E) -> Self {
-        BoxDynError(e)
-    }
-}
-impl<E> BoxDynError<E> {
-    fn into_inner(self) -> E {
-        self.0
     }
 }

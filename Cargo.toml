@@ -8,3 +8,6 @@ members = [
 
 [profile.release]
 debug=true
+
+[patch.crates-io]
+tracing-core = { git = "https://github.com/tokio-rs/tracing.git" }

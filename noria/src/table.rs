@@ -2,12 +2,12 @@ use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
 use crate::debug::trace::Tracer;
 use crate::internal::*;
-use crate::BoxDynError;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures::stream::futures_unordered::FuturesUnordered;
 use nom_sql::CreateTableStatement;
+use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -71,8 +71,6 @@ pub(crate) type TableRpc = Buffer<
     Tagged<LocalOrNot<Input>>,
 >;
 
-type E = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error;
-
 /// A failed [`Table`] operation.
 #[derive(Debug)]
 pub struct AsyncTableError {
@@ -85,12 +83,18 @@ pub struct AsyncTableError {
     pub error: TableError,
 }
 
-impl From<BoxDynError<E>> for AsyncTableError {
-    fn from(e: BoxDynError<E>) -> Self {
+impl From<TableError> for AsyncTableError {
+    fn from(e: TableError) -> Self {
         AsyncTableError {
             table: None,
-            error: TableError::from(e.into_inner()),
+            error: e,
         }
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync>> for AsyncTableError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        AsyncTableError::from(TableError::from(e))
     }
 }
 
@@ -113,12 +117,12 @@ pub enum TableError {
 
     /// The underlying connection to Noria produced an error.
     #[fail(display = "{}", _0)]
-    TransportError(#[cause] BoxDynError<<TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Error>),
+    TransportError(#[cause] failure::Error),
 }
 
-impl From<E> for TableError {
-    fn from(e: E) -> Self {
-        TableError::TransportError(BoxDynError::from(e))
+impl From<Box<dyn std::error::Error + Send + Sync>> for TableError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        TableError::TransportError(failure::Error::from_boxed_compat(e))
     }
 }
 
@@ -144,6 +148,7 @@ impl fmt::Debug for Input {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableBuilder {
     pub txs: Vec<SocketAddr>,
+    pub ni: NodeIndex,
     pub addr: LocalNodeIndex,
     pub key_is_primary: bool,
     pub key: Vec<usize>,
@@ -191,7 +196,9 @@ impl TableBuilder {
         )
         .map(move |shards| {
             let (addrs, conns) = shards.into_iter().unzip();
+            let dispatch = tracing::dispatcher::get_default(|d| d.clone());
             Table {
+                ni: self.ni,
                 node: self.addr,
                 key: self.key,
                 key_is_primary: self.key_is_primary,
@@ -204,6 +211,8 @@ impl TableBuilder {
 
                 shard_addrs: addrs,
                 shards: conns,
+
+                dispatch,
             }
         })
     }
@@ -217,6 +226,7 @@ impl TableBuilder {
 /// call `Table::into_exclusive`.
 #[derive(Clone)]
 pub struct Table {
+    ni: NodeIndex,
     node: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
@@ -229,11 +239,14 @@ pub struct Table {
 
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
+
+    dispatch: tracing::Dispatch,
 }
 
 impl fmt::Debug for Table {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Table")
+            .field("ni", &self.ni)
             .field("node", &self.node)
             .field("key_is_primary", &self.key_is_primary)
             .field("key", &self.key)
@@ -261,23 +274,29 @@ impl Service<Input> for Table {
     }
 
     fn call(&mut self, mut i: Input) -> Self::Future {
+        let span = if crate::trace_next_op() {
+            Some(tracing::trace_span!(
+                "table-request",
+                base = self.ni.index()
+            ))
+        } else {
+            None
+        };
+
         i.tracer = self.tracer.take();
 
         // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
 
         if self.shards.len() == 1 {
-            future::Either::A(
-                self.shards[0]
-                    .call(
-                        if self.dst_is_local {
-                            unsafe { LocalOrNot::for_local_transfer(i) }
-                        } else {
-                            LocalOrNot::new(i)
-                        }
-                        .into(),
-                    )
-                    .map_err(TableError::from),
-            )
+            let request = Tagged::from(if self.dst_is_local {
+                unsafe { LocalOrNot::for_local_transfer(i) }
+            } else {
+                LocalOrNot::new(i)
+            });
+
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("submit request");
+            future::Either::A(self.shards[0].call(request).map_err(TableError::from))
         } else {
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -288,6 +307,8 @@ impl Service<Input> for Table {
             }
             let key_col = self.key[0];
 
+            let _guard = span.as_ref().map(tracing::Span::enter);
+            tracing::trace!("shard request");
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
             for r in i.data.drain(..) {
                 let shard = {
@@ -320,8 +341,18 @@ impl Service<Input> for Table {
                             data: rs,
                         })
                     };
+                    let request = Tagged::from(p);
 
-                    wait_for.push(self.shards[s].call(p.into()));
+                    // make a span per shard
+                    let span = if span.is_some() {
+                        Some(tracing::trace_span!("table-shard", s))
+                    } else {
+                        None
+                    };
+                    let _guard = span.as_ref().map(tracing::Span::enter);
+                    tracing::trace!("submit request shard");
+
+                    wait_for.push(self.shards[s].call(request));
                 } else {
                     // poll_ready reserves a sender slot which we have to release
                     // we do that by dropping the old handle and replacing it with a clone
@@ -486,10 +517,7 @@ impl Table {
         <Self as Service<Request>>::Future: Send,
     {
         self.ready()
-            .map_err(|e| match e {
-                TableError::TransportError(e) => AsyncTableError::from(e),
-                e => unreachable!("{:?}", e),
-            })
+            .map_err(AsyncTableError::from)
             .and_then(move |mut svc| {
                 svc.call(r).then(move |r| match r {
                     Ok(_) => Ok(svc),
@@ -633,24 +661,28 @@ impl Table {
 pub struct SyncTable(Option<Table>);
 
 macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {
-        match $self
+    ($self:ident.$method:ident($($args:expr),*)) => {{
+        let mut table = $self
             .0
             .take()
-            .expect("tried to use Table after its transport has failed")
-            .$method($($args),*)
-            .wait()
-        {
-            Ok(this) => {
+            .expect("tried to use Table after its transport has failed");
+        let tracer = std::mem::replace(&mut table.dispatch, tracing::Dispatch::none());
+        let res = tracing::dispatcher::with_default(&tracer, move || table.$method($($args),*).wait());
+        match res {
+            Ok(mut this) => {
+                std::mem::replace(&mut this.dispatch, tracer);
                 $self.0 = Some(this);
                 Ok(())
             }
-            Err(e) => {
+            Err(mut e) => {
+                if let Some(ref mut table) = e.table {
+                    std::mem::replace(&mut table.dispatch, tracer);
+                }
                 $self.0 = e.table;
                 Err(e.error)
             },
         }
-    };
+    }};
 }
 
 use std::ops::{Deref, DerefMut};
