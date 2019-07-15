@@ -10,7 +10,7 @@ default = []
 
 [dependencies]
 trawler = "0.6"
-mysql_async = { git = "https://github.com/udoprog/mysql_async.git", rev = "f923dec2f2c2efbdcab0df6db275468a2be23fd4" }
+mysql_async = { git = "https://github.com/blackbeam/mysql_async.git" }
 tokio = "0.1"
 clap = "2.31"
 futures = "0.1"
