@@ -24,7 +24,7 @@ use nom_sql::SelectStatement;
 use noria::{SyncControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
 use std::io::{self, BufReader, BufWriter};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tokio::prelude::*;
@@ -73,6 +73,13 @@ fn main() {
                 .help("Log slow queries (> 5ms)"),
         )
         .arg(
+            Arg::with_name("trace")
+                .long("trace")
+                .takes_value(true)
+                .default_value("0")
+                .help("Trace client-side execution of every Nth operation"),
+        )
+        .arg(
             Arg::with_name("no-static-responses")
                 .long("no-static-responses")
                 .takes_value(false)
@@ -91,6 +98,7 @@ fn main() {
     assert!(!deployment.contains("-"));
 
     let port = value_t_or_exit!(matches, "port", u16);
+    let trace_every = value_t_or_exit!(matches, "trace", usize);
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
     let sanitize = !matches.is_present("no-sanitize");
@@ -113,7 +121,8 @@ fn main() {
     zk_auth.log_with(log.clone());
 
     debug!(log, "Connecting to Noria...",);
-    let s = tracing_fmt::default::Format::default().with_timer(tracing_fmt::time::Uptime::default());
+    let s =
+        tracing_fmt::default::Format::default().with_timer(tracing_fmt::time::Uptime::default());
     let s = tracing_fmt::FmtSubscriber::builder().on_event(s).finish();
     let tracer = tracing::Dispatch::new(s);
     let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
@@ -125,6 +134,8 @@ fn main() {
         Ok(_) => Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c")),
         Err(e) => Err(e),
     }));
+    let primed = Arc::new(atomic::AtomicBool::new(false));
+    let ops = Arc::new(atomic::AtomicUsize::new(0));
 
     let mut threads = Vec::new();
     let mut i = 0;
@@ -144,10 +155,15 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("conn-{}", i));
 
-        let (auto_increments, query_cache, log) =
-            (auto_increments.clone(), query_cache.clone(), log.clone());
+        let (auto_increments, query_cache, log, primed) = (
+            auto_increments.clone(),
+            query_cache.clone(),
+            log.clone(),
+            primed.clone(),
+        );
 
         let ch = ch.clone();
+        let ops = ops.clone();
 
         let jh = builder
             .spawn(move || {
@@ -155,6 +171,8 @@ fn main() {
                     ch,
                     auto_increments,
                     query_cache,
+                    (ops, trace_every),
+                    primed,
                     slowlog,
                     static_responses,
                     sanitize,
