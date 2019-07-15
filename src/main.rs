@@ -113,7 +113,10 @@ fn main() {
     zk_auth.log_with(log.clone());
 
     debug!(log, "Connecting to Noria...",);
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let s = tracing_fmt::default::Format::default().with_timer(tracing_fmt::time::Uptime::default());
+    let s = tracing_fmt::FmtSubscriber::builder().on_event(s).finish();
+    let tracer = tracing::Dispatch::new(s);
+    let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
     let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
     debug!(log, "Connected!");
 
