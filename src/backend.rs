@@ -112,6 +112,8 @@ where
 pub struct NoriaBackend<E> {
     inner: NoriaBackendInner<E>,
     log: slog::Logger,
+    ops: Arc<atomic::AtomicUsize>,
+    trace_every: usize,
 
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
@@ -122,6 +124,9 @@ pub struct NoriaBackend<E> {
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
+
+    primed: Arc<atomic::AtomicBool>,
+    reset: bool,
 
     parsed: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
 
@@ -138,6 +143,8 @@ where
         ch: SyncControllerHandle<ZookeeperAuthority, E>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
+        (ops, trace_every): (Arc<atomic::AtomicUsize>, usize),
+        primed: Arc<atomic::AtomicBool>,
         slowlog: bool,
         static_responses: bool,
         sanitize: bool,
@@ -146,6 +153,8 @@ where
         NoriaBackend {
             inner: NoriaBackendInner::new(ch),
             log: log,
+            ops,
+            trace_every,
 
             auto_increments: auto_increments,
 
@@ -156,6 +165,9 @@ where
             tl_cached: HashMap::new(),
 
             parsed: HashMap::new(),
+
+            primed,
+            reset: false,
 
             sanitize,
             slowlog,
@@ -716,6 +728,10 @@ where
             }
         }
 
+        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+            noria::trace_my_next_op();
+        }
+
         let result = if let Some(ref update_fields) = q.on_duplicate {
             trace!(self.log, "inserting-or-updating {:?}", buf);
             assert_eq!(buf.len(), 1);
@@ -796,6 +812,10 @@ where
         let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
         let keys = if is_bogo { bogo } else { keys };
 
+        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+            noria::trace_my_next_op();
+        }
+
         // if first lookup fails, there's no reason to try the others
         match getter.multi_lookup(keys, true) {
             Ok(d) => {
@@ -851,6 +871,10 @@ where
             utils::extract_update(q, params, schema)
         };
 
+        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+            noria::trace_my_next_op();
+        }
+
         match mutator.update(key, updates) {
             Ok(..) => results.completed(1 /* TODO */, 0),
             Err(e) => {
@@ -872,6 +896,10 @@ where
 
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         trace!(self.log, "prepare: {}", query);
+
+        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
+            self.reset = true;
+        }
 
         let query = if self.sanitize {
             utils::sanitize_query(query)
@@ -924,6 +952,10 @@ where
         params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
+            self.reset = true;
+        }
+
         let start = time::Instant::now();
 
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
@@ -1002,6 +1034,10 @@ where
 
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         trace!(self.log, "query: {}", query);
+
+        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
+            self.reset = true;
+        }
 
         let start = time::Instant::now();
         let query = if self.sanitize {
