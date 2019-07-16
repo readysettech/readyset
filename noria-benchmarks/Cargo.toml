@@ -11,7 +11,7 @@ orchestration = ["rusoto_core", "rusoto_sts", "tsunami"]
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 noria = { path = "../noria-server", package = "noria-server" }
-nom-sql = "0.0.6"
+nom-sql = "0.0.7"
 regex = "1.0.0"
 itertools = "0.8"
 slog = "2.4.0"
