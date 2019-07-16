@@ -302,7 +302,7 @@ impl Display for FieldValueExpression {
 
 #[inline]
 pub fn is_sql_identifier(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == '_' as u8
+    is_alphanumeric(chr) || chr == '_' as u8 || chr == '@' as u8
 }
 
 #[inline]

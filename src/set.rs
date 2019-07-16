@@ -53,6 +53,19 @@ mod tests {
     }
 
     #[test]
+    fn user_defined_vars() {
+        let qstring = "SET @var = 123;";
+        let res = set(CompleteByteSlice(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            SetStatement {
+                variable: "@var".to_owned(),
+                value: 123.into(),
+            }
+        );
+    }
+
+    #[test]
     fn format_set() {
         let qstring = "set autocommit=1";
         let expected = "SET autocommit = 1";
