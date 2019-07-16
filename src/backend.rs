@@ -362,9 +362,12 @@ where
 
     fn handle_set<W: io::Write>(
         &mut self,
-        _q: nom_sql::SetStatement,
+        q: nom_sql::SetStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        if q.variable == "@primed" {
+            self.primed.store(true, atomic::Ordering::SeqCst);
+        }
         // ignore
         results.completed(0, 0)
     }
