@@ -326,6 +326,7 @@ pub fn shard(
         // force everything to be unsharded...
         let sharding = Sharding::ForcedNone;
         warn!(log, "forcing de-sharding"; "node" => ?node);
+        // TODO: BUG HERE -- DOESN'T ALWAYS CALL reshard!
         for &ni in need_sharding.keys() {
             if input_shardings[&ni] != sharding {
                 // ancestor must be forced to right sharding
