@@ -33,6 +33,9 @@ debug=true
 [lib]
 path = "src/lib.rs"
 
+[patch.crates-io]
+nom-sql = { git = "https://github.com/ms705/nom-sql.git" }
+
 ###[patch."https://github.com/mit-pdos/noria.git"]
 ###noria = { path = "../noria/noria/" }
 ###noria-server = { path = "../noria/noria-server/" }
