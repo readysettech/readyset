@@ -11,7 +11,7 @@ failure = "0.1.1"
 msql-srv = "0.8"
 noria = { git = "https://github.com/mit-pdos/noria.git" }
 lazy_static = "1.0.0"
-nom-sql = "0.0.6"
+nom-sql = "0.0.7"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
@@ -32,9 +32,6 @@ debug=true
 
 [lib]
 path = "src/lib.rs"
-
-[patch.crates-io]
-nom-sql = { git = "https://github.com/ms705/nom-sql.git" }
 
 ###[patch."https://github.com/mit-pdos/noria.git"]
 ###noria = { path = "../noria/noria/" }
