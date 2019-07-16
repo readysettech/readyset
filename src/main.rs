@@ -76,7 +76,6 @@ fn main() {
             Arg::with_name("trace")
                 .long("trace")
                 .takes_value(true)
-                .default_value("0")
                 .help("Trace client-side execution of every Nth operation"),
         )
         .arg(
@@ -98,7 +97,11 @@ fn main() {
     assert!(!deployment.contains("-"));
 
     let port = value_t_or_exit!(matches, "port", u16);
-    let trace_every = value_t_or_exit!(matches, "trace", usize);
+    let trace_every = if matches.is_present("trace") {
+        Some(value_t_or_exit!(matches, "trace", usize))
+    } else {
+        None
+    };
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
     let sanitize = !matches.is_present("no-sanitize");
