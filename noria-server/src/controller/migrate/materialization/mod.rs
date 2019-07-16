@@ -800,20 +800,41 @@ impl Materializations {
             }
 
             let n = &graph[node];
+            let mut shard_congruent_index = n.sharded_by().is_none();
+            if let Sharding::ByColumn(col, _) = n.sharded_by() {
+                if index_on.len() == 1 {
+                    let idx = index_on.iter().next().unwrap();
+                    if idx.len() == 1 && idx[0] == col {
+                        shard_congruent_index = true;
+                    }
+                }
+            }
+
             if self.partial.contains(&node) {
-                info!(self.log, "adding partial index to existing {:?}", n);
+                if !shard_congruent_index {
+                    // unclear if this is okay
+                    warn!(self.log, "adding non-congruent partial index to existing {:?}", n;
+                          "node" => node.index(),
+                          "cols" => ?index_on,
+                          "sharding" => ?n.sharded_by());
+                } else {
+                    info!(self.log, "adding partial index to existing {:?}", n;
+                          "node" => node.index(),
+                          "cols" => ?index_on);
+                }
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
                 self.setup(node, &mut index_on, graph, domains, workers, replies);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
-            } else if !n.sharded_by().is_none() {
-                // what do we even do here?!
+            } else if !shard_congruent_index {
+                // what would we even do here?!
                 println!("{}", graphviz(graph, true, &self));
-                crit!(self.log, "asked to add index to sharded node";
+                crit!(self.log, "asked to add index to sharded node by non-shard column";
                            "node" => node.index(),
-                           "cols" => ?index_on);
-            // unimplemented!();
+                           "cols" => ?index_on,
+                           "sharding" => ?n.sharded_by());
+                unimplemented!();
             } else {
                 use dataflow::payload::InitialState;
                 domains
