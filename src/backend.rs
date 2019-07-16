@@ -113,7 +113,7 @@ pub struct NoriaBackend<E> {
     inner: NoriaBackendInner<E>,
     log: slog::Logger,
     ops: Arc<atomic::AtomicUsize>,
-    trace_every: usize,
+    trace_every: Option<usize>,
 
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
@@ -143,7 +143,7 @@ where
         ch: SyncControllerHandle<ZookeeperAuthority, E>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        (ops, trace_every): (Arc<atomic::AtomicUsize>, usize),
+        (ops, trace_every): (Arc<atomic::AtomicUsize>, Option<usize>),
         primed: Arc<atomic::AtomicBool>,
         slowlog: bool,
         static_responses: bool,
@@ -728,7 +728,12 @@ where
             }
         }
 
-        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+        let ops = &self.ops;
+        if self
+            .trace_every
+            .map(|te| ops.fetch_add(1, atomic::Ordering::AcqRel) % te == 0)
+            .unwrap_or(false)
+        {
             noria::trace_my_next_op();
         }
 
@@ -812,7 +817,12 @@ where
         let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
         let keys = if is_bogo { bogo } else { keys };
 
-        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+        let ops = &self.ops;
+        if self
+            .trace_every
+            .map(|te| ops.fetch_add(1, atomic::Ordering::AcqRel) % te == 0)
+            .unwrap_or(false)
+        {
             noria::trace_my_next_op();
         }
 
@@ -871,7 +881,12 @@ where
             utils::extract_update(q, params, schema)
         };
 
-        if self.ops.fetch_add(1, atomic::Ordering::AcqRel) % self.trace_every == 1 {
+        let ops = &self.ops;
+        if self
+            .trace_every
+            .map(|te| ops.fetch_add(1, atomic::Ordering::AcqRel) % te == 0)
+            .unwrap_or(false)
+        {
             noria::trace_my_next_op();
         }
 
