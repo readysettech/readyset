@@ -22,7 +22,14 @@ stages:
    displayName: Style linting
    dependsOn: check
    jobs:
-     - template: azure/style.yml@templates
+     - template: azure/rustfmt.yml@templates
+       parameters:
+         name: rustfmt
+     - template: azure/rustfmt.yml@templates
+       parameters:
+         name: rustfmt_beta
+         rust: beta
+         allow_fail: true
 
 resources:
   repositories:
