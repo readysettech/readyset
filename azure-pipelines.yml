@@ -1,0 +1,32 @@
+stages:
+ - stage: check
+   displayName: Compilation check
+   dependsOn: []
+   jobs:
+     - template: azure/cargo-check.yml@templates
+       parameters:
+         name: cargo_check
+         rust: nightly-2019-06-18
+         benches: true
+ - stage: test
+   dependsOn: check
+   jobs:
+     - template: azure/test.yml@templates
+       parameters:
+         name: cargo_test
+         cross: true
+         rust: nightly-2019-06-18
+         envs:
+           SETTLE_TIME: 2000
+ - stage: style
+   displayName: Style linting
+   dependsOn: check
+   jobs:
+     - template: azure/style.yml@templates
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: crate-ci/azure-pipelines
+      endpoint: mit-pdos
