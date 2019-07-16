@@ -42,6 +42,7 @@ streamunordered = "0.4.0"
 bufstream = { version = "0.1.3", features = [ "tokio" ] }
 stream-cancel = "0.4"
 
+timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
@@ -55,10 +56,6 @@ dataflow = { path = "dataflow" }
 mir = { path = "mir" }
 common = { path = "common" }
 noria = { path = "../noria" }
-
-[dependencies.timekeeper]
-git = "https://github.com/ms705/timekeeper"
-default-features = false
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
