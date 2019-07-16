@@ -1,6 +1,6 @@
 [package]
 name = "nom-sql"
-version = "0.0.6"
+version = "0.0.7"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 documentation = "https://docs.rs/nom-sql"
