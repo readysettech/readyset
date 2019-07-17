@@ -235,12 +235,24 @@ impl<'a> Plan<'a> {
                             let lookup_on_shard_key = match src_sharding {
                                 Sharding::Random(..) => false,
                                 Sharding::ByColumn(c, _) => {
-                                    assert_eq!(key.len(), 1);
                                     let lookup_key =
                                         nodes.iter().next().unwrap().1.as_ref().unwrap();
-                                    c == lookup_key[0]
+                                    if lookup_key.len() == 1 {
+                                        c == lookup_key[0]
+                                    } else {
+                                        // we're using a compound key to look up into a node that's
+                                        // sharded by a single column. if the sharding key is one
+                                        // of the lookup keys, then we indeed only need to look at
+                                        // one shard, otherwise we need to ask all
+                                        //
+                                        // NOTE: this _could_ be merged with the if arm above,
+                                        // but keeping them separate allows us to make this case
+                                        // explicit and more obvious
+                                        lookup_key.iter().any(|&kc| kc == c)
+                                    }
                                 }
-                                _ => true,
+                                s if s.is_none() => true,
+                                s => unreachable!("unhandled new sharding pattern {:?}", s),
                             };
 
                             let selection = if lookup_on_shard_key {
