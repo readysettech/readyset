@@ -379,7 +379,7 @@ mod tests {
     fn busybusybusy() {
         use std::thread;
 
-        let n = 10000;
+        let n = 1_000;
         let (r, mut w) = new(1, &[0]);
         thread::spawn(move || {
             for i in 0..n {
