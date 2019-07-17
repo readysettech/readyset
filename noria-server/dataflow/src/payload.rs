@@ -64,6 +64,7 @@ pub enum InitialState {
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<Vec<DataType>>,
+        unishard: bool,
         ignore: bool,
     },
     Regular {
@@ -195,9 +196,10 @@ pub enum Packet {
     RequestPartialReplay {
         tag: Tag,
         key: Vec<DataType>,
+        unishard: bool,
     },
 
-    /// Ask domain (nicely) to replay a particular key.
+    /// Ask domain (nicely) to replay a particular key into a Reader.
     RequestReaderReplay {
         node: LocalNodeIndex,
         cols: Vec<usize>,

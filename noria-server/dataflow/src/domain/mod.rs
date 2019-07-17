@@ -81,7 +81,14 @@ struct ReplayPath {
 }
 
 type Hole = (Vec<usize>, Vec<DataType>);
-type Redo = (Tag, Vec<DataType>);
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+struct Redo {
+    tag: Tag,
+    replay_key: Vec<DataType>,
+    unishard: bool,
+}
+
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
 /// missed in. We need to ensure that when this happens, we re-run the original replay to fill the
 /// hole we *originally* were trying to fill.
@@ -236,7 +243,7 @@ pub struct Domain {
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
+    buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>, bool)>,
     replay_batch_timeout: time::Duration,
     delayed_for_self: VecDeque<Box<Packet>>,
 
@@ -296,7 +303,11 @@ impl Domain {
                 // and then get back to it after all processing has finished (at the bottom of
                 // `Self::handle()`)
                 self.delayed_for_self
-                    .push_back(box Packet::RequestPartialReplay { tag, key });
+                    .push_back(box Packet::RequestPartialReplay {
+                        tag,
+                        key,
+                        unishard: true, // local replays are necessarily single-shard
+                    });
                 continue;
             }
 
@@ -320,6 +331,7 @@ impl Domain {
         miss_columns: &[usize],
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
+        was_single_shard: bool,
         needed_for: Tag,
     ) {
         use std::collections::hash_map::Entry;
@@ -329,7 +341,11 @@ impl Domain {
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
         let mut redundant = false;
-        let redo = (needed_for, replay_key.clone());
+        let redo = Redo {
+            tag: needed_for,
+            replay_key: replay_key.clone(),
+            unishard: was_single_shard,
+        };
         match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
             Entry::Occupied(e) => {
                 // we have already requested backfill of this key
@@ -381,6 +397,7 @@ impl Domain {
                     if trigger
                         .send(box Packet::RequestPartialReplay {
                             tag,
+                            unishard: false,  // ask_all is true, so replay is sharded
                             key: key.clone(), // sad to clone here
                         })
                         .is_err()
@@ -405,7 +422,11 @@ impl Domain {
             "concurrent" => self.concurrent_replays,
             );
             if options[shard]
-                .send(box Packet::RequestPartialReplay { tag, key })
+                .send(box Packet::RequestPartialReplay {
+                    tag,
+                    key,
+                    unishard: true, // only one option / !ask_all, so only one path
+                })
                 .is_err()
             {
                 // we're shutting down -- it's fine.
@@ -1031,7 +1052,7 @@ impl Domain {
                         }
                         self.total_replay_time.stop();
                     }
-                    Packet::RequestPartialReplay { tag, key } => {
+                    Packet::RequestPartialReplay { tag, key, unishard } => {
                         trace!(
                             self.log,
                            "got replay request";
@@ -1039,7 +1060,7 @@ impl Domain {
                            "key" => format!("{:?}", key)
                         );
                         self.total_replay_time.start();
-                        self.seed_replay(tag, &key[..], sends, executor);
+                        self.seed_replay(tag, &key[..], unishard, sends, executor);
                         self.total_replay_time.stop();
                     }
                     Packet::StartReplay { tag, from } => {
@@ -1333,10 +1354,10 @@ impl Domain {
             let elapsed_replays: Vec<_> = {
                 self.buffered_replay_requests
                     .iter_mut()
-                    .filter_map(|(&tag, &mut (first, ref mut keys))| {
+                    .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
                         if !keys.is_empty() && now.duration_since(first) > to {
                             // will be removed by retain below
-                            Some((tag, mem::replace(keys, HashSet::new())))
+                            Some((tag, mem::replace(keys, HashSet::new()), single_shard))
                         } else {
                             None
                         }
@@ -1344,9 +1365,9 @@ impl Domain {
                     .collect()
             };
             self.buffered_replay_requests
-                .retain(|_, (_, ref keys)| !keys.is_empty());
-            for (tag, keys) in elapsed_replays {
-                self.seed_all(tag, keys, sends, executor);
+                .retain(|_, (_, ref keys, _)| !keys.is_empty());
+            for (tag, keys, single_shard) in elapsed_replays {
+                self.seed_all(tag, keys, single_shard, sends, executor);
             }
             self.total_replay_time.stop();
         }
@@ -1420,6 +1441,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         keys: HashSet<Vec<DataType>>,
+        single_shard: bool,
         sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
@@ -1458,6 +1480,7 @@ impl Domain {
                         tag,
                         context: ReplayPieceContext::Partial {
                             for_keys: keys,
+                            unishard: single_shard, // if we are the only source, only one path
                             ignore: false,
                         },
                         data: rs.into(),
@@ -1485,7 +1508,7 @@ impl Domain {
                        "missed during replay request";
                        "tag" => tag.id(),
                        "key" => ?key);
-                self.on_replay_miss(source, &cols[..], key.clone(), key, tag);
+                self.on_replay_miss(source, &cols[..], key.clone(), key, single_shard, tag);
             }
         }
 
@@ -1513,6 +1536,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         key: &[DataType],
+        single_shard: bool,
         sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
@@ -1537,7 +1561,7 @@ impl Domain {
                 Entry::Vacant(v) => {
                     let mut ks = HashSet::new();
                     ks.insert(key);
-                    v.insert((time::Instant::now(), ks));
+                    v.insert((time::Instant::now(), ks, single_shard));
                 }
             }
 
@@ -1575,6 +1599,7 @@ impl Domain {
                         tag,
                         context: ReplayPieceContext::Partial {
                             for_keys: k,
+                            unishard: single_shard, // if we are the only source, only one path
                             ignore: false,
                         },
                         data,
@@ -1590,7 +1615,14 @@ impl Domain {
         if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(source, &cols[..], Vec::from(key), Vec::from(key), tag);
+            self.on_replay_miss(
+                source,
+                &cols[..],
+                Vec::from(key),
+                Vec::from(key),
+                single_shard,
+                tag,
+            );
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
@@ -1929,12 +1961,22 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
+                            let single_shard = if let box Packet::ReplayPiece {
+                                context: ReplayPieceContext::Partial { unishard, .. },
+                                ..
+                            } = m.as_mut().unwrap()
+                            {
+                                *unishard
+                            } else {
+                                unreachable!("backfill_keys.is_some() implies Context::Partial");
+                            };
                             for miss in misses {
                                 need_replay.push((
                                     miss.on,
                                     miss.replay_key_vec().unwrap(),
                                     miss.lookup_key_vec(),
                                     miss.lookup_idx,
+                                    single_shard,
                                     tag,
                                 ));
                             }
@@ -2176,7 +2218,11 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!(self.log, "batch processed");
                         }
-                        ReplayPieceContext::Partial { for_keys, ignore } => {
+                        ReplayPieceContext::Partial {
+                            for_keys,
+                            ignore,
+                            unishard: _,
+                        } => {
                             assert!(!ignore);
                             if dst_is_reader {
                                 if self.nodes[dst].borrow().beyond_mat_frontier() {
@@ -2211,7 +2257,7 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial);
         }
 
-        for (node, while_replaying_key, miss_key, miss_cols, tag) in need_replay {
+        for (node, while_replaying_key, miss_key, miss_cols, single_shard, tag) in need_replay {
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag.id(),
@@ -2219,7 +2265,14 @@ impl Domain {
                    "missed" => ?miss_key,
                    "on" => %node,
             );
-            self.on_replay_miss(node, &miss_cols[..], while_replaying_key, miss_key, tag);
+            self.on_replay_miss(
+                node,
+                &miss_cols[..],
+                while_replaying_key,
+                miss_key,
+                single_shard,
+                tag,
+            );
         }
 
         if let Some((tag, ni, for_keys)) = finished {
@@ -2280,10 +2333,16 @@ impl Domain {
                         })
                         .collect();
 
-                    for (tag, replay_key) in replay {
+                    for Redo {
+                        tag,
+                        replay_key,
+                        unishard,
+                    } in replay
+                    {
                         self.delayed_for_self
                             .push_back(box Packet::RequestPartialReplay {
                                 tag,
+                                unishard,
                                 key: replay_key,
                             });
                     }
@@ -2689,8 +2748,8 @@ impl Domain {
                 let opt1 = self
                     .buffered_replay_requests
                     .iter()
-                    .filter(|&(_, &(_, ref keys))| !keys.is_empty())
-                    .map(|(_, &(first, _))| {
+                    .filter(|&(_, &(_, ref keys, _))| !keys.is_empty())
+                    .map(|(_, &(first, _, _))| {
                         self.replay_batch_timeout
                             .checked_sub(now.duration_since(first))
                             .unwrap_or(time::Duration::from_millis(0))

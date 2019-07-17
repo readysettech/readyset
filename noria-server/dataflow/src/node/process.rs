@@ -92,6 +92,7 @@ impl Node {
                             context:
                                 payload::ReplayPieceContext::Partial {
                                     ref mut for_keys,
+                                    unishard,
                                     ignore,
                                 },
                             ..
@@ -101,6 +102,7 @@ impl Node {
                             ReplayContext::Partial {
                                 key_cols: keyed_by.unwrap().clone(),
                                 keys: mem::replace(for_keys, HashSet::new()),
+                                unishard,
                             }
                         }
                         (&mut Packet::ReplayPiece {

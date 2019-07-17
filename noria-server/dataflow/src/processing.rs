@@ -84,6 +84,7 @@ crate enum ReplayContext {
     Partial {
         key_cols: Vec<usize>,
         keys: HashSet<Vec<DataType>>,
+        unishard: bool,
     },
     Full {
         last: bool,

@@ -442,14 +442,13 @@ impl Ingredient for Union {
             ReplayContext::Partial {
                 ref key_cols,
                 ref keys,
+                unishard,
             } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
-                // TODO: which node is key_col an index of?
-                if let Emit::AllFrom(_, Sharding::ByColumn(shard_col, _)) = self.emit {
-                    assert_eq!(key_cols.len(), 1);
-                    if shard_col == key_cols[0] {
+                if let Emit::AllFrom(_, _) = self.emit {
+                    if unishard {
                         // No need to buffer since request should only be for one shard
                         assert!(self.replay_pieces.is_empty());
                         return RawProcessingResult::ReplayPiece {
