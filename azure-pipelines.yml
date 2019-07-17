@@ -25,7 +25,7 @@ stages:
        - template: azure/install-rust.yml@templates
          parameters:
            rust: nightly-2019-06-18
-       - script: cargo test --all
+       - script: cargo test --all -- --test-threads=1
          displayName: Run tests
          env:
           SETTLE_TIME: 2000
