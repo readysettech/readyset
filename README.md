@@ -2,7 +2,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/noria.svg)](https://crates.io/crates/noria)
 [![Documentation](https://docs.rs/noria/badge.svg)](https://jon.thesquareplanet.com/crates/noria/)
-[![Build Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
+[![Travis Status](https://travis-ci.org/mit-pdos/noria.svg?branch=master)](https://travis-ci.org/mit-pdos/noria)
+[![Azure Status](https://dev.azure.com/mit-pdos/mit-pdos/_apis/build/status/noria?branchName=master)](https://dev.azure.com/mit-pdos/mit-pdos/_build/latest?definitionId=1&branchName=master)
 
 Noria is a new streaming data-flow system designed to act as a fast
 storage backend for read-heavy web applications based on [this
