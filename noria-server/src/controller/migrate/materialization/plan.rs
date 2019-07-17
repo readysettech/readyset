@@ -236,7 +236,9 @@ impl<'a> Plan<'a> {
                                 Sharding::Random(..) => false,
                                 Sharding::ByColumn(c, _) => {
                                     assert_eq!(key.len(), 1);
-                                    c == key[0]
+                                    let lookup_key =
+                                        nodes.iter().next().unwrap().1.as_ref().unwrap();
+                                    c == lookup_key[0]
                                 }
                                 _ => true,
                             };
