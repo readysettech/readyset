@@ -984,12 +984,17 @@ impl Domain {
                                     payload::SourceSelection::AllShards(nshards) => {
                                         (true, (0..nshards).map(shard).collect())
                                     }
-                                    payload::SourceSelection::SameShard => (
-                                        true,
-                                        vec![shard(self.shard.expect(
-                                            "told to replay from same shard, but not sharded",
-                                        ))],
-                                    ),
+                                    payload::SourceSelection::SameShard => {
+                                        // note that ask_all is true here because we're not
+                                        // indexing the vector by our shard index. unipath will
+                                        // still be set to true though, since options.len() == 1.
+                                        (
+                                            true,
+                                            vec![shard(self.shard.expect(
+                                                "told to replay from same shard, but not sharded",
+                                            ))],
+                                        )
+                                    }
                                     payload::SourceSelection::KeyShard(nshards) => {
                                         (false, (0..nshards).map(shard).collect())
                                     }
