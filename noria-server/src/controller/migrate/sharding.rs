@@ -135,6 +135,15 @@ pub fn shard(
             assert_eq!(want_sharding.len(), 1);
             let want_sharding = want_sharding[0];
 
+            if graph[node].fields()[want_sharding] == "bogokey" {
+                info!(log, "de-sharding node that operates on bogokey"; "node" => ?node);
+                for (ni, s) in input_shardings.iter_mut() {
+                    reshard(log, new, &mut swaps, graph, *ni, node, Sharding::ForcedNone);
+                    *s = Sharding::ForcedNone;
+                }
+                continue;
+            }
+
             let resolved = if graph[node].is_internal() {
                 graph[node].resolve(want_sharding)
             } else if graph[node].is_base() {
