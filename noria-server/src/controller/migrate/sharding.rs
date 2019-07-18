@@ -42,14 +42,18 @@ pub fn shard(
                 .unwrap()
                 .and_then(|c| {
                     if c.len() == 1 {
-                        Some(Sharding::ByColumn(c[0], sharding_factor))
+                        if graph[node].fields()[c[0]] == "bogokey" {
+                            Some(Sharding::ForcedNone)
+                        } else {
+                            Some(Sharding::ByColumn(c[0], sharding_factor))
+                        }
                     } else {
                         None
                     }
                 })
                 .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
-                info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
+                info!(log, "de-sharding prior to poorly keyed reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
                 graph[node]
