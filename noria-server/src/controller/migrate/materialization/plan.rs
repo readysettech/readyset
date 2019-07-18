@@ -232,13 +232,17 @@ impl<'a> Plan<'a> {
                             // sharding key anyway, and that we should thus never see.
                             let src_sharding = self.graph[segments[0].1[0].0].sharded_by();
                             let shards = src_sharding.shards().unwrap_or(1);
-                            let lookup_on_shard_key = match src_sharding {
-                                Sharding::Random(..) => false,
+                            let lookup_key_to_shard = match src_sharding {
+                                Sharding::Random(..) => None,
                                 Sharding::ByColumn(c, _) => {
                                     let lookup_key =
                                         nodes.iter().next().unwrap().1.as_ref().unwrap();
                                     if lookup_key.len() == 1 {
-                                        c == lookup_key[0]
+                                        if c == lookup_key[0] {
+                                            Some(0)
+                                        } else {
+                                            None
+                                        }
                                     } else {
                                         // we're using a compound key to look up into a node that's
                                         // sharded by a single column. if the sharding key is one
@@ -248,14 +252,14 @@ impl<'a> Plan<'a> {
                                         // NOTE: this _could_ be merged with the if arm above,
                                         // but keeping them separate allows us to make this case
                                         // explicit and more obvious
-                                        lookup_key.iter().any(|&kc| kc == c)
+                                        lookup_key.iter().position(|&kc| kc == c)
                                     }
                                 }
-                                s if s.is_none() => true,
+                                s if s.is_none() => None,
                                 s => unreachable!("unhandled new sharding pattern {:?}", s),
                             };
 
-                            let selection = if lookup_on_shard_key {
+                            let selection = if let Some(i) = lookup_key_to_shard {
                                 // if we are not sharded, all is okay.
                                 //
                                 // if we are sharded:
@@ -274,7 +278,10 @@ impl<'a> Plan<'a> {
                                 //    aliased in dst. because of this, it should be the case that
                                 //    KeyShard == SameShard; if that were not the case, the value
                                 //    in dst.x should never have reached dst in the first place.
-                                SourceSelection::KeyShard(shards)
+                                SourceSelection::KeyShard {
+                                    key_i_to_shard: i,
+                                    nshards: shards,
+                                }
                             } else {
                                 // replay key != sharding key
                                 // normally, we'd have to query all shards, but if we are sharded
@@ -282,10 +289,14 @@ impl<'a> Plan<'a> {
                                 // source and us), then we should *only* query the same shard of
                                 // the source (since it necessarily holds all records we could
                                 // possibly see).
-                                if segments
-                                    .iter()
-                                    .flat_map(|s| s.1.iter())
-                                    .any(|&(n, _)| self.graph[n].is_shard_merger())
+                                //
+                                // note that the no-sharding case is the same as "ask all shards"
+                                // except there is only one (shards == 1).
+                                if src_sharding.is_none()
+                                    || segments
+                                        .iter()
+                                        .flat_map(|s| s.1.iter())
+                                        .any(|&(n, _)| self.graph[n].is_shard_merger())
                                 {
                                     SourceSelection::AllShards(shards)
                                 } else {

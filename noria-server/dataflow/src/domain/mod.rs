@@ -13,7 +13,7 @@ use futures;
 use group_commit::GroupCommitQueueSet;
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
-use payload::{ControlReplyPacket, ReplayPieceContext};
+use payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
 use prelude::*;
 use slog::Logger;
 use stream_cancel::Valve;
@@ -67,7 +67,7 @@ enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
     End {
-        ask_all: bool,
+        source: SourceSelection,
         options: Vec<Box<dyn channel::Sender<Item = Box<Packet>> + Send>>,
     },
     Local(Vec<usize>),
@@ -378,11 +378,22 @@ impl Domain {
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         if let TriggerEndpoint::End {
-            ask_all,
+            source,
             ref mut options,
         } = self.replay_paths.get_mut(&tag).unwrap().trigger
         {
-            if ask_all && options.len() != 1 {
+            let ask_shard_by_key_i = match source {
+                SourceSelection::AllShards(_) => None,
+                SourceSelection::SameShard => {
+                    // note that we "ask all" here because we're not indexing the vector by the
+                    // key's shard index. unipath will still be set to true though, since
+                    // options.len() == 1.
+                    None
+                }
+                SourceSelection::KeyShard { key_i_to_shard, .. } => Some(key_i_to_shard),
+            };
+
+            if ask_shard_by_key_i.is_none() && options.len() != 1 {
                 // source is sharded by a different key than we are doing lookups for,
                 // so we need to trigger on all the shards.
                 self.concurrent_replays += 1;
@@ -410,9 +421,11 @@ impl Domain {
 
             let shard = if options.len() == 1 {
                 0
+            } else if let Some(key_shard_i) = ask_shard_by_key_i {
+                ::shard_by(&key[key_shard_i], options.len())
             } else {
-                assert_eq!(key.len(), 1);
-                ::shard_by(&key[0], options.len())
+                // would have hit the if further up
+                unreachable!();
             };
             self.concurrent_replays += 1;
             trace!(self.log, "sending replay request";
@@ -980,27 +993,19 @@ impl Domain {
                                         .unwrap()
                                 };
 
-                                let (ask_all, options) = match selection {
-                                    payload::SourceSelection::AllShards(nshards) => {
-                                        (true, (0..nshards).map(shard).collect())
+                                let options = match selection {
+                                    SourceSelection::AllShards(nshards)
+                                    | SourceSelection::KeyShard { nshards, .. } => {
+                                        // we may need to send to any of these shards
+                                        (0..nshards).map(shard).collect()
                                     }
-                                    payload::SourceSelection::SameShard => {
-                                        // note that ask_all is true here because we're not
-                                        // indexing the vector by our shard index. unipath will
-                                        // still be set to true though, since options.len() == 1.
-                                        (
-                                            true,
-                                            vec![shard(self.shard.expect(
-                                                "told to replay from same shard, but not sharded",
-                                            ))],
-                                        )
-                                    }
-                                    payload::SourceSelection::KeyShard(nshards) => {
-                                        (false, (0..nshards).map(shard).collect())
-                                    }
+                                    SourceSelection::SameShard => vec![shard(self.shard.unwrap())],
                                 };
 
-                                TriggerEndpoint::End { ask_all, options }
+                                TriggerEndpoint::End {
+                                    source: selection,
+                                    options,
+                                }
                             }
                         };
 

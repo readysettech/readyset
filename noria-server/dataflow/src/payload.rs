@@ -24,9 +24,10 @@ pub struct ReplayPathSegment {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum SourceSelection {
     /// Query only the shard of the source that matches the key.
-    ///
-    /// Value is the number of shards.
-    KeyShard(usize),
+    KeyShard {
+        key_i_to_shard: usize,
+        nshards: usize,
+    },
     /// Query the same shard of the source as the destination.
     SameShard,
     /// Query all shards of the source.
