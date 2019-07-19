@@ -83,7 +83,7 @@ named!(query_expr<CompleteByteSlice, (bool, Option<String>, SqlQuery)>,
         prefix: opt!(do_parse!(
             public: opt!(alt!(tag_no_case!("query") | tag_no_case!("view"))) >>
             opt!(multispace) >>
-            name: opt!(terminated!(take_while1_s!(is_ident), opt!(multispace))) >>
+            name: opt!(terminated!(take_while1!(is_ident), opt!(multispace))) >>
             tag!(":") >>
             opt!(multispace) >>
             (public, name)

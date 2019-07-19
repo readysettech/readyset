@@ -17,7 +17,6 @@ use std::fmt::Write as FmtWrite;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::slice::SliceConcatExt;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -409,7 +408,7 @@ fn mysql_comparison() {
             let result = panic::catch_unwind(|| {
                 check_query(&schema.tables, query_name, query, &target_data[query_name])
             });
-            panic::take_hook();
+            let _ = panic::take_hook();
             match result {
                 Ok(Ok(())) => println!("\x1B[32;1mPASS\x1B[m"),
                 Ok(Err(e)) => {
