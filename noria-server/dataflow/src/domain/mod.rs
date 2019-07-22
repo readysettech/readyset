@@ -1324,6 +1324,12 @@ impl Domain {
                                     .unwrap()
                                 };
 
+                                let probe_result = if n.is_internal() {
+                                    n.probe()
+                                } else {
+                                    serde_json::Value::Null
+                                };
+
                                 if time.is_some() && ptime.is_some() {
                                     Some((
                                         node_index,
@@ -1333,6 +1339,7 @@ impl Domain {
                                             process_ptime: ptime.unwrap(),
                                             mem_size,
                                             materialized: mat_state,
+                                            probe_result,
                                         },
                                     ))
                                 } else {

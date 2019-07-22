@@ -131,6 +131,11 @@ impl Ingredient for Union {
         }
     }
 
+    fn probe(&self) -> serde_json::Value {
+        serde_json::json!({
+            "captured": self.replay_pieces.len(),
+        })
+    }
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
             ref mut cols,

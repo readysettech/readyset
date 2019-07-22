@@ -148,6 +148,16 @@ where
     ///    ⋃    |  Union
     fn description(&self, detailed: bool) -> String;
 
+    /// Provide measurements of transient internal state that may be useful in debugging contexts.
+    ///
+    /// For example, a union might use this to report if it has captured any replays that it has
+    /// not yet released.
+    ///
+    /// The default implementation returns `null`.
+    fn probe(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
     /// Called when a node is first connected to the graph.
     ///
     /// All its ancestors are present, but this node and its children may not have been connected
