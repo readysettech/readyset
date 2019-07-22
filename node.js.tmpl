@@ -58,6 +58,7 @@
                     }
                   }
                   $("#mem-size").text(filesize(stats["mem_size"]));
+                  $("#probe-data").text(JSON.stringify(stats["probe_result"]));
                   $("#process-time").text(readableNanosecondFormatter(stats["process_time"]));
                   $("#process-ptime").text(readableNanosecondFormatter(stats["process_ptime"]));
                 }
