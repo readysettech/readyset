@@ -27,8 +27,8 @@ zookeeper = "0.5.3"
 # cli
 clap = "2.25.0"
 # distributions
-rand = "0.6"
-zipf = "5"
+rand = "0.7"
+zipf = "6"
 # sampling
 hdrhistogram = "6.1"
 # mssql
@@ -45,9 +45,9 @@ futures = "0.1.14"
 futures-cpupool = "0.1.8"
 tokio = "0.1"
 # ec2
-rusoto_core = { optional = true, version = "0.39" }
-rusoto_sts = { optional = true, version = "0.39" }
-tsunami = { optional = true, version = "0.8" }
+rusoto_core = { optional = true, version = "0.40" }
+rusoto_sts = { optional = true, version = "0.40" }
+tsunami = { optional = true, version = "0.9" }
 timeout-readwrite = "0.2"
 ctrlc = "3.1"
 failure = "0.1"
