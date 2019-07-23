@@ -154,8 +154,8 @@ where
     /// not yet released.
     ///
     /// The default implementation returns `null`.
-    fn probe(&self) -> serde_json::Map<String, serde_json::Value> {
-        serde_json::Map::default()
+    fn probe(&self) -> HashMap<String, String> {
+        Default::default()
     }
 
     /// Called when a node is first connected to the graph.

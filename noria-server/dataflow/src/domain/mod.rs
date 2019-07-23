@@ -1325,9 +1325,9 @@ impl Domain {
                                 };
 
                                 let probe_result = if n.is_internal() {
-                                    Some(n.probe())
+                                    n.probe()
                                 } else {
-                                    None
+                                    Default::default()
                                 };
 
                                 if time.is_some() && ptime.is_some() {
