@@ -1325,9 +1325,9 @@ impl Domain {
                                 };
 
                                 let probe_result = if n.is_internal() {
-                                    n.probe()
+                                    Some(n.probe())
                                 } else {
-                                    serde_json::Value::Null
+                                    None
                                 };
 
                                 if time.is_some() && ptime.is_some() {

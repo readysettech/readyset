@@ -131,10 +131,14 @@ impl Ingredient for Union {
         }
     }
 
-    fn probe(&self) -> serde_json::Value {
-        serde_json::json!({
+    fn probe(&self) -> serde_json::Map<String, serde_json::Value> {
+        if let serde_json::Value::Object(o) = serde_json::json!({
             "captured": self.replay_pieces.len(),
-        })
+        }) {
+            o
+        } else {
+            unreachable!()
+        }
     }
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {

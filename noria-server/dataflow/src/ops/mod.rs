@@ -128,7 +128,7 @@ impl Ingredient for NodeOperator {
     fn description(&self, detailed: bool) -> String {
         impl_ingredient_fn_ref!(self, description, detailed)
     }
-    fn probe(&self) -> serde_json::Value {
+    fn probe(&self) -> serde_json::Map<String, serde_json::Value> {
         impl_ingredient_fn_ref!(self, probe,)
     }
     fn on_connected(&mut self, graph: &Graph) {
