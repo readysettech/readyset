@@ -4,7 +4,7 @@ extern crate slog;
 use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -112,7 +112,9 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let mut b = NoriaBackend::new(ch, auto_increments, query_cache, false, true, true, logger);
+        let stats = (Arc::new(AtomicUsize::new(0)), None);
+        let primed = Arc::new(AtomicBool::new(false));
+        let mut b = NoriaBackend::new(ch, auto_increments, query_cache, stats, primed, false, true, true, logger);
 
         MysqlIntermediary::run_on_tcp(&mut b, s).unwrap();
         rt.shutdown_on_idle().wait().unwrap();
