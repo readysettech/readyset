@@ -3,6 +3,7 @@ use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
+use std::ops::Deref;
 
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::{Column, FunctionExpression};
@@ -15,8 +16,11 @@ pub enum SqlType {
     Char(u16),
     Varchar(u16),
     Int(u16),
+    UnsignedInt(u16),
     Bigint(u16),
+    UnsignedBigint(u16),
     Tinyint(u16),
+    UnsignedTinyint(u16),
     Blob,
     Longblob,
     Mediumblob,
@@ -44,8 +48,11 @@ impl fmt::Display for SqlType {
             SqlType::Char(len) => write!(f, "CHAR({})", len),
             SqlType::Varchar(len) => write!(f, "VARCHAR({})", len),
             SqlType::Int(len) => write!(f, "INT({})", len),
+            SqlType::UnsignedInt(len) => write!(f, "UNSIGNED INT({})", len),
             SqlType::Bigint(len) => write!(f, "BIGINT({})", len),
+            SqlType::UnsignedBigint(len) => write!(f, "UNSIGNED BIGINT({})", len),
             SqlType::Tinyint(len) => write!(f, "TINYINT({})", len),
+            SqlType::UnsignedTinyint(len) => write!(f, "UNSIGNED TINYINT({})", len),
             SqlType::Blob => write!(f, "BLOB"),
             SqlType::Longblob => write!(f, "LONGBLOB"),
             SqlType::Mediumblob => write!(f, "MEDIUMBLOB"),
@@ -78,6 +85,7 @@ pub struct Real {
 pub enum Literal {
     Null,
     Integer(i64),
+    UnsignedInteger(u64),
     FixedPoint(Real),
     String(String),
     Blob(Vec<u8>),
@@ -90,6 +98,24 @@ pub enum Literal {
 impl From<i64> for Literal {
     fn from(i: i64) -> Self {
         Literal::Integer(i)
+    }
+}
+
+impl From<u64> for Literal {
+    fn from(i: u64) -> Self {
+        Literal::UnsignedInteger(i)
+    }
+}
+
+impl From<i32> for Literal {
+    fn from(i: i32) -> Self {
+        Literal::Integer(i.into())
+    }
+}
+
+impl From<u32> for Literal {
+    fn from(i: u32) -> Self {
+        Literal::UnsignedInteger(i.into())
     }
 }
 
@@ -110,6 +136,7 @@ impl ToString for Literal {
         match *self {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
+            Literal::UnsignedInteger(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => format!("{}.{}", f.integral, f.fractional),
             Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
             Literal::Blob(ref bv) => format!(
@@ -393,15 +420,35 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
                tag_no_case!("tinyint") >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1)))
+               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (match signed {
+                   Some(ref sign) => {
+                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
+                       if signedness.to_lowercase() == "unsigned" {
+                           SqlType::UnsignedTinyint(len.map(|l|len_as_u16(l)).unwrap_or(1))
+                       } else {
+                           SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1))
+                       }
+                   },
+                    _ => SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1)),
+               })
            )
          | do_parse!(
                tag_no_case!("bigint") >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1)))
+               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (match signed {
+                   Some(ref sign) => {
+                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
+                       if signedness.to_lowercase() == "unsigned" {
+                           SqlType::UnsignedBigint(len.map(|l|len_as_u16(l)).unwrap_or(1))
+                       } else {
+                           SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1))
+                       }
+                   },
+                    _ => SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1)),
+               })
            )
          | do_parse!(
                tag_no_case!("double") >>
@@ -457,11 +504,18 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
                alt!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
                len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
                opt_multispace >>
-               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Int(match len {
-                   Some(len) => len_as_u16(len),
-                   None => 32 as u16,
-               }))
+               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
+               (match signed {
+                   Some(ref sign) => {
+                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
+                       if signedness.to_lowercase() == "unsigned" {
+                           SqlType::UnsignedInt(len.map(|l|len_as_u16(l)).unwrap_or(32))
+                       } else {
+                           SqlType::Int(len.map(|l|len_as_u16(l)).unwrap_or(32))
+                       }
+                   },
+                   _ => SqlType::Int(len.map(|l|len_as_u16(l)).unwrap_or(32)),
+               })
            )
          | do_parse!(
                tag_no_case!("enum") >>

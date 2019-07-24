@@ -434,13 +434,22 @@ mod tests {
 
     #[test]
     fn sql_types() {
-        let type0 = "bigint(20) unsigned";
+        let type0 = "bigint(20)";
         let type1 = "varchar(255) binary";
+        let type2 = "bigint(20) unsigned";
+        let type3 = "bigint(20) signed";
 
         let res = type_identifier(CompleteByteSlice(type0.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
         let res = type_identifier(CompleteByteSlice(type1.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::Varchar(255));
+        let res = type_identifier(CompleteByteSlice(type2.as_bytes()));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
+        let res = type_identifier(CompleteByteSlice(type3.as_bytes()));
+        assert_eq!(res.unwrap().1, SqlType::Bigint(20));
+        let res = type_identifier(CompleteByteSlice(type2.as_bytes()));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
+        let res = type_identifier(CompleteByteSlice(type3.as_bytes()));
     }
 
     #[test]
@@ -676,7 +685,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         Column::from("django_admin_log.action_flag"),
-                        SqlType::Int(32),
+                        SqlType::UnsignedInt(32),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
@@ -829,7 +838,7 @@ mod tests {
                 fields: vec![
                     ColumnSpecification::with_constraints(
                         Column::from("comments.id"),
-                        SqlType::Int(32),
+                        SqlType::UnsignedInt(32),
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::AutoIncrement,
