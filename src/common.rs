@@ -855,8 +855,8 @@ named!(pub field_definition_expr<CompleteByteSlice, Vec<FieldDefinitionExpressio
        )
 );
 
-/// Parse list of table names.
-/// XXX(malte): add support for aliases
+// Parse list of table names.
+// XXX(malte): add support for aliases
 named!(pub table_list<CompleteByteSlice, Vec<Table> >,
        many0!(
            do_parse!(
@@ -874,7 +874,7 @@ named!(pub table_list<CompleteByteSlice, Vec<Table> >,
        )
 );
 
-/// Integer literal value
+// Integer literal value
 named!(pub integer_literal<CompleteByteSlice, Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
@@ -889,7 +889,7 @@ named!(pub integer_literal<CompleteByteSlice, Literal>,
     )
 );
 
-/// Floating point literal value
+// Floating point literal value
 named!(pub float_literal<CompleteByteSlice, Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
@@ -958,7 +958,7 @@ named!(pub string_literal<CompleteByteSlice, Literal>,
            )
 );
 
-/// Any literal value.
+// Any literal value.
 named!(pub literal<CompleteByteSlice, Literal>,
     alt!(
           float_literal
@@ -983,7 +983,7 @@ named!(pub literal_expression<CompleteByteSlice, LiteralExpression>,
     )
 );
 
-/// Parse a list of values (e.g., for INSERT syntax).
+// Parse a list of values (e.g., for INSERT syntax).
 named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
        many0!(
            do_parse!(
@@ -1002,8 +1002,8 @@ named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
        )
 );
 
-/// Parse a reference to a named table, with an optional alias
-/// TODO(malte): add support for schema.table notation
+// Parse a reference to a named table, with an optional alias
+// TODO(malte): add support for schema.table notation
 named!(pub table_reference<CompleteByteSlice, Table>,
     do_parse!(
         table: sql_identifier >>
@@ -1018,7 +1018,7 @@ named!(pub table_reference<CompleteByteSlice, Table>,
     )
 );
 
-/// Parse rule for a comment part.
+// Parse rule for a comment part.
 named!(pub parse_comment<CompleteByteSlice, String>,
     do_parse!(
         opt_multispace >>
