@@ -36,10 +36,12 @@ stages:
      - template: azure/rustfmt.yml@templates
        parameters:
          name: rustfmt
+         components: [rustfmt]
      - template: azure/rustfmt.yml@templates
        parameters:
          name: rustfmt_beta
          rust: beta
+         components: [rustfmt]
          allow_fail: true
 
 resources:
