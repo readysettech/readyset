@@ -59,8 +59,8 @@ pub struct ExtremumOperator {
 }
 
 pub enum DiffType {
-    Insert(i64),
-    Remove(i64),
+    Insert(i128),
+    Remove(i128),
 }
 
 impl GroupedOperation for ExtremumOperator {
@@ -79,8 +79,10 @@ impl GroupedOperation for ExtremumOperator {
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
         let v = match r[self.over] {
-            DataType::Int(n) => i64::from(n),
-            DataType::BigInt(n) => n,
+            DataType::Int(n) => i128::from(n),
+            DataType::UnsignedInt(n) => i128::from(n),
+            DataType::BigInt(n) => i128::from(n),
+            DataType::UnsignedBigInt(n) => i128::from(n),
             _ => {
                 // the column we're aggregating over is non-numerical (or rather, this value is).
                 // if you've removed a column, chances are the  default value has the wrong type.
@@ -109,20 +111,24 @@ impl GroupedOperation for ExtremumOperator {
     ) -> DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
-        let mut extreme_values: Vec<i64> = vec![];
+        let mut extreme_values: Vec<i128> = vec![];
         if let Some(data) = current {
             match *data {
-                DataType::Int(n) => extreme_values.push(i64::from(n)),
-                DataType::BigInt(n) => extreme_values.push(n),
+                DataType::Int(n) => extreme_values.push(i128::from(n)),
+                DataType::UnsignedInt(n) => extreme_values.push(i128::from(n)),
+                DataType::BigInt(n) => extreme_values.push(i128::from(n)),
+                DataType::UnsignedBigInt(n) => extreme_values.push(i128::from(n)),
                 _ => unreachable!(),
             }
         };
 
-        let is_extreme_value = |x: i64| {
+        let is_extreme_value = |x: i128| {
             if let Some(data) = current {
                 let n = match *data {
-                    DataType::Int(n) => i64::from(n),
-                    DataType::BigInt(n) => n,
+                    DataType::Int(n) => i128::from(n),
+                    DataType::UnsignedInt(n) => i128::from(n),
+                    DataType::BigInt(n) => i128::from(n),
+                    DataType::UnsignedBigInt(n) => i128::from(n),
                     _ => unreachable!(),
                 };
                 match self.op {
@@ -138,7 +144,7 @@ impl GroupedOperation for ExtremumOperator {
             match d {
                 DiffType::Insert(v) if is_extreme_value(v) => extreme_values.push(v),
                 DiffType::Remove(v) if is_extreme_value(v) => {
-                    if let Some(i) = extreme_values.iter().position(|x: &i64| *x == v) {
+                    if let Some(i) = extreme_values.iter().position(|x: &i128| *x == v) {
                         extreme_values.swap_remove(i);
                     }
                 }

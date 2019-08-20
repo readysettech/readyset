@@ -14,7 +14,9 @@ type Path = std::vec::Vec<(
 fn to_sql_type(d: &DataType) -> Option<SqlType> {
     match d {
         DataType::Int(_) => Some(SqlType::Int(32)),
+        DataType::UnsignedInt(_) => Some(SqlType::UnsignedInt(32)),
         DataType::BigInt(_) => Some(SqlType::Bigint(64)),
+        DataType::UnsignedBigInt(_) => Some(SqlType::UnsignedBigint(64)),
         DataType::Real(_, _) => Some(SqlType::Real),
         DataType::Text(_) => Some(SqlType::Text),
         DataType::TinyText(_) => Some(SqlType::Varchar(8)),

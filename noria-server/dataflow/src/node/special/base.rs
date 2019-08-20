@@ -240,8 +240,8 @@ impl Base {
                 match op {
                     Modification::Set(v) => future[col] = v,
                     Modification::Apply(op, v) => {
-                        let old: i64 = future[col].clone().into();
-                        let delta: i64 = v.into();
+                        let old: i128 = future[col].clone().into();
+                        let delta: i128 = v.into();
                         future[col] = match op {
                             Operation::Add => (old + delta).into(),
                             Operation::Sub => (old - delta).into(),

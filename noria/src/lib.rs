@@ -247,7 +247,9 @@ pub struct ActivationResult {
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {
         DataType::Int(n) => n as usize % shards,
+        DataType::UnsignedInt(n) => n as usize % shards,
         DataType::BigInt(n) => n as usize % shards,
+        DataType::UnsignedBigInt(n) => n as usize % shards,
         DataType::Text(..) | DataType::TinyText(..) => {
             use std::borrow::Cow;
             use std::hash::Hasher;

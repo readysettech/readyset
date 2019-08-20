@@ -60,7 +60,7 @@ pub struct Aggregator {
 }
 
 impl GroupedOperation for Aggregator {
-    type Diff = i64;
+    type Diff = i128;
 
     fn setup(&mut self, parent: &Node) {
         assert!(
@@ -79,15 +79,17 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT => -1,
             Aggregation::SUM => {
                 let v = match r[self.over] {
-                    DataType::Int(n) => i64::from(n),
-                    DataType::BigInt(n) => n,
+                    DataType::Int(n) => i128::from(n),
+                    DataType::UnsignedInt(n) => i128::from(n),
+                    DataType::BigInt(n) => i128::from(n),
+                    DataType::UnsignedBigInt(n) => i128::from(n),
                     DataType::None => 0,
                     ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
                 };
                 if pos {
                     v
                 } else {
-                    0i64 - v
+                    0i128 - v
                 }
             }
         }
@@ -99,8 +101,10 @@ impl GroupedOperation for Aggregator {
         diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> DataType {
         let n = match current {
-            Some(&DataType::Int(n)) => i64::from(n),
-            Some(&DataType::BigInt(n)) => n,
+            Some(&DataType::Int(n)) => i128::from(n),
+            Some(&DataType::UnsignedInt(n)) => i128::from(n),
+            Some(&DataType::BigInt(n)) => i128::from(n),
+            Some(&DataType::UnsignedBigInt(n)) => i128::from(n),
             None => 0,
             _ => unreachable!(),
         };

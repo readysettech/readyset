@@ -310,7 +310,9 @@ fn check_query(
                     .map(|v| match v {
                         DataType::None => "NULL".to_owned(),
                         DataType::Int(i) => i.to_string(),
+                        DataType::UnsignedInt(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
+                        DataType::UnsignedBigInt(i) => i.to_string(),
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
                         DataType::Text(_) | DataType::TinyText(_) => v.into(),
                         DataType::Timestamp(_) => unimplemented!(),

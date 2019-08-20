@@ -133,14 +133,14 @@ fn perform_primary_reads(
     let mut getter = g.view("ReadRow").unwrap().into_sync();
 
     for i in row_ids {
-        let id: DataType = DataType::BigInt(i);
+        let id: DataType = DataType::UnsignedBigInt(i as u64);
         let start = Instant::now();
         let rs = getter.lookup(&[id], true).unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         assert_eq!(rs.len(), 1);
         for j in 0..10 {
-            assert_eq!(DataType::BigInt(i), rs[0][j]);
+            assert_eq!(DataType::UnsignedBigInt(i as u64), rs[0][j]);
         }
 
         if hist.record(us).is_err() {
@@ -164,7 +164,7 @@ fn perform_secondary_reads(
 
     let skewed = row_ids.len() == 1;
     for i in row_ids {
-        let id: DataType = DataType::BigInt(i);
+        let id: DataType = DataType::UnsignedBigInt(i as u64);
         let start = Instant::now();
         // Pick an arbitrary secondary index to use:
         let getter = &mut getters[i as usize % (indices - 1)];
@@ -178,7 +178,7 @@ fn perform_secondary_reads(
         }
 
         for j in 0..10 {
-            assert_eq!(DataType::BigInt(i), rs[0][j]);
+            assert_eq!(DataType::UnsignedBigInt(i as u64), rs[0][j]);
         }
 
         if hist.record(us).is_err() {
