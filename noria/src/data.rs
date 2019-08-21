@@ -172,9 +172,15 @@ impl PartialEq for DataType {
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(b)) => a == b,
             (&DataType::Int(a), &DataType::Int(b)) => a == b,
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a == b,
-            (&DataType::BigInt(..), &DataType::Int(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
+            (&DataType::UnsignedBigInt(..), &DataType::Int(..))
+            | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..))
+            | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
+            | (&DataType::UnsignedInt(..), &DataType::Int(..))
+            | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
+            | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
+            | (&DataType::BigInt(..), &DataType::Int(..))
             | (&DataType::BigInt(..), &DataType::UnsignedInt(..))
+            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..))
             | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
             | (&DataType::Int(..), &DataType::BigInt(..)) => {
@@ -215,6 +221,7 @@ impl Ord for DataType {
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a.cmp(&b),
             (&DataType::BigInt(..), &DataType::Int(..)) | (&DataType::Int(..), &DataType::BigInt(..))
             | (&DataType::BigInt(..), &DataType::UnsignedInt(..)) | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
+            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..)) | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
             | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..)) | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
             | (&DataType::Int(..), &DataType::UnsignedBigInt(..)) | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
             | (&DataType::UnsignedInt(..), &DataType::Int(..)) | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
@@ -782,12 +789,18 @@ mod tests {
         let shrt6 = DataType::Int(6);
         let long = DataType::BigInt(5);
         let long6 = DataType::BigInt(6);
+        let ushrt = DataType::UnsignedInt(5);
+        let ushrt6 = DataType::UnsignedInt(6);
+        let ulong = DataType::UnsignedBigInt(5);
+        let ulong6 = DataType::UnsignedBigInt(6);
 
         assert_eq!(txt1, txt1);
         assert_eq!(txt2, txt2);
         assert_eq!(text, text);
         assert_eq!(shrt, shrt);
         assert_eq!(long, long);
+        assert_eq!(ushrt, ushrt);
+        assert_eq!(ulong, ulong);
         assert_eq!(real, real);
         assert_eq!(time, time);
 
@@ -796,6 +809,16 @@ mod tests {
         assert_eq!(txt2, txt1);
         assert_eq!(shrt, long);
         assert_eq!(long, shrt);
+        assert_eq!(ushrt, shrt);
+        assert_eq!(shrt, ushrt);
+        assert_eq!(ulong, long);
+        assert_eq!(long, ulong);
+        assert_eq!(shrt, ulong);
+        assert_eq!(ulong, shrt);
+        assert_eq!(ushrt, long);
+        assert_eq!(long, ushrt);
+        assert_eq!(ushrt, ulong);
+        assert_eq!(ulong, ushrt);
 
         // negation
         assert_ne!(txt1, txt12);
@@ -804,6 +827,8 @@ mod tests {
         assert_ne!(txt1, time);
         assert_ne!(txt1, shrt);
         assert_ne!(txt1, long);
+        assert_ne!(txt1, ushrt);
+        assert_ne!(txt1, ulong);
 
         assert_ne!(txt2, txt12);
         assert_ne!(txt2, text);
@@ -811,6 +836,8 @@ mod tests {
         assert_ne!(txt2, time);
         assert_ne!(txt2, shrt);
         assert_ne!(txt2, long);
+        assert_ne!(txt2, ushrt);
+        assert_ne!(txt2, ulong);
 
         assert_ne!(text, text2);
         assert_ne!(text, txt1);
@@ -819,6 +846,8 @@ mod tests {
         assert_ne!(text, time);
         assert_ne!(text, shrt);
         assert_ne!(text, long);
+        assert_ne!(text, ushrt);
+        assert_ne!(text, ulong);
 
         assert_ne!(real, real2);
         assert_ne!(real, txt1);
@@ -827,6 +856,8 @@ mod tests {
         assert_ne!(real, time);
         assert_ne!(real, shrt);
         assert_ne!(real, long);
+        assert_ne!(real, ushrt);
+        assert_ne!(real, ulong);
 
         assert_ne!(time, time2);
         assert_ne!(time, txt1);
@@ -835,6 +866,8 @@ mod tests {
         assert_ne!(time, real);
         assert_ne!(time, shrt);
         assert_ne!(time, long);
+        assert_ne!(time, ushrt);
+        assert_ne!(time, ulong);
 
         assert_ne!(shrt, shrt6);
         assert_ne!(shrt, txt1);
@@ -851,6 +884,26 @@ mod tests {
         assert_ne!(long, real);
         assert_ne!(long, time);
         assert_ne!(long, shrt6);
+
+        assert_ne!(ushrt, ushrt6);
+        assert_ne!(ushrt, txt1);
+        assert_ne!(ushrt, txt2);
+        assert_ne!(ushrt, text);
+        assert_ne!(ushrt, real);
+        assert_ne!(ushrt, time);
+        assert_ne!(ushrt, ulong6);
+        assert_ne!(ushrt, shrt6);
+        assert_ne!(ushrt, long6);
+
+        assert_ne!(ulong, ulong6);
+        assert_ne!(ulong, txt1);
+        assert_ne!(ulong, txt2);
+        assert_ne!(ulong, text);
+        assert_ne!(ulong, real);
+        assert_ne!(ulong, time);
+        assert_ne!(ulong, ushrt6);
+        assert_ne!(ulong, shrt6);
+        assert_ne!(ulong, long6);
 
         use std::cmp::Ordering;
         assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
