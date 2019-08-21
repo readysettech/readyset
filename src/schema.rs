@@ -8,6 +8,7 @@ pub enum Schema {
 }
 
 pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
+    let mut flags = msql_srv::ColumnFlags::empty();
     msql_srv::Column {
         table: cs.column.table.clone().unwrap_or("".to_owned()),
         column: cs.column.name.clone(),
@@ -17,11 +18,20 @@ pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
             SqlType::Text => msql_srv::ColumnType::MYSQL_TYPE_STRING,
             SqlType::Varchar(_) => msql_srv::ColumnType::MYSQL_TYPE_VAR_STRING,
             SqlType::Int(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
-            SqlType::UnsignedInt(_) => msql_srv::ColumnType::MYSQL_TYPE_LONG,
+            SqlType::UnsignedInt(_) => {
+                flags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+                msql_srv::ColumnType::MYSQL_TYPE_LONG
+            },
             SqlType::Bigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-            SqlType::UnsignedBigint(_) => msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
+            SqlType::UnsignedBigint(_) => {
+                flags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+                msql_srv::ColumnType::MYSQL_TYPE_LONGLONG
+            },
             SqlType::Tinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
-            SqlType::UnsignedTinyint(_) => msql_srv::ColumnType::MYSQL_TYPE_TINY,
+            SqlType::UnsignedTinyint(_) => {
+                flags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+                msql_srv::ColumnType::MYSQL_TYPE_TINY
+            },
             SqlType::Bool => msql_srv::ColumnType::MYSQL_TYPE_BIT,
             SqlType::DateTime(_) => msql_srv::ColumnType::MYSQL_TYPE_DATETIME,
             SqlType::Float => msql_srv::ColumnType::MYSQL_TYPE_DOUBLE,
@@ -29,7 +39,6 @@ pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
             _ => unimplemented!(),
         },
         colflags: {
-            let mut flags = msql_srv::ColumnFlags::empty();
             for c in &cs.constraints {
                 match *c {
                     ColumnConstraint::AutoIncrement => {
