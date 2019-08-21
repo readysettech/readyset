@@ -793,7 +793,9 @@ where
             let written = match *c {
                 DataType::None => rw.write_col(None::<i32>),
                 DataType::Int(i) => rw.write_col(i as isize),
+                DataType::UnsignedInt(i) => rw.write_col(i as usize),
                 DataType::BigInt(i) => rw.write_col(i as isize),
+                DataType::UnsignedBigInt(i) => rw.write_col(i as usize),
                 DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
                 ref dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
                 ref dt @ DataType::Real(_, _) => match cs.coltype {
