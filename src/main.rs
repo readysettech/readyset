@@ -125,7 +125,7 @@ fn main() {
 
     debug!(log, "Connecting to Noria...",);
     let s =
-        tracing_fmt::default::Format::default().with_timer(tracing_fmt::time::Uptime::default());
+        tracing_fmt::format::Format::default().with_timer(tracing_fmt::time::Uptime::default());
     let s = tracing_fmt::FmtSubscriber::builder().on_event(s).finish();
     let tracer = tracing::Dispatch::new(s);
     let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
