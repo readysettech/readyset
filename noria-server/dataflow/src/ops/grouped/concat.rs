@@ -228,10 +228,7 @@ impl GroupedOperation for GroupConcat {
             .collect::<Vec<_>>()
             .join(", ");
 
-        format!(
-            "||([{}], \"{}\") γ[{}]",
-            fields, self.separator, group_cols
-        )
+        format!("||([{}], \"{}\") γ[{}]", fields, self.separator, group_cols)
     }
 
     fn over_columns(&self) -> Vec<usize> {

@@ -219,12 +219,18 @@ impl Ord for DataType {
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(ref b)) => a.cmp(b),
             (&DataType::Int(a), &DataType::Int(b)) => a.cmp(&b),
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a.cmp(&b),
-            (&DataType::BigInt(..), &DataType::Int(..)) | (&DataType::Int(..), &DataType::BigInt(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedInt(..)) | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..)) | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..)) | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::Int(..), &DataType::UnsignedBigInt(..)) | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
-            | (&DataType::UnsignedInt(..), &DataType::Int(..)) | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
+            (&DataType::BigInt(..), &DataType::Int(..))
+            | (&DataType::Int(..), &DataType::BigInt(..))
+            | (&DataType::BigInt(..), &DataType::UnsignedInt(..))
+            | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
+            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..))
+            | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
+            | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..))
+            | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
+            | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
+            | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
+            | (&DataType::UnsignedInt(..), &DataType::Int(..))
+            | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
                 let a: i128 = self.into();
                 let b: i128 = other.into();
                 a.cmp(&b)
