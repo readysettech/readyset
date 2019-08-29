@@ -796,8 +796,8 @@ where
                 DataType::BigInt(i) => rw.write_col(i as isize),
                 // XXX(malte): isize case here is wrong, but expected by msql_srv.-
                 // see #9
-                DataType::UnsignedInt(i) => rw.write_col(i as isize),
-                DataType::UnsignedBigInt(i) => rw.write_col(i as isize),
+                DataType::UnsignedInt(i) => rw.write_col(i as usize),
+                DataType::UnsignedBigInt(i) => rw.write_col(i as usize),
                 DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
                 ref dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
                 ref dt @ DataType::Real(_, _) => match cs.coltype {
