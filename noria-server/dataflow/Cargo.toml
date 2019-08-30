@@ -6,12 +6,12 @@ publish = false
 
 [dependencies]
 bincode = "1.0.0"
-evmap = { git = "https://github.com/jonhoo/rust-evmap", branch = "eviction" }
+evmap = { git = "https://github.com/jonhoo/rust-evmap", branch = "indexmap" }
 fnv = "1.0.5"
 futures = "0.1"
 itertools = "0.8"
 nom-sql = "0.0.9"
-rahashmap = "0.2.13"
+indexmap = "1.1.0"
 rand = "0.7"
 regex = "1"
 serde_derive = "1.0.8"

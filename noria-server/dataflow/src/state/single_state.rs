@@ -24,10 +24,10 @@ macro_rules! insert_row_match_impl {
 }
 
 macro_rules! remove_row_match_impl {
-    ($self:ident, $r:ident, $do_remove:ident, $map:ident) => {{
+    ($self:ident, $r:ident, $do_remove:ident, $map:ident, $($hint:tt)*) => {{
         // TODO: can we avoid the Clone here?
         let key = MakeKey::from_row(&$self.key, $r);
-        if let Some(ref mut rs) = $map.get_mut(&key) {
+        if let Some(ref mut rs) = $map.get_mut::<$($hint)*>(&key) {
             return $do_remove(&mut $self.rows, rs);
         }
     }};
@@ -46,7 +46,7 @@ impl SingleState {
     /// Inserts the given record, or returns false if a hole was encountered (and the record hence
     /// not inserted).
     pub(super) fn insert_row(&mut self, r: Row) -> bool {
-        use rahashmap::Entry;
+        use indexmap::map::Entry;
         match self.state {
             KeyedState::Single(ref mut map) => {
                 // treat this specially to avoid the extra Vec
@@ -100,11 +100,21 @@ impl SingleState {
                     return do_remove(&mut self.rows, rs);
                 }
             }
-            KeyedState::Double(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
-            KeyedState::Tri(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
-            KeyedState::Quad(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
-            KeyedState::Quin(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
-            KeyedState::Sex(ref mut map) => remove_row_match_impl!(self, r, do_remove, map),
+            KeyedState::Double(ref mut map) => {
+                remove_row_match_impl!(self, r, do_remove, map, (DataType, _))
+            }
+            KeyedState::Tri(ref mut map) => {
+                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _))
+            }
+            KeyedState::Quad(ref mut map) => {
+                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _))
+            }
+            KeyedState::Quin(ref mut map) => {
+                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _, _))
+            }
+            KeyedState::Sex(ref mut map) => {
+                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _, _, _))
+            }
         }
         None
     }
@@ -160,12 +170,16 @@ impl SingleState {
 
     pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
-            KeyedState::Single(ref mut map) => map.remove(&key[0]),
-            KeyedState::Double(ref mut map) => map.remove(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut map) => map.remove(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut map) => map.remove(&MakeKey::from_key(key)),
-            KeyedState::Quin(ref mut map) => map.remove(&MakeKey::from_key(key)),
-            KeyedState::Sex(ref mut map) => map.remove(&MakeKey::from_key(key)),
+            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
+            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut m) => {
+                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Sex(ref mut m) => {
+                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+            }
         };
         // mark_hole should only be called on keys we called mark_filled on
         removed
@@ -198,7 +212,7 @@ impl SingleState {
         let mut bytes_freed = 0;
         let mut keys = Vec::with_capacity(count);
         for _ in 0..count {
-            if let Some((n, key)) = self.state.evict_at_index(rng.gen()) {
+            if let Some((n, key)) = self.state.evict_with_seed(rng.gen()) {
                 bytes_freed += n;
                 keys.push(key);
             } else {

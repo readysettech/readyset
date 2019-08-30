@@ -1,12 +1,12 @@
 use fnv::FnvBuildHasher;
-use rahashmap::HashMap as RaHashMap;
+use indexmap::IndexMap;
 use std::rc::Rc;
 
 use super::mk_key::MakeKey;
 use common::SizeOf;
 use prelude::*;
 
-type FnvHashMap<K, V> = RaHashMap<K, V, FnvBuildHasher>;
+type FnvHashMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
@@ -31,26 +31,39 @@ impl KeyedState {
         }
     }
 
-    /// Remove all rows for the first key at or after `index`, returning that key along with the
-    /// number of bytes freed. Returns None if already empty.
-    pub(super) fn evict_at_index(&mut self, index: usize) -> Option<(u64, Vec<DataType>)> {
+    /// Remove all rows for a randomly chosen key seeded by `seed`, returning that key along with
+    /// the number of bytes freed. Returns `None` if map is empty.
+    pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(u64, Vec<DataType>)> {
         let (rs, key) = match *self {
-            KeyedState::Single(ref mut m) => m.remove_at_index(index).map(|(k, rs)| (rs, vec![k])),
-            KeyedState::Double(ref mut m) => {
-                m.remove_at_index(index).map(|(k, rs)| (rs, vec![k.0, k.1]))
+            KeyedState::Single(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]))
             }
-            KeyedState::Tri(ref mut m) => m
-                .remove_at_index(index)
-                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2])),
-            KeyedState::Quad(ref mut m) => m
-                .remove_at_index(index)
-                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3])),
-            KeyedState::Quin(ref mut m) => m
-                .remove_at_index(index)
-                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4])),
-            KeyedState::Sex(ref mut m) => m
-                .remove_at_index(index)
-                .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5])),
+            KeyedState::Double(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, vec![k.0, k.1]))
+            }
+            KeyedState::Tri(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, vec![k.0, k.1, k.2]))
+            }
+            KeyedState::Quad(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3]))
+            }
+            KeyedState::Quin(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4]))
+            }
+            KeyedState::Sex(ref mut m) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index)
+                    .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5]))
+            }
         }?;
         Some((
             rs.iter()
@@ -65,11 +78,15 @@ impl KeyedState {
     pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
             KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Quin(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Sex(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut m) => {
+                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Sex(ref mut m) => {
+                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+            }
         }
         .map(|rows| {
             rows.iter()
