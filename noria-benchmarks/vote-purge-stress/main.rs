@@ -1,4 +1,3 @@
-#![feature(duration_float)]
 #![allow(clippy::many_single_char_names)]
 
 extern crate clap;

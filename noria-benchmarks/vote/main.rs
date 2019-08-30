@@ -1,6 +1,5 @@
 #![feature(try_blocks)]
-#![feature(existential_type)]
-#![feature(duration_float)]
+#![feature(type_alias_impl_trait)]
 
 #[macro_use]
 extern crate clap;
@@ -8,6 +7,7 @@ extern crate clap;
 use failure::ResultExt;
 use hdrhistogram::Histogram;
 use rand::prelude::*;
+use rand_distr::Exp;
 use std::cell::RefCell;
 use std::fs;
 use std::mem;
@@ -264,7 +264,7 @@ where
     let end = start + warmup + runtime;
 
     let max_batch_time = time::Duration::new(0, MAX_BATCH_TIME_US * 1_000);
-    let interarrival = rand::distributions::Exp::new(target * 1e-9);
+    let interarrival = Exp::new(target * 1e-9).unwrap();
 
     let every = value_t_or_exit!(global_args, "ratio", u32);
 

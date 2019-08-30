@@ -28,6 +28,7 @@ zookeeper = "0.5.3"
 clap = "2.25.0"
 # distributions
 rand = "0.7"
+rand_distr = "0.2"
 zipf = "6"
 # sampling
 hdrhistogram = "6.1"

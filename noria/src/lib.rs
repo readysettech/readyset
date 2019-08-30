@@ -110,7 +110,7 @@
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(allow_fail)]
 #![feature(try_blocks)]
-#![feature(existential_type)]
+#![feature(type_alias_impl_trait)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 

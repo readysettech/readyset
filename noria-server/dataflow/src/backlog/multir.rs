@@ -38,19 +38,20 @@ impl Handle {
                 use std::mem;
                 use std::ptr;
                 unsafe {
-                    let mut stack_key: (DataType, DataType) = mem::uninitialized();
+                    let mut stack_key: (mem::MaybeUninit<DataType>, mem::MaybeUninit<DataType>) =
+                        (mem::MaybeUninit::uninit(), mem::MaybeUninit::uninit());
                     ptr::copy_nonoverlapping(
                         &key[0] as *const DataType,
-                        &mut stack_key.0 as *mut DataType,
+                        stack_key.0.as_mut_ptr(),
                         1,
                     );
                     ptr::copy_nonoverlapping(
                         &key[1] as *const DataType,
-                        &mut stack_key.1 as *mut DataType,
+                        stack_key.1.as_mut_ptr(),
                         1,
                     );
+                    let stack_key = mem::transmute::<_, &(DataType, DataType)>(&stack_key);
                     let v = h.meta_get_and(&stack_key, then);
-                    mem::forget(stack_key);
                     v
                 }
             }

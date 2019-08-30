@@ -1,5 +1,3 @@
-#![feature(duration_float)]
-
 #[macro_use]
 extern crate clap;
 

@@ -36,7 +36,7 @@ impl Service<()> for TableEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    existential type Future: Future<
+    type Future = impl Future<
         Item = multiplex::MultiplexTransport<Transport, Tagger>,
         Error = tokio::io::Error,
     >;
@@ -264,7 +264,7 @@ impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    existential type Future: Future<Item = Tagged<()>, Error = TableError>;
+    type Future = impl Future<Item = Tagged<()>, Error = TableError>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {

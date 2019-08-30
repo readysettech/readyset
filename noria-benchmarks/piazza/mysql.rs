@@ -1,4 +1,3 @@
-#![feature(duration_float)]
 #![feature(type_ascription)]
 
 #[macro_use]

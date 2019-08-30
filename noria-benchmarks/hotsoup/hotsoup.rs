@@ -1,5 +1,3 @@
-#![feature(duration_float)]
-
 mod populate;
 
 #[macro_use]

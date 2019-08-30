@@ -31,7 +31,7 @@ impl Service<()> for ViewEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    existential type Future: Future<
+    type Future = impl Future<
         Item = multiplex::MultiplexTransport<Transport, Tagger>,
         Error = tokio::io::Error,
     >;
@@ -218,7 +218,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
     type Response = Vec<Datas>;
     type Error = ViewError;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    existential type Future: Future<Item = Vec<Datas>, Error = ViewError>;
+    type Future = impl Future<Item = Vec<Datas>, Error = ViewError>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         for s in &mut self.shards {
