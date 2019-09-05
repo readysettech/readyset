@@ -1,5 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
-use nom::{self, IResult};
+use nom;
 use std::io;
 use std::io::prelude::*;
 
@@ -135,20 +135,22 @@ impl<R: Read> PacketReader<R> {
     }
 }
 
-named!(
-    fullpacket<(u8, &[u8])>,
-    do_parse!(
-        tag!(&[0xff, 0xff, 0xff]) >> seq: take!(1) >> bytes: take!(U24_MAX) >> (seq[0], bytes)
-    )
-);
+pub fn fullpacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
+    let (i, _) = nom::bytes::complete::tag(&[0xff, 0xff, 0xff])(i)?;
+    let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
+    let (i, bytes) = nom::bytes::complete::take(U24_MAX)(i)?;
+    Ok((i, (seq[0], bytes)))
+}
 
-named!(
-    onepacket<(u8, &[u8])>,
-    do_parse!(
-        length: apply!(nom::le_u24,) >> seq: take!(1) >> bytes: take!(length) >> (seq[0], bytes)
-    )
-);
+pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
+    let (i, length) = nom::number::complete::le_u24(i)?;
+    let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
+    let (i, bytes) = nom::bytes::complete::take(length)(i)?;
+    Ok((i, (seq[0], bytes)))
+}
 
+// Clone because of https://github.com/Geal/nom/issues/1008
+#[derive(Clone)]
 pub struct Packet<'a>(&'a [u8], Vec<u8>);
 
 impl<'a> Packet<'a> {
@@ -191,35 +193,37 @@ impl<'a> Deref for Packet<'a> {
     }
 }
 
-fn packet<'a>(input: &'a [u8]) -> IResult<&'a [u8], (u8, Packet<'a>)> {
-    do_parse!(
-        input,
-        full: fold_many0!(
-            fullpacket,
-            (0, None),
-            |(seq, pkt): (_, Option<Packet<'a>>), (nseq, p)| {
-                let pkt = if let Some(mut pkt) = pkt {
-                    assert_eq!(nseq, seq + 1);
-                    pkt.extend(p);
-                    Some(pkt)
-                } else {
-                    Some(Packet(p, Vec::new()))
-                };
-                (nseq, pkt)
-            }
-        ) >> last: onepacket
-            >> ({
-                let seq = last.0;
-                let pkt = if let Some(mut pkt) = full.1 {
-                    assert_eq!(last.0, full.0 + 1);
-                    pkt.extend(last.1);
-                    pkt
-                } else {
-                    Packet(last.1, Vec::new())
-                };
-                (seq, pkt)
-            })
-    )
+fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet)> {
+    nom::combinator::map(
+        nom::sequence::pair(
+            nom::multi::fold_many0(
+                fullpacket,
+                (0, None),
+                |(seq, pkt): (_, Option<Packet>), (nseq, p)| {
+                    let pkt = if let Some(mut pkt) = pkt {
+                        assert_eq!(nseq, seq + 1);
+                        pkt.extend(p);
+                        Some(pkt)
+                    } else {
+                        Some(Packet(p, Vec::new()))
+                    };
+                    (nseq, pkt)
+                },
+            ),
+            onepacket,
+        ),
+        move |(full, last)| {
+            let seq = last.0;
+            let pkt = if let Some(mut pkt) = full.1 {
+                assert_eq!(last.0, full.0 + 1);
+                pkt.extend(last.1);
+                pkt
+            } else {
+                Packet(last.1, Vec::new())
+            };
+            (seq, pkt)
+        },
+    )(i)
 }
 
 #[cfg(test)]
