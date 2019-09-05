@@ -9,23 +9,23 @@ pub struct ClientHandshake<'a> {
     username: &'a [u8],
 }
 
-named!(
-    pub client_handshake<ClientHandshake>,
-    do_parse!(
-        cap: apply!(nom::le_u32,) >>
-        maxps: apply!(nom::le_u32,) >>
-        collation: take!(1) >>
-        take!(23) >>
-        username: take_until!(&b"\0"[..]) >>
-        tag!(b"\0") >> //rustfmt
-        (ClientHandshake {
+pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake> {
+    let (i, cap) = nom::number::complete::le_u32(i)?;
+    let (i, maxps) = nom::number::complete::le_u32(i)?;
+    let (i, collation) = nom::bytes::complete::take(1u8)(i)?;
+    let (i, _) = nom::bytes::complete::take(23u8)(i)?;
+    let (i, username) = nom::bytes::complete::take_until(&b"\0"[..])(i)?;
+    let (i, _) = nom::bytes::complete::tag(b"\0")(i)?;
+    Ok((
+        i,
+        ClientHandshake {
             capabilities: CapabilityFlags::from_bits_truncate(cap),
             maxps,
             collation: u16::from(collation[0]),
             username,
-        })
-    )
-);
+        },
+    ))
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command<'a> {
@@ -47,48 +47,63 @@ pub enum Command<'a> {
     Quit,
 }
 
-named!(
-    execute<Command>,
-    do_parse!(
-        stmt: apply!(nom::le_u32,) >>
-        _flags: take!(1) >>
-        _iterations: apply!(nom::le_u32,) >>
-        rest: apply!(nom::rest,) >> //rustfmt
-        (Command::Execute {
-            stmt,
-            params: rest,
-        })
-    )
-);
+pub fn execute(i: &[u8]) -> nom::IResult<&[u8], Command> {
+    let (i, stmt) = nom::number::complete::le_u32(i)?;
+    let (i, _flags) = nom::bytes::complete::take(1u8)(i)?;
+    let (i, _iterations) = nom::number::complete::le_u32(i)?;
+    Ok((&[], Command::Execute { stmt, params: i }))
+}
 
-named!(
-    send_long_data<Command>,
-    do_parse!(
-        stmt: apply!(nom::le_u32,) >>
-        param: apply!(nom::le_u16,) >>
-        data: apply!(nom::rest,) >> // rustfmt
-        (Command::SendLongData {
+pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command> {
+    let (i, stmt) = nom::number::complete::le_u32(i)?;
+    let (i, param) = nom::number::complete::le_u16(i)?;
+    Ok((
+        &[],
+        Command::SendLongData {
             stmt,
             param,
-            data,
-        })
-    )
-);
+            data: i,
+        },
+    ))
+}
 
-named!(
-    pub parse<Command>,
-    alt!(
-        preceded!(tag!(&[CommandByte::COM_QUERY as u8]), apply!(nom::rest,)) => { |sql| Command::Query(sql) } |
-        preceded!(tag!(&[CommandByte::COM_FIELD_LIST as u8]), apply!(nom::rest,)) => { |filter| Command::ListFields(filter) } |
-        preceded!(tag!(&[CommandByte::COM_INIT_DB as u8]), apply!(nom::rest,)) => { |db| Command::Init(db) } |
-        preceded!(tag!(&[CommandByte::COM_STMT_PREPARE as u8]), apply!(nom::rest,)) => { |sql| Command::Prepare(sql) } |
-        preceded!(tag!(&[CommandByte::COM_STMT_EXECUTE as u8]), execute) |
-        preceded!(tag!(&[CommandByte::COM_STMT_SEND_LONG_DATA as u8]), send_long_data) |
-        preceded!(tag!(&[CommandByte::COM_STMT_CLOSE as u8]), apply!(nom::le_u32,)) => { |stmt| Command::Close(stmt)} |
-        tag!(&[CommandByte::COM_QUIT as u8]) => { |_| Command::Quit } |
-        tag!(&[CommandByte::COM_PING as u8]) => { |_| Command::Ping }
-    )
-);
+pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command> {
+    use nom::bytes::complete::tag;
+    use nom::combinator::{map, rest};
+    use nom::sequence::preceded;
+    nom::branch::alt((
+        map(
+            preceded(tag(&[CommandByte::COM_QUERY as u8]), rest),
+            Command::Query,
+        ),
+        map(
+            preceded(tag(&[CommandByte::COM_FIELD_LIST as u8]), rest),
+            Command::ListFields,
+        ),
+        map(
+            preceded(tag(&[CommandByte::COM_INIT_DB as u8]), rest),
+            Command::Init,
+        ),
+        map(
+            preceded(tag(&[CommandByte::COM_STMT_PREPARE as u8]), rest),
+            Command::Prepare,
+        ),
+        preceded(tag(&[CommandByte::COM_STMT_EXECUTE as u8]), execute),
+        preceded(
+            tag(&[CommandByte::COM_STMT_SEND_LONG_DATA as u8]),
+            send_long_data,
+        ),
+        map(
+            preceded(
+                tag(&[CommandByte::COM_STMT_CLOSE as u8]),
+                nom::number::complete::le_u32,
+            ),
+            Command::Close,
+        ),
+        map(tag(&[CommandByte::COM_QUIT as u8]), |_| Command::Quit),
+        map(tag(&[CommandByte::COM_PING as u8]), |_| Command::Ping),
+    ))(i)
+}
 
 #[cfg(test)]
 mod tests {

@@ -94,7 +94,6 @@
 extern crate byteorder;
 extern crate chrono;
 extern crate mysql_common as myc;
-#[macro_use]
 extern crate nom;
 
 use std::collections::HashMap;
