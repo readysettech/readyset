@@ -126,7 +126,7 @@ executing data-flow operators (`noria-server/dataflow`). The code in
 establishing materializations, scheduling data-flow work, orchestrating
 Noria program changes, handling failovers, etc.
 
-[`noria-server/lib.rs`](noria-server/src/lib.rs) has a pretty extensive comment at
+[`noria-server/src/lib.rs`](noria-server/src/lib.rs) has a pretty extensive comment at
 the top of it that goes through how the Noria internals fit together at
 an implementation level. While it occasionally lags behind, especially
 following larger changes, it should serve to get you familiarized with
