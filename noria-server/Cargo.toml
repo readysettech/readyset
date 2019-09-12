@@ -28,14 +28,13 @@ serde_json = "1.0.2"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
-tokio-os-timer = "0.1.2"
+async-timer = "0.5.2"
 slab = "0.4"
 bincode = "1.0.0"
-tokio = "0.1"
-async-bincode = "0.4.5"
-tokio-threadpool = "0.1"
-tokio-io-pool = "0.1.1"
-tokio-sync = "0.1"
+tokio = "0.2.0-alpha.4"
+async-bincode = "0.5.0-alpha.1"
+tokio-io-pool = "0.2.0-alpha.1"
+tokio-sync = "0.2.0-alpha.4"
 tracing = "0.1"
 tracing-subscriber = "0.1.0"
 streamunordered = "0.4.0"
@@ -47,9 +46,9 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", rev = "2e1d40903b9a294d8c984612400838dcdc8fd758" }
-tower-util = "0.1"
-tower = "0.1"
+tokio-tower = "0.2.0-alpha.1"
+tower-util = "0.3.0-alpha.1"
+tower = "0.3.0-alpha.1"
 
 # local deps
 dataflow = { path = "dataflow" }

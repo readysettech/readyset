@@ -120,8 +120,6 @@ extern crate failure;
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate futures;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
@@ -142,6 +140,7 @@ pub mod internal;
 pub use crate::consensus::ZookeeperAuthority;
 use crate::internal::*;
 use std::cell::RefCell;
+use std::pin::Pin;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -186,11 +185,11 @@ pub struct Tagger(slab::Slab<()>);
 impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
     type Tag = u32;
 
-    fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
+    fn assign_tag(mut self: Pin<&mut Self>, r: &mut Tagged<Request>) -> Self::Tag {
         r.tag = self.0.insert(()) as u32;
         r.tag
     }
-    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
+    fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
         self.0.remove(r.tag as usize);
         r.tag
     }
@@ -209,7 +208,7 @@ impl<T> From<T> for Tagged<T> {
     }
 }
 
-pub use crate::controller::{ControllerDescriptor, ControllerHandle, SyncControllerHandle};
+pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
 pub use crate::table::{SyncTable, Table};
 pub use crate::view::{SyncView, View};

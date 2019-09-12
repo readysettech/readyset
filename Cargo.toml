@@ -8,3 +8,13 @@ members = [
 
 [profile.release]
 debug=true
+
+[patch.crates-io]
+tower = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tower-balance = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tower-buffer = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tower-discover = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tower-load = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tower-util = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git" }
+hyper = { git = "https://github.com/hyperium/hyper.git" }

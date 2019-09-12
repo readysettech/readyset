@@ -5,7 +5,7 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{self, BufWriter, Read, Write};
+use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
@@ -16,6 +16,8 @@ use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::prelude::*;
+use tokio_io::BufWriter;
+use tokio_net::driver::Handle;
 
 pub mod rpc;
 pub mod tcp;
@@ -72,7 +74,7 @@ where
         // synchronous read upon accepting a connection.
         let s = self.build_sync()?.into_inner().into_inner()?;
 
-        tokio::net::TcpStream::from_std(s, &tokio::reactor::Handle::default())
+        tokio::net::TcpStream::from_std(s, &Handle::default())
             .map(BufWriter::new)
             .map(AsyncBincodeWriter::from)
             .map(AsyncBincodeWriter::for_async)
@@ -117,9 +119,7 @@ impl<T> DomainConnectionBuilder<MaybeLocal, T>
 where
     T: serde::Serialize + 'static + Send,
 {
-    pub fn build_async(
-        self,
-    ) -> io::Result<Box<dyn Sink<SinkItem = T, SinkError = bincode::Error> + Send>> {
+    pub fn build_async(self) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send>> {
         if let Some(chan) = self.chan {
             Ok(
                 Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))

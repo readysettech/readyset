@@ -5,13 +5,19 @@ use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
 
 use crate::Tagged;
-use async_bincode::{AsyncBincodeStream, AsyncBincodeWriter, AsyncDestination};
+use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use bincode;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
-use mio::{self, Evented, Poll, PollOpt, Ready, Token};
+use futures_util::ready;
+use mio::{self, Evented, PollOpt, Ready, Token};
 use net2;
+use pin_project::{pin_project, project};
 use serde::{Deserialize, Serialize};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::prelude::*;
 
 use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
@@ -139,10 +145,11 @@ pub enum RecvError {
     DeserializationError(bincode::Error),
 }
 
+#[pin_project]
 pub enum DualTcpStream<S, T, T2, D> {
-    Passthrough(AsyncBincodeStream<S, T, Tagged<()>, D>),
+    Passthrough(#[pin] AsyncBincodeStream<S, T, Tagged<()>, D>),
     Upgrade(
-        AsyncBincodeStream<S, T2, Tagged<()>, D>,
+        #[pin] AsyncBincodeStream<S, T2, Tagged<()>, D>,
         Box<dyn FnMut(T2) -> T + Send + Sync>,
     ),
 }
@@ -168,26 +175,47 @@ impl<S, T, T2> DualTcpStream<S, T, T2, AsyncDestination> {
     }
 }
 
-impl<S, T, T2, D> Sink for DualTcpStream<S, T, T2, D>
+impl<S, T, T2, D> Sink<Tagged<()>> for DualTcpStream<S, T, T2, D>
 where
     S: AsyncWrite,
-    AsyncBincodeWriter<S, Tagged<()>, D>: Sink<SinkItem = Tagged<()>, SinkError = bincode::Error>,
+    AsyncBincodeStream<S, T, Tagged<()>, D>: Sink<Tagged<()>, Error = bincode::Error>,
+    AsyncBincodeStream<S, T2, Tagged<()>, D>: Sink<Tagged<()>, Error = bincode::Error>,
 {
-    type SinkItem = Tagged<()>;
-    type SinkError = bincode::Error;
-    fn start_send(
-        &mut self,
-        item: Self::SinkItem,
-    ) -> Result<AsyncSink<Self::SinkItem>, Self::SinkError> {
-        match *self {
-            DualTcpStream::Passthrough(ref mut abs) => abs.start_send(item),
-            DualTcpStream::Upgrade(ref mut abs, _) => abs.start_send(item),
+    type Error = bincode::Error;
+
+    #[project]
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        #[project]
+        match self.project() {
+            DualTcpStream::Passthrough(abs) => abs.poll_ready(cx),
+            DualTcpStream::Upgrade(abs, _) => abs.poll_ready(cx),
         }
     }
-    fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
-        match *self {
-            DualTcpStream::Passthrough(ref mut abs) => abs.poll_complete(),
-            DualTcpStream::Upgrade(ref mut abs, _) => abs.poll_complete(),
+
+    #[project]
+    fn start_send(mut self: Pin<&mut Self>, item: Tagged<()>) -> Result<(), Self::Error> {
+        #[project]
+        match self.project() {
+            DualTcpStream::Passthrough(abs) => abs.start_send(item),
+            DualTcpStream::Upgrade(abs, _) => abs.start_send(item),
+        }
+    }
+
+    #[project]
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        #[project]
+        match self.project() {
+            DualTcpStream::Passthrough(abs) => abs.poll_flush(cx),
+            DualTcpStream::Upgrade(abs, _) => abs.poll_flush(cx),
+        }
+    }
+
+    #[project]
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        #[project]
+        match self.project() {
+            DualTcpStream::Passthrough(abs) => abs.poll_close(cx),
+            DualTcpStream::Upgrade(abs, _) => abs.poll_close(cx),
         }
     }
 }
@@ -197,19 +225,21 @@ where
     for<'a> T: Deserialize<'a>,
     for<'a> T2: Deserialize<'a>,
     S: AsyncRead,
+    AsyncBincodeStream<S, T, Tagged<()>, D>: Stream<Item = Result<T, bincode::Error>>,
+    AsyncBincodeStream<S, T2, Tagged<()>, D>: Stream<Item = Result<T2, bincode::Error>>,
 {
-    type Item = T;
-    type Error = bincode::Error;
-    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
+    type Item = Result<T, bincode::Error>;
+
+    #[project]
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // https://github.com/rust-lang/rust-clippy/issues/3071
+        #[project]
         #[allow(clippy::redundant_closure)]
-        match *self {
-            DualTcpStream::Passthrough(ref mut abr) => abr.poll(),
-            DualTcpStream::Upgrade(ref mut abr, ref mut upgrade) => match abr.poll() {
-                Ok(Async::Ready(x)) => Ok(Async::Ready(x.map(|x| upgrade(x)))),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => Err(e),
-            },
+        match self.project() {
+            DualTcpStream::Passthrough(abr) => abr.poll_next(cx),
+            DualTcpStream::Upgrade(abr, upgrade) => {
+                Poll::Ready(ready!(abr.poll_next(cx)).transpose()?.map(upgrade).map(Ok))
+            }
         }
     }
 }
@@ -304,7 +334,7 @@ where
 impl<T> Evented for TcpReceiver<T> {
     fn register(
         &self,
-        poll: &Poll,
+        poll: &mio::Poll,
         token: Token,
         interest: Ready,
         opts: PollOpt,
@@ -317,7 +347,7 @@ impl<T> Evented for TcpReceiver<T> {
 
     fn reregister(
         &self,
-        poll: &Poll,
+        poll: &mio::Poll,
         token: Token,
         interest: Ready,
         opts: PollOpt,
@@ -328,7 +358,7 @@ impl<T> Evented for TcpReceiver<T> {
             .reregister(poll, token, interest, opts)
     }
 
-    fn deregister(&self, poll: &Poll) -> io::Result<()> {
+    fn deregister(&self, poll: &mio::Poll) -> io::Result<()> {
         self.stream.get_ref().get_ref().deregister(poll)
     }
 }
@@ -401,7 +431,7 @@ mod tests {
         });
 
         let t2 = thread::spawn(move || {
-            let poll = Poll::new().unwrap();
+            let poll = mio::Poll::new().unwrap();
             let mut events = Events::with_capacity(128);
             poll.register(&receiver, Token(0), Ready::readable(), PollOpt::level())
                 .unwrap();
@@ -423,7 +453,7 @@ mod tests {
         let (mut sender2, mut receiver2) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         let t1 = thread::spawn(move || {
-            let poll = Poll::new().unwrap();
+            let poll = mio::Poll::new().unwrap();
             let mut events = Events::with_capacity(128);
             poll.register(&receiver, Token(0), Ready::readable(), PollOpt::level())
                 .unwrap();
@@ -442,7 +472,7 @@ mod tests {
         });
 
         let t2 = thread::spawn(move || {
-            let poll = Poll::new().unwrap();
+            let poll = mio::Poll::new().unwrap();
             let mut events = Events::with_capacity(128);
             poll.register(&receiver2, Token(0), Ready::readable(), PollOpt::level())
                 .unwrap();
