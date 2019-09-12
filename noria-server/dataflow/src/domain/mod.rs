@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
-use futures;
+use futures_util::{future::FutureExt, stream::StreamExt};
 use group_commit::GroupCommitQueueSet;
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
@@ -19,7 +19,7 @@ use slog::Logger;
 use stream_cancel::Valve;
 
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use tokio::{self, prelude::*};
+use tokio;
 use Readers;
 
 #[derive(Debug)]
@@ -877,7 +877,7 @@ impl Domain {
                                 let txs = (0..shards)
                                     .map(|shard| {
                                         let key = key.clone();
-                                        let (tx, rx) = futures::sync::mpsc::unbounded();
+                                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                         let sender = self
                                             .channel_coordinator
                                             .builder_for(&(trigger_domain, shard))
@@ -893,16 +893,17 @@ impl Domain {
                                                     cols: key.clone(),
                                                     node,
                                                 })
-                                                .fold(sender, move |sender, m| {
-                                                    sender.send(m).map_err(|e| {
+                                                .map(Ok)
+                                                .forward(sender)
+                                                .map(|r| {
+                                                    if let Err(e) = r {
                                                         // domain went away?
                                                         eprintln!(
                                                             "replay source went away: {:?}",
                                                             e
                                                         );
-                                                    })
-                                                })
-                                                .map(|_| ()),
+                                                    }
+                                                }),
                                         );
                                         tx
                                     })
@@ -917,7 +918,7 @@ impl Domain {
                                             assert_eq!(miss.len(), 1);
                                             &txs[::shard_by(&miss[0], n)]
                                         };
-                                        tx.unbounded_send(Vec::from(miss)).is_ok()
+                                        tx.clone().try_send(Vec::from(miss)).is_ok()
                                     });
 
                                 let mut n = self.nodes[node].borrow_mut();

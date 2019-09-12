@@ -77,15 +77,21 @@ impl KeyedState {
     /// Remove all rows for the given key, returning the number of bytes freed.
     pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
-            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Single(ref mut m) => m.swap_remove(&(key[0])),
+            KeyedState::Double(ref mut m) => {
+                m.swap_remove::<(DataType, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Tri(ref mut m) => {
+                m.swap_remove::<(DataType, _, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Quad(ref mut m) => {
+                m.swap_remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
+            }
             KeyedState::Quin(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::Sex(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
         }
         .map(|rows| {

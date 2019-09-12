@@ -119,7 +119,9 @@ impl<T> DomainConnectionBuilder<MaybeLocal, T>
 where
     T: serde::Serialize + 'static + Send,
 {
-    pub fn build_async(self) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send>> {
+    pub fn build_async(
+        self,
+    ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
             Ok(
                 Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))
