@@ -18,3 +18,5 @@ tower-load = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" 
 tower-util = { git = "https://github.com/tower-rs/tower.git", branch = "v0.3.x" }
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 hyper = { git = "https://github.com/hyperium/hyper.git" }
+tokio-io = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/asyncbufstream" }
+async-bincode = { git = "https://github.com/jonhoo/async-bincode.git", branch = "tokio-alpha-5" }

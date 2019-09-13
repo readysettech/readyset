@@ -23,6 +23,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, io, thread, time};
+use std::{future::Future, task::Poll};
 use tokio::prelude::*;
 
 /// `Controller` is the core component of the alternate Soup implementation.
@@ -73,7 +74,7 @@ pub(super) struct ControllerInner {
 }
 
 pub(in crate::controller) struct DomainReplies(
-    futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+    tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
 );
 
 impl DomainReplies {
@@ -85,17 +86,17 @@ impl DomainReplies {
         // TODO
         loop {
             match self.0.poll() {
-                Ok(Async::NotReady) => thread::yield_now(),
-                Ok(Async::Ready(Some(crp))) => {
+                Poll::Pending => thread::yield_now(),
+                Poll::Ready(Ok(Some(crp))) => {
                     crps.push(crp);
                     if crps.len() == n {
                         return crps;
                     }
                 }
-                Ok(Async::Ready(None)) => {
+                Poll::Ready(Ok(None)) => {
                     unreachable!("got unexpected EOF from domain reply channel");
                 }
-                Err(e) => {
+                Poll::Ready(Err(e)) => {
                     unimplemented!("failed to read control reply packet: {:?}", e);
                 }
             }
@@ -205,7 +206,7 @@ impl ControllerInner {
         method: hyper::Method,
         path: String,
         query: Option<String>,
-        body: Vec<u8>,
+        body: hyper::Chunk,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {
         use serde_json as json;
@@ -313,12 +314,17 @@ impl ControllerInner {
         }
     }
 
-    pub(super) fn handle_register(
-        &mut self,
-        msg: &CoordinationMessage,
-        remote: &SocketAddr,
-        read_listen_addr: SocketAddr,
-    ) -> Result<(), io::Error> {
+    pub(super) fn handle_register(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
+        let (remote, read_listen_addr) = if let CoordinationPayload::Register {
+            remote,
+            read_listen_addr,
+        } = msg.payload
+        {
+            (remote, read_listen_addr)
+        } else {
+            unreachable!();
+        };
+
         info!(
             self.log,
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
@@ -408,7 +414,7 @@ impl ControllerInner {
             .expect("failed to activate original recipe");
     }
 
-    pub(super) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+    pub(super) fn handle_heartbeat(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -428,7 +434,7 @@ impl ControllerInner {
     pub(super) fn new(
         log: slog::Logger,
         state: ControllerState,
-        drx: futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+        drx: tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
     ) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(

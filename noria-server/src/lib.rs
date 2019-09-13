@@ -351,6 +351,7 @@
 #![feature(allow_fail)]
 #![feature(optin_builtin_traits)]
 #![feature(box_patterns)]
+#![feature(type_alias_impl_trait)]
 #![feature(box_syntax)]
 #![feature(nll)]
 #![feature(try_blocks)]
@@ -390,7 +391,7 @@ pub enum ReuseConfigType {
 }
 
 pub use crate::builder::Builder;
-pub use crate::handle::{Handle, SyncHandle};
+pub use crate::handle::Handle;
 pub use controller::migrate::materialization::FrontierStrategy;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
@@ -411,11 +412,18 @@ pub(crate) fn block_on<F, T>(f: F) -> T
 where
     F: FnOnce() -> T,
 {
-    use tokio::prelude::*;
-    use tokio_threadpool::blocking;
+    blocking(f).wait().unwrap()
+}
+
+pub(crate) async fn blocking<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    use futures_util::future::poll_fn;
+    use tokio_executor::threadpool::blocking;
     let mut wrap = Some(f);
-    future::poll_fn(|| blocking(|| wrap.take().unwrap()()))
-        .wait()
+    poll_fn(|_| blocking(|| wrap.take().unwrap()()))
+        .await
         .unwrap()
 }
 

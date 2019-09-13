@@ -3,8 +3,7 @@ use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescri
 use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
-use futures::sync::mpsc::UnboundedSender;
-use futures::{self, Future, Sink, Stream};
+use futures_util::{future, future::Either, future::FutureExt, sink::SinkExt, stream::StreamExt};
 use noria::channel::{self, TcpSender};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
@@ -22,8 +21,7 @@ use std::sync::{
 use std::time::{self, Duration};
 use stream_cancel::{Trigger, Valve};
 use tokio;
-use tokio::prelude::future::Either;
-use tokio::prelude::*;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_io_pool;
 
 mod readers;
@@ -45,140 +43,133 @@ impl InstanceState {
         ::std::mem::replace(self, InstanceState::Pining)
     }
 }
-pub(super) fn main(
+pub(super) async fn main(
     ioh: tokio_io_pool::Handle,
-    worker_rx: futures::sync::mpsc::UnboundedReceiver<Event>,
+    worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,
     waddr: SocketAddr,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
-) -> impl Future<Item = (), Error = ()> {
+) {
     // shared df state
     let coord = Arc::new(ChannelCoordinator::new());
 
     let mut worker_state = InstanceState::Pining;
     let log = log.clone();
-    worker_rx
-        .map_err(|_| unreachable!())
-        .for_each(move |e| {
-            match e {
-                Event::InternalMessage(msg) => match msg.payload {
-                    CoordinationPayload::RemoveDomain => {
-                        unimplemented!();
-                    }
-                    CoordinationPayload::AssignDomain(d) => {
-                        if let InstanceState::Active {
-                            epoch,
-                            ref mut add_domain,
-                            ..
-                        } = worker_state
-                        {
-                            if epoch == msg.epoch {
-                                return Either::A(Box::new(
-                                    add_domain.clone().send(d).map(|_| ()).map_err(|d| {
-                                        format_err!("could not add new domain {:?}", d)
-                                    }),
-                                ));
-                            }
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                    CoordinationPayload::DomainBooted(dd) => {
-                        if let InstanceState::Active { epoch, .. } = worker_state {
-                            if epoch == msg.epoch {
-                                let domain = dd.domain();
-                                let shard = dd.shard();
-                                let addr = dd.addr();
-                                trace!(
-                                    log,
-                                    "found that domain {}.{} is at {:?}",
-                                    domain.index(),
-                                    shard,
-                                    addr
-                                );
-                                coord.insert_remote((domain, shard), addr);
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                },
-                Event::LeaderChange(state, descriptor) => {
+    while let Some(e) = worker_rx.next().await {
+        match e {
+            Event::InternalMessage(msg) => match msg.payload {
+                CoordinationPayload::RemoveDomain => {
+                    unimplemented!();
+                }
+                CoordinationPayload::AssignDomain(d) => {
                     if let InstanceState::Active {
-                        add_domain,
-                        trigger,
+                        epoch,
+                        ref mut add_domain,
                         ..
-                    } = worker_state.take()
+                    } = worker_state
                     {
-                        // XXX: should we wait for current DF to be fully shut down?
-                        // FIXME: what about messages in listen_df's ctrl_tx?
-                        info!(log, "detected leader change");
-                        drop(add_domain);
-                        trigger.cancel();
+                        if epoch == msg.epoch {
+                            add_domain.send(d).await.unwrap_or_else(|d| {
+                                panic!("could not add new domain {:?}", d);
+                            });
+                            return;
+                        }
                     } else {
-                        info!(log, "found initial leader");
-                    }
-
-                    info!(
-                        log,
-                        "leader listening on external address {:?}", descriptor.external_addr
-                    );
-                    debug!(
-                        log,
-                        "leader's worker listen address: {:?}", descriptor.worker_addr
-                    );
-                    debug!(
-                        log,
-                        "leader's domain listen address: {:?}", descriptor.domain_addr
-                    );
-
-                    // we need to make a new valve that we can use to shut down *just* the
-                    // worker in the case of controller failover.
-                    let (trigger, valve) = Valve::new();
-
-                    // TODO: memory stuff should probably also be in config?
-                    let (rep_tx, rep_rx) = futures::sync::mpsc::unbounded();
-                    let ctrl = listen_df(
-                        valve,
-                        &ioh,
-                        log.clone(),
-                        (memory_limit, memory_check_frequency),
-                        &state,
-                        &descriptor,
-                        waddr,
-                        coord.clone(),
-                        listen_addr,
-                        rep_rx,
-                    );
-
-                    if let Err(e) = ctrl {
-                        error!(log, "failed to connect to controller");
-                        eprintln!("{:?}", e);
-                    } else {
-                        // now we can start accepting dataflow messages
-                        worker_state = InstanceState::Active {
-                            epoch: state.epoch,
-                            add_domain: rep_tx,
-                            trigger,
-                        };
-                        warn!(log, "Connected to new leader");
+                        unreachable!();
                     }
                 }
-                e => unreachable!("{:?} is not a worker event", e),
+                CoordinationPayload::DomainBooted(dd) => {
+                    if let InstanceState::Active { epoch, .. } = worker_state {
+                        if epoch == msg.epoch {
+                            let domain = dd.domain();
+                            let shard = dd.shard();
+                            let addr = dd.addr();
+                            trace!(
+                                log,
+                                "found that domain {}.{} is at {:?}",
+                                domain.index(),
+                                shard,
+                                addr
+                            );
+                            coord.insert_remote((domain, shard), addr);
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            },
+            Event::LeaderChange(state, descriptor) => {
+                if let InstanceState::Active {
+                    add_domain,
+                    trigger,
+                    ..
+                } = worker_state.take()
+                {
+                    // XXX: should we wait for current DF to be fully shut down?
+                    // FIXME: what about messages in listen_df's ctrl_tx?
+                    info!(log, "detected leader change");
+                    drop(add_domain);
+                    trigger.cancel();
+                } else {
+                    info!(log, "found initial leader");
+                }
+
+                info!(
+                    log,
+                    "leader listening on external address {:?}", descriptor.external_addr
+                );
+                debug!(
+                    log,
+                    "leader's worker listen address: {:?}", descriptor.worker_addr
+                );
+                debug!(
+                    log,
+                    "leader's domain listen address: {:?}", descriptor.domain_addr
+                );
+
+                // we need to make a new valve that we can use to shut down *just* the
+                // worker in the case of controller failover.
+                let (trigger, valve) = Valve::new();
+
+                // TODO: memory stuff should probably also be in config?
+                let (rep_tx, rep_rx) = tokio::sync::mpsc::unbounded_channel();
+                let ctrl = listen_df(
+                    valve,
+                    &ioh,
+                    log.clone(),
+                    (memory_limit, memory_check_frequency),
+                    &state,
+                    &descriptor,
+                    waddr,
+                    coord.clone(),
+                    listen_addr,
+                    rep_rx,
+                );
+
+                if let Err(e) = ctrl {
+                    error!(log, "failed to connect to controller");
+                    eprintln!("{:?}", e);
+                } else {
+                    // now we can start accepting dataflow messages
+                    worker_state = InstanceState::Active {
+                        epoch: state.epoch,
+                        add_domain: rep_tx,
+                        trigger,
+                    };
+                    warn!(log, "Connected to new leader");
+                }
             }
-            Either::B(futures::future::ok(()))
-        })
-        .and_then(|()| {
-            // shutting down...
-            //
-            // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
-            // closure above is dropped, which will also shut down the worker.
-            //
-            // TODO: maybe flush things or something?
-            Ok(())
-        })
-        .map_err(|e| panic!("{:?}", e))
+            e => unreachable!("{:?} is not a worker event", e),
+        }
+    }
+
+    // shutting down...
+    //
+    // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
+    // closure above is dropped, which will also shut down the worker.
+    //
+    // TODO: maybe flush things or something?
 }
 
 fn listen_df(
@@ -191,7 +182,7 @@ fn listen_df(
     waddr: SocketAddr,
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
-    replicas: futures::sync::mpsc::UnboundedReceiver<DomainBuilder>,
+    replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
 ) -> Result<(), failure::Error> {
     // first, try to connect to controller
     let ctrl = ::std::net::TcpStream::connect(&desc.worker_addr)?;
@@ -213,7 +204,7 @@ fn listen_df(
     let epoch = state.epoch;
     let heartbeat_every = state.config.heartbeat_every;
 
-    let (ctrl_tx, ctrl_rx) = futures::sync::mpsc::unbounded();
+    let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
 
     // reader setup
     let readers = Arc::new(Mutex::new(HashMap::new()));
@@ -259,7 +250,7 @@ fn listen_df(
                 // and start sending heartbeats
                 timer
                     .map(|_| CoordinationPayload::Heartbeat)
-                    .map_err(|e| -> futures::sync::mpsc::SendError<_> { panic!("{:?}", e) })
+                    .map_err(|e| -> tokio::sync::mpsc::error::SendError<_> { panic!("{:?}", e) })
                     .forward(ctrl_tx.clone())
                     .map(|_| ())
             })
@@ -364,17 +355,17 @@ fn listen_df(
 }
 
 #[allow(clippy::type_complexity)]
-fn do_eviction(
+async fn do_eviction(
     log: &slog::Logger,
     memory_limit: Option<usize>,
     domain_senders: &mut HashMap<(DomainIndex, usize), TcpSender<Box<Packet>>>,
     state_sizes: &Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
-) -> impl Future<Item = (), Error = ()> {
+) {
     use std::cmp;
 
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
-    let sizes: Vec<((DomainIndex, usize), usize)> = crate::block_on(|| {
+    let sizes: Vec<((DomainIndex, usize), usize)> = crate::blocking(|| {
         let state_sizes = state_sizes.lock().unwrap();
         state_sizes
             .iter()
@@ -390,7 +381,8 @@ fn do_eviction(
                 (*ds, size)
             })
             .collect()
-    });
+    })
+    .await;
 
     // 3. are we above the limit?
     let total: usize = sizes.iter().map(|&(_, s)| s).sum();
@@ -409,16 +401,15 @@ fn do_eviction(
                     );
 
                 let tx = domain_senders.get_mut(&largest.0).unwrap();
-                crate::block_on(|| {
+                crate::blocking(|| {
                     tx.send(box Packet::Evict {
                         node: None,
                         num_bytes: cmp::min(largest.1, total - limit),
                     })
                     .unwrap()
-                });
+                })
+                .await;
             }
         }
     }
-
-    Result::Ok::<_, ()>(()).into_future()
 }

@@ -1,16 +1,24 @@
 use async_bincode::AsyncBincodeStream;
+use async_timer::Oneshot;
 use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use dataflow::SingleReadHandle;
-use futures::future::{self, Either};
-use futures::try_ready;
-use futures::{self, Future, Stream};
+use futures_util::{
+    future, future::Either, future::FutureExt, ready, sink::SinkExt, stream::StreamExt,
+    try_future::TryFutureExt, try_stream::TryStreamExt,
+};
 use noria::{ReadQuery, ReadReply, Tagged};
+use pin_project::pin_project;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
 use std::time;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use stream_cancel::Valve;
 use tokio::prelude::*;
 use tokio_tower::multiplex::server;
@@ -36,11 +44,11 @@ pub(super) fn listen(
     ioh: &tokio_io_pool::Handle,
     on: tokio::net::TcpListener,
     readers: Readers,
-) -> impl Future<Item = (), Error = ()> {
+) -> impl Future<Output = ()> {
     ioh.spawn_all(
         valve
             .wrap(on.incoming())
-            .map(Some)
+            .map_ok(Some)
             .or_else(|_| {
                 // io error from client: just ignore it
                 Ok(None)
@@ -85,7 +93,7 @@ fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
 fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
-) -> impl Future<Item = Tagged<ReadReply>, Error = ()> + Send {
+) -> impl Future<Output = Result<Tagged<ReadReply>, ()>> + Send {
     let tag = m.tag;
     match m.v {
         ReadQuery::Normal {
@@ -177,7 +185,7 @@ fn handle_message(
                             keys,
                             read: ret,
                             truth: s.clone(),
-                            retry: tokio_os_timer::Interval::new(retry).unwrap(),
+                            retry: async_timer::interval(retry),
                             trigger_timeout: trigger,
                             next_trigger: now,
                         }))
@@ -204,32 +212,34 @@ fn handle_message(
     }
 }
 
+#[pin_project]
 struct BlockingRead {
     tag: u32,
     read: Vec<Vec<Vec<DataType>>>,
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
     truth: Readers,
-    retry: tokio_os_timer::Interval,
+
+    #[pin]
+    retry: async_timer::Interval<async_timer::oneshot::Timer>,
+
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
 }
 
 impl Future for BlockingRead {
-    type Item = Tagged<ReadReply>;
-    type Error = ();
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+    type Output = Option<Tagged<ReadReply>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
         loop {
-            let _ = try_ready!(self.retry.poll().map_err(|e| {
-                unreachable!("timer failure: {:?}", e);
-            }))
-            .expect("interval stopped yielding");
+            this.retry.set(ready!(this.retry.poll(cx)));
 
             let missing = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let s = &self.truth;
-                let target = &self.target;
-                let reader = readers_cache.entry(self.target).or_insert_with(|| {
+                let s = &this.truth;
+                let target = &this.target;
+                let reader = readers_cache.entry(this.target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(target).unwrap().clone()
                 });
@@ -237,7 +247,7 @@ impl Future for BlockingRead {
                 let mut triggered = false;
                 let mut missing = false;
                 let now = time::Instant::now();
-                for (i, key) in self.keys.iter_mut().enumerate() {
+                for (i, key) in this.keys.iter_mut().enumerate() {
                     if key.is_empty() {
                         // already have this value
                     } else {
@@ -246,7 +256,7 @@ impl Future for BlockingRead {
                         // same time, that replay trigger will just be ignored by the target domain.
                         match reader.try_find_and(key, dup).map(|r| r.0) {
                             Ok(Some(rs)) => {
-                                self.read[i] = rs;
+                                this.read[i] = rs;
                                 key.clear();
                             }
                             Err(()) => {
@@ -254,7 +264,7 @@ impl Future for BlockingRead {
                                 return Err(());
                             }
                             Ok(None) => {
-                                if now > self.next_trigger {
+                                if now > this.next_trigger {
                                     // maybe the key was filled but then evicted, and we missed it?
                                     if !reader.trigger(key) {
                                         // server is shutting down and won't do the backfill
@@ -269,17 +279,17 @@ impl Future for BlockingRead {
                 }
 
                 if triggered {
-                    self.trigger_timeout *= 2;
-                    self.next_trigger = now + self.trigger_timeout;
+                    this.trigger_timeout *= 2;
+                    this.next_trigger = now + this.trigger_timeout;
                 }
 
                 Ok(missing)
             })?;
 
             if !missing {
-                return Ok(Async::Ready(Tagged {
-                    tag: self.tag,
-                    v: ReadReply::Normal(Ok(mem::replace(&mut self.read, Vec::new()))),
+                return Poll::Ready(Ok(Tagged {
+                    tag: this.tag,
+                    v: ReadReply::Normal(Ok(mem::replace(&mut this.read, Vec::new()))),
                 }));
             }
         }
