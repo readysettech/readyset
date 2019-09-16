@@ -291,7 +291,7 @@ async fn broad_recursing_upquery() {
             Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
         );
         // reader, sharded by the lookup column, which is the third column on x
-        mig.maintain("reader".to_string(), join, &[2]);
+        mig.maintain("reader".to_string(), join, &[2], HashMap::new());
     })
     .await;
 

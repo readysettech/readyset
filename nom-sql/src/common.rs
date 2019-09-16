@@ -203,7 +203,7 @@ impl fmt::Display for LiteralExpression {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
     And,
@@ -219,6 +219,14 @@ pub enum Operator {
     In,
     NotIn,
     Is,
+}
+
+impl Operator {
+    /// Returns true if this operator represents an ordered comparison
+    pub fn is_comparison(&self) -> bool {
+        use Operator::*;
+        matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
+    }
 }
 
 impl Display for Operator {
