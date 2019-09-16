@@ -939,7 +939,24 @@ fn materialize_leaf_node(
     key_cols: &[Column],
     mig: &mut Migration,
 ) {
+    use nom_sql::ConditionExpression;
+    use nom_sql::SelectStatement;
+    use nom_sql::SqlQuery;
+
     let na = parent.borrow().flow_node_addr().unwrap();
+    let mut inequality_queries: HashMap<u64, nom_sql::Operator> = HashMap::default();
+
+    for (query_id, (_, expression, _)) in &mig.mainline.recipe.expressions {
+        if let SqlQuery::Select(SelectStatement {
+            where_clause: Some(ConditionExpression::ComparisonOp(tree)),
+            ..
+        }) = expression
+        {
+            if tree.operator.is_comparison() {
+                inequality_queries.insert(*query_id, tree.operator);
+            }
+        }
+    }
 
     // we must add a new reader for this query. This also requires adding an identity node (at
     // least currently), since a node can only have a single associated reader. However, the
@@ -953,9 +970,9 @@ fn materialize_leaf_node(
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c, None))
             .collect();
-        mig.maintain(name, na, &key_cols[..]);
+        mig.maintain(name, na, &key_cols[..], inequality_queries);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, &[0]);
+        mig.maintain(name, na, &[0], inequality_queries);
     }
 }

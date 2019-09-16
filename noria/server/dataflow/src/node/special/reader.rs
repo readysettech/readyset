@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::backlog;
 use crate::prelude::*;
 
@@ -8,6 +10,7 @@ pub struct Reader {
 
     for_node: NodeIndex,
     state: Option<Vec<usize>>,
+    inequality_queries: HashMap<u64, nom_sql::Operator>,
 }
 
 impl Clone for Reader {
@@ -17,16 +20,18 @@ impl Clone for Reader {
             writer: None,
             state: self.state.clone(),
             for_node: self.for_node,
+            inequality_queries: self.inequality_queries.clone(),
         }
     }
 }
 
 impl Reader {
-    pub fn new(for_node: NodeIndex) -> Self {
+    pub fn new(for_node: NodeIndex, inequality_queries: HashMap<u64, nom_sql::Operator>) -> Self {
         Reader {
             writer: None,
             state: None,
             for_node,
+            inequality_queries,
         }
     }
 
@@ -50,6 +55,7 @@ impl Reader {
             writer: self.writer.take(),
             state: self.state.clone(),
             for_node: self.for_node,
+            inequality_queries: self.inequality_queries.clone(),
         }
     }
 
