@@ -335,6 +335,7 @@ impl SqlToMirConverter {
             MirNodeType::Leaf {
                 node: parent.clone(),
                 keys: Vec::from(params),
+                operator: Operator::Equal,
             },
             vec![n],
             vec![],
@@ -419,6 +420,7 @@ impl SqlToMirConverter {
                 MirNodeType::Leaf {
                     node: final_node.clone(),
                     keys: vec![],
+                    operator: Operator::Equal,
                 },
                 vec![final_node.clone()],
                 vec![],
@@ -2083,6 +2085,13 @@ impl SqlToMirConverter {
                     qg.parameters().into_iter().map(Column::from).collect()
                 };
 
+                let operator = match &st.where_clause {
+                    Some(ConditionExpression::ComparisonOp(ConditionTree { operator, .. })) => {
+                        *operator
+                    }
+                    _ => Operator::Equal,
+                };
+
                 let leaf_node = MirNode::new(
                     name,
                     self.schema_version,
@@ -2090,6 +2099,7 @@ impl SqlToMirConverter {
                     MirNodeType::Leaf {
                         node: leaf_project_node.clone(),
                         keys: query_params,
+                        operator,
                     },
                     vec![leaf_project_node.clone()],
                     vec![],

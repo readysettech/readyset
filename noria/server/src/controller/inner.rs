@@ -43,7 +43,7 @@ pub(super) struct ControllerInner {
     pub(super) materializations: Materializations,
 
     /// Current recipe
-    pub recipe: Recipe,
+    recipe: Recipe,
 
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
     pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
