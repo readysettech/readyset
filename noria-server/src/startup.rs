@@ -268,9 +268,15 @@ where
             Box::pin(async move {
                 let body = req.into_body().try_concat().await?;
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                event_tx
+
+                if let Err(_) = event_tx
                     .send(Event::ExternalRequest(method, path, query, body, tx))
-                    .await;
+                    .await
+                {
+                    res.status(StatusCode::SERVICE_UNAVAILABLE);
+                    res.header("Content-Type", "text/plain; charset=utf-8");
+                    return Ok(res.body(hyper::Body::from("server went away")).unwrap());
+                }
 
                 match rx.await {
                     Ok(reply) => {

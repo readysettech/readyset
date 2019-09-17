@@ -6,7 +6,7 @@ use crate::ActivationResult;
 #[cfg(debug_assertions)]
 use assert_infrequent;
 use failure::{self, ResultExt};
-use futures_util::{future, ready, try_stream::TryStreamExt};
+use futures_util::{future, try_stream::TryStreamExt};
 use hyper;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -199,9 +199,9 @@ impl<A: Authority + 'static> ControllerHandle<A> {
 
     /// Check that the `ControllerHandle` can accept another request.
     ///
-    /// Note that this method _must_ return `Async::Ready` before any other methods that return
+    /// Note that this method _must_ return `Poll::Ready` before any other methods that return
     /// a `Future` on `ControllerHandle` can be called.
-    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
         self.handle
             .poll_ready(cx)
             .map_err(failure::Error::from_boxed_compat)
@@ -210,14 +210,9 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// A future that resolves when the controller can accept more messages.
     ///
     /// When this future resolves, you it is safe to call any methods that require `poll_ready` to
-    /// have returned `Async::Ready`.
-    pub async fn ready(self) -> Result<Self, failure::Error> {
-        let mut rdy = Some(self);
-        future::poll_fn(move |cx| -> Poll<Result<_, failure::Error>> {
-            ready!(rdy.as_mut().unwrap().poll_ready(cx))?;
-            Poll::Ready(Ok(rdy.take().unwrap()))
-        })
-        .await
+    /// have returned `Poll::Ready`.
+    pub async fn ready(&mut self) -> Result<(), failure::Error> {
+        future::poll_fn(move |cx| self.poll_ready(cx)).await
     }
 
     /// Create a `ControllerHandle` that bootstraps a connection to Noria via the configuration

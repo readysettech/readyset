@@ -42,9 +42,9 @@ memcached-rs = "0.4"
 # mio
 mio = "0.6.9"
 # futures
-futures = "0.1.14"
-futures-cpupool = "0.1.8"
-tokio = "0.1"
+#futures = "0.1.14"
+#futures-cpupool = "0.1.8"
+tokio = "0.2.0-alpha.4"
 # ec2
 rusoto_core = { optional = true, version = "0.40" }
 rusoto_sts = { optional = true, version = "0.40" }
@@ -52,8 +52,8 @@ tsunami = { optional = true, version = "0.9" }
 timeout-readwrite = "0.2"
 ctrlc = "3.1"
 failure = "0.1"
-tower-service = "0.2"
-tokio-mock-task = "0.1"
+tower-service = "0.3.0-alpha.1"
+#tokio-mock-task = "0.1"
 
 [[bin]]
 name = "vote"

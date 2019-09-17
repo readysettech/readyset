@@ -1,7 +1,6 @@
 use crate::controller::migrate::Migration;
 use crate::startup::Event;
 use dataflow::prelude::*;
-use futures_util::future::poll_fn;
 use futures_util::sink::SinkExt;
 use noria::consensus::Authority;
 use noria::prelude::*;
@@ -47,14 +46,6 @@ impl<A: Authority + 'static> Handle<A> {
             kill: Some(kill),
             iopool: Some(io),
         })
-    }
-
-    /// A future that resolves when the controller can accept more messages.
-    ///
-    /// When this future resolves, you it is safe to call any methods on the wrapped
-    /// `ControllerHandle` that require `poll_ready` to have returned `Async::Ready`.
-    pub async fn ready(&mut self) -> Result<(), failure::Error> {
-        poll_fn(|cx| self.poll_ready(cx)).await
     }
 
     #[cfg(test)]
