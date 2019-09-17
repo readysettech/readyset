@@ -21,6 +21,7 @@ pub enum NodeOperator {
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
+    FilterSum(grouped::GroupedOperator<grouped::filteraggregate::FilterAggregator>),
     Join(join::Join),
     Latest(latest::Latest),
     Project(project::Project),
@@ -55,6 +56,10 @@ nodeop_from_impl!(
     NodeOperator::Concat,
     grouped::GroupedOperator<grouped::concat::GroupConcat>
 );
+nodeop_from_impl!(
+    NodeOperator::FilterSum,
+    grouped::GroupedOperator<grouped::filteraggregate::FilterAggregator>
+);
 nodeop_from_impl!(NodeOperator::Join, join::Join);
 nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
 nodeop_from_impl!(NodeOperator::Project, project::Project);
@@ -72,6 +77,7 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Sum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::FilterSum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
@@ -92,6 +98,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Sum(ref i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
+            NodeOperator::FilterSum(ref i) => i.$fn($($arg),*),
             NodeOperator::Join(ref i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref i) => i.$fn($($arg),*),
             NodeOperator::Project(ref i) => i.$fn($($arg),*),
