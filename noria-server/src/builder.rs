@@ -95,6 +95,7 @@ impl Builder {
     /// Set the number of pool threads to use (default is #cores)
     pub fn set_threads(&mut self, threads: usize) {
         self.config.threads = Some(threads);
+        unimplemented!();
     }
 
     /// Start a server instance and return a handle to it.

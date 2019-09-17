@@ -1,15 +1,13 @@
-#[macro_use]
-extern crate clap;
-extern crate rand;
-
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 
+use clap::value_t_or_exit;
 use noria::{DataType, DurabilityMode, PersistenceParameters, TableOperation};
 use rand::Rng;
-use std::{thread, time};
+use std::time;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::{App, Arg};
 
     let args = App::new("vote-dbtoaster-style")
@@ -60,29 +58,30 @@ fn main() {
     s.stupid = false;
     s.partial = false;
     s.threads = Some(1);
-    let mut g = s.start_sync(persistence).unwrap();
+    let mut g = s.start(persistence).await.unwrap();
 
     // prepopulate
     if args.is_present("verbose") {
         eprintln!("==> prepopulating with {} articles", articles);
     }
-    let mut a = g.graph.table("Article").unwrap().into_sync();
+    let mut a = g.graph.table("Article").await.unwrap();
     a.perform_all((0..articles).map(|i| {
         vec![
             ((i + 1) as i32).into(),
             format!("Article #{}", i + 1).into(),
         ]
     }))
+    .await
     .unwrap();
     if args.is_present("verbose") {
         eprintln!("==> done with prepopulation");
     }
 
     // allow writes to propagate
-    thread::sleep(time::Duration::from_secs(1));
+    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(1)).await;
 
     let mut rng = rand::thread_rng();
-    let mut v = g.graph.table("Vote").unwrap().into_sync();
+    let mut v = g.graph.table("Vote").await.unwrap();
     v.i_promise_dst_is_same_process();
 
     // start the benchmark
@@ -96,6 +95,7 @@ fn main() {
                 0.into(),
             ])
         }))
+        .await
         .unwrap();
     }
     let took = start.elapsed();
