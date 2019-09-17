@@ -225,14 +225,12 @@ fn instance_campaign<A: Authority + 'static>(
             if let Some(leader) = authority.try_get_leader()? {
                 epoch = leader.0;
                 event_tx = event_tx
-                    .send(payload_to_event(leader.1)?)
-                    .wait()
+                    .try_send(payload_to_event(leader.1)?)
                     .map_err(|_| format_err!("send failed"))?;
                 while let Some(leader) = authority.await_new_epoch(epoch)? {
                     epoch = leader.0;
                     event_tx = event_tx
-                        .send(payload_to_event(leader.1)?)
-                        .wait()
+                        .try_send(payload_to_event(leader.1)?)
                         .map_err(|_| format_err!("send failed"))?;
                 }
             }

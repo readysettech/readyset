@@ -13,8 +13,8 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
+use futures_util::ready;
 use futures_util::stream::futures_unordered::FuturesUnordered;
-use futures_util::{ready, stream::StreamExt};
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
@@ -36,18 +36,15 @@ use tokio_io::{BufReader, BufStream, BufWriter};
 
 pub(super) type ReplicaIndex = (DomainIndex, usize);
 
-#[rustfmt::skip]
-type Incoming = impl Stream<Item = Result<tokio::net::tcp::TcpStream, tokio::io::Error>> + Unpin;
-
-fn _foo(l: tokio::net::tcp::TcpListener) -> Incoming {
-    l.incoming()
-}
-
-#[rustfmt::skip]
-type FirstByte = impl Future<Output = Result<(tokio::net::tcp::TcpStream, u8), tokio::io::Error>>;
+// https://github.com/rust-lang/rust/issues/64445
+type Incoming =
+    Box<dyn Stream<Item = Result<tokio::net::tcp::TcpStream, tokio::io::Error>> + Unpin + Send>;
+type FirstByte = Pin<
+    Box<dyn Future<Output = Result<(tokio::net::tcp::TcpStream, u8), tokio::io::Error>> + Send>,
+>;
 
 #[pin_project]
-pub(super) struct Replica<I = Incoming> {
+pub(super) struct Replica {
     domain: Domain,
     log: slog::Logger,
 
@@ -56,7 +53,7 @@ pub(super) struct Replica<I = Incoming> {
     retry: Option<Box<Packet>>,
 
     #[pin]
-    incoming: Valved<I>,
+    incoming: Valved<Incoming>,
 
     #[pin]
     first_byte: FuturesUnordered<FirstByte>,
@@ -106,7 +103,7 @@ impl Replica {
             coord: cc,
             domain,
             retry: None,
-            incoming: valve.wrap(on.incoming()),
+            incoming: valve.wrap(Box::new(on.incoming())),
             first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
@@ -286,12 +283,12 @@ impl Replica {
                     // we know that any new connection to a domain will first send a one-byte
                     // token to indicate whether the connection is from a base or not.
                     debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-                    this.first_byte.push(async move {
+                    this.first_byte.push(Box::pin(async move {
                         let mut byte = [0; 1];
                         let n = stream.read_exact(&mut byte[..]).await?;
                         assert_eq!(n, 1);
                         Ok((stream, byte[0]))
-                    });
+                    }));
                 }
                 None => {
                     return Ok(false);

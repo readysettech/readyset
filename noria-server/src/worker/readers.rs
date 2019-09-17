@@ -1,12 +1,11 @@
 use async_bincode::AsyncBincodeStream;
-use async_timer::Oneshot;
 use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use dataflow::SingleReadHandle;
 use futures_util::{
-    future, future::Either, future::FutureExt, ready, sink::SinkExt, stream::StreamExt,
-    try_future::TryFutureExt, try_stream::TryStreamExt,
+    future, future::Either, future::FutureExt, ready, try_future::TryFutureExt,
+    try_stream::TryStreamExt,
 };
 use noria::{ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
@@ -48,13 +47,13 @@ pub(super) fn listen(
     ioh.spawn_all(
         valve
             .wrap(on.incoming())
-            .map_ok(Some)
-            .or_else(|_| {
+            .into_stream()
+            .filter_map(|c| {
                 // io error from client: just ignore it
-                Ok(None)
+                async move { c.ok() }
             })
-            .filter_map(|c| c)
-            .map(move |stream| {
+            .map(Ok)
+            .map_ok(move |stream| {
                 let readers = readers.clone();
                 stream.set_nodelay(true).expect("could not set TCP_NODELAY");
                 server::Server::new(
@@ -68,6 +67,7 @@ pub(super) fn listen(
                         eprintln!("!!! reader client protocol error: {:?}", e);
                     }
                 })
+                .map(|_| ())
             }),
     )
     .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
@@ -76,6 +76,7 @@ pub(super) fn listen(
             e
         );
     })
+    .map(|_| ())
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
@@ -168,18 +169,18 @@ fn handle_message(
             });
 
             match immediate {
-                Ok(reply) => Either::A(Either::A(future::ok(reply))),
+                Ok(reply) => Either::Left(Either::Left(future::ready(Ok(reply)))),
                 Err((keys, ret)) => {
                     if !block {
-                        Either::A(Either::A(future::ok(Tagged {
+                        Either::Left(Either::Left(future::ready(Ok(Tagged {
                             tag,
                             v: ReadReply::Normal(Ok(ret)),
-                        })))
+                        }))))
                     } else {
                         let trigger = time::Duration::from_micros(TRIGGER_TIMEOUT_US);
                         let retry = time::Duration::from_micros(RETRY_TIMEOUT_US);
                         let now = time::Instant::now();
-                        Either::A(Either::B(BlockingRead {
+                        Either::Left(Either::Right(BlockingRead {
                             tag,
                             target,
                             keys,
@@ -204,10 +205,10 @@ fn handle_message(
                 reader.len()
             });
 
-            Either::B(future::ok(Tagged {
+            Either::Right(future::ready(Ok(Tagged {
                 tag,
                 v: ReadReply::Size(size),
-            }))
+            })))
         }
     }
 }
@@ -228,18 +229,18 @@ struct BlockingRead {
 }
 
 impl Future for BlockingRead {
-    type Output = Option<Tagged<ReadReply>>;
+    type Output = Result<Tagged<ReadReply>, ()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         loop {
-            this.retry.set(ready!(this.retry.poll(cx)));
+            ready!(this.retry.poll_next(cx));
 
             let missing = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
                 let s = &this.truth;
                 let target = &this.target;
-                let reader = readers_cache.entry(this.target).or_insert_with(|| {
+                let reader = readers_cache.entry(*this.target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(target).unwrap().clone()
                 });
@@ -264,7 +265,7 @@ impl Future for BlockingRead {
                                 return Err(());
                             }
                             Ok(None) => {
-                                if now > this.next_trigger {
+                                if now > *this.next_trigger {
                                     // maybe the key was filled but then evicted, and we missed it?
                                     if !reader.trigger(key) {
                                         // server is shutting down and won't do the backfill
@@ -279,8 +280,8 @@ impl Future for BlockingRead {
                 }
 
                 if triggered {
-                    this.trigger_timeout *= 2;
-                    this.next_trigger = now + this.trigger_timeout;
+                    *this.trigger_timeout *= 2;
+                    *this.next_trigger = now + *this.trigger_timeout;
                 }
 
                 Ok(missing)
@@ -288,7 +289,7 @@ impl Future for BlockingRead {
 
             if !missing {
                 return Poll::Ready(Ok(Tagged {
-                    tag: this.tag,
+                    tag: *this.tag,
                     v: ReadReply::Normal(Ok(mem::replace(&mut this.read, Vec::new()))),
                 }));
             }

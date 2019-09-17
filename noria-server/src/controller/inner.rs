@@ -21,10 +21,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 use std::{cell, io, thread, time};
-use std::{future::Future, task::Poll};
-use tokio::prelude::*;
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///

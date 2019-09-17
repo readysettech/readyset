@@ -3,7 +3,7 @@ use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescri
 use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
-use futures_util::{future, future::Either, future::FutureExt, sink::SinkExt, stream::StreamExt};
+use futures_util::{future::FutureExt, sink::SinkExt, stream::StreamExt, try_future::TryFutureExt};
 use noria::channel::{self, TcpSender};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
@@ -12,6 +12,7 @@ use replica::ReplicaIndex;
 use slog;
 use std::collections::HashMap;
 use std::fs;
+use std::future::Future;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{
@@ -145,7 +146,8 @@ pub(super) async fn main(
                     coord.clone(),
                     listen_addr,
                     rep_rx,
-                );
+                )
+                .await;
 
                 if let Err(e) = ctrl {
                     error!(log, "failed to connect to controller");
@@ -172,122 +174,116 @@ pub(super) async fn main(
     // TODO: maybe flush things or something?
 }
 
-fn listen_df(
+fn listen_df<'a>(
     valve: Valve,
-    ioh: &tokio_io_pool::Handle,
+    ioh: &'a tokio_io_pool::Handle,
     log: slog::Logger,
     (memory_limit, evict_every): (Option<usize>, Option<Duration>),
-    state: &ControllerState,
-    desc: &ControllerDescriptor,
+    state: &'a ControllerState,
+    desc: &'a ControllerDescriptor,
     waddr: SocketAddr,
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
     replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
-) -> Result<(), failure::Error> {
-    // first, try to connect to controller
-    let ctrl = ::std::net::TcpStream::connect(&desc.worker_addr)?;
-    let ctrl = tokio::net::TcpStream::from_std(ctrl, &Default::default())?;
-    let ctrl_addr = ctrl.local_addr()?;
-    info!(log, "connected to controller"; "src" => ?ctrl_addr);
+) -> impl Future<Output = Result<(), failure::Error>> + 'a {
+    async move {
+        // first, try to connect to controller
+        let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
+        let ctrl_addr = ctrl.local_addr()?;
+        info!(log, "connected to controller"; "src" => ?ctrl_addr);
 
-    let log_prefix = state.config.persistence.log_prefix.clone();
-    let prefix = format!("{}-log-", log_prefix);
-    let log_files: Vec<String> = fs::read_dir(".")
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
-        .map(|e| e.path().to_string_lossy().into_owned())
-        .filter(|path| path.starts_with(&prefix))
-        .collect();
+        let log_prefix = state.config.persistence.log_prefix.clone();
+        let prefix = format!("{}-log-", log_prefix);
+        let log_files: Vec<String> = fs::read_dir(".")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path().to_string_lossy().into_owned())
+            .filter(|path| path.starts_with(&prefix))
+            .collect();
 
-    // extract important things from state config
-    let epoch = state.epoch;
-    let heartbeat_every = state.config.heartbeat_every;
+        // extract important things from state config
+        let epoch = state.epoch;
+        let heartbeat_every = state.config.heartbeat_every;
 
-    let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // reader setup
-    let readers = Arc::new(Mutex::new(HashMap::new()));
-    let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
-    let raddr = rport.local_addr()?;
-    info!(log, "listening for reads"; "on" => ?raddr);
+        // reader setup
+        let readers = Arc::new(Mutex::new(HashMap::new()));
+        let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
+        let raddr = rport.local_addr()?;
+        info!(log, "listening for reads"; "on" => ?raddr);
 
-    // start controller message handler
-    let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
-    tokio::spawn(
-        ctrl_rx
-            .map(move |cm| CoordinationMessage {
-                source: ctrl_addr,
-                payload: cm,
-                epoch,
-            })
-            .map_err(|e| panic!("{:?}", e))
-            .forward(ctrl.sink_map_err(|e| {
-                // if the controller goes away, another will be elected, and the worker will be
-                // restarted, so there's no reason to do anything too drastic here.
-                eprintln!("controller went away: {:?}", e);
-            }))
-            .map(|_| ()),
-    );
+        // start controller message handler
+        let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
+        tokio::spawn(async move {
+            while let Some(cm) = ctrl_rx.next().await {
+                if let Err(e) = ctrl
+                    .send(CoordinationMessage {
+                        source: ctrl_addr,
+                        payload: cm,
+                        epoch,
+                    })
+                    .await
+                {
+                    // if the controller goes away, another will be elected, and the worker will be
+                    // restarted, so there's no reason to do anything too drastic here.
+                    eprintln!("controller went away: {:?}", e);
+                }
+            }
+        });
 
-    // also start readers
-    tokio::spawn(readers::listen(&valve, ioh, rport, readers.clone()));
+        // also start readers
+        tokio::spawn(readers::listen(&valve, ioh, rport, readers.clone()));
 
-    // and tell the controller about us
-    let timer = valve.wrap(tokio::timer::Interval::new(
-        time::Instant::now() + heartbeat_every,
-        heartbeat_every,
-    ));
-    tokio::spawn(
-        ctrl_tx
-            .clone()
-            .send(CoordinationPayload::Register {
-                addr: waddr,
-                read_listen_addr: raddr,
-                log_files,
-            })
-            .and_then(move |ctrl_tx| {
-                // and start sending heartbeats
-                timer
-                    .map(|_| CoordinationPayload::Heartbeat)
-                    .map_err(|e| -> tokio::sync::mpsc::error::SendError<_> { panic!("{:?}", e) })
-                    .forward(ctrl_tx.clone())
-                    .map(|_| ())
-            })
-            .map_err(|_| {
-                // we're probably just shutting down
-            }),
-    );
-
-    let state_sizes = Arc::new(Mutex::new(HashMap::new()));
-    if let Some(evict_every) = evict_every {
-        let log = log.clone();
-        let mut domain_senders = HashMap::new();
-        let state_sizes = state_sizes.clone();
+        // and tell the controller about us
         let timer = valve.wrap(tokio::timer::Interval::new(
-            time::Instant::now() + evict_every,
-            evict_every,
+            time::Instant::now() + heartbeat_every,
+            heartbeat_every,
         ));
-        tokio::spawn(
-            timer
-                .for_each(move |_| {
-                    do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes)
-                        .map_err(|e| panic!("{:?}", e))
+        tokio::spawn(async move {
+            let _ = ctrl_tx
+                .send(CoordinationPayload::Register {
+                    addr: waddr,
+                    read_listen_addr: raddr,
+                    log_files,
                 })
-                .map_err(|e| panic!("{:?}", e)),
-        );
-    }
+                .await;
 
-    // Now we're ready to accept new domains.
-    let dcaddr = desc.domain_addr;
-    tokio::spawn(
-        replicas
-            .map_err(|e| -> io::Error { panic!("{:?}", e) })
-            .fold(ctrl_tx, move |ctrl_tx, d| {
-                let idx = d.index;
-                let shard = d.shard.unwrap_or(0);
-                let addr: io::Result<_> = try {
-                    let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0))?;
+            // start sending heartbeats
+            while let Some(_) = timer.next().await {
+                if let Err(_) = ctrl_tx.send(CoordinationPayload::Heartbeat).await {
+                    // if we error we're probably just shutting down
+                    break;
+                }
+            }
+        });
+
+        let state_sizes = Arc::new(Mutex::new(HashMap::new()));
+        if let Some(evict_every) = evict_every {
+            let log = log.clone();
+            let mut domain_senders = HashMap::new();
+            let state_sizes = state_sizes.clone();
+            let timer = valve.wrap(tokio::timer::Interval::new(
+                time::Instant::now() + evict_every,
+                evict_every,
+            ));
+            tokio::spawn(async move {
+                while let Some(_) = timer.next().await {
+                    do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes).await;
+                }
+            });
+        }
+
+        // Now we're ready to accept new domains.
+        let dcaddr = desc.domain_addr;
+        tokio::spawn(
+            async move {
+                while let d = replicas.next().await.unwrap() {
+                    let idx = d.index;
+                    let shard = d.shard.unwrap_or(0);
+
+                    let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
                     let addr = on.local_addr()?;
 
                     let state_size = Arc::new(AtomicUsize::new(0));
@@ -308,9 +304,10 @@ fn listen_df(
                     coord.insert_local((idx, shard), tx);
                     coord.insert_remote((idx, shard), addr);
 
-                    crate::block_on(|| {
+                    crate::blocking(|| {
                         state_sizes.lock().unwrap().insert((idx, shard), state_size)
-                    });
+                    })
+                    .await;
 
                     tokio::spawn(replica::Replica::new(
                         &valve,
@@ -330,28 +327,25 @@ fn listen_df(
                         addr
                     );
 
-                    addr
-                };
-
-                match addr {
-                    Ok(addr) => Either::A(
-                        ctrl_tx
-                            .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
-                                idx, shard, addr,
-                            )))
-                            .map_err(|_| {
-                                // controller went away -- exit?
-                                io::Error::new(io::ErrorKind::Other, "controller went away")
-                            }),
-                    ),
-                    Err(e) => Either::B(future::err(e)),
+                    ctrl_tx
+                        .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
+                            idx, shard, addr,
+                        )))
+                        .await
+                        .map_err(|_| {
+                            // controller went away -- exit?
+                            io::Error::new(io::ErrorKind::Other, "controller went away")
+                        })?;
                 }
-            })
-            .map_err(|e| panic!("{:?}", e))
-            .map(|_| ()),
-    );
 
-    Ok(())
+                Ok(())
+            }
+                .map_err(|e: io::Error| panic!("{:?}", e))
+                .map(|_| ()),
+        );
+
+        Ok(())
+    }
 }
 
 #[allow(clippy::type_complexity)]

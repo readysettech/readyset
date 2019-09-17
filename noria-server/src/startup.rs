@@ -2,8 +2,7 @@ use crate::controller::ControllerState;
 use crate::coordination::{CoordinationMessage, CoordinationPayload};
 use async_bincode::AsyncBincodeReader;
 use futures_util::{
-    future::FutureExt, sink::SinkExt, stream::StreamExt, try_future::TryFutureExt,
-    try_stream::TryStreamExt,
+    future::FutureExt, sink::SinkExt, try_future::TryFutureExt, try_stream::TryStreamExt,
 };
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use noria::consensus::Authority;
@@ -124,24 +123,26 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         let mut ctx = ctrl_tx;
         let mut wtx = worker_tx;
         while let Some(e) = rx.next().await {
-            match e {
+            let snd = match e {
                 Event::InternalMessage(ref msg) => match msg.payload {
-                    CoordinationPayload::Deregister => ctx.send(e).await.unwrap(),
-                    CoordinationPayload::RemoveDomain => wtx.send(e).await.unwrap(),
-                    CoordinationPayload::AssignDomain(..) => wtx.send(e).await.unwrap(),
-                    CoordinationPayload::DomainBooted(..) => wtx.send(e).await.unwrap(),
-                    CoordinationPayload::Register { .. } => ctx.send(e).await.unwrap(),
-                    CoordinationPayload::Heartbeat => ctx.send(e).await.unwrap(),
-                    CoordinationPayload::CreateUniverse(..) => ctx.send(e).await.unwrap(),
+                    CoordinationPayload::Deregister => ctx.send(e),
+                    CoordinationPayload::RemoveDomain => wtx.send(e),
+                    CoordinationPayload::AssignDomain(..) => wtx.send(e),
+                    CoordinationPayload::DomainBooted(..) => wtx.send(e),
+                    CoordinationPayload::Register { .. } => ctx.send(e),
+                    CoordinationPayload::Heartbeat => ctx.send(e),
+                    CoordinationPayload::CreateUniverse(..) => ctx.send(e),
                 },
-                Event::ExternalRequest(..) => ctx.send(e).await.unwrap(),
-                Event::ManualMigration { .. } => ctx.send(e).await.unwrap(),
-                Event::LeaderChange(..) => wtx.send(e).await.unwrap(),
-                Event::WonLeaderElection(..) => ctx.send(e).await.unwrap(),
-                Event::CampaignError(..) => ctx.send(e).await.unwrap(),
+                Event::ExternalRequest(..) => ctx.send(e),
+                Event::ManualMigration { .. } => ctx.send(e),
+                Event::LeaderChange(..) => wtx.send(e),
+                Event::WonLeaderElection(..) => ctx.send(e),
+                Event::CampaignError(..) => ctx.send(e),
                 #[cfg(test)]
-                Event::IsReady(..) => ctx.send(e).await.unwrap(),
-            }
+                Event::IsReady(..) => ctx.send(e),
+            };
+            // needed for https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
+            snd.await.unwrap();
         }
     });
 
