@@ -408,13 +408,6 @@ pub mod manual {
 use dataflow::DomainConfig;
 use std::time;
 
-pub(crate) fn block_on<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    blocking(f).wait().unwrap()
-}
-
 pub(crate) async fn blocking<F, T>(f: F) -> T
 where
     F: FnOnce() -> T,

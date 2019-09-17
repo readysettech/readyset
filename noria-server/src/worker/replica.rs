@@ -13,8 +13,8 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
-use futures_util::ready;
 use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::{pin_mut, ready};
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
@@ -330,13 +330,23 @@ impl Replica {
     fn try_timeout(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = self.project();
 
-        if let Some(mut to) = this.timeout.as_pin_mut() {
+        if let Some(to) = this.timeout.as_pin_mut() {
             if let Poll::Ready(()) = to.poll(cx) {
                 this.timeout.set(None);
-                crate::block_on(|| {
+                let blocking = crate::blocking(|| {
                     this.domain
-                        .on_event(this.oob, PollEvent::Timeout, this.outbox)
+                        .on_event(this.oob, PollEvent::Timeout, this.outbox);
                 });
+                pin_mut!(blocking);
+                if let Poll::Pending = blocking.poll(cx) {
+                    // this is a little awkward. we failed to block, so we failed to notify about
+                    // the timeout expiry. we'll need to make sure we get back to the code above to
+                    // try again note that we are already scheduled for a wake-up since blocking
+                    // returned Pending.
+                    this.timeout.set(Some(async_timer::oneshot::Timer::new(
+                        std::time::Duration::new(0, 0),
+                    )));
+                }
                 return Poll::Ready(());
             }
         }

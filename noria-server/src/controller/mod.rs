@@ -224,12 +224,12 @@ fn instance_campaign<A: Authority + 'static>(
             let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
                 epoch = leader.0;
-                event_tx = event_tx
+                event_tx
                     .try_send(payload_to_event(leader.1)?)
                     .map_err(|_| format_err!("send failed"))?;
                 while let Some(leader) = authority.await_new_epoch(epoch)? {
                     epoch = leader.0;
-                    event_tx = event_tx
+                    event_tx
                         .try_send(payload_to_event(leader.1)?)
                         .map_err(|_| format_err!("send failed"))?;
                 }
@@ -271,14 +271,13 @@ fn instance_campaign<A: Authority + 'static>(
             // It is not currently possible to safely handle involuntary loss of leadership status
             // (and there is nothing that can currently trigger it), so don't bother watching for
             // it.
-            break event_tx
-                .send(Event::WonLeaderElection(state.clone().unwrap()))
-                .and_then(|event_tx| {
-                    event_tx.send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
-                })
-                .wait()
-                .map(|_| ())
-                .map_err(|_| format_err!("send failed"));
+            event_tx
+                .try_send(Event::WonLeaderElection(state.clone().unwrap()))
+                .map_err(|_| format_err!("failed to announce who won leader election"))?;
+            event_tx
+                .try_send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
+                .map_err(|_| format_err!("failed to announce leader change"))?;
+            break Ok(());
         }
     };
 

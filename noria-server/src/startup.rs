@@ -1,9 +1,7 @@
 use crate::controller::ControllerState;
 use crate::coordination::{CoordinationMessage, CoordinationPayload};
 use async_bincode::AsyncBincodeReader;
-use futures_util::{
-    future::FutureExt, sink::SinkExt, try_future::TryFutureExt, try_stream::TryStreamExt,
-};
+use futures_util::{future::FutureExt, try_future::TryFutureExt, try_stream::TryStreamExt};
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use noria::consensus::Authority;
 use noria::ControllerDescriptor;
@@ -230,7 +228,7 @@ where
         type Error = hyper::Error;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-        fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 

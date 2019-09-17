@@ -2,6 +2,7 @@ use crate::controller::migrate::Migration;
 use crate::startup::Event;
 use dataflow::prelude::*;
 use futures_util::future::poll_fn;
+use futures_util::sink::SinkExt;
 use noria::consensus::Authority;
 use noria::prelude::*;
 use std::collections::HashMap;
@@ -70,7 +71,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[doc(hidden)]
-    pub fn migrate<F, T>(&mut self, f: F) -> T
+    pub async fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T + Send + 'static,
         T: Send + 'static,
@@ -84,15 +85,14 @@ impl<A: Authority + 'static> Handle<A> {
         });
 
         self.event_tx
-            .clone()
+            .as_mut()
             .unwrap()
-            .unbounded_send(Event::ManualMigration { f: b, done: fin_tx })
+            .send(Event::ManualMigration { f: b, done: fin_tx })
+            .await
             .unwrap();
 
-        match fin_rx.wait() {
-            Ok(()) => ret_rx.wait().unwrap(),
-            Err(e) => unreachable!("{:?}", e),
-        }
+        fin_rx.await.unwrap();
+        ret_rx.await.unwrap()
     }
 
     /// Install a new set of policies on the controller.

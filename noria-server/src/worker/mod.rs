@@ -279,7 +279,7 @@ fn listen_df<'a>(
         let dcaddr = desc.domain_addr;
         tokio::spawn(
             async move {
-                while let d = replicas.next().await.unwrap() {
+                while let Some(d) = replicas.next().await {
                     let idx = d.index;
                     let shard = d.shard.unwrap_or(0);
 
