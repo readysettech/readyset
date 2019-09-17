@@ -78,7 +78,7 @@ pub(in crate::controller) struct DomainReplies(
 
 impl DomainReplies {
     async fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
-        let crps: Vec<_> = self.0.take(n as u64).collect().await;
+        let crps: Vec<_> = (&mut self.0).take(n as u64).collect().await;
 
         if crps.len() != n {
             unreachable!(
@@ -984,7 +984,7 @@ impl ControllerInner {
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
-                let view = rgb.map(|rgb| rgb.build(x.clone()).unwrap()).unwrap();
+                let mut view = rgb.map(|rgb| rgb.build(x.clone()).unwrap()).unwrap();
                 let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
                     .unwrap()
                     .iter()

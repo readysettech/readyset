@@ -232,9 +232,9 @@ impl Future for BlockingRead {
     type Output = Result<Tagged<ReadReply>, ()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+        let mut this = self.project();
         loop {
-            ready!(this.retry.poll_next(cx));
+            ready!(this.retry.as_mut().poll_next(cx));
 
             let missing = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();

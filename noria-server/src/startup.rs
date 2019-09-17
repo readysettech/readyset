@@ -77,21 +77,21 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let iopool = pool.build().unwrap();
 
     let (trigger, valve) = Valve::new();
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
     // we'll be listening for a couple of different types of events:
     // first, events from workers
-    let wport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)).await?;
+    let wport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
     let waddr = wport.local_addr()?;
     // second, messages from the "real world"
-    let xport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 6033))
-        .or_else(|_| tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)))
+    let xport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 6033))
+        .or_else(|_| tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)))
         .await?;
     let xaddr = xport.local_addr()?;
     // and third, domain control traffic. this traffic is a little special, since we may need to
     // receive from it while handling control messages (e.g., for replay acks). because of this, we
     // give it its own channel.
-    let cport = tokio::net::TcpListener::bind(&SocketAddr::new(listen_addr, 0)).await?;
+    let cport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
     let caddr = cport.local_addr()?;
 
     // set up different loops for the controller "part" and the worker "part" of us. this is
@@ -179,7 +179,7 @@ async fn listen_internal(
     event_tx: UnboundedSender<Event>,
     on: tokio::net::TcpListener,
 ) {
-    let rx = valve.wrap(on.incoming());
+    let mut rx = valve.wrap(on.incoming());
     while let Some(r) = rx.next().await {
         match r {
             Err(e) => {
@@ -263,7 +263,7 @@ where
             let method = req.method().clone();
             let path = req.uri().path().to_string();
             let query = req.uri().query().map(ToOwned::to_owned);
-            let event_tx = self.0.clone();
+            let mut event_tx = self.0.clone();
 
             Box::pin(async move {
                 let body = req.into_body().try_concat().await?;

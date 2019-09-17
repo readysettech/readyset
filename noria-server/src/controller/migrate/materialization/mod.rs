@@ -858,7 +858,7 @@ impl Materializations {
                     workers,
                 )
                 .unwrap();
-            replies.wait_for_acks(&domain);
+            futures_executor::block_on(replies.wait_for_acks(&domain));
             trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
@@ -992,7 +992,7 @@ impl Materializations {
                "domain" => target.index(),
             );
 
-            replies.wait_for_acks(&domains[&target]);
+            futures_executor::block_on(replies.wait_for_acks(&domains[&target]));
         }
     }
 }

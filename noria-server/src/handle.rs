@@ -132,10 +132,11 @@ impl<A: Authority + 'static> Handle<A> {
         fields.sort();
         let record: Vec<DataType> = fields.iter().map(|&f| context[f].clone()).collect();
 
-        let table = c.table(&bname).await?;
-        table
-            .insert(record)
-            .await
+        let mut table = c.table(&bname).await?;
+        let fut = table.insert(record);
+        // can't await immediately because of
+        // https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
+        fut.await
             .map_err(|e| format_err!("failed to make table: {:?}", e))
     }
 

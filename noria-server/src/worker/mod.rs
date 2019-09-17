@@ -46,7 +46,7 @@ impl InstanceState {
 }
 pub(super) async fn main(
     ioh: tokio_io_pool::Handle,
-    worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    mut worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,
     waddr: SocketAddr,
     memory_limit: Option<usize>,
@@ -184,7 +184,7 @@ fn listen_df<'a>(
     waddr: SocketAddr,
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
-    replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
+    mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
 ) -> impl Future<Output = Result<(), failure::Error>> + 'a {
     async move {
         // first, try to connect to controller
@@ -206,7 +206,7 @@ fn listen_df<'a>(
         let epoch = state.epoch;
         let heartbeat_every = state.config.heartbeat_every;
 
-        let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (mut ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // reader setup
         let readers = Arc::new(Mutex::new(HashMap::new()));
@@ -215,7 +215,7 @@ fn listen_df<'a>(
         info!(log, "listening for reads"; "on" => ?raddr);
 
         // start controller message handler
-        let ctrl = AsyncBincodeWriter::from(ctrl).for_async();
+        let mut ctrl = AsyncBincodeWriter::from(ctrl).for_async();
         tokio::spawn(async move {
             while let Some(cm) = ctrl_rx.next().await {
                 if let Err(e) = ctrl
@@ -237,12 +237,13 @@ fn listen_df<'a>(
         tokio::spawn(readers::listen(&valve, ioh, rport, readers.clone()));
 
         // and tell the controller about us
-        let timer = valve.wrap(tokio::timer::Interval::new(
+        let mut timer = valve.wrap(tokio::timer::Interval::new(
             time::Instant::now() + heartbeat_every,
             heartbeat_every,
         ));
+        let mut ctx = ctrl_tx.clone();
         tokio::spawn(async move {
-            let _ = ctrl_tx
+            let _ = ctx
                 .send(CoordinationPayload::Register {
                     addr: waddr,
                     read_listen_addr: raddr,
@@ -252,7 +253,7 @@ fn listen_df<'a>(
 
             // start sending heartbeats
             while let Some(_) = timer.next().await {
-                if let Err(_) = ctrl_tx.send(CoordinationPayload::Heartbeat).await {
+                if let Err(_) = ctx.send(CoordinationPayload::Heartbeat).await {
                     // if we error we're probably just shutting down
                     break;
                 }
@@ -264,7 +265,7 @@ fn listen_df<'a>(
             let log = log.clone();
             let mut domain_senders = HashMap::new();
             let state_sizes = state_sizes.clone();
-            let timer = valve.wrap(tokio::timer::Interval::new(
+            let mut timer = valve.wrap(tokio::timer::Interval::new(
                 time::Instant::now() + evict_every,
                 evict_every,
             ));

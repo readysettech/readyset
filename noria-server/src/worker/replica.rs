@@ -13,8 +13,8 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
+use futures_util::ready;
 use futures_util::stream::futures_unordered::FuturesUnordered;
-use futures_util::{pin_mut, ready};
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
@@ -118,13 +118,13 @@ impl Replica {
     fn try_oob(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
         let this = self.project();
 
-        let inputs = this.inputs;
-        let pending = this.oob.pending;
+        let mut inputs = this.inputs;
+        let pending = &mut this.oob.pending;
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
         this.oob.back.retain(|&streami, tags| {
-            let stream = &mut inputs[streami];
+            let mut stream = Pin::new(&mut inputs[streami]);
             let mut no_more = false;
 
             let had = tags.len();
@@ -133,7 +133,7 @@ impl Replica {
                     return true;
                 }
 
-                match Pin::new(stream).poll_ready(cx) {
+                match stream.as_mut().poll_ready(cx) {
                     Poll::Ready(Ok(())) => {}
                     Poll::Pending => {
                         no_more = true;
@@ -146,7 +146,7 @@ impl Replica {
                     }
                 }
 
-                match Pin::new(stream).start_send(Tagged { tag, v: () }) {
+                match stream.as_mut().start_send(Tagged { tag, v: () }) {
                     Ok(()) => false,
                     Err(e) => {
                         // start_send shouldn't generally error
@@ -224,8 +224,10 @@ impl Replica {
                 (tx, true)
             });
 
+            let mut tx = Pin::new(tx);
+
             while !ms.is_empty() {
-                match Pin::new(tx).poll_ready(cx) {
+                match tx.as_mut().poll_ready(cx) {
                     Poll::Ready(Ok(())) => {}
                     Poll::Pending => break,
                     Poll::Ready(Err(e)) => {
@@ -235,7 +237,7 @@ impl Replica {
                 }
 
                 let m = ms.pop_front().expect("!is_empty");
-                match Pin::new(tx).start_send(m) {
+                match tx.as_mut().start_send(m) {
                     Ok(()) => {
                         // we queued something, so we'll need to send!
                         *pending = true;
@@ -275,11 +277,11 @@ impl Replica {
     }
 
     fn try_new(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
-        let this = self.project();
+        let mut this = self.project();
 
-        while let Poll::Ready(stream) = this.incoming.poll_next(cx)? {
+        while let Poll::Ready(stream) = this.incoming.as_mut().poll_next(cx)? {
             match stream {
-                Some(stream) => {
+                Some(mut stream) => {
                     // we know that any new connection to a domain will first send a one-byte
                     // token to indicate whether the connection is from a base or not.
                     debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
@@ -296,7 +298,7 @@ impl Replica {
             }
         }
 
-        while let Poll::Ready(Some((stream, tag))) = this.first_byte.poll_next(cx)? {
+        while let Poll::Ready(Some((stream, tag))) = this.first_byte.as_mut().poll_next(cx)? {
             let is_base = tag == CONNECTION_FROM_BASE;
 
             debug!(this.log, "established new connection"; "base" => ?is_base);
@@ -328,17 +330,16 @@ impl Replica {
     }
 
     fn try_timeout(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let this = self.project();
+        let mut this = self.project();
 
-        if let Some(to) = this.timeout.as_pin_mut() {
+        if let Some(to) = this.timeout.as_mut().as_pin_mut() {
             if let Poll::Ready(()) = to.poll(cx) {
                 this.timeout.set(None);
-                let blocking = crate::blocking(|| {
+                let try_block = tokio_executor::threadpool::blocking(|| {
                     this.domain
                         .on_event(this.oob, PollEvent::Timeout, this.outbox);
                 });
-                pin_mut!(blocking);
-                if let Poll::Pending = blocking.poll(cx) {
+                if let Poll::Pending = try_block {
                     // this is a little awkward. we failed to block, so we failed to notify about
                     // the timeout expiry. we'll need to make sure we get back to the code above to
                     // try again note that we are already scheduled for a wake-up since blocking
@@ -393,13 +394,17 @@ impl Future for Replica {
                 // FIXME: check if we should call update_state_sizes (every evict_every)
 
                 // are there are any new connections?
-                if !self.try_new(cx).context("check for new connections")? {
+                if !self
+                    .as_mut()
+                    .try_new(cx)
+                    .context("check for new connections")?
+                {
                     // incoming socket closed -- no more clients will arrive
                     return Poll::Ready(());
                 }
 
                 // have any of our timers expired?
-                self.try_timeout(cx);
+                let _ = self.as_mut().try_timeout(cx);
 
                 // we have three logical input sources: receives from local domains, receives from
                 // remote domains, and remote mutators. we want to achieve some kind of fairness among
@@ -422,8 +427,8 @@ impl Future for Replica {
                 let mut local_done = false;
                 let mut remote_done = false;
                 let mut check_local = true;
-                let this = self.project();
                 let readiness = 'ready: loop {
+                    let mut this = self.project();
                     let d = this.domain;
                     let oob = this.oob;
                     let ob = this.outbox;
@@ -465,11 +470,11 @@ impl Future for Replica {
                     for i in 0..FORCE_INPUT_YIELD_EVERY {
                         if !local_done && (check_local || remote_done) {
                             match this.locals.poll_recv(cx) {
-                                Poll::Ready(Some(packet)) => process!(self.retry, packet, |p| d
+                                Poll::Ready(Some(packet)) => process!(*this.retry, packet, |p| d
                                     .on_event(oob, PollEvent::Process(p), ob)),
                                 Poll::Ready(None) => {
                                     // local input stream finished
-                                    error!(self.log, "local input stream terminated");
+                                    error!(this.log, "local input stream terminated");
                                     local_done = true;
                                     break;
                                 }
@@ -480,7 +485,7 @@ impl Future for Replica {
                         }
 
                         if !remote_done && (!check_local || local_done) {
-                            match this.inputs.poll_next(cx) {
+                            match this.inputs.as_mut().poll_next(cx) {
                                 Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => process!(
                                     *this.retry,
                                     packet,
@@ -522,10 +527,12 @@ impl Future for Replica {
 
                     // send to downstream
                     // TODO: send fail == exiting?
-                    self.try_flush(cx).context("downstream flush (after)")?;
+                    self.as_mut()
+                        .try_flush(cx)
+                        .context("downstream flush (after)")?;
 
                     // send acks
-                    self.try_oob(cx)?;
+                    self.as_mut().try_oob(cx)?;
 
                     if interrupted {
                         // resume reading from our non-depleted inputs
@@ -535,22 +542,23 @@ impl Future for Replica {
                 };
 
                 // check if we now need to set a timeout
-                match self.domain.on_event(
-                    &mut self.oob,
-                    PollEvent::ResumePolling,
-                    &mut self.outbox,
-                ) {
+                let mut this = self.project();
+                match this
+                    .domain
+                    .on_event(this.oob, PollEvent::ResumePolling, this.outbox)
+                {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
                             // tokio-timer has a resolution of 1ms, so we can't use it :'(
                             // TODO: how about we don't create a new timer each time?
-                            self.timeout = Some(async_timer::oneshot::Timer::new(timeout));
+                            this.timeout
+                                .set(Some(async_timer::oneshot::Timer::new(timeout)));
 
                             // we need to poll the timer to ensure we'll get woken up
-                            if let Poll::Ready(()) = self.try_timeout(cx) {
+                            if let Poll::Ready(()) = self.as_mut().try_timeout(cx) {
                                 // the timer expired and we did some stuff
                                 // make sure we don't return while there's more work to do
-                                cx.waker().wake();
+                                cx.waker().wake_by_ref();
                             }
                         }
                     }
@@ -565,7 +573,8 @@ impl Future for Replica {
         };
 
         if let Err(e) = ready!(r) {
-            crit!(self.log, "replica failure: {:?}", e);
+            let this = self.project();
+            crit!(this.log, "replica failure: {:?}", e);
         }
         Poll::Ready(())
     }

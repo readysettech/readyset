@@ -63,7 +63,7 @@ pub(super) async fn main<A: Authority + 'static>(
     valve: Valve,
     config: Config,
     descriptor: ControllerDescriptor,
-    ctrl_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    mut ctrl_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     cport: tokio::net::tcp::TcpListener,
     log: slog::Logger,
     authority: Arc<A>,
@@ -177,7 +177,8 @@ async fn listen_domain_replies(
     reply_tx: UnboundedSender<ControlReplyPacket>,
     on: tokio::net::TcpListener,
 ) {
-    while let Some(sock) = valve.wrap(on.incoming()).next().await {
+    let mut incoming = valve.wrap(on.incoming());
+    while let Some(sock) = incoming.next().await {
         match sock {
             Err(e) => {
                 warn!(log, "domain reply connection failed: {:?}", e);
@@ -202,7 +203,7 @@ async fn listen_domain_replies(
 }
 
 fn instance_campaign<A: Authority + 'static>(
-    event_tx: UnboundedSender<Event>,
+    mut event_tx: UnboundedSender<Event>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
     config: Config,
