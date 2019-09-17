@@ -9,6 +9,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
+use nom_sql::Operator;
 use noria::consensus::LocalAuthority;
 use noria::DataType;
 
@@ -291,7 +292,7 @@ async fn broad_recursing_upquery() {
             Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
         );
         // reader, sharded by the lookup column, which is the third column on x
-        mig.maintain("reader".to_string(), join, &[2], HashMap::new());
+        mig.maintain("reader".to_string(), join, &[2], Operator::Equal);
     })
     .await;
 

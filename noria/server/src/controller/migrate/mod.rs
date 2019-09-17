@@ -23,6 +23,7 @@
 use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
+use nom_sql::Operator;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -234,12 +235,12 @@ impl<'a> Migration<'a> {
         &mut self,
         n: NodeIndex,
         name: Option<String>,
-        inequality_queries: HashMap<u64, nom_sql::Operator>,
+        operator: nom_sql::Operator,
     ) {
         use std::collections::hash_map::Entry;
         if let Entry::Vacant(e) = self.readers.entry(n) {
             // make a reader
-            let r = node::special::Reader::new(n, inequality_queries);
+            let r = node::special::Reader::new(n, operator);
             let mut r = if let Some(name) = name {
                 self.mainline.ingredients[n].named_mirror(r, name)
             } else {
@@ -259,7 +260,7 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
     pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
-        self.ensure_reader_for(n, None, HashMap::default());
+        self.ensure_reader_for(n, None, Operator::Equal);
         let ri = self.readers[&n];
 
         self.mainline.ingredients[ri]
@@ -277,9 +278,9 @@ impl<'a> Migration<'a> {
         name: String,
         n: NodeIndex,
         key: &[usize],
-        inequality_queries: HashMap<u64, nom_sql::Operator>,
+        operator: nom_sql::Operator,
     ) {
-        self.ensure_reader_for(n, Some(name), inequality_queries);
+        self.ensure_reader_for(n, Some(name), operator);
 
         let ri = self.readers[&n];
 
