@@ -4,6 +4,7 @@ use crate::FrontierStrategy;
 use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
 use noria::consensus::{Authority, LocalAuthority};
+use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
@@ -100,10 +101,10 @@ impl Builder {
 
     /// Start a server instance and return a handle to it.
     #[must_use]
-    pub async fn start<A: Authority + 'static>(
+    pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> Result<Handle<A>, failure::Error> {
+    ) -> impl Future<Output = Result<Handle<A>, failure::Error>> {
         let Builder {
             listen_addr,
             ref config,
@@ -114,6 +115,7 @@ impl Builder {
 
         let config = config.clone();
         let log = log.clone();
+
         crate::startup::start_instance(
             authority,
             listen_addr,
@@ -122,16 +124,20 @@ impl Builder {
             memory_check_frequency,
             log,
         )
-        .await
     }
 
     /// Start a local-only worker, and return a handle to it.
     #[must_use]
-    pub async fn start_local(&self) -> Result<Handle<LocalAuthority>, failure::Error> {
-        #[allow(unused_mut)]
-        let mut wh = self.start(Arc::new(LocalAuthority::new())).await?;
-        #[cfg(test)]
-        wh.backend_ready().await?;
-        Ok(wh)
+    pub fn start_local(
+        &self,
+    ) -> impl Future<Output = Result<Handle<LocalAuthority>, failure::Error>> {
+        let fut = self.start(Arc::new(LocalAuthority::new()));
+        async move {
+            #[allow(unused_mut)]
+            let mut wh = fut.await?;
+            #[cfg(test)]
+            wh.backend_ready().await?;
+            Ok(wh)
+        }
     }
 }
