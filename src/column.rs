@@ -4,13 +4,16 @@ use std::str;
 
 use common::{Literal, SqlType};
 use keywords::escape_if_keyword;
+use condition::ConditionExpression;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
     Avg(Column, bool),
     Count(Column, bool),
     CountStar,
+    CountFilter(ConditionExpression),
     Sum(Column, bool),
+    SumFilter(Column, ConditionExpression),
     Max(Column),
     Min(Column),
     GroupConcat(Column, String),
@@ -27,6 +30,8 @@ impl Display for FunctionExpression {
             FunctionExpression::Count(ref col, _) => write!(f, "count({})", col),
             FunctionExpression::CountStar => write!(f, "count(*)"),
             FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col),
+            FunctionExpression::CountFilter(_) => write!(f, "count(filter *)"),
+            FunctionExpression::SumFilter(ref col, _) => write!(f, "sum(filter {})", col),
             FunctionExpression::Max(ref col) => write!(f, "max({})", col),
             FunctionExpression::Min(ref col) => write!(f, "min({})", col),
             FunctionExpression::GroupConcat(ref col, ref s) => {

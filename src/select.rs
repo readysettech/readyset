@@ -742,6 +742,64 @@ mod tests {
     }
 
     #[test]
+    fn count_filter() {
+        let qstring = "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
+
+        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+
+        let filter_cond = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("vote_id")))),
+            right: Box::new(Base(Literal(Literal::Integer(10.into())))),
+            operator: Operator::Greater,
+        });
+        let agg_expr = FunctionExpression::CountFilter(filter_cond);
+        let expected_stmt = SelectStatement {
+            tables: vec![Table::from("votes")],
+            fields: vec![FieldDefinitionExpression::Col(Column {
+                name: String::from("count(filter vote_id)"),
+                alias: None,
+                table: None,
+                function: Some(Box::new(agg_expr)),
+            })],
+            group_by: Some(GroupByClause {
+                columns: vec![Column::from("aid")],
+                having: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected_stmt);
+    }
+
+    #[test]
+    fn sum_filter() {
+        let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id END) FROM votes GROUP BY aid;";
+
+        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+
+        let filter_cond = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("sign")))),
+            right: Box::new(Base(Literal(Literal::Integer(1.into())))),
+            operator: Operator::Equal,
+        });
+        let agg_expr = FunctionExpression::SumFilter(Column::from("vote_id"), filter_cond);
+        let expected_stmt = SelectStatement {
+            tables: vec![Table::from("votes")],
+            fields: vec![FieldDefinitionExpression::Col(Column {
+                name: String::from("count(filter 2)"),
+                alias: None,
+                table: None,
+                function: Some(Box::new(agg_expr)),
+            })],
+            group_by: Some(GroupByClause {
+                columns: vec![Column::from("aid")],
+                having: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected_stmt);
+    }
+
+    #[test]
     fn moderately_complex_selection() {
         let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
