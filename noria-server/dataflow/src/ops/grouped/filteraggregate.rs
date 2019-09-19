@@ -229,6 +229,34 @@ mod tests {
         g
     }
 
+    fn setup_sum(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        // sum z's, grouped by y, where y!=x and z>1
+        g.set_op(
+            "identity",
+            &["y", "zsum"],
+            FilterAggregation::SUM.over(
+                s.as_global(),
+                &[
+                    None,
+                    Some(FilterCondition::Comparison(
+                        Operator::NotEqual,
+                        Value::Column(0),
+                    )),
+                    Some(FilterCondition::Comparison(
+                        Operator::Greater,
+                        Value::Constant(1.into()),
+                    )),
+                ],
+                2,
+                &[1]
+            ),
+            mat,
+        );
+        g
+    }
+
     #[test]
     fn it_describes() {
         let s = 0.into();
@@ -442,7 +470,118 @@ mod tests {
         }
     }
 
-    // TODO: also test SUM
+    #[test]
+    fn it_sums() {
+        // records [x, y, z]  --> [y, zsum]
+        // sum z's, grouped by y, where y!=x and z>1
+
+        // test:
+        // filtered out by z=1, z=0, y=x
+        // positive and negative updates
+
+        let mut c = setup_sum(true);
+
+        // some unfiltered updates first
+
+        let u: Record = vec![1.into(), 2.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 0.into(), 3.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 3.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // now filtered updates
+
+        let u: Record = vec![1.into(), 1.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 3.into(), 1.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 3.into());
+                assert_eq!(r[1], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 2.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 0);
+
+        let u: Record = vec![2.into(), 2.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 0);
+
+        // additional update to preexisting group
+
+        let u: Record = vec![0.into(), 2.into(), 4.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 6.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // now a negative update to a group
+        let u = (vec![14.into(), 0.into(), 2.into()], false);
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 3.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 1.into());
+            }
+            _ => unreachable!(),
+        }
+    }
 
     #[test]
     fn it_suggests_indices() {
