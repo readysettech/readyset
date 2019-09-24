@@ -1,6 +1,7 @@
 use ahash::RandomState;
 use common::DataType;
-use evbtree;
+use evbtree::{self, refs::Values};
+use std::ops::RangeBounds;
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
@@ -20,7 +21,7 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
     where
-        F: FnOnce(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> T,
     {
         match *self {
             Handle::Single(ref h) => {
@@ -74,6 +75,23 @@ impl Handle {
             Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
             Handle::Double(ref h) => h.map_into(|(k1, k2), _| vec![k1.clone(), k2.clone()]),
             Handle::Many(ref h) => h.map_into(|ks, _| ks.clone()),
+        }
+    }
+
+    pub(super) fn meta_get_range_and<F, T, R>(&self, range: R, mut then: F) -> Option<(Vec<T>, i64)>
+    where
+        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        R: RangeBounds<DataType>,
+    {
+        match *self {
+            Handle::Single(ref h) => {
+                //h.meta_get_range_and(range, then),
+                let map = h.enter()?;
+                let meta = h.meta()?;
+                Some((map.range(range).map(|(_, row)| then(row)).collect(), *meta))
+            }
+            // TODO(jonathangb): Consider handling other types of handle.
+            _ => unimplemented!(),
         }
     }
 }

@@ -1,8 +1,10 @@
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
+use evbtree::refs::Values;
 use rand::prelude::*;
 use std::borrow::Cow;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
@@ -339,14 +341,31 @@ impl SingleReadHandle {
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle
             .meta_get_and(key, &mut then)
             .ok_or(())
             .map(|(mut records, meta)| {
                 if records.is_none() && self.trigger.is_none() {
-                    records = Some(then(&evbtree::refs::Values::default()));
+                    records = Some(then(&Values::default()));
+                }
+                (records, meta)
+            })
+    }
+
+    /// Look up the entries whose keys are in `range`, pass each to `then`, and return them
+    pub fn try_find_range_and<F, T, R>(&self, range: R, mut then: F) -> Result<(Vec<T>, i64), ()>
+    where
+        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        R: RangeBounds<common::DataType>,
+    {
+        self.handle
+            .meta_get_range_and(range, &mut then)
+            .ok_or(())
+            .map(|(mut records, meta)| {
+                if records.is_empty() && self.trigger.is_none() {
+                    records = vec![then(&Values::default())];
                 }
                 (records, meta)
             })
