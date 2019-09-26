@@ -1562,7 +1562,7 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
-            assert_eq!(agg_view.description(true), "|σ(*)| γ[0]");
+            assert_eq!(agg_view.description(true), "|σ(1)| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -1574,6 +1574,7 @@ mod tests {
 
     #[test]
     fn it_incorporates_aggregation_filter_sum() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum");
         g.migrate(|mig| {
@@ -1589,7 +1590,7 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
-                "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes GROUP BY votes.userid;",
+                "SELECT SUM(CASE WHEN votes.aid = 5 THEN votes.sign END) AS sum FROM votes GROUP BY votes.userid;",
                 None,
                 mig,
             );
@@ -1597,7 +1598,15 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
+            let f = Box::new(FunctionExpression::SumFilter(
+                Column::from("votes.sign"),
+                ConditionExpression::ComparisonOp(
+                    ConditionTree {
+                        operator: Operator::Equal,
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                    }
+            )));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1610,12 +1619,12 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "|σ(*)| γ[0]");
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         });
     }

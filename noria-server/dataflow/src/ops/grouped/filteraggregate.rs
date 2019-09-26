@@ -161,7 +161,7 @@ impl GroupedOperation for FilterAggregator {
 
         // TODO could include information about filter condition
         let op_string = match self.op {
-            FilterAggregation::COUNT => "|σ(*)|".into(),
+            FilterAggregation::COUNT => format!("|σ({})|", self.over),
             FilterAggregation::SUM => format!("𝛴(σ({}))", self.over),
         };
         let group_cols = self
