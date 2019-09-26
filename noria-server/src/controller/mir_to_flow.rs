@@ -97,6 +97,7 @@ fn mir_node_to_flow_parts(
                         GroupedNodeType::Aggregation(kind.clone()),
                         mig,
                         table_mapping,
+                        None,
                     )
                 }
                 MirNodeType::Base {
@@ -129,6 +130,27 @@ fn mir_node_to_flow_parts(
                         GroupedNodeType::Extremum(kind.clone()),
                         mig,
                         table_mapping,
+                        None,
+                    )
+                }
+                MirNodeType::FilterAggregation {
+                    ref on,
+                    ref group_by,
+                    ref kind,
+                    ref conditions,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_grouped_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        on,
+                        group_by,
+                        GroupedNodeType::FilterAggregation(kind.clone()),
+                        mig,
+                        table_mapping,
+                        Some(conditions),
                     )
                 }
                 MirNodeType::Filter { ref conditions } => {
@@ -152,6 +174,7 @@ fn mir_node_to_flow_parts(
                         GroupedNodeType::GroupConcat(separator.to_string()),
                         mig,
                         table_mapping,
+                        None,
                     )
                 }
                 MirNodeType::Identity => {
@@ -507,6 +530,7 @@ fn make_grouped_node(
     kind: GroupedNodeType,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+    conditions: Option<&[Option<FilterCondition>]>,
 ) -> FlowNode {
     assert!(!group_by.is_empty());
     assert!(
@@ -545,6 +569,14 @@ fn make_grouped_node(
             column_names.as_slice(),
             extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
         ),
+        GroupedNodeType::FilterAggregation(agg) => {
+            let cond = conditions.expect("FilterAggregation must have conditions!");
+            mig.add_ingredient(
+                String::from(name),
+                column_names.as_slice(),
+                agg.over(parent_na, cond, over_col_indx, group_col_indx.as_slice()),
+            )
+        },
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
             let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);

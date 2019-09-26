@@ -936,12 +936,13 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
     ) -> Vec<MirNodeRef> {
         use dataflow::ops::grouped::aggregate::Aggregation;
+        use dataflow::ops::grouped::filteraggregate::FilterAggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
+        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool, cond: Option<&ConditionExpression>| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
@@ -955,6 +956,7 @@ impl SqlToMirConverter {
                     (node, &over),
                     group_cols,
                     t,
+                    cond,
                 ));
                 out_nodes
             } else {
@@ -964,6 +966,7 @@ impl SqlToMirConverter {
                     (parent, &over),
                     group_cols,
                     t,
+                    cond,
                 ));
                 out_nodes
             }
@@ -975,11 +978,19 @@ impl SqlToMirConverter {
                 &Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
+                None,
+            ),
+            SumFilter(ref col, ref condition) => mknode(
+                &Column::from(col),
+                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                false,
+                Some(condition),
             ),
             Count(ref col, distinct) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
                 distinct,
+                None,
             ),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
@@ -989,21 +1000,27 @@ impl SqlToMirConverter {
                 // rows including those with NULL values, and we don't have a mechanism to do that
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
-            }
+            },
+            CountFilter(_) => {
+                panic!("Count filter should have been rewritten earlier!")
+            },
             Max(ref col) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
+                None,
             ),
             Min(ref col) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
+                None,
             ),
             GroupConcat(ref col, ref separator) => mknode(
                 &Column::from(col),
                 GroupedNodeType::GroupConcat(separator.clone()),
                 false,
+                None,
             ),
             _ => unimplemented!(),
         }
@@ -1016,6 +1033,7 @@ impl SqlToMirConverter {
         over: (MirNodeRef, &Column),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
+        condition: Option<&ConditionExpression>
     ) -> MirNodeRef {
         let parent_node = over.0;
 
@@ -1056,6 +1074,33 @@ impl SqlToMirConverter {
                 vec![parent_node.clone()],
                 vec![],
             ),
+            GroupedNodeType::FilterAggregation(filter_agg) => {
+                use nom_sql::ConditionExpression::*;
+
+                let cond = condition.expect("Filter aggregation must have condition!");
+                let condtree = match *cond {
+                    LogicalOp(_) => unimplemented!(),
+                    ComparisonOp(ref ct) => ct,
+                    Bracketed(_) => unimplemented!(),
+                    NegationOp(_) => unreachable!("negation should have been removed earlier"),
+                    Base(_) => unreachable!("dangling base predicate"),
+                    Arithmetic(_) => unimplemented!(),
+                };
+                let filter = self.to_conditions(condtree, &mut combined_columns, &parent_node);
+                MirNode::new(
+                    name,
+                    self.schema_version,
+                    combined_columns,
+                    MirNodeType::FilterAggregation {
+                        on: over_col.clone(),
+                        group_by: group_by.into_iter().cloned().collect(),
+                        kind: filter_agg,
+                        conditions: filter,
+                    },
+                    vec![parent_node.clone()],
+                    vec![],
+                )
+            },
             GroupedNodeType::GroupConcat(sep) => MirNode::new(
                 name,
                 self.schema_version,

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Write};
 
 use dataflow::ops::filter::FilterCondition;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use node::{MirNode, MirNodeType};
@@ -141,6 +142,23 @@ impl GraphViz for MirNodeType {
                 let op_string = match *kind {
                     ExtremumKind::MIN => format!("min({})", print_col(on)),
                     ExtremumKind::MAX => format!("max({})", print_col(on)),
+                };
+                let group_cols = group_by
+                    .iter()
+                    .map(|c| print_col(c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(out, "{} | γ: {}", op_string, group_cols)?;
+            }
+            MirNodeType::FilterAggregation {
+                ref on,
+                ref group_by,
+                ref kind,
+                conditions: _,
+            } => {
+                let op_string = match *kind {
+                    FilterAggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),
+                    FilterAggregationKind::SUM => format!("𝛴(filter {})", print_col(on)),
                 };
                 let group_cols = group_by
                     .iter()

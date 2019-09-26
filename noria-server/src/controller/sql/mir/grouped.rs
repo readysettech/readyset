@@ -15,10 +15,14 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
         | GroupConcat(ref col, _)
         | Max(ref col)
         | Min(ref col)
-        | Sum(ref col, _) => Column::from(col),
+        | Sum(ref col, _)
+        | SumFilter(ref col, _) => Column::from(col),
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
+        }
+        CountFilter(_) => {
+            panic!("Count with filter should have been rewritten earlier!")
         }
     }
 }

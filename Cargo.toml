@@ -8,3 +8,6 @@ members = [
 
 [profile.release]
 debug=true
+
+[patch.crates-io]
+nom-sql = { path = "../nom-sql" }
