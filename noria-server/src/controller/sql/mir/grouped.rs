@@ -12,6 +12,7 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
     match *computed_col.function.as_ref().unwrap().deref() {
         Avg(ref col, _)
         | Count(ref col, _)
+        | CountFilter(ref col, _)
         | GroupConcat(ref col, _)
         | Max(ref col)
         | Min(ref col)
@@ -20,9 +21,6 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
-        }
-        CountFilter(_) => {
-            panic!("Count with filter should have been rewritten earlier!")
         }
     }
 }

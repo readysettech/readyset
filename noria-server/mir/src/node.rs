@@ -228,8 +228,8 @@ impl MirNode {
                 .rposition(|cs| Column::from(&cs.0.column) == *c)
             {
                 None => panic!(
-                    "tried to look up non-existent column {:?} in {}",
-                    c, self.name
+                    "tried to look up non-existent column {:?} in {}\ncolumn_specs={:?}",
+                    c, self.name, column_specs
                 ),
                 Some(id) => column_specs[id]
                     .1

@@ -1517,6 +1517,7 @@ mod tests {
 
     #[test]
     fn it_incorporates_aggregation_filter_count() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_count");
         g.migrate(|mig| {
@@ -1532,7 +1533,7 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
-                "SELECT COUNT(CASE WHEN aid = 5 THEN 1 END) AS count FROM votes GROUP BY votes.userid;",
+                "SELECT COUNT(CASE WHEN votes.aid = 5 THEN votes.aid END) AS count FROM votes GROUP BY votes.userid;",
                 None,
                 mig,
             );
@@ -1540,7 +1541,15 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
+            let f = Box::new(FunctionExpression::CountFilter(
+                Column::from("votes.aid"),
+                ConditionExpression::ComparisonOp(
+                    ConditionTree {
+                        operator: Operator::Equal,
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                    }
+            )));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1553,7 +1562,7 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
-            assert_eq!(agg_view.description(true), "|*| γ[0]");
+            assert_eq!(agg_view.description(true), "|σ(*)| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -1593,15 +1602,15 @@ mod tests {
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
-                    name: String::from("count"),
-                    alias: Some(String::from("count")),
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
                     table: None,
                     function: Some(f),
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["userid", "count"]);
-            assert_eq!(agg_view.description(true), "|*| γ[0]");
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "|σ(*)| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.

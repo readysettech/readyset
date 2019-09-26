@@ -1001,9 +1001,12 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             },
-            CountFilter(_) => {
-                panic!("Count filter should have been rewritten earlier!")
-            },
+            CountFilter(ref col, ref condition) => mknode(
+                &Column::from(col),
+                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                false,
+                Some(condition),
+            ),
             Max(ref col) => mknode(
                 &Column::from(col),
                 GroupedNodeType::Extremum(Extremum::MAX),
@@ -1086,7 +1089,8 @@ impl SqlToMirConverter {
                     Base(_) => unreachable!("dangling base predicate"),
                     Arithmetic(_) => unimplemented!(),
                 };
-                let filter = self.to_conditions(condtree, &mut combined_columns, &parent_node);
+                let mut fields = parent_node.borrow().columns().to_vec();
+                let filter = self.to_conditions(condtree, &mut fields, &parent_node);
                 MirNode::new(
                     name,
                     self.schema_version,
