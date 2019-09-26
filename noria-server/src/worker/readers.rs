@@ -231,7 +231,7 @@ struct BlockingRead {
 impl Future for BlockingRead {
     type Output = Result<Tagged<ReadReply>, ()>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         loop {
             ready!(this.retry.as_mut().poll_next(cx));

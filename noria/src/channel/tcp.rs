@@ -180,7 +180,7 @@ where
     type Error = bincode::Error;
 
     #[project]
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_ready(cx),
@@ -189,7 +189,7 @@ where
     }
 
     #[project]
-    fn start_send(mut self: Pin<&mut Self>, item: Tagged<()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Tagged<()>) -> Result<(), Self::Error> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.start_send(item),
@@ -198,7 +198,7 @@ where
     }
 
     #[project]
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_flush(cx),
@@ -207,7 +207,7 @@ where
     }
 
     #[project]
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_close(cx),
@@ -227,7 +227,7 @@ where
     type Item = Result<T, bincode::Error>;
 
     #[project]
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // https://github.com/rust-lang/rust-clippy/issues/3071
         #[project]
         #[allow(clippy::redundant_closure)]

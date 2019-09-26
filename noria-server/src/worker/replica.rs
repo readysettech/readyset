@@ -115,7 +115,7 @@ impl Replica {
         }
     }
 
-    fn try_oob(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+    fn try_oob(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
         let this = self.project();
 
         let mut inputs = this.inputs;
@@ -204,7 +204,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
         let this = self.project();
 
         let cc = this.coord;
@@ -276,7 +276,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_new(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
+    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
         let mut this = self.project();
 
         while let Poll::Ready(stream) = this.incoming.as_mut().poll_next(cx)? {
@@ -310,18 +310,21 @@ impl Replica {
                       "from" => ?stream.peer_addr().unwrap());
             }
             let tcp = if is_base {
-                DualTcpStream::upgrade(tokio_io::buffer(stream), move |Tagged { v: input, tag }| {
-                    Box::new(Packet::Input {
-                        inner: input,
-                        src: Some(SourceChannelIdentifier { token, tag }),
-                        senders: Vec::new(),
-                    })
-                })
+                DualTcpStream::upgrade(
+                    tokio_io::BufStream::new(stream),
+                    move |Tagged { v: input, tag }| {
+                        Box::new(Packet::Input {
+                            inner: input,
+                            src: Some(SourceChannelIdentifier { token, tag }),
+                            senders: Vec::new(),
+                        })
+                    },
+                )
             } else {
-                BufReader::with_capacity(
+                tokio_io::BufStream::from(BufReader::with_capacity(
                     2 * 1024 * 1024,
                     BufWriter::with_capacity(4 * 1024, stream),
-                )
+                ))
                 .into()
             };
             slot.insert(tcp);
@@ -329,7 +332,7 @@ impl Replica {
         Ok(true)
     }
 
-    fn try_timeout(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let mut this = self.project();
 
         if let Some(to) = this.timeout.as_mut().as_pin_mut() {
@@ -428,7 +431,7 @@ impl Future for Replica {
                 let mut remote_done = false;
                 let mut check_local = true;
                 let readiness = 'ready: loop {
-                    let mut this = self.project();
+                    let mut this = self.as_mut().project();
                     let d = this.domain;
                     let oob = this.oob;
                     let ob = this.outbox;
@@ -542,7 +545,7 @@ impl Future for Replica {
                 };
 
                 // check if we now need to set a timeout
-                let mut this = self.project();
+                let mut this = self.as_mut().project();
                 match this
                     .domain
                     .on_event(this.oob, PollEvent::ResumePolling, this.outbox)
