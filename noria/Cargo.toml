@@ -67,7 +67,4 @@ path = "src/lib.rs"
 name = "noria"
 
 [[example]]
-name = "quickstart-async"
-
-[[example]]
-name = "quickstart-sync"
+name = "quickstart"
