@@ -4,22 +4,22 @@ use std::path::Path;
 use std::time;
 
 use super::Backend;
-use noria::{DataType, SyncTable};
+use noria::{DataType, Table};
 
-fn do_put<'a>(mutator: &'a mut SyncTable, tx: bool) -> Box<dyn FnMut(Vec<DataType>) + 'a> {
+async fn do_put(mutator: &mut Table, tx: bool, v: Vec<DataType>) {
     if tx {
         // Box::new(move |v| assert!(mutator.transactional.insert(v, Token::empty()).is_ok())),
         unimplemented!()
     } else {
-        Box::new(move |v| assert!(mutator.insert(v).is_ok()))
+        assert!(mutator.insert(v).await.is_ok());
     }
 }
 
-fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
+async fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
     use std::str::FromStr;
 
     let table_name = data.file_stem().unwrap().to_str().unwrap();
-    let mut putter = backend.g.table(table_name).unwrap().into_sync();
+    let mut putter = backend.g.table(table_name).await.unwrap();
 
     let f = File::open(data).unwrap();
     let mut reader = BufReader::new(f);
@@ -38,7 +38,7 @@ fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
                     Err(_) => s.into(),
                 })
                 .collect();
-            do_put(&mut putter, use_txn)(rec);
+            do_put(&mut putter, use_txn, rec).await;
         }
         i += 1;
         s.clear();
@@ -54,7 +54,7 @@ fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> usize {
     i as usize
 }
 
-pub fn populate(backend: &mut Backend, data_location: &str, use_txn: bool) -> io::Result<()> {
+pub async fn populate(backend: &mut Backend, data_location: &str, use_txn: bool) -> io::Result<()> {
     use std::fs;
 
     let dir = Path::new(data_location);
@@ -63,7 +63,7 @@ pub fn populate(backend: &mut Backend, data_location: &str, use_txn: bool) -> io
             let entry = entry?;
             let path = entry.path();
             if path.is_file() {
-                populate_table(backend, &path, use_txn);
+                populate_table(backend, &path, use_txn).await;
             }
         }
     }
