@@ -540,21 +540,6 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
        )
 );
 
-named!(pub case_when_constant<CompleteByteSlice, ConditionExpression>,
-       do_parse!(
-           tag_no_case!("case when") >>
-           opt_multispace >>
-           cond: condition_expr >>
-           opt_multispace >>
-           tag_no_case!("then") >>
-           opt_multispace >>
-           digit >>
-           opt_multispace >>
-           tag_no_case!("end") >>
-           (cond)
-       )
-);
-
 named!(pub case_when_column<CompleteByteSlice, (Column, ConditionExpression)>,
        do_parse!(
            tag_no_case!("case when") >>
@@ -592,8 +577,8 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
         )
     |   do_parse!(
             tag_no_case!("count") >>
-            cond: delimited!(tag!("("), case_when_constant, tag!(")")) >>
-            (FunctionExpression::CountFilter(cond))
+            args: delimited!(tag!("("), case_when_column, tag!(")")) >>
+            (FunctionExpression::CountFilter(args.0.clone(), args.1.clone()))
         )
     |   do_parse!(
             tag_no_case!("count") >>

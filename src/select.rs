@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn count_filter() {
-        let qstring = "SELECT COUNT(CASE WHEN vote_id > 10 THEN 1 END) FROM votes GROUP BY aid;";
+        let qstring = "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
 
@@ -752,11 +752,11 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
             operator: Operator::Greater,
         });
-        let agg_expr = FunctionExpression::CountFilter(filter_cond);
+        let agg_expr = FunctionExpression::CountFilter(Column::from("vote_id"), filter_cond);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("count(filter *)"),
+                name: String::from("count(filter vote_id)"),
                 alias: None,
                 table: None,
                 function: Some(Box::new(agg_expr)),
