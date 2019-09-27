@@ -136,7 +136,7 @@ impl Builder {
             #[allow(unused_mut)]
             let mut wh = fut.await?;
             #[cfg(test)]
-            wh.backend_ready().await?;
+            wh.backend_ready().await;
             Ok(wh)
         }
     }

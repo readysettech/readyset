@@ -49,10 +49,17 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     #[cfg(test)]
-    pub(super) async fn backend_ready<E>(&mut self) -> Result<(), E> {
+    pub(super) async fn backend_ready(&mut self) {
+        use std::time;
+
         loop {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            self.event_tx.send(Event::IsReady(tx)).await.unwrap();
+            self.event_tx
+                .as_mut()
+                .unwrap()
+                .send(Event::IsReady(tx))
+                .await
+                .unwrap();
             if rx.await.unwrap() {
                 break;
             }
@@ -150,18 +157,18 @@ impl<A: Authority> Drop for Handle<A> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
+    #[tokio::test]
     #[should_panic]
     #[cfg_attr(not(debug_assertions), allow_fail)]
-    fn limit_mutator_creation() {
+    async fn limit_mutator_creation() {
         use crate::Builder;
         let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                      CREATE TABLE b (r int, s int);\n";
 
-        let mut c = Builder::default().start_simple().unwrap();
-        assert!(c.install_recipe(r_txt).is_ok());
+        let mut c = Builder::default().start_local().await.unwrap();
+        assert!(c.install_recipe(r_txt).await.is_ok());
         for _ in 0..2500 {
-            let _ = c.table("a").unwrap();
+            let _ = c.table("a").await.unwrap();
         }
     }
 }
