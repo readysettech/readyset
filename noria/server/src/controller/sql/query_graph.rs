@@ -140,7 +140,7 @@ pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionExpression>,
     pub columns: Vec<Column>,
-    pub parameters: Vec<Column>,
+    pub parameters: Vec<(Column, nom_sql::BinaryOperator)>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -179,13 +179,14 @@ impl QueryGraph {
 
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
-    pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations
-            .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Column>, qgn| {
+    pub fn parameters<'a>(&'a self) -> Vec<&'a (Column, nom_sql::BinaryOperator)> {
+        self.relations.values().fold(
+            Vec::new(),
+            |mut acc: Vec<&'a (Column, nom_sql::BinaryOperator)>, qgn| {
                 acc.extend(qgn.parameters.iter());
                 acc
-            })
+            },
+        )
     }
 
     pub fn exact_hash(&self) -> u64 {
@@ -255,7 +256,7 @@ fn classify_conditionals(
     local: &mut HashMap<String, Vec<ConditionExpression>>,
     join: &mut Vec<ConditionTree>,
     global: &mut Vec<ConditionExpression>,
-    params: &mut Vec<Column>,
+    params: &mut Vec<(Column, nom_sql::BinaryOperator)>,
 ) {
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
@@ -405,7 +406,7 @@ fn classify_conditionals(
                         // right-hand side is a placeholder, so this must be a query parameter
                         ConditionBase::Literal(Literal::Placeholder(_)) => {
                             if let ConditionBase::Field(ref lf) = *l {
-                                params.push(lf.clone());
+                                params.push((lf.clone(), ct.operator.clone()));
                             }
                         }
                         // right-hand side is a non-placeholder literal, so this is a predicate
@@ -699,7 +700,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         //    node for this query. Such columns will be carried all the way through the operators
         //    implementing the query (unlike in a traditional query plan, where the predicates on
         //    parameters might be evaluated sooner).
-        for column in query_parameters.into_iter() {
+        for (column, operator) in query_parameters.into_iter() {
             match column.table {
                 None => {
                     return Err(format!("each parameter's column must have an associated table! (no such column \"{}\")", column).to_string());
@@ -712,7 +713,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // the parameter column is included in the projected columns of the output, but
                     // we also separately register it as a parameter so that we can set keys
                     // correctly on the leaf view
-                    rel.parameters.push(column.clone());
+                    rel.parameters.push((column.clone(), operator.clone()));
                 }
             }
         }
