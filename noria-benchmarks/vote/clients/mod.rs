@@ -1,5 +1,5 @@
 use clap;
-use tokio::prelude::*;
+use std::future::Future;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct Parameters {
@@ -14,12 +14,8 @@ pub(crate) trait VoteClient
 where
     Self: Sized,
 {
-    type Future: Future<Item = Self, Error = failure::Error> + Send + 'static;
-    fn new(
-        ex: tokio::runtime::TaskExecutor,
-        params: Parameters,
-        args: clap::ArgMatches,
-    ) -> <Self as VoteClient>::Future;
+    type Future: Future<Output = Result<Self, failure::Error>> + Send + 'static;
+    fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future;
 }
 
 //pub(crate) mod hybrid;
