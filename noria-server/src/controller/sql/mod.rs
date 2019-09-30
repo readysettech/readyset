@@ -1533,7 +1533,7 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
-                "SELECT COUNT(CASE WHEN votes.aid = 5 THEN votes.aid END) AS count FROM votes GROUP BY votes.userid;",
+                "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes GROUP BY votes.userid;",
                 None,
                 mig,
             );
@@ -1590,7 +1590,7 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
-                "SELECT SUM(CASE WHEN votes.aid = 5 THEN votes.sign END) AS sum FROM votes GROUP BY votes.userid;",
+                "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes GROUP BY votes.userid;",
                 None,
                 mig,
             );

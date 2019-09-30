@@ -141,6 +141,8 @@ fn rewrite_selection(
                         match **f {
                             Avg(ref mut fe, _)
                             | Count(ref mut fe, _)
+                            | CountFilter(ref mut fe, _)
+                            | SumFilter(ref mut fe, _)
                             | Sum(ref mut fe, _)
                             | Min(ref mut fe)
                             | Max(ref mut fe)
@@ -151,6 +153,10 @@ fn rewrite_selection(
                             }
                             _ => {}
                         }
+                        //     sq.where_clause = match sq.where_clause {
+                        //        None => None,
+                        //        Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
+                        //    };
                         None
                     }
                     None => find_table(&f, tables_in_query),
@@ -187,6 +193,19 @@ fn rewrite_selection(
             }
             FieldDefinitionExpression::Col(ref mut f) => {
                 *f = expand_columns(f.clone(), &tables);
+                // also need to expand any conditionals in the column, e.g. for filtered aggregations
+                match f.function {
+                    Some(ref mut f) => {
+                        match **f {
+                            CountFilter(_, ref mut condition)
+                            | SumFilter(_, ref mut condition) => {
+                                *condition = rewrite_conditional(&expand_columns, condition.clone(), &tables);
+                            }
+                            _ => {}
+                        }
+                    }
+                    None => {}
+                }
             }
         }
     }
