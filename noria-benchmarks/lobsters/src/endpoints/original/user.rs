@@ -12,7 +12,7 @@ where
     F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
 {
     let c = c.await?;
-    let (c, user) = c
+    let (mut c, user) = c
         .first_exec::<_, _, my::Row>(
             "SELECT  `users`.* FROM `users` \
              WHERE `users`.`username` = ?",

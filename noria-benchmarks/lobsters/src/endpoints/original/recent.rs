@@ -27,7 +27,7 @@ where
              ORDER BY stories.id DESC LIMIT 51",
         )
         .await?;
-    let (c, (users, stories)) = stories
+    let (mut c, (users, stories)) = stories
         .reduce_and_drop(
             (HashSet::new(), HashSet::new()),
             |(mut users, mut stories), story| {
@@ -133,7 +133,7 @@ where
         ))
         .await?;
 
-    let (c, tags) = taggings
+    let (mut c, tags) = taggings
         .reduce_and_drop(HashSet::new(), |mut tags, tagging| {
             tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
             tags

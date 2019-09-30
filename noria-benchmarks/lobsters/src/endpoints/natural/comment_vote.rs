@@ -15,7 +15,7 @@ where
     let c = c.await?;
     let user = acting_as.unwrap();
 
-    let (c, comment) = c
+    let (mut c, comment) = c
         .first_exec::<_, _, my::Row>(
             "SELECT `comments`.* \
              FROM `comments` \

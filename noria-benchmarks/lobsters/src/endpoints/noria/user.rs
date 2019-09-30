@@ -22,7 +22,7 @@ where
     let uid = user.unwrap().get::<u32, _>("id").unwrap();
 
     // most popular tag
-    let (c, mut rows) = c
+    let (mut c, mut rows) = c
         .prep_exec(
             "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `taggings` \
              INNER JOIN `tags` ON `taggings`.`tag_id` = `tags`.`id` \

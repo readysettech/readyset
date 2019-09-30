@@ -1,9 +1,16 @@
 extern crate mysql_async as my;
 
+// https://github.com/rust-lang/rust/pull/64856
+macro_rules! format {
+    ($($arg:tt)*) => {{
+        let res = std::format!($($arg)*);
+        res
+    }}
+}
+
 use clap::value_t_or_exit;
 use clap::{App, Arg};
 use futures_util::future::{ready, Either};
-use futures_util::stream::StreamExt;
 use futures_util::try_future::TryFutureExt;
 use my::prelude::*;
 use std::collections::HashMap;
@@ -92,7 +99,7 @@ impl trawler::LobstersClient for MysqlTrawler {
         let db_create = format!("CREATE DATABASE {}", db);
         let db_use = format!("USE {}", db);
         Box::pin(async move {
-            let c = c.get_conn().await?;
+            let mut c = c.get_conn().await?;
             c = c.drop_query(&db_drop).await?;
             c = c.drop_query(&db_create).await?;
             c = c.drop_query(&db_use).await?;
@@ -259,7 +266,7 @@ impl trawler::LobstersClient for MysqlTrawler {
             // notifications
             if let Some(uid) = acting_as {
                 if with_notifications {
-                    c = match variant {
+                    match variant {
                         Variant::Original => endpoints::original::notifications(c, uid).await,
                         Variant::Noria => endpoints::noria::notifications(c, uid).await,
                         Variant::Natural => endpoints::natural::notifications(c, uid).await,

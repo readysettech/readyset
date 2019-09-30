@@ -12,7 +12,7 @@ where
     F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
 {
     let c = c.await?;
-    let (c, user) = c
+    let (mut c, user) = c
         .first_exec::<_, _, my::Row>(
             "SELECT  `users`.* FROM `users` \
              WHERE `users`.`username` = ?",
@@ -29,7 +29,7 @@ where
         .await?;
 
     // most popular tag
-    let (c, mut rows) = c
+    let (mut c, mut rows) = c
         .prep_exec(
             "SELECT  `tags`.`id`, COUNT(*) AS `count` FROM `taggings` \
              INNER JOIN `tags` ON `taggings`.`tag_id` = `tags`.`id` \

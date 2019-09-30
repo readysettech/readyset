@@ -16,7 +16,7 @@ where
 {
     let c = c.await?;
     let user = acting_as.unwrap();
-    let (c, story) = c
+    let (mut c, story) = c
         .first_exec::<_, _, my::Row>(
             "SELECT `stories`.* \
              FROM `stories` \
@@ -119,7 +119,7 @@ where
         .await?
     };
     let comment = q.last_insert_id().unwrap();
-    let c = q.drop_result().await?;
+    let mut c = q.drop_result().await?;
     // but why?!
     c = c
         .drop_exec(

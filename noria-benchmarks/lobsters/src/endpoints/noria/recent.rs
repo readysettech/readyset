@@ -29,7 +29,7 @@ where
             //AND saldo <= 5 \
         )
         .await?;
-    let (c, (users, stories)) = stories
+    let (mut c, (users, stories)) = stories
         .reduce_and_drop(
             (HashSet::new(), HashSet::new()),
             |(mut users, mut stories), story| {
@@ -49,7 +49,7 @@ where
         .join(",");
 
     if let Some(uid) = acting_as {
-        let x = c
+        c = c
             .drop_exec(
                 "SELECT `hidden_stories`.`story_id` \
                  FROM `hidden_stories` \
@@ -114,7 +114,7 @@ where
         ))
         .await?;
 
-    let (c, tags) = taggings
+    let (mut c, tags) = taggings
         .reduce_and_drop(HashSet::new(), |mut tags, tagging| {
             tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
             tags

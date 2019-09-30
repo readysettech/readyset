@@ -15,7 +15,7 @@ where
     let c = c.await?;
     let user = acting_as.unwrap();
 
-    let (c, comment) = c
+    let (mut c, comment) = c
         .first_exec::<_, _, my::Row>(
             "SELECT `comments`.* \
              FROM `comments` \
@@ -104,7 +104,7 @@ where
         .await?;
 
     // get all the stuff needed to compute updated hotness
-    let (c, story) = c
+    let (mut c, story) = c
         .first_exec::<_, _, my::Row>(
             "SELECT `stories`.* \
              FROM `stories` \
@@ -115,14 +115,15 @@ where
     let story = story.unwrap();
     let score = story.get::<f64, _>("hotness").unwrap();
 
-    c.drop_exec(
-        "SELECT `tags`.* \
-         FROM `tags` \
-         INNER JOIN `taggings` ON `tags`.`id` = `taggings`.`tag_id` \
-         WHERE `taggings`.`story_id` = ?",
-        (sid,),
-    )
-    .await?;
+    c = c
+        .drop_exec(
+            "SELECT `tags`.* \
+             FROM `tags` \
+             INNER JOIN `taggings` ON `tags`.`id` = `taggings`.`tag_id` \
+             WHERE `taggings`.`story_id` = ?",
+            (sid,),
+        )
+        .await?;
 
     c = c
         .drop_exec(

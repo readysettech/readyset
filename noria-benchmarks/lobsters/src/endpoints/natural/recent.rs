@@ -50,7 +50,7 @@ where
         ))
         .await?;
 
-    let (c, users) = res
+    let (mut c, users) = res
         .reduce_and_drop(HashSet::new(), |mut users, story| {
             users.insert(story.get::<u32, _>("user_id").unwrap());
             users
@@ -115,7 +115,7 @@ where
         ))
         .await?;
 
-    let (c, tags) = taggings
+    let (mut c, tags) = taggings
         .reduce_and_drop(HashSet::new(), |mut tags, tagging| {
             tags.insert(tagging.get::<u32, _>("tag_id").unwrap());
             tags

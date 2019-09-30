@@ -82,7 +82,7 @@ where
 {
     // XXX: at the end there are also a bunch of repeated, seemingly superfluous queries
     let c = c.await?;
-    let (c, mut story) = c
+    let (mut c, mut story) = c
         .prep_exec(
             "SELECT `story_with_votes`.* \
              FROM `story_with_votes` \
@@ -171,7 +171,7 @@ where
         )
         .await?;
 
-    let (c, (users, comments)) = comments
+    let (mut c, (users, comments)) = comments
         .reduce_and_drop(
             (HashSet::new(), HashSet::new()),
             |(mut users, mut comments), comment| {

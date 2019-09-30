@@ -24,7 +24,7 @@ where
         ))
         .await?;
 
-    let (c, (comments, users, stories)) = comments
+    let (mut c, (comments, users, stories)) = comments
         .reduce_and_drop(
             (Vec::new(), HashSet::new(), HashSet::new()),
             |(mut comments, mut users, mut stories), comment| {
@@ -81,7 +81,7 @@ where
         ))
         .await?;
 
-    let (c, authors) = stories
+    let (mut c, authors) = stories
         .reduce_and_drop(HashSet::new(), |mut authors, story| {
             authors.insert(story.get::<u32, _>("user_id").unwrap());
             authors

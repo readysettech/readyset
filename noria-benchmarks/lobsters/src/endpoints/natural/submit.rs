@@ -17,7 +17,7 @@ where
     let user = acting_as.unwrap();
 
     // check that tags are active
-    let (c, tag) = c
+    let (mut c, tag) = c
         .first::<_, my::Row>(
             "SELECT  `tags`.* FROM `tags` \
              WHERE `tags`.`inactive` = 0 AND `tags`.`tag` IN ('test')",
@@ -71,7 +71,7 @@ where
         )
         .await?;
     let story = q.last_insert_id().unwrap();
-    let c = q.drop_result().await?;
+    let mut c = q.drop_result().await?;
 
     c = c
         .drop_exec(

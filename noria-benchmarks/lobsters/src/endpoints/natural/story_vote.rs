@@ -14,7 +14,7 @@ where
 {
     let c = c.await?;
     let user = acting_as.unwrap();
-    let (c, mut story) = c
+    let (mut c, mut story) = c
         .prep_exec(
             "SELECT `stories`.* \
              FROM `stories` \
