@@ -1,11 +1,10 @@
-extern crate noria;
-
 use noria::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NUM_ARTICLES: usize = 10_000;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // inline recipe definition
     let sql = "# base tables
                CREATE TABLE Article (aid int, title varchar(255), \
@@ -38,13 +37,13 @@ fn main() {
     // test passes again.
     //builder.disable_partial();
 
-    let mut blender = builder.start_simple().unwrap();
-    blender.install_recipe(sql).unwrap();
+    let mut blender = builder.start_local().await.unwrap();
+    blender.install_recipe(sql).await.unwrap();
 
     // Get mutators and getter.
-    let mut article = blender.table("Article").unwrap().into_sync();
-    let mut vote = blender.table("Vote").unwrap().into_sync();
-    let mut awvc = blender.view("ArticleWithVoteCount").unwrap().into_sync();
+    let mut article = blender.table("Article").await.unwrap();
+    let mut vote = blender.table("Vote").await.unwrap();
+    let mut awvc = blender.view("ArticleWithVoteCount").await.unwrap();
 
     println!("Creating articles...");
     for aid in 1..NUM_ARTICLES {
@@ -53,13 +52,14 @@ fn main() {
         let url = "http://pdos.csail.mit.edu";
         article
             .insert(vec![aid.into(), title.into(), url.into()])
+            .await
             .unwrap();
-        vote.insert(vec![aid.into(), 1.into()]).unwrap();
+        vote.insert(vec![aid.into(), 1.into()]).await.unwrap();
     }
 
     println!("Reading articles...");
     for aid in 1..NUM_ARTICLES {
-        awvc.lookup(&[aid.into()], true).unwrap();
+        awvc.lookup(&[aid.into()], true).await.unwrap();
     }
 
     println!("Casting votes...");
@@ -70,8 +70,10 @@ fn main() {
             .unwrap()
             .as_secs() as i64;
         aid = (aid + 1) % NUM_ARTICLES;
-        vote.insert(vec![(aid + 1).into(), uid.into()]).unwrap();
+        vote.insert(vec![(aid + 1).into(), uid.into()])
+            .await
+            .unwrap();
 
-        awvc.lookup(&[aid.into()], true).unwrap();
+        awvc.lookup(&[aid.into()], true).await.unwrap();
     }
 }
