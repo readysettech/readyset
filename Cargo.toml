@@ -11,21 +11,5 @@ debug=true
 
 [patch.crates-io]
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-tokio = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-codec = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-executor = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-fs = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-io = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-macros = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-net = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-sync = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tokio-timer = { git = "https://github.com/tokio-rs/tokio", branch = "jonhoo/bufstream-from" }
-tower = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-discover = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-service = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-load = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-util = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-buffer = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-tower-balance = { git = "https://github.com/taiki-e/tower.git", branch = "pin-project" }
-hyper = { git = "https://github.com/taiki-e/hyper.git", branch = "pin-project" }
+hyper = { git = "https://github.com/jonhoo/hyper.git", branch = "bump-h2" }
 mysql_async = { git = "https://github.com/jonhoo/mysql_async.git", branch = "pin-project" }
