@@ -24,6 +24,7 @@ use slog;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
+use std::time;
 use std::{
     future::Future,
     pin::Pin,
@@ -552,16 +553,21 @@ impl Future for Replica {
                 {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
-                            // tokio-timer has a resolution of 1ms, so we can't use it :'(
+                            if timeout == time::Duration::new(0, 0) {
+                                // async-timer yells at us if we try to set a zero-length timer,
+                                // so we instead just go again immediately
+                                this.timeout.set(None);
+                                continue;
+                            }
+
                             // TODO: how about we don't create a new timer each time?
                             this.timeout
                                 .set(Some(async_timer::oneshot::Timer::new(timeout)));
 
                             // we need to poll the timer to ensure we'll get woken up
                             if let Poll::Ready(()) = self.as_mut().try_timeout(cx) {
-                                // the timer expired and we did some stuff
-                                // make sure we don't return while there's more work to do
-                                cx.waker().wake_by_ref();
+                                // the timer expired, so we go again!
+                                continue;
                             }
                         }
                     }
