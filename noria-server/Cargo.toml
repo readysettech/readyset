@@ -21,7 +21,7 @@ futures-sink-preview = "=0.3.0-alpha.19"
 futures-executor-preview = "=0.3.0-alpha.19" # for block_on
 pin-project = "0.4.0"
 hostname = "0.1.3"
-hyper = { version = "=0.13.0-alpha.3", features = [ "unstable-stream" ] }
+hyper = { version = "=0.13.0-alpha.4", features = [ "unstable-stream" ] }
 mio = "0.6.9"
 nom = "^4.0.0"
 nom-sql = "0.0.9"
