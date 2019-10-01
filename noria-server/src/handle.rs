@@ -157,7 +157,7 @@ impl<A: Authority> Drop for Handle<A> {
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
+    #[tokio::test(multi_thread)]
     #[should_panic]
     #[cfg_attr(not(debug_assertions), allow_fail)]
     async fn limit_mutator_creation() {
