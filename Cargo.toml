@@ -11,5 +11,4 @@ debug=true
 
 [patch.crates-io]
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-hyper = { git = "https://github.com/jonhoo/hyper.git", branch = "bump-h2" }
 mysql_async = { git = "https://github.com/jonhoo/mysql_async.git", branch = "pin-project" }
