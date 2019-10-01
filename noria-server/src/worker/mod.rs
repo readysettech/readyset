@@ -75,7 +75,6 @@ pub(super) async fn main(
                             add_domain.send(d).await.unwrap_or_else(|d| {
                                 panic!("could not add new domain {:?}", d);
                             });
-                            return;
                         }
                     } else {
                         unreachable!();
