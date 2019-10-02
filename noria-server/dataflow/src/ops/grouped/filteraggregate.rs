@@ -27,18 +27,30 @@ impl FilterAggregation {
         src: NodeIndex,
         filter: &[Option<FilterCondition>],
         over: usize,
+        over_else: Option<usize>,
         group_by: &[usize],
     ) -> GroupedOperator<FilterAggregator> {
         assert!(
             !group_by.iter().any(|&i| i == over),
             "cannot group by aggregation column"
         );
+        match over_else {
+            Some(col) => {
+                assert!(
+                    !group_by.iter().any(|&i| i == col),
+                    "cannot group by aggregation column"
+                );
+            },
+            None => {}
+        }
+
         GroupedOperator::new(
             src,
             FilterAggregator {
                 op: self,
                 filter: sync::Arc::new(Vec::from(filter)),
                 over,
+                over_else,
                 group: group_by.into(),
             },
         )
@@ -64,6 +76,7 @@ pub struct FilterAggregator {
     op: FilterAggregation,
     filter: sync::Arc<Vec<Option<FilterCondition>>>,
     over: usize,
+    over_else: Option<usize>,
     group: Vec<usize>,
 }
 
@@ -72,7 +85,7 @@ impl GroupedOperation for FilterAggregator {
 
     fn setup(&mut self, parent: &Node) {
         assert!(
-            self.over < parent.fields().len(),
+            self.over < parent.fields().len() && self.over_else.unwrap_or(0) < parent.fields().len(),
             "cannot aggregate over non-existing column"
         );
     }
@@ -110,28 +123,46 @@ impl GroupedOperation for FilterAggregator {
                 true
             }
         });
-        if !passes_filter {
-            0
-        } else {
+        let v = if passes_filter {
             match self.op {
-                FilterAggregation::COUNT if pos => 1,
-                FilterAggregation::COUNT => -1,
+                FilterAggregation::COUNT => 1,
                 FilterAggregation::SUM => {
-                    let v = match r[self.over] {
+                    match r[self.over] {
                         DataType::Int(n) => i128::from(n),
                         DataType::UnsignedInt(n) => i128::from(n),
                         DataType::BigInt(n) => i128::from(n),
                         DataType::UnsignedBigInt(n) => i128::from(n),
                         DataType::None => 0,
                         ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
-                    };
-                    if pos {
-                        v
-                    } else {
-                        0i128 - v
                     }
                 }
             }
+        } else {
+            // the filter returned false, so check whether we have an else case
+            match self.over_else {
+                Some(over_else) => {
+                    match self.op {
+                        FilterAggregation::COUNT => 1,
+                        FilterAggregation::SUM => {
+                            match r[over_else] {
+                                DataType::Int(n) => i128::from(n),
+                                DataType::UnsignedInt(n) => i128::from(n),
+                                DataType::BigInt(n) => i128::from(n),
+                                DataType::UnsignedBigInt(n) => i128::from(n),
+                                DataType::None => 0,
+                                ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
+                            }
+                        }
+                    }
+                }
+                None => 0
+            }
+        };
+
+        if pos {
+            v
+        } else {
+            0i128 - v
         }
     }
 
@@ -160,10 +191,21 @@ impl GroupedOperation for FilterAggregator {
         }
 
         // TODO could include information about filter condition
-        let op_string = match self.op {
-            FilterAggregation::COUNT => format!("|σ({})|", self.over),
-            FilterAggregation::SUM => format!("𝛴(σ({}))", self.over),
+        let op_string = match self.over_else {
+            Some(over_else) => {
+                match self.op {
+                    FilterAggregation::COUNT => format!("|σ({};{})|", self.over, over_else),
+                    FilterAggregation::SUM => format!("𝛴(σ({};{}))", self.over, over_else),
+                }
+            },
+            None => {
+                match self.op {
+                    FilterAggregation::COUNT => format!("|σ({})|", self.over),
+                    FilterAggregation::SUM => format!("𝛴(σ({}))", self.over),
+                }
+            }
         };
+
         let group_cols = self
             .group
             .iter()
@@ -174,7 +216,10 @@ impl GroupedOperation for FilterAggregator {
     }
 
     fn over_columns(&self) -> Vec<usize> {
-        vec![self.over]
+        match self.over_else {
+            Some(over_else) => vec![self.over, over_else],
+            None => vec![self.over]
+        }
     }
 }
 
@@ -200,6 +245,7 @@ mod tests {
                     )),
                 ],
                 1,
+                None,
                 &[0]),
             mat,
         );
@@ -223,6 +269,7 @@ mod tests {
                     None,
                 ],
                 1,
+                None,
                 &[0, 2]),
             mat,
         );
@@ -250,6 +297,7 @@ mod tests {
                     )),
                 ],
                 2,
+                None,
                 &[1]
             ),
             mat,
@@ -261,10 +309,10 @@ mod tests {
     fn it_describes() {
         let s = 0.into();
 
-        let c = FilterAggregation::COUNT.over(s, &[None, None, None], 1, &[0, 2]);
-        assert_eq!(c.description(true), "|σ(*)| γ[0, 2]");
+        let c = FilterAggregation::COUNT.over(s, &[None, None, None], 1, None, &[0, 2]);
+        assert_eq!(c.description(true), "|σ(1)| γ[0, 2]");
 
-        let s = FilterAggregation::SUM.over(s, &[None, None, None], 1, &[2, 0]);
+        let s = FilterAggregation::SUM.over(s, &[None, None, None], 1, None, &[2, 0]);
         assert_eq!(s.description(true), "𝛴(σ(1)) γ[2, 0]");
     }
 
