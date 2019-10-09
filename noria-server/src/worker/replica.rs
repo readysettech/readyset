@@ -83,6 +83,7 @@ pub(super) struct Replica {
 
     #[pin]
     timeout: Option<async_timer::oneshot::Timer>,
+    timed_out: bool,
 
     oob: OutOfBand,
 }
@@ -113,6 +114,7 @@ impl Replica {
             outbox: Default::default(),
             oob: OutOfBand::new(ctrl_tx),
             timeout: None,
+            timed_out: false,
         }
     }
 
@@ -333,29 +335,30 @@ impl Replica {
         Ok(true)
     }
 
-    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) {
         let mut this = self.project();
 
         if let Some(to) = this.timeout.as_mut().as_pin_mut() {
             if let Poll::Ready(()) = to.poll(cx) {
                 this.timeout.set(None);
-                let try_block = tokio_executor::threadpool::blocking(|| {
-                    this.domain
-                        .on_event(this.oob, PollEvent::Timeout, this.outbox);
-                });
-                if let Poll::Pending = try_block {
-                    // this is a little awkward. we failed to block, so we failed to notify about
-                    // the timeout expiry. we'll need to make sure we get back to the code above to
-                    // try again note that we are already scheduled for a wake-up since blocking
-                    // returned Pending.
-                    this.timeout.set(Some(async_timer::oneshot::Timer::new(
-                        std::time::Duration::new(0, 0),
-                    )));
-                }
-                return Poll::Ready(());
+                *this.timed_out = true;
             }
         }
-        Poll::Pending
+
+        if *this.timed_out {
+            *this.timed_out = false;
+            let try_block = tokio_executor::threadpool::blocking(|| {
+                this.domain
+                    .on_event(this.oob, PollEvent::Timeout, this.outbox);
+            });
+            if let Poll::Pending = try_block {
+                // this is a little awkward. we failed to block, so we failed to notify about
+                // the timeout expiry. we'll need to make sure we get back to the code above to
+                // try again. note that we are already scheduled for a wake-up since blocking
+                // returned Pending.
+                *this.timed_out = true;
+            }
+        }
     }
 }
 
@@ -408,7 +411,7 @@ impl Future for Replica {
                 }
 
                 // have any of our timers expired?
-                let _ = self.as_mut().try_timeout(cx);
+                self.as_mut().try_timeout(cx);
 
                 // we have three logical input sources: receives from local domains, receives from
                 // remote domains, and remote mutators. we want to achieve some kind of fairness among
@@ -478,9 +481,8 @@ impl Future for Replica {
                                     .on_event(oob, PollEvent::Process(p), ob)),
                                 Poll::Ready(None) => {
                                     // local input stream finished
-                                    error!(this.log, "local input stream terminated");
-                                    local_done = true;
-                                    break;
+                                    // TODO: should we finish up remaining work?
+                                    return Poll::Ready(());
                                 }
                                 Poll::Pending => {
                                     local_done = true;
@@ -554,21 +556,16 @@ impl Future for Replica {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
                             if timeout == time::Duration::new(0, 0) {
-                                // async-timer yells at us if we try to set a zero-length timer,
-                                // so we instead just go again immediately
                                 this.timeout.set(None);
-                                continue;
+                                *this.timed_out = true;
+                            } else {
+                                // TODO: how about we don't create a new timer each time?
+                                this.timeout
+                                    .set(Some(async_timer::oneshot::Timer::new(timeout)));
                             }
-
-                            // TODO: how about we don't create a new timer each time?
-                            this.timeout
-                                .set(Some(async_timer::oneshot::Timer::new(timeout)));
 
                             // we need to poll the timer to ensure we'll get woken up
-                            if let Poll::Ready(()) = self.as_mut().try_timeout(cx) {
-                                // the timer expired, so we go again!
-                                continue;
-                            }
+                            self.as_mut().try_timeout(cx);
                         }
                     }
                     pr => {
