@@ -11,4 +11,4 @@ debug=true
 
 [patch.crates-io]
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-tokio-macros = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/mt-tokio-test" }
+tokio-macros = { git = "https://github.com/tokio-rs/tokio.git" }
