@@ -359,6 +359,9 @@ impl Replica {
 }
 
 struct Outboxes {
+    // anything new to send?
+    dirty: bool,
+
     // messages for other domains
     domains: FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
 
@@ -377,12 +380,14 @@ impl Outboxes {
             back: Default::default(),
             pending: Default::default(),
             ctrl_tx,
+            dirty: false,
         }
     }
 }
 
 impl Executor for Outboxes {
     fn ack(&mut self, id: SourceChannelIdentifier) {
+        self.dirty = true;
         self.back.entry(id.token).or_default().push(id.tag);
     }
 
@@ -392,6 +397,7 @@ impl Executor for Outboxes {
             .expect("asked to send to controller, but controller has gone away");
     }
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
+        self.dirty = true;
         self.domains.entry(dest).or_default().push_back(m);
     }
 }
@@ -548,6 +554,7 @@ impl Future for Replica {
 
                 // check if we now need to set a timeout
                 let mut this = self.as_mut().project();
+                this.out.dirty = false;
                 match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
@@ -562,6 +569,12 @@ impl Future for Replica {
 
                             // we need to poll the timer to ensure we'll get woken up
                             self.as_mut().try_timeout(cx);
+                        }
+
+                        if self.out.dirty {
+                            // more stuff appeared in our outboxes
+                            // can't yield yet -- we need to try to send it
+                            continue;
                         }
                     }
                     pr => {
