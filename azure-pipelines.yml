@@ -19,12 +19,21 @@ stages:
             vmImage: ubuntu-16.04
           MacOS:
             vmImage: macOS-10.14
+          Windows:
+            vmImage: windows-2019
       pool:
         vmImage: $(vmImage)
       steps:
        - template: azure/install-rust.yml@templates
          parameters:
            rust: nightly
+       - powershell: |
+           Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
+           ./LLVM-9.0.0-win64.exe /S
+           [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
+         displayName: Windows install clang
+         condition: eq( variables['Agent.OS'], 'Windows_NT' )
+
        - script: cargo test --all -- --test-threads=1
          displayName: Run tests
          env:
