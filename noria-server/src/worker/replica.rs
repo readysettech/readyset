@@ -488,6 +488,7 @@ impl Future for Replica {
                                 Poll::Ready(None) => {
                                     // local input stream finished
                                     // TODO: should we finish up remaining work?
+                                    warn!(this.log, "local input stream ended");
                                     return Poll::Ready(());
                                 }
                                 Poll::Pending => {
