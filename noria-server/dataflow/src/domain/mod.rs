@@ -525,7 +525,7 @@ impl Domain {
         }
     }
 
-    fn dispatch(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: &mut dyn Executor) {
+    fn dispatch(&mut self, m: Box<Packet>, executor: &mut dyn Executor) {
         let src = m.src();
         let me = m.dst();
 
@@ -558,7 +558,6 @@ impl Domain {
                 &self.nodes,
                 self.shard,
                 true,
-                sends,
                 executor,
             );
             assert_eq!(captured.len(), 0);
@@ -671,7 +670,7 @@ impl Domain {
                         link: Link::new(src, me),
                         tag,
                     }),
-                    sends,
+                    executor,
                 );
             }
         }
@@ -712,18 +711,12 @@ impl Domain {
             }
             m.link_mut().dst = childi;
 
-            self.dispatch(m, sends, executor);
+            self.dispatch(m, executor);
         }
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle(
-        &mut self,
-        m: Box<Packet>,
-        sends: &mut EnqueuedSends,
-        executor: &mut dyn Executor,
-        top: bool,
-    ) {
+    fn handle(&mut self, m: Box<Packet>, executor: &mut dyn Executor, top: bool) {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
@@ -733,16 +726,16 @@ impl Domain {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 self.total_forward_time.start();
-                self.dispatch(m, sends, executor);
+                self.dispatch(m, executor);
                 self.total_forward_time.stop();
             }
             Packet::ReplayPiece { .. } => {
                 self.total_replay_time.start();
-                self.handle_replay(m, sends, executor);
+                self.handle_replay(m, executor);
                 self.total_replay_time.stop();
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
-                self.handle_eviction(m, sends);
+                self.handle_eviction(m, executor);
             }
             consumed => {
                 match consumed {
@@ -1071,7 +1064,7 @@ impl Domain {
                            "key" => format!("{:?}", key)
                         );
                         self.total_replay_time.start();
-                        self.seed_replay(tag, &key[..], unishard, sends, executor);
+                        self.seed_replay(tag, &key[..], unishard, executor);
                         self.total_replay_time.stop();
                     }
                     Packet::StartReplay { tag, from } => {
@@ -1203,13 +1196,13 @@ impl Domain {
                                 })
                                 .unwrap();
                         }
-                        self.handle_replay(p, sends, executor);
+                        self.handle_replay(p, executor);
 
                         self.total_replay_time.stop();
                     }
                     Packet::Finish(tag, ni) => {
                         self.total_replay_time.start();
-                        self.finish_replay(tag, ni, sends, executor);
+                        self.finish_replay(tag, ni, executor);
                         self.total_replay_time.stop();
                     }
                     Packet::Ready { node, purge, index } => {
@@ -1385,7 +1378,7 @@ impl Domain {
             self.buffered_replay_requests
                 .retain(|_, (_, ref keys, _)| !keys.is_empty());
             for (tag, keys, single_shard) in elapsed_replays {
-                self.seed_all(tag, keys, single_shard, sends, executor);
+                self.seed_all(tag, keys, single_shard, executor);
             }
             self.total_replay_time.stop();
         }
@@ -1429,7 +1422,7 @@ impl Domain {
                 // instead, we ensure that only the topmost call to handle() walks delayed_for_self
 
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
-                self.handle(m, sends, executor, false);
+                self.handle(m, executor, false);
             }
         }
         if !self.wait_time.is_running() {
@@ -1460,7 +1453,6 @@ impl Domain {
         tag: Tag,
         keys: HashSet<Vec<DataType>>,
         single_shard: bool,
-        sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
@@ -1546,7 +1538,7 @@ impl Domain {
                 unreachable!();
             }
 
-            self.handle_replay(m, sends, ex);
+            self.handle_replay(m, ex);
         }
     }
 
@@ -1555,7 +1547,6 @@ impl Domain {
         tag: Tag,
         key: &[DataType],
         single_shard: bool,
-        sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
         if let ReplayPath {
@@ -1583,7 +1574,7 @@ impl Domain {
                 }
             }
 
-            // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
+            // TODO: if timer has expired, call seed_all(tag, _, executor) immediately
             return;
         }
 
@@ -1655,12 +1646,12 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            self.handle_replay(m, sends, ex);
+            self.handle_replay(m, ex);
         }
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut dyn Executor) {
+    fn handle_replay(&mut self, m: Box<Packet>, ex: &mut dyn Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
@@ -1847,7 +1838,6 @@ impl Domain {
                             &self.nodes,
                             self.shard,
                             false,
-                            sends,
                             ex,
                         );
 
@@ -2390,13 +2380,7 @@ impl Domain {
         }
     }
 
-    fn finish_replay(
-        &mut self,
-        tag: Tag,
-        node: LocalNodeIndex,
-        sends: &mut EnqueuedSends,
-        ex: &mut dyn Executor,
-    ) {
+    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, ex: &mut dyn Executor) {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
             ref to,
@@ -2427,7 +2411,7 @@ impl Domain {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
-                    self.dispatch(m, sends, ex);
+                    self.dispatch(m, ex);
                 } else {
                     unreachable!();
                 }
@@ -2478,14 +2462,14 @@ impl Domain {
         }
     }
 
-    pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+    pub fn handle_eviction(&mut self, m: Box<Packet>, ex: &mut dyn Executor) {
         #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
             log: &Logger,
             key_columns: &[usize],
             keys: &[Vec<DataType>],
             node: LocalNodeIndex,
-            sends: &mut EnqueuedSends,
+            ex: &mut dyn Executor,
             not_ready: &HashSet<LocalNodeIndex>,
             replay_paths: &HashMap<Tag, ReplayPath>,
             shard: Option<usize>,
@@ -2507,7 +2491,7 @@ impl Domain {
                     };
 
                     let mut keys = Vec::from(keys);
-                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, sends);
+                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, ex);
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
@@ -2530,7 +2514,7 @@ impl Domain {
                             &target.partial_key.as_ref().unwrap()[..],
                             &keys[..],
                             target.node,
-                            sends,
+                            ex,
                             not_ready,
                             replay_paths,
                             shard,
@@ -2548,7 +2532,7 @@ impl Domain {
             tag: Tag,
             shard: Option<usize>,
             nodes: &mut DomainNodes,
-            sends: &mut EnqueuedSends,
+            executor: &mut dyn Executor,
         ) {
             let mut from = path[0].node;
             for segment in path {
@@ -2558,7 +2542,7 @@ impl Domain {
                     keys,
                     tag,
                     shard,
-                    sends,
+                    executor,
                 );
                 from = segment.node;
             }
@@ -2627,7 +2611,7 @@ impl Domain {
                                 &key_columns[..],
                                 &keys[..],
                                 node,
-                                sends,
+                                ex,
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
@@ -2659,14 +2643,7 @@ impl Domain {
                     .iter()
                     .position(|ps| ps.node == dst)
                     .expect("got eviction for non-local node");
-                walk_path(
-                    &path[i..],
-                    &mut keys,
-                    tag,
-                    self.shard,
-                    &mut self.nodes,
-                    sends,
-                );
+                walk_path(&path[i..], &mut keys, tag, self.shard, &mut self.nodes, ex);
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
@@ -2688,7 +2665,7 @@ impl Domain {
                                 &key_columns[..],
                                 &keys[..],
                                 target,
-                                sends,
+                                ex,
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
@@ -2748,12 +2725,7 @@ impl Domain {
         // no response sent, as worker will read the atomic
     }
 
-    pub fn on_event(
-        &mut self,
-        executor: &mut dyn Executor,
-        event: PollEvent,
-        sends: &mut EnqueuedSends,
-    ) -> ProcessResult {
+    pub fn on_event(&mut self, executor: &mut dyn Executor, event: PollEvent) -> ProcessResult {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
@@ -2801,25 +2773,25 @@ impl Domain {
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     packet.trace(PacketEvent::ExitInputChannel);
                     if let Some(packet) = self.group_commit_queues.append(packet) {
-                        self.handle(packet, sends, executor, true);
+                        self.handle(packet, executor, true);
                     }
                 } else {
-                    self.handle(packet, sends, executor, true);
+                    self.handle(packet, executor, true);
                 }
 
                 while let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, executor, true);
+                    self.handle(m, executor, true);
                 }
 
                 ProcessResult::Processed
             }
             PollEvent::Timeout => {
                 while let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, executor, true);
+                    self.handle(m, executor, true);
                 }
 
                 if !self.buffered_replay_requests.is_empty() || !self.timed_purges.is_empty() {
-                    self.handle(box Packet::Spin, sends, executor, true);
+                    self.handle(box Packet::Spin, executor, true);
                 }
 
                 ProcessResult::Processed

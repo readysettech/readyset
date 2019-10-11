@@ -1,8 +1,7 @@
-use fnv::FnvHashMap;
 use node::NodeType;
 use payload;
 use prelude::*;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::mem;
 
 impl Node {
@@ -15,7 +14,6 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
-        output: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
@@ -71,10 +69,10 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard.unwrap_or(0), output);
+                e.process(m, on_shard.unwrap_or(0), ex);
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, addr, on_shard.is_some(), output);
+                s.process(m, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
@@ -233,7 +231,7 @@ impl Node {
         keys: &mut Vec<Vec<DataType>>,
         tag: Tag,
         on_shard: Option<usize>,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        ex: &mut dyn Executor,
     ) {
         let addr = self.local_addr();
         match self.inner {
@@ -249,11 +247,11 @@ impl Node {
                         keys: keys.to_vec(),
                     })),
                     on_shard.unwrap_or(0),
-                    output,
+                    ex,
                 );
             }
             NodeType::Sharder(ref mut s) => {
-                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), output);
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, key_columns, keys);

@@ -35,7 +35,7 @@ use streamunordered::{StreamUnordered, StreamYield};
 use tokio::prelude::*;
 use tokio_io::{BufReader, BufStream, BufWriter};
 
-pub(super) type ReplicaIndex = (DomainIndex, usize);
+pub(super) type ReplicaAddr = (DomainIndex, usize);
 
 // https://github.com/rust-lang/rust/issues/64445
 type Incoming =
@@ -72,20 +72,18 @@ pub(super) struct Replica {
     >,
 
     outputs: FnvHashMap<
-        ReplicaIndex,
+        ReplicaAddr,
         (
             Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>,
             bool,
         ),
     >,
 
-    outbox: FnvHashMap<ReplicaIndex, VecDeque<Box<Packet>>>,
-
     #[pin]
     timeout: Option<async_timer::oneshot::Timer>,
     timed_out: bool,
 
-    oob: OutOfBand,
+    out: Outboxes,
 }
 
 impl Replica {
@@ -111,22 +109,21 @@ impl Replica {
             log: log.new(o! {"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
-            outbox: Default::default(),
-            oob: OutOfBand::new(ctrl_tx),
+            out: Outboxes::new(ctrl_tx),
             timeout: None,
             timed_out: false,
         }
     }
 
-    fn try_oob(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+    fn try_acks(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
         let this = self.project();
 
         let mut inputs = this.inputs;
-        let pending = &mut this.oob.pending;
+        let pending = &mut this.out.pending;
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        this.oob.back.retain(|&streami, tags| {
+        this.out.back.retain(|&streami, tags| {
             let mut stream = Pin::new(&mut inputs[streami]);
             let mut no_more = false;
 
@@ -213,10 +210,10 @@ impl Replica {
         let cc = this.coord;
         let outputs = this.outputs;
 
-        // just like in try_oob:
+        // just like in try_acks:
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        for (&ri, ms) in this.outbox {
+        for (&ri, ms) in &mut this.out.domains {
             if ms.is_empty() {
                 continue;
             }
@@ -348,8 +345,7 @@ impl Replica {
         if *this.timed_out {
             *this.timed_out = false;
             let try_block = tokio_executor::threadpool::blocking(|| {
-                this.domain
-                    .on_event(this.oob, PollEvent::Timeout, this.outbox);
+                this.domain.on_event(this.out, PollEvent::Timeout);
             });
             if let Poll::Pending = try_block {
                 // this is a little awkward. we failed to block, so we failed to notify about
@@ -362,7 +358,10 @@ impl Replica {
     }
 }
 
-struct OutOfBand {
+struct Outboxes {
+    // messages for other domains
+    domains: FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+
     // map from inputi to number of (empty) ACKs
     back: FnvHashMap<usize, Vec<u32>>,
     pending: FnvHashSet<usize>,
@@ -371,9 +370,10 @@ struct OutOfBand {
     ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
 }
 
-impl OutOfBand {
+impl Outboxes {
     fn new(ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
-        OutOfBand {
+        Outboxes {
+            domains: Default::default(),
             back: Default::default(),
             pending: Default::default(),
             ctrl_tx,
@@ -381,7 +381,7 @@ impl OutOfBand {
     }
 }
 
-impl Executor for OutOfBand {
+impl Executor for Outboxes {
     fn ack(&mut self, id: SourceChannelIdentifier) {
         self.back.entry(id.token).or_default().push(id.tag);
     }
@@ -390,6 +390,9 @@ impl Executor for OutOfBand {
         self.ctrl_tx
             .try_send(CoordinationPayload::CreateUniverse(universe))
             .expect("asked to send to controller, but controller has gone away");
+    }
+    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
+        self.domains.entry(dest).or_default().push_back(m);
     }
 }
 
@@ -437,8 +440,7 @@ impl Future for Replica {
                 let readiness = 'ready: loop {
                     let mut this = self.as_mut().project();
                     let d = this.domain;
-                    let oob = this.oob;
-                    let ob = this.outbox;
+                    let out = this.out;
 
                     macro_rules! process {
                         ($retry:expr, $p:expr, $pp:expr) => {{
@@ -467,18 +469,16 @@ impl Future for Replica {
                     let mut interrupted = false;
                     if let Some(p) = this.retry.take() {
                         // first try the thing we failed to process last time again
-                        process!(*this.retry, p, |p| d.on_event(
-                            oob,
-                            PollEvent::Process(p),
-                            ob
-                        ));
+                        process!(*this.retry, p, |p| d.on_event(out, PollEvent::Process(p),));
                     }
 
                     for i in 0..FORCE_INPUT_YIELD_EVERY {
                         if !local_done && (check_local || remote_done) {
                             match this.locals.poll_recv(cx) {
-                                Poll::Ready(Some(packet)) => process!(*this.retry, packet, |p| d
-                                    .on_event(oob, PollEvent::Process(p), ob)),
+                                Poll::Ready(Some(packet)) => {
+                                    process!(*this.retry, packet, |p| d
+                                        .on_event(out, PollEvent::Process(p),));
+                                }
                                 Poll::Ready(None) => {
                                     // local input stream finished
                                     // TODO: should we finish up remaining work?
@@ -492,14 +492,13 @@ impl Future for Replica {
 
                         if !remote_done && (!check_local || local_done) {
                             match this.inputs.as_mut().poll_next(cx) {
-                                Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => process!(
-                                    *this.retry,
-                                    packet,
-                                    |p| d.on_event(oob, PollEvent::Process(p), ob)
-                                ),
+                                Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
+                                    process!(*this.retry, packet, |p| d
+                                        .on_event(out, PollEvent::Process(p),));
+                                }
                                 Poll::Ready(Some((StreamYield::Finished, streami))) => {
-                                    oob.back.remove(&streami);
-                                    oob.pending.remove(&streami);
+                                    out.back.remove(&streami);
+                                    out.pending.remove(&streami);
                                     // FIXME: what about if a later flush flushes to this stream?
                                 }
                                 Poll::Ready(None) => {
@@ -538,7 +537,7 @@ impl Future for Replica {
                         .context("downstream flush (after)")?;
 
                     // send acks
-                    self.as_mut().try_oob(cx)?;
+                    self.as_mut().try_acks(cx)?;
 
                     if interrupted {
                         // resume reading from our non-depleted inputs
@@ -549,10 +548,7 @@ impl Future for Replica {
 
                 // check if we now need to set a timeout
                 let mut this = self.as_mut().project();
-                match this
-                    .domain
-                    .on_event(this.oob, PollEvent::ResumePolling, this.outbox)
-                {
+                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
                             if timeout == time::Duration::new(0, 0) {

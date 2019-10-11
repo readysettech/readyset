@@ -23,10 +23,6 @@ crate type StateMap = Map<Box<dyn State>>;
 crate type DomainNodes = Map<cell::RefCell<Node>>;
 crate type ReplicaAddr = (DomainIndex, usize);
 
-use fnv::FnvHashMap;
-use std::collections::VecDeque;
-crate type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
-
 // public exports
 pub use common::*;
 pub use node::Node;
@@ -44,4 +40,5 @@ pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, u
 pub trait Executor {
     fn ack(&mut self, tag: SourceChannelIdentifier);
     fn create_universe(&mut self, req: HashMap<String, DataType>);
+    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>);
 }

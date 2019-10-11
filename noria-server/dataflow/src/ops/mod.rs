@@ -420,6 +420,7 @@ pub mod test {
             impl Executor for Ex {
                 fn ack(&mut self, _: SourceChannelIdentifier) {}
                 fn create_universe(&mut self, _: HashMap<String, DataType>) {}
+                fn send(&mut self, _: ReplicaAddr, _: Box<Packet>) {}
             }
 
             let mut u = {

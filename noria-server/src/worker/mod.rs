@@ -8,7 +8,7 @@ use noria::channel::{self, TcpSender};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
 use noria::ControllerDescriptor;
-use replica::ReplicaIndex;
+use replica::ReplicaAddr;
 use slog;
 use std::collections::HashMap;
 use std::fs;
@@ -28,7 +28,7 @@ use tokio_io_pool;
 mod readers;
 mod replica;
 
-type ChannelCoordinator = channel::ChannelCoordinator<ReplicaIndex, Box<Packet>>;
+type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddr, Box<Packet>>;
 
 enum InstanceState {
     Pining,
