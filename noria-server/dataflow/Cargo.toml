@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 publish = false
 
+[target.'cfg(not(target_env="msvc"))'.dependencies]
+jemallocator = "0.3"
+
 [dependencies]
 bincode = "1.0.0"
 evmap = { version = "7.1.0", features = ["indexed"] }
@@ -21,7 +24,6 @@ stream-cancel = "=0.5.0-alpha.4"
 tokio = "=0.2.0-alpha.6"
 vec_map = { version = "0.8.0", features = ["eders"] }
 tempfile = "3.0.2"
-jemallocator = "0.3"
 
 # need features
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
