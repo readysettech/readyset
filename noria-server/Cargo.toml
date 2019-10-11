@@ -32,7 +32,7 @@ serde_json = "1.0.2"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
-async-timer = { version = "0.6.0", features = [ "stream" ] }
+async-timer = { version = "0.6.0", features = [ "stream", "tokio_on" ] }
 slab = "0.4"
 bincode = "1.0.0"
 tokio = "=0.2.0-alpha.6"
