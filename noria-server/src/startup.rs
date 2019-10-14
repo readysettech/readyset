@@ -77,7 +77,8 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let iopool = pool.build().unwrap();
 
     let (trigger, valve) = Valve::new();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut rx = valve.wrap(rx);
 
     // we'll be listening for a couple of different types of events:
     // first, events from workers
