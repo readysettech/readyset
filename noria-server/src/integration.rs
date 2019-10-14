@@ -848,6 +848,44 @@ async fn mutator_churn() {
 }
 
 #[tokio::test(multi_thread)]
+async fn connection_churn() {
+    let authority = Arc::new(LocalAuthority::new());
+
+    let mut builder = Builder::default();
+    builder.set_sharding(DEFAULT_SHARDING);
+    builder.set_persistence(get_persistence_params("connection_churn"));
+    let mut g = builder.start(authority.clone()).await.unwrap();
+
+    g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
+        .await
+        .unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    // continuously write to vote with entirely new connections
+    for i in 0..20 {
+        let authority = authority.clone();
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut builder = Builder::default();
+            builder.set_sharding(DEFAULT_SHARDING);
+            builder.set_persistence(get_persistence_params("connection_churn"));
+            let mut g = builder.start(authority.clone()).await.unwrap();
+
+            g.table("A")
+                .await
+                .unwrap()
+                .insert(vec![DataType::from(i)])
+                .await
+                .unwrap();
+
+            drop(tx);
+        });
+    }
+    drop(tx);
+    let _ = rx.recv().await;
+}
+
+#[tokio::test(multi_thread)]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
