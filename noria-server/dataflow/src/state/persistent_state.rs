@@ -1065,6 +1065,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn persistent_state_drop() {
         let path = {
             let state = PersistentState::new(
