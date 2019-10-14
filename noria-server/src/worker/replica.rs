@@ -304,6 +304,13 @@ impl Replica {
             debug!(this.log, "established new connection"; "base" => ?is_base);
             let slot = this.inputs.stream_entry();
             let token = slot.token();
+            let epoch = if let Some(e) = this.out.epochs.get_mut(token) {
+                *e
+            } else {
+                let t = this.out.epochs.insert(1);
+                assert_eq!(t, token);
+                1
+            };
             if let Err(e) = stream.set_nodelay(true) {
                 warn!(this.log,
                       "failed to set TCP_NODELAY for new connection: {:?}", e;
@@ -315,7 +322,7 @@ impl Replica {
                     move |Tagged { v: input, tag }| {
                         Box::new(Packet::Input {
                             inner: input,
-                            src: Some(SourceChannelIdentifier { token, tag }),
+                            src: Some(SourceChannelIdentifier { token, tag, epoch }),
                             senders: Vec::new(),
                         })
                     },
@@ -374,16 +381,23 @@ struct Outboxes {
     back: FnvHashMap<usize, Vec<u32>>,
     pending: FnvHashSet<usize>,
 
+    // epoch counter for each stream index (since they're re-used)
+    epochs: slab::Slab<usize>,
+
     // for sending messages to the controller
     ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
 }
 
 impl Outboxes {
     fn new(ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
+        let mut epochs = slab::Slab::new();
+        epochs.insert(0); // index 0 is reserved
+
         Outboxes {
             domains: Default::default(),
             back: Default::default(),
             pending: Default::default(),
+            epochs,
             ctrl_tx,
             dirty: false,
         }
@@ -393,7 +407,11 @@ impl Outboxes {
 impl Executor for Outboxes {
     fn ack(&mut self, id: SourceChannelIdentifier) {
         self.dirty = true;
-        self.back.entry(id.token).or_default().push(id.tag);
+        if id.epoch == self.epochs[id.token] {
+            // if the epoch doesn't match, the stream was closed and a new one has been established
+            // note that this only matters for connections that do not wait for all acks!
+            self.back.entry(id.token).or_default().push(id.tag);
+        }
     }
 
     fn create_universe(&mut self, universe: HashMap<String, DataType>) {
@@ -511,6 +529,10 @@ impl Future for Replica {
                                 Poll::Ready(Some((StreamYield::Finished, streami))) => {
                                     out.back.remove(&streami);
                                     out.pending.remove(&streami);
+                                    // increment the epoch to detect stale acks
+                                    *out.epochs
+                                        .get_mut(streami)
+                                        .expect("all streams are assigned an epoch") += 1;
                                     // FIXME: what about if a later flush flushes to this stream?
                                 }
                                 Poll::Ready(None) => {
