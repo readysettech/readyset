@@ -210,15 +210,12 @@
 //!
 //! ```no_run
 //! # extern crate noria;
-//! # extern crate tokio;
-//! # extern crate futures;
-//! use tokio::prelude::*;
-//! # fn main() {
+//! # #[tokio::main]
+//! # async fn main() {
 //! # let zookeeper_addr = "";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
-//! let mut article = db.table("article").unwrap();
-//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).wait();
+//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! let mut article = db.table("article").await.unwrap();
+//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).await.unwrap();
 //! # }
 //! ```
 //!
@@ -269,15 +266,12 @@
 //!
 //! ```no_run
 //! # extern crate noria;
-//! # extern crate tokio;
-//! # extern crate futures;
-//! use tokio::prelude::*;
-//! # fn main() {
+//! # #[tokio::main]
+//! # async fn main() {
 //! # let zookeeper_addr = "";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
-//! let mut vote = db.table("vote").unwrap();
-//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).wait();
+//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! let mut vote = db.table("vote").await.unwrap();
+//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).await.unwrap();
 //! # }
 //! ```
 //!

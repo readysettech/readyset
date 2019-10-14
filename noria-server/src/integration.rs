@@ -748,6 +748,7 @@ async fn it_works_with_arithmetic_aliases() {
 }
 
 #[tokio::test(multi_thread)]
+#[ignore]
 async fn it_recovers_persisted_bases() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
@@ -848,6 +849,7 @@ async fn mutator_churn() {
 }
 
 #[tokio::test(multi_thread)]
+#[ignore]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();

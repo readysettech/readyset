@@ -25,50 +25,52 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
-//! use tokio::prelude::*;
 //! # use noria::*;
-//! # let zookeeper_addr = "127.0.0.1:2181";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
+//! #[tokio::main]
+//! async fn main() {
+//!     let zookeeper_addr = "127.0.0.1:2181";
+//!     let mut db = ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
 //!
-//! // if this is the first time we interact with Noria, we must give it the schema
-//! db.install_recipe("
-//!     CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
-//!     CREATE TABLE Vote (aid int, uid int);
-//! ");
+//!     // if this is the first time we interact with Noria, we must give it the schema
+//!     db.install_recipe("
+//!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
+//!         CREATE TABLE Vote (aid int, uid int);
+//!     ").await.unwrap();
 //!
-//! // we can then get handles that let us insert into the new tables
-//! let mut article = db.table("Article").unwrap().into_sync();
-//! let mut vote = db.table("Vote").unwrap().into_sync();
+//!     // we can then get handles that let us insert into the new tables
+//!     let mut article = db.table("Article").await.unwrap();
+//!     let mut vote = db.table("Vote").await.unwrap();
 //!
-//! // let's make a new article
-//! let aid = 42;
-//! let title = "I love Soup";
-//! let url = "https://pdos.csail.mit.edu";
-//! article
-//!     .insert(vec![aid.into(), title.into(), url.into()])
-//!     .unwrap();
+//!     // let's make a new article
+//!     let aid = 42;
+//!     let title = "I love Soup";
+//!     let url = "https://pdos.csail.mit.edu";
+//!     article
+//!         .insert(vec![aid.into(), title.into(), url.into()])
+//!         .await
+//!         .unwrap();
 //!
-//! // and then vote for it
-//! vote.insert(vec![aid.into(), 1.into()]).unwrap();
+//!     // and then vote for it
+//!     vote.insert(vec![aid.into(), 1.into()]).await.unwrap();
 //!
-//! // we can also declare views that we want want to query
-//! db.extend_recipe("
-//!     VoteCount: \
-//!       SELECT Vote.aid, COUNT(uid) AS votes \
-//!       FROM Vote GROUP BY Vote.aid;
-//!     QUERY ArticleWithVoteCount: \
-//!       SELECT Article.aid, title, url, VoteCount.votes AS votes \
-//!       FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
-//!       WHERE Article.aid = ?;");
+//!     // we can also declare views that we want want to query
+//!     db.extend_recipe("
+//!         VoteCount: \
+//!           SELECT Vote.aid, COUNT(uid) AS votes \
+//!           FROM Vote GROUP BY Vote.aid;
+//!         QUERY ArticleWithVoteCount: \
+//!           SELECT Article.aid, title, url, VoteCount.votes AS votes \
+//!           FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
+//!           WHERE Article.aid = ?;").await.unwrap();
 //!
-//! // and then get handles that let us execute those queries to fetch their results
-//! let mut awvc = db.view("ArticleWithVoteCount").unwrap().into_sync();
-//! // looking up article 42 should yield the article we inserted with a vote count of 1
-//! assert_eq!(
-//!     awvc.lookup(&[aid.into()], true).unwrap(),
-//!     vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
-//! );
+//!     // and then get handles that let us execute those queries to fetch their results
+//!     let mut awvc = db.view("ArticleWithVoteCount").await.unwrap();
+//!     // looking up article 42 should yield the article we inserted with a vote count of 1
+//!     assert_eq!(
+//!         awvc.lookup(&[aid.into()], true).await.unwrap(),
+//!         vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
+//!     );
+//! }
 //! ```
 //!
 //! # Client model
