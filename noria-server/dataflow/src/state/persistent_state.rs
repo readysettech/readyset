@@ -1078,7 +1078,8 @@ mod tests {
             String::from(path.to_str().unwrap())
         };
 
-        eprintln!("{:?}", path);
+        // give windows some time to delete files on drop
+        ::std::thread::sleep(::std::time::Duration::from_millis(50));
         assert!(!PathBuf::from(path).exists());
     }
 
