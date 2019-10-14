@@ -1,22 +1,22 @@
 stages:
- - stage: check
-   displayName: Compilation check
-   dependsOn: []
-   jobs:
-     - template: azure/cargo-check.yml@templates
-       parameters:
-         name: cargo_check
-         rust: nightly
-         benches: true
+  # - stage: check
+  #   displayName: Compilation check
+  #   dependsOn: []
+  #   jobs:
+  #     - template: azure/cargo-check.yml@templates
+  #       parameters:
+  #         name: cargo_check
+  #         rust: nightly
+  #         benches: true
  - stage: test
-   dependsOn: check
+   # dependsOn: check
    jobs:
     - job: test
       displayName: "cargo test"
       strategy:
         matrix:
-          Linux:
-            vmImage: ubuntu-16.04
+          # Linux:
+          #   vmImage: ubuntu-16.04
           MacOS:
             vmImage: macOS-10.14
           Windows:
@@ -42,16 +42,16 @@ stages:
          displayName: Run tests
          env:
           SETTLE_TIME: 2000
- - stage: style
-   displayName: Style linting
-   dependsOn: check
-   jobs:
-     - template: azure/rustfmt.yml@templates
-       parameters:
-         name: rustfmt
-         rust: nightly
-         allow_fail: true
-
+          # - stage: style
+          #   displayName: Style linting
+          #   dependsOn: check
+          #   jobs:
+          #     - template: azure/rustfmt.yml@templates
+          #       parameters:
+          #         name: rustfmt
+          #         rust: nightly
+          #         allow_fail: true
+          #
 resources:
   repositories:
     - repository: templates
