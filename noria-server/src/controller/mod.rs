@@ -256,9 +256,11 @@ fn instance_campaign<A: Authority + 'static>(
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {
                         state.epoch = epoch;
-                        if state.config != config {
-                            panic!("Config in Zk does not match requested config!")
-                        }
+                        // check that running config is the same that builder requested
+                        assert_eq!(
+                            state.config, config,
+                            "Config in Zk does not match requested config!"
+                        );
                         Ok(state)
                     }
                 },

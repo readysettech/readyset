@@ -414,7 +414,7 @@ where
         .unwrap()
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 crate struct Config {
     crate sharding: Option<usize>,
     crate partial_enabled: bool,
