@@ -332,7 +332,9 @@ impl Replica {
         Ok(true)
     }
 
-    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) {
+    // returns true if on_event(Timeout) was called
+    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> bool {
+        let mut processed = false;
         let mut this = self.project();
 
         if let Some(to) = this.timeout.as_mut().as_pin_mut() {
@@ -346,6 +348,7 @@ impl Replica {
             *this.timed_out = false;
             let try_block = tokio_executor::threadpool::blocking(|| {
                 this.domain.on_event(this.out, PollEvent::Timeout);
+                processed = true;
             });
             if let Poll::Pending = try_block {
                 // this is a little awkward. we failed to block, so we failed to notify about
@@ -355,6 +358,8 @@ impl Replica {
                 *this.timed_out = true;
             }
         }
+
+        processed
     }
 }
 
@@ -406,7 +411,7 @@ impl Future for Replica {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let r: Poll<Result<(), failure::Error>> = try {
-            loop {
+            'process: loop {
                 // FIXME: check if we should call update_state_sizes (every evict_every)
 
                 // are there are any new connections?
@@ -554,34 +559,45 @@ impl Future for Replica {
                 };
 
                 // check if we now need to set a timeout
-                let mut this = self.as_mut().project();
-                this.out.dirty = false;
-                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
-                    ProcessResult::KeepPolling(timeout) => {
-                        if let Some(timeout) = timeout {
-                            if timeout == time::Duration::new(0, 0) {
-                                this.timeout.set(None);
-                                *this.timed_out = true;
-                            } else {
-                                // TODO: how about we don't create a new timer each time?
-                                this.timeout
-                                    .set(Some(async_timer::oneshot::Timer::new(timeout)));
+                self.out.dirty = false;
+                'resume_polling: loop {
+                    let mut this = self.as_mut().project();
+                    match this.domain.on_event(this.out, PollEvent::ResumePolling) {
+                        ProcessResult::KeepPolling(timeout) => {
+                            if let Some(timeout) = timeout {
+                                if timeout == time::Duration::new(0, 0) {
+                                    this.timeout.set(None);
+                                    *this.timed_out = true;
+                                } else {
+                                    // TODO: how about we don't create a new timer each time?
+                                    this.timeout
+                                        .set(Some(async_timer::oneshot::Timer::new(timeout)));
+                                }
+
+                                // we need to poll the timer to ensure we'll get woken up
+                                if self.as_mut().try_timeout(cx) {
+                                    // a timeout occurred, so we may have to set a new timer
+                                    if self.out.dirty {
+                                        // if we're already dirty, we'll re-do processing anyway
+                                    } else {
+                                        // try to resume polling again
+                                        continue;
+                                    }
+                                }
                             }
 
-                            // we need to poll the timer to ensure we'll get woken up
-                            self.as_mut().try_timeout(cx);
+                            if self.out.dirty {
+                                // more stuff appeared in our outboxes
+                                // can't yield yet -- we need to try to send it
+                                continue 'process;
+                            }
                         }
-
-                        if self.out.dirty {
-                            // more stuff appeared in our outboxes
-                            // can't yield yet -- we need to try to send it
-                            continue;
+                        pr => {
+                            // TODO: just have resume_polling be a method...
+                            unreachable!("unexpected ResumePolling result {:?}", pr)
                         }
                     }
-                    pr => {
-                        // TODO: just have resume_polling be a method...
-                        unreachable!("unexpected ResumePolling result {:?}", pr)
-                    }
+                    break;
                 }
 
                 break readiness;
