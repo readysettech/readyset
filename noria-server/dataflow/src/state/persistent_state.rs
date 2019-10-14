@@ -1065,6 +1065,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn persistent_state_drop() {
         let path = {
             let state = PersistentState::new(
@@ -1078,8 +1079,6 @@ mod tests {
             String::from(path.to_str().unwrap())
         };
 
-        // give windows some time to delete files on drop
-        ::std::thread::sleep(::std::time::Duration::from_millis(50));
         assert!(!PathBuf::from(path).exists());
     }
 
