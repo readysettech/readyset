@@ -100,7 +100,12 @@ pub(super) async fn main<A: Authority + 'static>(
                 }
                 CoordinationPayload::Register { .. } => {
                     if let Some(ref mut ctrl) = controller {
-                        crate::blocking(|| ctrl.handle_register(msg).unwrap()).await;
+                        crate::blocking(|| {
+                            if let Err(e) = ctrl.handle_register(msg) {
+                                warn!(log, "worker registered and then immediately left: {:?}", e);
+                            }
+                        })
+                        .await;
                     }
                 }
                 CoordinationPayload::Heartbeat => {
