@@ -35,8 +35,9 @@ stages:
          condition: eq( variables['Agent.OS'], 'Windows_NT' )
        - bash: |
            brew install llvm
-           export LLVM_CONFIG_PATH="/usr/local/opt/llvm/bin/llvm-config"
-           export PATH="/usr/local/opt/llvm/bin:$PATH"
+           brew link --force llvm
+           echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
+           echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
          displayName: Install LLVM (macOS)
          condition: eq( variables['Agent.OS'], 'Darwin' )
        - script: cargo test --all -- --test-threads=1
