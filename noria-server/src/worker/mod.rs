@@ -340,8 +340,8 @@ fn listen_df<'a>(
 
                 Ok(())
             }
-                .map_err(|e: io::Error| panic!("{:?}", e))
-                .map(|_| ()),
+            .map_err(|e: io::Error| panic!("{:?}", e))
+            .map(|_| ()),
         );
 
         Ok(())
