@@ -351,7 +351,9 @@ where
 
         ex.spawn(async move {
             if let Err(e) = fut.await {
-                if time::Instant::now() < end && !errd.swap(true, atomic::Ordering::SeqCst) {
+                if time::Instant::now() < (end - time::Duration::from_secs(1))
+                    && !errd.swap(true, atomic::Ordering::SeqCst)
+                {
                     eprintln!("failed to enqueue request: {:?}", e)
                 }
             }
