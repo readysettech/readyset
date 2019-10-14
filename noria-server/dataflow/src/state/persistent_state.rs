@@ -1078,6 +1078,7 @@ mod tests {
             String::from(path.to_str().unwrap())
         };
 
+        eprintln!("{:?}", path);
         assert!(!PathBuf::from(path).exists());
     }
 
