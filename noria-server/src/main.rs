@@ -169,6 +169,6 @@ fn main() {
         rt.core_threads(threads);
     }
     let rt = rt.build().unwrap();
-    rt.block_on(builder.start(Arc::new(authority))).unwrap();
+    let _server = rt.block_on(builder.start(Arc::new(authority))).unwrap();
     rt.shutdown_on_idle();
 }
