@@ -54,6 +54,9 @@ struct NoriaBackendInner<E> {
 
 macro_rules! block_on {
     ($self:expr, $fut:expr) => {{
+        let noria = &mut $self.noria;
+        futures_executor::block_on(futures_util::future::poll_fn(|cx| noria.poll_ready(cx)))
+            .unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let fut = $fut;
         $self
@@ -68,15 +71,19 @@ macro_rules! block_on {
 
 impl<E> NoriaBackendInner<E> {
     async fn new(ex: E, mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
+        ch.ready().await.unwrap();
         let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
         let mut i = BTreeMap::new();
         for (n, _) in inputs {
+            ch.ready().await.unwrap();
             let t = ch.table(&n).await.unwrap();
             i.insert(n, t);
         }
+        ch.ready().await.unwrap();
         let outputs = ch.outputs().await.expect("couldn't get outputs from Noria");
         let mut o = BTreeMap::new();
         for (n, _) in outputs {
+            ch.ready().await.unwrap();
             let t = ch.view(&n).await.unwrap();
             o.insert(n, t);
         }
@@ -107,9 +114,8 @@ where
         &'a mut self,
         table: &'b str,
     ) -> Result<&'a mut Table, failure::Error> {
-        let noria = &mut self.noria;
         if !self.inputs.contains_key(table) {
-            let t = block_on!(self, noria.table(table))?;
+            let t = block_on!(self, self.noria.table(table))?;
             self.inputs.insert(table.to_owned(), t);
         }
         Ok(self.inputs.get_mut(table).unwrap())
@@ -119,9 +125,8 @@ where
         &'a mut self,
         view: &'b str,
     ) -> Result<&'a mut View, failure::Error> {
-        let noria = &mut self.noria;
         if !self.outputs.contains_key(view) {
-            let vh = block_on!(self, noria.view(view))?;
+            let vh = block_on!(self, self.noria.view(view))?;
             self.outputs.insert(view.to_owned(), vh);
         }
         Ok(self.outputs.get_mut(view).unwrap())
