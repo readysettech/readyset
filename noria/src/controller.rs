@@ -222,7 +222,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ///
     /// Note that this method _must_ return `Poll::Ready` before any other methods that return
     /// a `Future` on `ControllerHandle` can be called.
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
         self.handle
             .poll_ready(cx)
             .map_err(failure::Error::from_boxed_compat)
