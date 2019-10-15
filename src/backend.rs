@@ -1,8 +1,7 @@
-use noria::{
-    DataType, SyncControllerHandle, SyncTable, SyncView, TableOperation, ZookeeperAuthority,
-};
+use noria::{ControllerHandle, DataType, Table, TableOperation, View, ZookeeperAuthority};
 
 use failure;
+use futures_executor::block_on as block_on_buffer;
 use msql_srv::{self, *};
 use nom_sql::{
     self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery, UpdateStatement,
@@ -47,39 +46,59 @@ impl fmt::Debug for PreparedStatement {
 }
 
 struct NoriaBackendInner<E> {
-    noria: SyncControllerHandle<ZookeeperAuthority, E>,
-    inputs: BTreeMap<String, SyncTable>,
-    outputs: BTreeMap<String, SyncView>,
+    executor: E,
+    noria: ControllerHandle<ZookeeperAuthority>,
+    inputs: BTreeMap<String, Table>,
+    outputs: BTreeMap<String, View>,
+}
+
+macro_rules! block_on {
+    ($self:expr, $fut:expr) => {{
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let fut = $fut;
+        $self
+            .executor
+            .spawn(Box::pin(async move {
+                tx.send(fut.await).unwrap();
+            }))
+            .unwrap();
+        futures_executor::block_on(rx).unwrap()
+    }};
+}
+
+impl<E> NoriaBackendInner<E> {
+    async fn new(ex: E, mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
+        let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
+        let mut i = BTreeMap::new();
+        for (n, _) in inputs {
+            let t = ch.table(&n).await.unwrap();
+            i.insert(n, t);
+        }
+        let outputs = ch.outputs().await.expect("couldn't get outputs from Noria");
+        let mut o = BTreeMap::new();
+        for (n, _) in outputs {
+            let t = ch.view(&n).await.unwrap();
+            o.insert(n, t);
+        }
+        NoriaBackendInner {
+            executor: ex,
+            inputs: i,
+            outputs: o,
+            noria: ch,
+        }
+    }
 }
 
 impl<E> NoriaBackendInner<E>
 where
     E: tokio::executor::Executor,
 {
-    fn new(mut ch: SyncControllerHandle<ZookeeperAuthority, E>) -> Self {
-        NoriaBackendInner {
-            inputs: ch
-                .inputs()
-                .expect("couldn't get inputs from Noria")
-                .into_iter()
-                .map(|(n, _)| (n.clone(), ch.table(&n).unwrap().into_sync()))
-                .collect::<BTreeMap<String, SyncTable>>(),
-            outputs: ch
-                .outputs()
-                .expect("couldn't get outputs from Noria")
-                .into_iter()
-                .map(|(n, _)| (n.clone(), ch.view(&n).unwrap().into_sync()))
-                .collect::<BTreeMap<String, SyncView>>(),
-            noria: ch,
-        }
-    }
-
-    fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut SyncTable {
+    fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
         self.get_or_make_mutator(table)
             .expect(&format!("no table named '{}'!", table))
     }
 
-    fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut SyncView {
+    fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
         self.get_or_make_getter(view)
             .expect(&format!("no view named '{}'!", view))
     }
@@ -87,11 +106,11 @@ where
     fn get_or_make_mutator<'a, 'b>(
         &'a mut self,
         table: &'b str,
-    ) -> Result<&'a mut SyncTable, failure::Error> {
+    ) -> Result<&'a mut Table, failure::Error> {
         let noria = &mut self.noria;
         if !self.inputs.contains_key(table) {
-            let t = noria.table(table)?;
-            self.inputs.insert(table.to_owned(), t.into_sync());
+            let t = block_on!(self, noria.table(table))?;
+            self.inputs.insert(table.to_owned(), t);
         }
         Ok(self.inputs.get_mut(table).unwrap())
     }
@@ -99,11 +118,11 @@ where
     fn get_or_make_getter<'a, 'b>(
         &'a mut self,
         view: &'b str,
-    ) -> Result<&'a mut SyncView, failure::Error> {
+    ) -> Result<&'a mut View, failure::Error> {
         let noria = &mut self.noria;
         if !self.outputs.contains_key(view) {
-            let vh = noria.view(view)?;
-            self.outputs.insert(view.to_owned(), vh.into_sync());
+            let vh = block_on!(self, noria.view(view))?;
+            self.outputs.insert(view.to_owned(), vh);
         }
         Ok(self.outputs.get_mut(view).unwrap())
     }
@@ -139,8 +158,9 @@ impl<E> NoriaBackend<E>
 where
     E: tokio::executor::Executor,
 {
-    pub fn new(
-        ch: SyncControllerHandle<ZookeeperAuthority, E>,
+    pub async fn new(
+        ex: E,
+        ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         (ops, trace_every): (Arc<atomic::AtomicUsize>, Option<usize>),
@@ -151,7 +171,7 @@ where
         log: slog::Logger,
     ) -> Self {
         NoriaBackend {
-            inner: NoriaBackendInner::new(ch),
+            inner: NoriaBackendInner::new(ex, ch).await,
             log: log,
             ops,
             trace_every,
@@ -185,7 +205,7 @@ where
                 // already have getter, nothing more to do
                 continue;
             } else {
-                //  2. If nothing, RPC for view
+                //  2. If nothing, RPC for iew
                 match self.inner.get_or_make_getter(&t.name) {
                     // TODO(malte): the error handling here is lame, as it doesn't differentiate
                     // between "no such view/table" errors and transport or network errors.
@@ -210,7 +230,10 @@ where
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
-        match self.inner.noria.extend_recipe(&format!("{};", q)) {
+        match block_on!(
+            self.inner,
+            self.inner.noria.extend_recipe(&format!("{};", q))
+        ) {
             Ok(_) => {
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
@@ -232,11 +255,12 @@ where
             self.log,
             "Adding view \"{}\" to Noria as {}", q.definition, q.name
         );
-        match self
-            .inner
-            .noria
-            .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
-        {
+        match block_on!(
+            self.inner,
+            self.inner
+                .noria
+                .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
+        ) {
             Ok(_) => {
                 // no rows to return
                 results.completed(0, 0)
@@ -275,7 +299,7 @@ where
             Some(flattened) => {
                 let count = flattened.len() as u64;
                 for key in flattened {
-                    match mutator.delete(key) {
+                    match block_on_buffer(mutator.delete(key)) {
                         Ok(_) => {}
                         Err(e) => {
                             error!(self.log, "delete error: {:?}", e);
@@ -479,11 +503,12 @@ where
                                     "Adding ad-hoc query \"{}\" to Noria as {}", q, qname
                                 );
                             }
-                            if let Err(e) = self
-                                .inner
-                                .noria
-                                .extend_recipe(&format!("QUERY {}: {};", qname, q))
-                            {
+                            if let Err(e) = block_on!(
+                                self.inner,
+                                self.inner
+                                    .noria
+                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                            ) {
                                 error!(self.log, "{:?}", e);
                                 return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
                             }
@@ -755,14 +780,14 @@ where
             };
 
             // TODO(malte): why can't I consume buf here?
-            putter.insert_or_update(buf[0].clone(), updates)
+            block_on_buffer(putter.insert_or_update(buf[0].clone(), updates))
         } else {
             trace!(self.log, "inserting {:?}", buf);
             let buf: Vec<_> = buf
                 .into_iter()
                 .map(|r| TableOperation::Insert(r.into()))
                 .collect();
-            putter.perform_all(buf)
+            block_on_buffer(putter.perform_all(buf))
         };
 
         match result {
@@ -834,7 +859,7 @@ where
         }
 
         // if first lookup fails, there's no reason to try the others
-        match getter.multi_lookup(keys, true) {
+        match block_on_buffer(getter.multi_lookup(keys, true)) {
             Ok(d) => {
                 let mut rw = results.start(schema).unwrap();
                 for resultsets in d {
@@ -897,7 +922,7 @@ where
             noria::trace_my_next_op();
         }
 
-        match mutator.update(key, updates) {
+        match block_on_buffer(mutator.update(key, updates)) {
             Ok(..) => results.completed(1 /* TODO */, 0),
             Err(e) => {
                 error!(self.log, "update: {:?}", e);

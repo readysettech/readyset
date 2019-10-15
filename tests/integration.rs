@@ -11,8 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria_server::{Builder, SyncControllerHandle, ZookeeperAuthority};
-use tokio::prelude::*;
+use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use noria_mysql::NoriaBackend;
@@ -83,7 +82,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let mut builder = Builder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
         let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
@@ -105,7 +104,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 
     debug!(logger, "Connecting to Noria...",);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
+    let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     debug!(logger, "Connected!");
 
     // no need for a barrier here since accept() acts as one
@@ -114,10 +113,22 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 
         let stats = (Arc::new(AtomicUsize::new(0)), None);
         let primed = Arc::new(AtomicBool::new(false));
-        let mut b = NoriaBackend::new(ch, auto_increments, query_cache, stats, primed, false, true, true, logger);
+        let b = NoriaBackend::new(
+            rt.executor(),
+            ch,
+            auto_increments,
+            query_cache,
+            stats,
+            primed,
+            false,
+            true,
+            true,
+            logger,
+        );
+        let mut b = rt.block_on(b);
 
         MysqlIntermediary::run_on_tcp(&mut b, s).unwrap();
-        rt.shutdown_on_idle().wait().unwrap();
+        rt.shutdown_on_idle();
     });
 
     let mut builder = mysql::OptsBuilder::default();
