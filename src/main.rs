@@ -111,6 +111,7 @@ fn main() {
         .with_timer(tracing_subscriber::fmt::time::Uptime::default());
     let s = tracing_subscriber::FmtSubscriber::builder()
         .on_event(s)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .finish();
     let tracer = tracing::Dispatch::new(s);
     let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
