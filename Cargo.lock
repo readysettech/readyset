@@ -322,7 +322,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7e1fa21ad6948d93349773c38789aa5947c2454c"
+source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7959157ca12140fea4e032345011c18882fee32e"
 dependencies = [
  "arccstr 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -408,7 +408,7 @@ dependencies = [
 [[package]]
 name = "dataflow"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7e1fa21ad6948d93349773c38789aa5947c2454c"
+source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7959157ca12140fea4e032345011c18882fee32e"
 dependencies = [
  "backtrace 0.3.38 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -953,7 +953,7 @@ dependencies = [
 [[package]]
 name = "mir"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7e1fa21ad6948d93349773c38789aa5947c2454c"
+source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7959157ca12140fea4e032345011c18882fee32e"
 dependencies = [
  "common 0.1.0 (git+https://github.com/mit-pdos/noria.git?branch=async-await)",
  "dataflow 0.1.0 (git+https://github.com/mit-pdos/noria.git?branch=async-await)",
@@ -1116,7 +1116,7 @@ dependencies = [
 [[package]]
 name = "noria"
 version = "0.1.2"
-source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7e1fa21ad6948d93349773c38789aa5947c2454c"
+source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7959157ca12140fea4e032345011c18882fee32e"
 dependencies = [
  "arccstr 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "assert_infrequent 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1145,7 +1145,7 @@ dependencies = [
  "tokio-io 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-net 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-sync 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-tower 0.2.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-tower 0.2.0-alpha.2a (registry+https://github.com/rust-lang/crates.io-index)",
  "tower 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-balance 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-buffer 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1185,7 +1185,7 @@ dependencies = [
 [[package]]
 name = "noria-server"
 version = "0.1.0"
-source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7e1fa21ad6948d93349773c38789aa5947c2454c"
+source = "git+https://github.com/mit-pdos/noria.git?branch=async-await#7959157ca12140fea4e032345011c18882fee32e"
 dependencies = [
  "async-bincode 0.5.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-timer 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1224,7 +1224,7 @@ dependencies = [
  "tokio-io 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-io-pool 0.2.0-alpha.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-sync 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-tower 0.2.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-tower 0.2.0-alpha.2a (registry+https://github.com/rust-lang/crates.io-index)",
  "tower 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-util 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "tokio-tower"
-version = "0.2.0-alpha.2"
+version = "0.2.0-alpha.2a"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "crossbeam 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2772,7 +2772,7 @@ dependencies = [
 "checksum tokio-net 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)" = "a441682cd32f3559383112c4a7f372f5c9fa1950c5cf8c8dd05274a2ce8c2654"
 "checksum tokio-sync 0.2.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)" = "4f1aaeb685540f7407ea0e27f1c9757d258c7c6bf4e3eb19da6fc59b747239d2"
 "checksum tokio-timer 0.3.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)" = "b97c1587fe71018eb245a4a9daa13a5a3b681bbc1f7fdadfe24720e141472c13"
-"checksum tokio-tower 0.2.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)" = "753b4ded7858b68cd480cc78cde4b86cbd9d30545e799f3d69deaa757e50777c"
+"checksum tokio-tower 0.2.0-alpha.2a (registry+https://github.com/rust-lang/crates.io-index)" = "6489f2efcf6f7d76fda9febbb3f7d41c0409b340193d7c538eae7904849bd396"
 "checksum tower 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)" = "b05ce6a5913c351c65d5538545302eceaf3f84e8257654370d298c3ea1a97935"
 "checksum tower-balance 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)" = "38dce028671196b8e89965a7b057b8e4bc99206185c0418ce8d164fe674c9d72"
 "checksum tower-buffer 0.3.0-alpha.2 (registry+https://github.com/rust-lang/crates.io-index)" = "eb66caab441682c3eac396617cbc1c2bd8962589468d08be3b05cb6875200694"
