@@ -540,7 +540,7 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
        )
 );
 
-named!(pub case_when_column<CompleteByteSlice, (Column, ConditionExpression)>,
+named!(pub case_when_column<CompleteByteSlice, (Column, Option<Column>, ConditionExpression)>,
        do_parse!(
            tag_no_case!("case when") >>
            opt_multispace >>
@@ -550,8 +550,15 @@ named!(pub case_when_column<CompleteByteSlice, (Column, ConditionExpression)>,
            opt_multispace >>
            column: column_identifier_no_alias >>
            opt_multispace >>
+           else_column: opt!(do_parse!(
+               tag_no_case!("else") >>
+               opt_multispace >>
+               else_col: column_identifier_no_alias >>
+               opt_multispace >>
+               (else_col)
+           )) >>
            tag_no_case!("end") >>
-           (column, cond)
+           (column, else_column, cond)
        )
 );
 
@@ -578,7 +585,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
     |   do_parse!(
             tag_no_case!("count") >>
             args: delimited!(tag!("("), case_when_column, tag!(")")) >>
-            (FunctionExpression::CountFilter(args.0.clone(), args.1.clone()))
+            (FunctionExpression::CountFilter(args.0.clone(), args.1.clone(), args.2.clone()))
         )
     |   do_parse!(
             tag_no_case!("count") >>
@@ -588,7 +595,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
     |   do_parse!(
             tag_no_case!("sum") >>
             args: delimited!(tag!("("), case_when_column, tag!(")")) >>
-            (FunctionExpression::SumFilter(args.0.clone(), args.1.clone()))
+            (FunctionExpression::SumFilter(args.0.clone(), args.1.clone(), args.2.clone()))
         )
     |   do_parse!(
             tag_no_case!("sum") >>
