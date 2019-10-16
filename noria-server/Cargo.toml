@@ -51,7 +51,7 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 timer_heap = "0.3.0"
 serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
-tokio-tower = "=0.2.0-alpha.2"
+tokio-tower = "=0.2.0-alpha.2a"
 tower-util = "=0.3.0-alpha.2"
 tower = "=0.3.0-alpha.2"
 
