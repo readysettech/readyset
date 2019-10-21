@@ -144,23 +144,11 @@ fn rewrite_selection(
                             | Sum(ref mut fe, _)
                             | Min(ref mut fe)
                             | Max(ref mut fe)
-                            | GroupConcat(ref mut fe, _) => {
+                            | GroupConcat(ref mut fe, _)
+                            | CountFilter(ref mut fe, _, _)
+                            | SumFilter(ref mut fe, _, _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
-                                }
-                            },
-                            CountFilter(ref mut col, ref mut else_col, _)
-                            | SumFilter(ref mut col, ref mut else_col, _) => {
-                                if col.table.is_none() {
-                                    col.table = find_table(col, tables_in_query);
-                                }
-                                match else_col {
-                                    Some(ecol) => {
-                                        if ecol.table.is_none() {
-                                            ecol.table = find_table(ecol, tables_in_query);
-                                        }
-                                    },
-                                    None => {},
                                 }
                             },
                             _ => {}

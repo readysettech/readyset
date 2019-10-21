@@ -1,4 +1,4 @@
-use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType};
+use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType, Literal};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
@@ -348,7 +348,7 @@ impl MirNode {
                     }
                 }
             }
-            MirNodeType::FilterAggregation { ref on, ref else_on, .. } => {
+            MirNodeType::FilterAggregation { ref on, .. } => {
                 let parent = self.ancestors.iter().next().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
@@ -359,14 +359,6 @@ impl MirNode {
                 // need the "over" columns
                 if !columns.contains(on) {
                     columns.push(on.clone());
-                }
-                match else_on {
-                    Some(eon) => {
-                        if !columns.contains(eon) {
-                            columns.push(eon.clone());
-                        }
-                    },
-                    None => {},
                 }
             }
             MirNodeType::Project { ref emit, .. } => {
@@ -431,7 +423,7 @@ pub enum MirNodeType {
     /// filter condition and grouping
     FilterAggregation {
         on: Column,
-        else_on: Option<Column>,
+        else_on: Option<Literal>,
         group_by: Vec<Column>,
         kind: FilterAggregationKind,
         conditions: Vec<Option<FilterCondition>>,
@@ -901,14 +893,8 @@ impl Debug for MirNodeType {
                 conditions: _,
             } => {
                 let op_string = match *kind {
-                    FilterAggregationKind::COUNT => match else_on {
-                        Some(eon) => format!("|*|(filter {} {})", on.name.as_str(), eon.name.as_str()),
-                        None => format!("|*|(filter {})", on.name.as_str()),
-                    },
-                    FilterAggregationKind::SUM => match else_on {
-                        Some (eon) => format!("𝛴(filter {} {})", on.name.as_str(), eon.name.as_str()),
-                        None => format!("𝛴(filter {})", on.name.as_str()),
-                    },
+                    FilterAggregationKind::COUNT => format!("|*|(filter {})", on.name.as_str()),
+                    FilterAggregationKind::SUM => format!("𝛴(filter {})", on.name.as_str()),
                 };
                 let group_cols = group_by
                     .iter()

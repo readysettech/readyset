@@ -970,8 +970,7 @@ mod tests {
     use crate::controller::Migration;
     use crate::integration;
     use dataflow::prelude::*;
-    use nom_sql::Column;
-    use nom_sql::FunctionExpression;
+    use nom_sql::{Column, FunctionExpression, Literal};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -1649,7 +1648,7 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
-                "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE aid END) AS sum FROM votes GROUP BY votes.userid;",
+                "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE 6 END) AS sum FROM votes GROUP BY votes.userid;",
                 None,
                 mig,
             );
@@ -1659,7 +1658,7 @@ mod tests {
             // check aggregation view
             let f = Box::new(FunctionExpression::SumFilter(
                 Column::from("votes.sign"),
-                Some(Column::from("votes.aid")),
+                Some(Literal::Integer(6)),
                 ConditionExpression::ComparisonOp(
                     ConditionTree {
                         operator: Operator::Equal,
@@ -1679,7 +1678,7 @@ mod tests {
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2;1)) γ[0]");
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.

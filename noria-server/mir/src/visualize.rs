@@ -158,14 +158,8 @@ impl GraphViz for MirNodeType {
                 conditions: _,
             } => {
                 let op_string = match *kind {
-                    FilterAggregationKind::COUNT => match else_on {
-                        Some(eon) => format!("\\|*\\|(filter {} {})", print_col(on), print_col(eon)),
-                        None => format!("\\|*\\|(filter {})", print_col(on)),
-                    },
-                    FilterAggregationKind::SUM => match else_on {
-                        Some(eon) => format!("𝛴(filter {} {})", print_col(on), print_col(eon)),
-                        None => format!("𝛴(filter {})", print_col(on)),
-                    },
+                    FilterAggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),
+                    FilterAggregationKind::SUM => format!("𝛴(filter {})", print_col(on)),
                 };
                 let group_cols = group_by
                     .iter()

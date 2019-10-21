@@ -1,5 +1,5 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, OrderType,
+    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, OrderType, Literal,
 };
 use std::collections::HashMap;
 
@@ -149,7 +149,7 @@ fn mir_node_to_flow_parts(
                         parent,
                         mir_node.columns.as_slice(),
                         on,
-                        else_on.as_ref(),
+                        else_on.clone(),
                         group_by,
                         GroupedNodeType::FilterAggregation(kind.clone()),
                         mig,
@@ -531,7 +531,7 @@ fn make_grouped_node(
     parent: MirNodeRef,
     columns: &[Column],
     on: &Column,
-    else_on: Option<&Column>,
+    else_on: Option<Literal>,
     group_by: &[Column],
     kind: GroupedNodeType,
     mig: &mut Migration,
@@ -552,8 +552,6 @@ fn make_grouped_node(
     let column_names = column_names(columns);
 
     let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping);
-    let else_col_indx = else_on.map_or(None,
-        |c| Some(parent.borrow().column_id_for_column(c, table_mapping)));
 
     let group_col_indx = group_by
         .iter()
@@ -582,7 +580,7 @@ fn make_grouped_node(
             mig.add_ingredient(
                 String::from(name),
                 column_names.as_slice(),
-                agg.over(parent_na, cond, over_col_indx, else_col_indx, group_col_indx.as_slice()),
+                agg.over(parent_na, cond, over_col_indx, else_on, group_col_indx.as_slice()),
             )
         },
         GroupedNodeType::GroupConcat(sep) => {
