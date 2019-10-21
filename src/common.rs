@@ -540,7 +540,7 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
        )
 );
 
-named!(pub case_when_column<CompleteByteSlice, (Column, Option<Column>, ConditionExpression)>,
+named!(pub case_when_column<CompleteByteSlice, (Column, Option<Literal>, ConditionExpression)>,
        do_parse!(
            tag_no_case!("case when") >>
            opt_multispace >>
@@ -550,15 +550,15 @@ named!(pub case_when_column<CompleteByteSlice, (Column, Option<Column>, Conditio
            opt_multispace >>
            column: column_identifier_no_alias >>
            opt_multispace >>
-           else_column: opt!(do_parse!(
+           else_value: opt!(do_parse!(
                tag_no_case!("else") >>
                opt_multispace >>
-               else_col: column_identifier_no_alias >>
+               else_val: literal >>
                opt_multispace >>
-               (else_col)
+               (else_val)
            )) >>
            tag_no_case!("end") >>
-           (column, else_column, cond)
+           (column, else_value, cond)
        )
 );
 
