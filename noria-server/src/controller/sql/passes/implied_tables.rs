@@ -141,8 +141,6 @@ fn rewrite_selection(
                         match **f {
                             Avg(ref mut fe, _)
                             | Count(ref mut fe, _)
-                            | CountFilter(ref mut fe, _)
-                            | SumFilter(ref mut fe, _)
                             | Sum(ref mut fe, _)
                             | Min(ref mut fe)
                             | Max(ref mut fe)
@@ -150,13 +148,23 @@ fn rewrite_selection(
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
-                            }
+                            },
+                            CountFilter(ref mut col, ref mut else_col, _)
+                            | SumFilter(ref mut col, ref mut else_col, _) => {
+                                if col.table.is_none() {
+                                    col.table = find_table(col, tables_in_query);
+                                }
+                                match else_col {
+                                    Some(ecol) => {
+                                        if ecol.table.is_none() {
+                                            ecol.table = find_table(ecol, tables_in_query);
+                                        }
+                                    },
+                                    None => {},
+                                }
+                            },
                             _ => {}
                         }
-                        //     sq.where_clause = match sq.where_clause {
-                        //        None => None,
-                        //        Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
-                        //    };
                         None
                     }
                     None => find_table(&f, tables_in_query),
@@ -197,8 +205,8 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => {
                         match **f {
-                            CountFilter(_, ref mut condition)
-                            | SumFilter(_, ref mut condition) => {
+                            CountFilter(_, _, ref mut condition)
+                            | SumFilter(_, _, ref mut condition) => {
                                 *condition = rewrite_conditional(&expand_columns, condition.clone(), &tables);
                             }
                             _ => {}

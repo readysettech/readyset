@@ -942,7 +942,7 @@ impl SqlToMirConverter {
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool, cond: Option<&ConditionExpression>| {
+        let mknode = |over: &Column, over_else: Option<Column>, t: GroupedNodeType, distinct: bool, cond: Option<&ConditionExpression>| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
@@ -953,7 +953,7 @@ impl SqlToMirConverter {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (node, &over),
+                    (node, &over, over_else),
                     group_cols,
                     t,
                     cond,
@@ -963,7 +963,7 @@ impl SqlToMirConverter {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (parent, &over),
+                    (parent, &over, over_else),
                     group_cols,
                     t,
                     cond,
@@ -976,18 +976,24 @@ impl SqlToMirConverter {
         match *func.deref() {
             Sum(ref col, distinct) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
                 None,
             ),
-            SumFilter(ref col, ref condition) => mknode(
+            SumFilter(ref col, ref else_col, ref condition) => mknode(
                 &Column::from(col),
+                match else_col {
+                    Some(ecol) => Some(Column::from(ecol)),
+                    None => None,
+                },
                 GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
                 false,
                 Some(condition),
             ),
             Count(ref col, distinct) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
                 distinct,
                 None,
@@ -1001,26 +1007,33 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             },
-            CountFilter(ref col, ref condition) => mknode(
+            CountFilter(ref col, ref else_col, ref condition) => mknode(
                 &Column::from(col),
+                match else_col {
+                    Some(ecol) => Some(Column::from(ecol)),
+                    None => None,
+                },
                 GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
                 false,
                 Some(condition),
             ),
             Max(ref col) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
                 None,
             ),
             Min(ref col) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
                 None,
             ),
             GroupConcat(ref col, ref separator) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::GroupConcat(separator.clone()),
                 false,
                 None,
@@ -1033,7 +1046,7 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         computed_col: &Column,
-        over: (MirNodeRef, &Column),
+        over: (MirNodeRef, &Column, Option<Column>),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
         condition: Option<&ConditionExpression>
@@ -1042,6 +1055,7 @@ impl SqlToMirConverter {
 
         // Resolve column IDs in parent
         let over_col = over.1;
+        let else_col = over.2;
 
         // The function node's set of output columns is the group columns plus the function
         // column
@@ -1097,6 +1111,7 @@ impl SqlToMirConverter {
                     combined_columns,
                     MirNodeType::FilterAggregation {
                         on: over_col.clone(),
+                        else_on: else_col.clone(),
                         group_by: group_by.into_iter().cloned().collect(),
                         kind: filter_agg,
                         conditions: filter,

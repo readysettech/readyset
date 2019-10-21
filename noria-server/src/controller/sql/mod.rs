@@ -1543,6 +1543,7 @@ mod tests {
             // check aggregation view
             let f = Box::new(FunctionExpression::CountFilter(
                 Column::from("votes.aid"),
+                None,
                 ConditionExpression::ComparisonOp(
                     ConditionTree {
                         operator: Operator::Equal,
@@ -1600,6 +1601,7 @@ mod tests {
             // check aggregation view
             let f = Box::new(FunctionExpression::SumFilter(
                 Column::from("votes.sign"),
+                None,
                 ConditionExpression::ComparisonOp(
                     ConditionTree {
                         operator: Operator::Equal,
@@ -1620,6 +1622,64 @@ mod tests {
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        });
+    }
+
+    #[test]
+    fn it_incorporates_aggregation_filter_sum_else() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE aid END) AS sum FROM votes GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::SumFilter(
+                Column::from("votes.sign"),
+                Some(Column::from("votes.aid")),
+                ConditionExpression::ComparisonOp(
+                    ConditionTree {
+                        operator: Operator::Equal,
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                    }
+            )));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2;1)) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.

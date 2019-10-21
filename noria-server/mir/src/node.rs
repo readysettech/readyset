@@ -348,7 +348,7 @@ impl MirNode {
                     }
                 }
             }
-            MirNodeType::FilterAggregation { ref on, .. } => {
+            MirNodeType::FilterAggregation { ref on, ref else_on, .. } => {
                 let parent = self.ancestors.iter().next().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
@@ -356,9 +356,17 @@ impl MirNode {
                         columns.push(c.clone());
                     }
                 }
-                // need the "over" column
+                // need the "over" columns
                 if !columns.contains(on) {
                     columns.push(on.clone());
+                }
+                match else_on {
+                    Some(eon) => {
+                        if !columns.contains(eon) {
+                            columns.push(eon.clone());
+                        }
+                    },
+                    None => {},
                 }
             }
             MirNodeType::Project { ref emit, .. } => {
@@ -423,6 +431,7 @@ pub enum MirNodeType {
     /// filter condition and grouping
     FilterAggregation {
         on: Column,
+        else_on: Option<Column>,
         group_by: Vec<Column>,
         kind: FilterAggregationKind,
         conditions: Vec<Option<FilterCondition>>,
@@ -637,6 +646,7 @@ impl MirNodeType {
             },
             MirNodeType::FilterAggregation {
                 on: ref our_on,
+                else_on: ref our_else_on,
                 group_by: ref our_group_by,
                 kind: ref our_kind,
                 conditions: ref our_conditions,
@@ -644,11 +654,13 @@ impl MirNodeType {
                 match *other {
                     MirNodeType::FilterAggregation {
                         ref on,
+                        ref else_on,
                         ref group_by,
                         ref kind,
                         ref conditions,
                     } => {
-                        our_on == on && our_group_by == group_by && our_kind == kind && our_conditions == conditions
+                        our_on == on && our_else_on == else_on && our_group_by == group_by
+                        && our_kind == kind && our_conditions == conditions
                     }
                     _ => false,
                 }
@@ -883,13 +895,20 @@ impl Debug for MirNodeType {
             }
             MirNodeType::FilterAggregation {
                 ref on,
+                ref else_on,
                 ref group_by,
                 ref kind,
                 conditions: _,
             } => {
                 let op_string = match *kind {
-                    FilterAggregationKind::COUNT => format!("|*|(filter {})", on.name.as_str()),
-                    FilterAggregationKind::SUM => format!("𝛴(filter {})", on.name.as_str()),
+                    FilterAggregationKind::COUNT => match else_on {
+                        Some(eon) => format!("|*|(filter {} {})", on.name.as_str(), eon.name.as_str()),
+                        None => format!("|*|(filter {})", on.name.as_str()),
+                    },
+                    FilterAggregationKind::SUM => match else_on {
+                        Some (eon) => format!("𝛴(filter {} {})", on.name.as_str(), eon.name.as_str()),
+                        None => format!("𝛴(filter {})", on.name.as_str()),
+                    },
                 };
                 let group_cols = group_by
                     .iter()
