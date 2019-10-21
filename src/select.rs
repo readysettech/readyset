@@ -800,8 +800,8 @@ mod tests {
     }
 
     #[test]
-    fn sum_filter_else() {
-        let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE replace_id END) FROM votes GROUP BY aid;";
+    fn sum_filter_else_literal() {
+        let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
 
@@ -810,11 +810,11 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
             operator: Operator::Equal,
         });
-        let agg_expr = FunctionExpression::SumFilter(Column::from("vote_id"), Some(Column::from("replace_id")), filter_cond);
+        let agg_expr = FunctionExpression::SumFilter(Column::from("vote_id"), Some(Literal::Integer(6)), filter_cond);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("sum(filter vote_id replace_id)"),
+                name: String::from("sum(filter vote_id)"),
                 alias: None,
                 table: None,
                 function: Some(Box::new(agg_expr)),
