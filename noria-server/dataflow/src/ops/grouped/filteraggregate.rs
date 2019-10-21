@@ -1,6 +1,6 @@
 use std::sync;
 
-pub use nom_sql::Operator;
+pub use nom_sql::{Operator, Literal};
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
 use ops::filter::{FilterCondition, Value};
@@ -27,22 +27,13 @@ impl FilterAggregation {
         src: NodeIndex,
         filter: &[Option<FilterCondition>],
         over: usize,
-        over_else: Option<usize>,
+        over_else: Option<Literal>,
         group_by: &[usize],
     ) -> GroupedOperator<FilterAggregator> {
         assert!(
             !group_by.iter().any(|&i| i == over),
             "cannot group by aggregation column"
         );
-        match over_else {
-            Some(col) => {
-                assert!(
-                    !group_by.iter().any(|&i| i == col),
-                    "cannot group by aggregation column"
-                );
-            },
-            None => {}
-        }
 
         GroupedOperator::new(
             src,
@@ -76,7 +67,7 @@ pub struct FilterAggregator {
     op: FilterAggregation,
     filter: sync::Arc<Vec<Option<FilterCondition>>>,
     over: usize,
-    over_else: Option<usize>,
+    over_else: Option<Literal>,
     group: Vec<usize>,
 }
 
@@ -85,7 +76,7 @@ impl GroupedOperation for FilterAggregator {
 
     fn setup(&mut self, parent: &Node) {
         assert!(
-            self.over < parent.fields().len() && self.over_else.unwrap_or(0) < parent.fields().len(),
+            self.over < parent.fields().len(),
             "cannot aggregate over non-existing column"
         );
     }
@@ -139,17 +130,14 @@ impl GroupedOperation for FilterAggregator {
             }
         } else {
             // the filter returned false, so check whether we have an else case
-            match self.over_else {
+            match self.over_else.clone() {
                 Some(over_else) => {
                     match self.op {
                         FilterAggregation::COUNT => 1,
                         FilterAggregation::SUM => {
-                            match r[over_else] {
-                                DataType::Int(n) => i128::from(n),
-                                DataType::UnsignedInt(n) => i128::from(n),
-                                DataType::BigInt(n) => i128::from(n),
-                                DataType::UnsignedBigInt(n) => i128::from(n),
-                                DataType::None => 0,
+                            match over_else {
+                                Literal::Integer(n) => i128::from(n),
+                                Literal::UnsignedInteger(n) => i128::from(n),
                                 ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
                             }
                         }
@@ -191,19 +179,9 @@ impl GroupedOperation for FilterAggregator {
         }
 
         // TODO could include information about filter condition
-        let op_string = match self.over_else {
-            Some(over_else) => {
-                match self.op {
-                    FilterAggregation::COUNT => format!("|σ({};{})|", self.over, over_else),
-                    FilterAggregation::SUM => format!("𝛴(σ({};{}))", self.over, over_else),
-                }
-            },
-            None => {
-                match self.op {
-                    FilterAggregation::COUNT => format!("|σ({})|", self.over),
-                    FilterAggregation::SUM => format!("𝛴(σ({}))", self.over),
-                }
-            }
+        let op_string = match self.op {
+            FilterAggregation::COUNT => format!("|σ({})|", self.over),
+            FilterAggregation::SUM => format!("𝛴(σ({}))", self.over),
         };
 
         let group_cols = self
@@ -216,10 +194,7 @@ impl GroupedOperation for FilterAggregator {
     }
 
     fn over_columns(&self) -> Vec<usize> {
-        match self.over_else {
-            Some(over_else) => vec![self.over, over_else],
-            None => vec![self.over]
-        }
+        vec![self.over]
     }
 }
 
@@ -323,7 +298,7 @@ mod tests {
                     None,
                 ],
                 2,
-                Some(0),
+                Some(Literal::Integer(6)),
                 &[3]
             ),
             mat,
@@ -660,7 +635,7 @@ mod tests {
     #[test]
     fn it_sums_with_else() {
         // records [x, y, z, g]  --> [g, zsum]
-        // sum z's if y>=3 else x's, grouped by g
+        // sum z's if y>=3 else 6s, grouped by g
 
         // test:
         // y<3, y=3, y>3
@@ -701,7 +676,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        // updates from x
+        // updates by literal 6
 
         let u: Record = vec![1.into(), 2.into(), 2.into(), 0.into()].into();
         let rs = c.narrow_one(u, true);
@@ -717,7 +692,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 0.into());
-                assert_eq!(r[1], 6.into());
+                assert_eq!(r[1], 11.into());
             }
             _ => unreachable!(),
         }
@@ -733,14 +708,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 0.into());
-                assert_eq!(r[1], 6.into());
+                assert_eq!(r[1], 11.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 0.into());
-                assert_eq!(r[1], 9.into());
+                assert_eq!(r[1], 17.into());
             }
             _ => unreachable!(),
         }
@@ -754,14 +729,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 0.into());
-                assert_eq!(r[1], 9.into());
+                assert_eq!(r[1], 17.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 0.into());
-                assert_eq!(r[1], 7.into());
+                assert_eq!(r[1], 15.into());
             }
             _ => unreachable!(),
         }

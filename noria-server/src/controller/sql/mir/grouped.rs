@@ -43,6 +43,9 @@ pub(super) fn make_predicates_above_grouped<'a>(
         None => (),
         Some(computed_cols_cgn) => {
             for ccol in &computed_cols_cgn.columns {
+                // whenever we have a column getting aggregated (i.e. an over column
+                // rather than a group by column) we won't be able to filter on it
+                // later, so any filters involving it need to get moved above
                 let over_col = target_columns_from_computed_column(ccol);
                 let over_table = over_col.table.as_ref().unwrap().as_str();
 
