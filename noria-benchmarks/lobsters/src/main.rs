@@ -15,12 +15,16 @@ use trawler::{LobstersRequest, UserId};
 const ORIGINAL_SCHEMA: &'static str = include_str!("../db-schema/original.sql");
 const NORIA_SCHEMA: &'static str = include_str!("../db-schema/noria.sql");
 const NATURAL_SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
+const CAN_COMBINE_SCHEMA: &'static str = include_str!("../db-schema/cancombine.sql");
+const FILTER_AGGREGATE_SCHEMA: &'static str = include_str!("../db-schema/filteraggregate.sql");
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum Variant {
     Original,
     Noria,
     Natural,
+    CanCombine,
+    FilterAggregate,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +106,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         Variant::Original => ORIGINAL_SCHEMA,
                         Variant::Noria => NORIA_SCHEMA,
                         Variant::Natural => NATURAL_SCHEMA,
+                        Variant::CanCombine => CAN_COMBINE_SCHEMA,
+                        Variant::FilterAggregate => FILTER_AGGREGATE_SCHEMA,
                     };
                     futures::stream::iter_ok(schema.lines())
                         .fold((c, String::new()), move |(c, mut current_q), line| {
@@ -266,6 +272,8 @@ impl trawler::LobstersClient for MysqlTrawler {
             Variant::Original => handle_req!(original, req),
             Variant::Noria => handle_req!(noria, req),
             Variant::Natural => handle_req!(natural, req),
+            Variant::CanCombine => handle_req!(natural, req),
+            Variant::FilterAggregate => handle_req!(natural, req),
         };
 
         // notifications
@@ -281,6 +289,8 @@ impl trawler::LobstersClient for MysqlTrawler {
                         as Box<dyn Future<Item = my::Conn, Error = my::error::Error> + Send>,
                     Variant::Noria => Box::new(endpoints::noria::notifications(c, uid)),
                     Variant::Natural => Box::new(endpoints::natural::notifications(c, uid)),
+                    Variant::CanCombine => Box::new(endpoints::natural::notifications(c, uid)),
+                    Variant::FilterAggregate => Box::new(endpoints::natural::notifications(c, uid)),
                 })
             }))
         } else {
@@ -333,7 +343,7 @@ fn main() {
             Arg::with_name("queries")
                 .short("q")
                 .long("queries")
-                .possible_values(&["original", "noria", "natural"])
+                .possible_values(&["original", "noria", "natural", "cancombine", "filteraggregate"])
                 .takes_value(true)
                 .required(true)
                 .help("Which set of queries to run"),
@@ -384,6 +394,8 @@ fn main() {
         "original" => Variant::Original,
         "noria" => Variant::Noria,
         "natural" => Variant::Natural,
+        "cancombine" => Variant::CanCombine,
+        "filteraggregate" => Variant::FilterAggregate,
         _ => unreachable!(),
     };
     let simulate_shards = args
