@@ -38,6 +38,8 @@ where Q: Ord + Clone {
         // TODO(jonathangb): Rotate tree?
         let mut curr = self.root.as_mut().unwrap();
         loop {
+            curr.maybe_update_value(&range.1);
+
             match cmp(&curr.key, &range) {
                 Equal => return, // Don't insert a redundant key.
                 Less => {
@@ -75,18 +77,18 @@ where Q: Ord {
     // Let's use this transformation to encode the Included/Excluded rules at the same time.
     // Note that topological order is used during comparison, so if r1 and r2 have the same `x`,
     // only then will the 2nd element of the tuple serve as a tie-breaker.
-    let r1_min_q = match &r1.0 {
+    let r1_min = match &r1.0 {
         Included(x) => Some((x, 1)),
         Excluded(x) => Some((x, 2)),
         Unbounded => None,
     };
-    let r2_min_q = match &r2.0 {
+    let r2_min = match &r2.0 {
         Included(x) => Some((x, 1)),
         Excluded(x) => Some((x, 2)),
         Unbounded => None,
     };
 
-    match (r1_min_q, r2_min_q) {
+    match (r1_min, r2_min) {
         (None, None) => {}, // Left-bounds are equal, we can't return yet.
         (None, Some(_)) => return Less,
         (Some(_), None) => return Greater,
@@ -102,18 +104,18 @@ where Q: Ord {
     // Both left-bounds are equal, we have to compare the right-bounds as a tie-breaker.
     // Note that we have inversed the 2nd value in the tuple, as the Included/Excluded rules
     // are flipped for the upper bound.
-    let r1_max_q = match &r1.1 {
+    let r1_max = match &r1.1 {
         Included(x) => Some((x, 2)),
         Excluded(x) => Some((x, 1)),
         Unbounded => None,
     };
-    let r2_max_q = match &r2.1 {
+    let r2_max = match &r2.1 {
         Included(x) => Some((x, 2)),
         Excluded(x) => Some((x, 1)),
         Unbounded => None,
     };
 
-    match (r1_max_q, r2_max_q) {
+    match (r1_max, r2_max) {
         (None, None) => Equal,
         (None, Some(_)) => Greater,
         (Some(_), None) => Less,
@@ -132,6 +134,28 @@ where Q: Ord + Clone {
             left: None,
             right: None,
         }
+    }
+
+    fn maybe_update_value(&mut self, inserted_max: &Bound<Q>) {
+        let self_max_q = match &self.value {
+            Included(x) => Some((x, 2)),
+            Excluded(x) => Some((x, 1)),
+            Unbounded => None,
+        };
+        let inserted_max_q = match inserted_max {
+            Included(x) => Some((x, 2)),
+            Excluded(x) => Some((x, 1)),
+            Unbounded => None,
+        };
+        match (self_max_q, inserted_max_q) {
+            (None, _) => {},
+            (_, None) => self.value = Unbounded,
+            (Some(self_max_q), Some(ref inserted_max_q)) => {
+                if self_max_q.cmp(inserted_max_q) == Less {
+                    self.value = inserted_max.clone();
+                }
+            },
+        };
     }
 }
 
@@ -156,11 +180,12 @@ mod tests {
     }
 
     #[test]
-    fn it_inserts_left_node() {
+    fn it_inserts_left_right_node() {
         let mut tree = IntervalTree::default();
 
         let root_key = (Included(2), Included(3));
         let left_key = (Included(0), Included(1));
+        let left_right_key = (Excluded(1), Unbounded);
 
         tree.insert(root_key.clone());
         assert!(tree.root.is_some());
@@ -169,7 +194,40 @@ mod tests {
         tree.insert(left_key.clone());
         assert!(tree.root.as_ref().unwrap().right.is_none());
         assert!(tree.root.as_ref().unwrap().left.is_some());
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_key.1)
+        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_key.1);
+    
+        tree.insert(left_right_key.clone());
+        assert!(tree.root.as_ref().unwrap().left.as_ref().unwrap().right.is_some());
+    }
+
+    #[test]
+    fn it_updates_value() {
+        let mut tree = IntervalTree::default();
+
+        let root_key = (Included(2), Included(3));
+        let left_key = (Included(0), Included(1));
+        let left_left_key = (Included(-5), Excluded(10));
+        let right_key = (Excluded(3), Unbounded);
+
+        tree.insert(root_key.clone());
+        assert_eq!(tree.root.as_ref().unwrap().value, root_key.1);
+
+        tree.insert(left_key.clone());
+        assert_eq!(tree.root.as_ref().unwrap().value, root_key.1);
+        assert!(tree.root.as_ref().unwrap().left.is_some());
+        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_key.1);
+
+        tree.insert(left_left_key.clone());
+        assert_eq!(tree.root.as_ref().unwrap().value, left_left_key.1);
+        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
+        assert!(tree.root.as_ref().unwrap().left.as_ref().unwrap().left.is_some());
+        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
+
+        tree.insert(right_key.clone());
+        assert_eq!(tree.root.as_ref().unwrap().value, right_key.1);
+        assert!(tree.root.as_ref().unwrap().right.is_some());
+        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
+        assert_eq!(tree.root.as_ref().unwrap().right.as_ref().unwrap().value, right_key.1);
     }
 
     #[test]
