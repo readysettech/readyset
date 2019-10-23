@@ -829,6 +829,47 @@ mod tests {
     }
 
     #[test]
+    fn count_filter_lobsters() {
+        let qstring =
+            "SELECT
+            COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) as votes
+            FROM votes
+            GROUP BY votes.comment_id;";
+
+        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+
+        let filter_cond = LogicalOp(ConditionTree {
+            left: Box::new(ComparisonOp(ConditionTree {
+                left: Box::new(Base(Field(Column::from("votes.story_id")))),
+                right: Box::new(Base(Literal(Literal::Null))),
+                operator: Operator::Equal,
+            })),
+            right: Box::new(ComparisonOp(ConditionTree {
+                left: Box::new(Base(Field(Column::from("votes.vote")))),
+                right: Box::new(Base(Literal(Literal::Integer(0)))),
+                operator: Operator::Equal,
+            })),
+            operator: Operator::And,
+        });
+        let agg_expr = FunctionExpression::CountFilter(Column::from("votes.vote"), None, filter_cond);
+        let expected_stmt = SelectStatement {
+            tables: vec![Table::from("votes")],
+            fields: vec![FieldDefinitionExpression::Col(Column {
+                name: String::from("votes"),
+                alias: Some(String::from("votes")),
+                table: None,
+                function: Some(Box::new(agg_expr)),
+            })],
+            group_by: Some(GroupByClause {
+                columns: vec![Column::from("votes.comment_id")],
+                having: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected_stmt);
+    }
+
+    #[test]
     fn moderately_complex_selection() {
         let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
