@@ -150,8 +150,8 @@ where Q: Ord + Clone {
         match (self_max_q, inserted_max_q) {
             (None, _) => {},
             (_, None) => self.value = Unbounded,
-            (Some(self_max_q), Some(ref inserted_max_q)) => {
-                if self_max_q.cmp(inserted_max_q) == Less {
+            (Some(self_max_q), Some(inserted_max_q)) => {
+                if self_max_q < inserted_max_q {
                     self.value = inserted_max.clone();
                 }
             },
