@@ -58,14 +58,14 @@ where Q: Ord + Clone {
     }
 
     pub fn get_interval_intersec(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
-        let curr = self.root.as_ref();
+        let curr = &self.root;
         let mut acc = Vec::new();
 
         Self::get_interval_intersec_rec(curr, q, &mut acc);
         acc
     }
 
-    fn get_interval_intersec_rec<'a>(curr: Option<&'a Box<Node<Q>>>, q: &Range<Q>, acc: &mut Vec<&'a Range<Q>>) {
+    fn get_interval_intersec_rec<'a>(curr: &'a Option<Box<Node<Q>>>, q: &Range<Q>, acc: &mut Vec<&'a Range<Q>>) {
         // If we reach None, stop recursing along this subtree.
         let node = match curr {
             None => return,
@@ -94,16 +94,12 @@ where Q: Ord + Clone {
             Unbounded => None,
         };
         match (max_subtree, min_q) {
-            (Some(max_subtree), Some(min_q)) => {
-                if max_subtree < min_q {
-                    return;
-                }
-            },
+            (Some(max_subtree), Some(min_q)) if max_subtree < min_q => return,
             _ => {},
         };
 
         // Search left subtree.
-        Self::get_interval_intersec_rec(node.left.as_ref(), q, acc);
+        Self::get_interval_intersec_rec(&node.left, q, acc);
 
         // Visit this node.
         // If node.min <= q.max AND node.max >= q.min, we have an intersection.
@@ -162,7 +158,7 @@ where Q: Ord + Clone {
         };
 
         // Search right subtree.
-        Self::get_interval_intersec_rec(node.right.as_ref(), q, acc);
+        Self::get_interval_intersec_rec(&node.right, q, acc);
     }
 }
 
