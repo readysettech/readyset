@@ -59,15 +59,15 @@ where
         }
     }
 
-    pub fn get_interval_intersec(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
+    pub fn get_interval_overlaps(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
         let curr = &self.root;
         let mut acc = Vec::new();
 
-        Self::get_interval_intersec_rec(curr, q, &mut acc);
+        Self::get_interval_overlaps_rec(curr, q, &mut acc);
         acc
     }
 
-    fn get_interval_intersec_rec<'a>(
+    fn get_interval_overlaps_rec<'a>(
         curr: &'a Option<Box<Node<Q>>>,
         q: &Range<Q>,
         acc: &mut Vec<&'a Range<Q>>,
@@ -105,7 +105,7 @@ where
         };
 
         // Search left subtree.
-        Self::get_interval_intersec_rec(&node.left, q, acc);
+        Self::get_interval_overlaps_rec(&node.left, q, acc);
 
         // Visit this node.
         // If node.min <= q.max AND node.max >= q.min, we have an intersection.
@@ -164,7 +164,7 @@ where
         };
 
         // Search right subtree.
-        Self::get_interval_intersec_rec(&node.right, q, acc);
+        Self::get_interval_overlaps_rec(&node.right, q, acc);
     }
 }
 
@@ -418,49 +418,49 @@ mod tests {
 
         tree.insert(root_key.clone());
         tree.insert(left_key.clone());
-        assert_eq!(tree.get_interval_intersec(&root_key), vec![&root_key]);
+        assert_eq!(tree.get_interval_overlaps(&root_key), vec![&root_key]);
 
         tree.insert(left_left_key.clone());
         assert_eq!(
-            tree.get_interval_intersec(&(Unbounded, Unbounded)),
+            tree.get_interval_overlaps(&(Unbounded, Unbounded)),
             vec![&left_left_key, &left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Included(100), Unbounded)),
+            tree.get_interval_overlaps(&(Included(100), Unbounded)),
             Vec::<&Range<i32>>::new()
         );
 
         tree.insert(right_key);
         assert_eq!(
-            tree.get_interval_intersec(&root_key),
+            tree.get_interval_overlaps(&root_key),
             vec![&left_left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Unbounded, Unbounded)),
+            tree.get_interval_overlaps(&(Unbounded, Unbounded)),
             vec![&left_left_key, &left_key, &root_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Included(100), Unbounded)),
+            tree.get_interval_overlaps(&(Included(100), Unbounded)),
             vec![&right_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Included(3), Excluded(10))),
+            tree.get_interval_overlaps(&(Included(3), Excluded(10))),
             vec![&left_left_key, &root_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Excluded(3), Excluded(10))),
+            tree.get_interval_overlaps(&(Excluded(3), Excluded(10))),
             vec![&left_left_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Unbounded, Excluded(2))),
+            tree.get_interval_overlaps(&(Unbounded, Excluded(2))),
             vec![&left_left_key, &left_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Unbounded, Included(2))),
+            tree.get_interval_overlaps(&(Unbounded, Included(2))),
             vec![&left_left_key, &left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_intersec(&(Unbounded, Included(3))),
+            tree.get_interval_overlaps(&(Unbounded, Included(3))),
             vec![&left_left_key, &left_key, &root_key]
         );
     }
