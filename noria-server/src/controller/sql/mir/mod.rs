@@ -1089,30 +1089,31 @@ impl SqlToMirConverter {
                 use nom_sql::ConditionExpression::*;
 
                 let cond = condition.expect("Filter aggregation must have condition!");
-                let condtree = match *cond {
-                    LogicalOp(_) => unimplemented!(),
-                    ComparisonOp(ref ct) => ct,
+                match *cond {
+                    LogicalOp(ref ct) => unimplemented!(),
+                    ComparisonOp(ref ct) => {
+                        let mut fields = parent_node.borrow().columns().to_vec();
+                        let filter = self.to_conditions(ct, &mut fields, &parent_node);
+                        MirNode::new(
+                            name,
+                            self.schema_version,
+                            combined_columns,
+                            MirNodeType::FilterAggregation {
+                                on: over_col.clone(),
+                                else_on: else_val.clone(),
+                                group_by: group_by.into_iter().cloned().collect(),
+                                kind: filter_agg,
+                                conditions: filter,
+                            },
+                            vec![parent_node.clone()],
+                            vec![],
+                        )
+                    },
                     Bracketed(_) => unimplemented!(),
                     NegationOp(_) => unreachable!("negation should have been removed earlier"),
                     Base(_) => unreachable!("dangling base predicate"),
                     Arithmetic(_) => unimplemented!(),
-                };
-                let mut fields = parent_node.borrow().columns().to_vec();
-                let filter = self.to_conditions(condtree, &mut fields, &parent_node);
-                MirNode::new(
-                    name,
-                    self.schema_version,
-                    combined_columns,
-                    MirNodeType::FilterAggregation {
-                        on: over_col.clone(),
-                        else_on: else_val.clone(),
-                        group_by: group_by.into_iter().cloned().collect(),
-                        kind: filter_agg,
-                        conditions: filter,
-                    },
-                    vec![parent_node.clone()],
-                    vec![],
-                )
+                }
             },
             GroupedNodeType::GroupConcat(sep) => MirNode::new(
                 name,

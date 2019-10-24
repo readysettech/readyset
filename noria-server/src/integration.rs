@@ -2271,6 +2271,28 @@ fn soupy_lobsters() {
 }
 
 #[test]
+fn mergeable_lobsters() {
+    test_queries(
+        "mergeable_lobsters",
+        "tests/mergeable-lobsters-schema.sql",
+        false,
+        false,
+        false,
+    );
+}
+
+#[test]
+fn filter_aggregate_lobsters() {
+    test_queries(
+        "filter_aggregate_lobsters",
+        "tests/filter-aggregate-lobsters-schema.sql",
+        false,
+        false,
+        false,
+    );
+}
+
+#[test]
 #[allow_fail]
 fn node_removal() {
     // set up graph

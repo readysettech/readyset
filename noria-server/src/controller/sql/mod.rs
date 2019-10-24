@@ -1688,6 +1688,79 @@ mod tests {
         });
     }
 
+// currently, this test will fail because logical operations are unimplemented
+// (in particular, any complex operation that might involve multiple filter conditions
+// is currently unimplemented for filter-aggregations (TODO))
+/*
+    #[test]
+    fn it_incorporates_aggregation_filter_logical_op() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (story_id int, comment_id int, vote int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["story_id", "comment_id", "vote"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT
+                COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) as votes
+                FROM votes
+                GROUP BY votes.comment_id;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let filter_cond = ConditionExpression::LogicalOp(ConditionTree {
+                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.story_id")))),
+                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Null))),
+                    operator: Operator::Equal,
+                })),
+                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.vote")))),
+                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(0)))),
+                    operator: Operator::Equal,
+                })),
+                operator: Operator::And,
+            });
+            let f = Box::new(FunctionExpression::CountFilter(
+                Column::from("votes.vote"),
+                None,
+                filter_cond));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.comment_id")],
+                &[&Column {
+                    name: String::from("votes"),
+                    alias: Some(String::from("votes")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        });
+    }
+    */
+
     #[test]
     fn it_incorporates_explicit_multi_join() {
         // set up graph

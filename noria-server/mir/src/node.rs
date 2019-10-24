@@ -887,7 +887,7 @@ impl Debug for MirNodeType {
             }
             MirNodeType::FilterAggregation {
                 ref on,
-                ref else_on,
+                else_on: _,
                 ref group_by,
                 ref kind,
                 conditions: _,
