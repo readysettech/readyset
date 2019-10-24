@@ -1,7 +1,7 @@
-use std::ops::Bound;
-use std::ops::Bound::*;
 use std::cmp::Ordering;
 use std::cmp::Ordering::*;
+use std::ops::Bound;
+use std::ops::Bound::*;
 
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
@@ -10,16 +10,18 @@ pub struct IntervalTree<Q: Ord + Clone> {
 }
 
 impl<Q> Default for IntervalTree<Q>
-where Q: Ord + Clone {
+where
+    Q: Ord + Clone,
+{
     fn default() -> IntervalTree<Q> {
-        IntervalTree {
-            root: None,
-        }
+        IntervalTree { root: None }
     }
 }
 
 impl<Q> IntervalTree<Q>
-where Q: Ord + Clone {
+where
+    Q: Ord + Clone,
+{
     pub fn insert(&mut self, range: Range<Q>) {
         // If the tree is empty, put new node at the root.
         if self.root.is_none() {
@@ -40,21 +42,21 @@ where Q: Ord + Clone {
                         None => {
                             curr.right = Some(Box::new(Node::new(range)));
                             return;
-                        },
+                        }
                         Some(ref mut node) => curr = node,
                     };
-                },
+                }
                 Greater => {
                     match curr.left {
                         None => {
                             curr.left = Some(Box::new(Node::new(range)));
                             return;
-                        },
+                        }
                         Some(ref mut node) => curr = node,
                     };
-                },
+                }
             };
-        };
+        }
     }
 
     pub fn get_interval_intersec(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
@@ -65,7 +67,11 @@ where Q: Ord + Clone {
         acc
     }
 
-    fn get_interval_intersec_rec<'a>(curr: &'a Option<Box<Node<Q>>>, q: &Range<Q>, acc: &mut Vec<&'a Range<Q>>) {
+    fn get_interval_intersec_rec<'a>(
+        curr: &'a Option<Box<Node<Q>>>,
+        q: &Range<Q>,
+        acc: &mut Vec<&'a Range<Q>>,
+    ) {
         // If we reach None, stop recursing along this subtree.
         let node = match curr {
             None => return,
@@ -95,7 +101,7 @@ where Q: Ord + Clone {
         };
         match (max_subtree, min_q) {
             (Some(max_subtree), Some(min_q)) if max_subtree < min_q => return,
-            _ => {},
+            _ => {}
         };
 
         // Search left subtree.
@@ -151,10 +157,10 @@ where Q: Ord + Clone {
                 };
 
                 match (max_node, min_q) {
-                    (Some(max_node), Some(min_q)) if max_node < min_q => {},
+                    (Some(max_node), Some(min_q)) if max_node < min_q => {}
                     _ => acc.push(&node.key),
                 };
-            },
+            }
         };
 
         // Search right subtree.
@@ -170,7 +176,9 @@ struct Node<Q: Ord + Clone> {
 }
 
 impl<Q> Node<Q>
-where Q: Ord + Clone {
+where
+    Q: Ord + Clone,
+{
     pub fn new(range: Range<Q>) -> Node<Q> {
         let max = range.1.clone();
 
@@ -194,19 +202,21 @@ where Q: Ord + Clone {
             Unbounded => None,
         };
         match (self_max_q, inserted_max_q) {
-            (None, _) => {},
+            (None, _) => {}
             (_, None) => self.value = Unbounded,
             (Some(self_max_q), Some(inserted_max_q)) => {
                 if self_max_q < inserted_max_q {
                     self.value = inserted_max.clone();
                 }
-            },
+            }
         };
     }
 }
 
 fn cmp<Q>(r1: &Range<Q>, r2: &Range<Q>) -> Ordering
-where Q: Ord {
+where
+    Q: Ord,
+{
     // Sorting by lower bound, then by upper bound.
     //   -> Unbounded is the smallest lower bound.
     //   -> Unbounded is the biggest upper bound.
@@ -229,18 +239,18 @@ where Q: Ord {
     };
 
     match (r1_min, r2_min) {
-        (None, None) => {}, // Left-bounds are equal, we can't return yet.
+        (None, None) => {} // Left-bounds are equal, we can't return yet.
         (None, Some(_)) => return Less,
         (Some(_), None) => return Greater,
         (Some(r1), Some(ref r2)) => {
             match r1.cmp(r2) {
                 Less => return Less,
                 Greater => return Greater,
-                Equal => {}, // Left-bounds are equal, we can't return yet.
+                Equal => {} // Left-bounds are equal, we can't return yet.
             };
         }
     };
-    
+
     // Both left-bounds are equal, we have to compare the right-bounds as a tie-breaker.
     // Note that we have inversed the 2nd value in the tuple, as the Included/Excluded rules
     // are flipped for the upper bound.
@@ -280,7 +290,6 @@ mod tests {
         assert_eq!(tree.root.as_ref().unwrap().value, key.1);
         assert!(tree.root.as_ref().unwrap().left.is_none());
         assert!(tree.root.as_ref().unwrap().right.is_none());
-
     }
 
     #[test]
@@ -298,10 +307,21 @@ mod tests {
         tree.insert(left_key.clone());
         assert!(tree.root.as_ref().unwrap().right.is_none());
         assert!(tree.root.as_ref().unwrap().left.is_some());
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_key.1);
-    
+        assert_eq!(
+            tree.root.as_ref().unwrap().left.as_ref().unwrap().value,
+            left_key.1
+        );
+
         tree.insert(left_right_key.clone());
-        assert!(tree.root.as_ref().unwrap().left.as_ref().unwrap().right.is_some());
+        assert!(tree
+            .root
+            .as_ref()
+            .unwrap()
+            .left
+            .as_ref()
+            .unwrap()
+            .right
+            .is_some());
     }
 
     #[test]
@@ -319,19 +339,51 @@ mod tests {
         tree.insert(left_key.clone());
         assert_eq!(tree.root.as_ref().unwrap().value, root_key.1);
         assert!(tree.root.as_ref().unwrap().left.is_some());
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_key.1);
+        assert_eq!(
+            tree.root.as_ref().unwrap().left.as_ref().unwrap().value,
+            left_key.1
+        );
 
         tree.insert(left_left_key.clone());
         assert_eq!(tree.root.as_ref().unwrap().value, left_left_key.1);
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
-        assert!(tree.root.as_ref().unwrap().left.as_ref().unwrap().left.is_some());
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
+        assert_eq!(
+            tree.root.as_ref().unwrap().left.as_ref().unwrap().value,
+            left_left_key.1
+        );
+        assert!(tree
+            .root
+            .as_ref()
+            .unwrap()
+            .left
+            .as_ref()
+            .unwrap()
+            .left
+            .is_some());
+        assert_eq!(
+            tree.root
+                .as_ref()
+                .unwrap()
+                .left
+                .as_ref()
+                .unwrap()
+                .left
+                .as_ref()
+                .unwrap()
+                .value,
+            left_left_key.1
+        );
 
         tree.insert(right_key.clone());
         assert_eq!(tree.root.as_ref().unwrap().value, right_key.1);
         assert!(tree.root.as_ref().unwrap().right.is_some());
-        assert_eq!(tree.root.as_ref().unwrap().left.as_ref().unwrap().value, left_left_key.1);
-        assert_eq!(tree.root.as_ref().unwrap().right.as_ref().unwrap().value, right_key.1);
+        assert_eq!(
+            tree.root.as_ref().unwrap().left.as_ref().unwrap().value,
+            left_left_key.1
+        );
+        assert_eq!(
+            tree.root.as_ref().unwrap().right.as_ref().unwrap().value,
+            right_key.1
+        );
     }
 
     #[test]
@@ -344,7 +396,7 @@ mod tests {
         let key5 = (Included(7), Included(8));
         let key_str1 = (Included("abc"), Excluded("def"));
         let key_str2 = (Included("bbc"), Included("bde"));
-        let key_str3 : (_, Bound<&str>) = (Included("bbc"), Unbounded);
+        let key_str3: (_, Bound<&str>) = (Included("bbc"), Unbounded);
 
         assert_eq!(cmp(&key1, &key1), Equal);
         assert_eq!(cmp(&key1, &key2), Less);
@@ -369,17 +421,47 @@ mod tests {
         assert_eq!(tree.get_interval_intersec(&root_key), vec![&root_key]);
 
         tree.insert(left_left_key.clone());
-        assert_eq!(tree.get_interval_intersec(&(Unbounded, Unbounded)), vec![&left_left_key, &left_key, &root_key]);
-        assert_eq!(tree.get_interval_intersec(&(Included(100), Unbounded)), Vec::<&Range<i32>>::new());
+        assert_eq!(
+            tree.get_interval_intersec(&(Unbounded, Unbounded)),
+            vec![&left_left_key, &left_key, &root_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Included(100), Unbounded)),
+            Vec::<&Range<i32>>::new()
+        );
 
         tree.insert(right_key);
-        assert_eq!(tree.get_interval_intersec(&root_key), vec![&left_left_key, &root_key]);
-        assert_eq!(tree.get_interval_intersec(&(Unbounded, Unbounded)), vec![&left_left_key, &left_key, &root_key, &right_key]);
-        assert_eq!(tree.get_interval_intersec(&(Included(100), Unbounded)), vec![&right_key]);
-        assert_eq!(tree.get_interval_intersec(&(Included(3), Excluded(10))), vec![&left_left_key, &root_key, &right_key]);     
-        assert_eq!(tree.get_interval_intersec(&(Excluded(3), Excluded(10))), vec![&left_left_key, &right_key]);   
-        assert_eq!(tree.get_interval_intersec(&(Unbounded, Excluded(2))), vec![&left_left_key, &left_key]);
-        assert_eq!(tree.get_interval_intersec(&(Unbounded, Included(2))), vec![&left_left_key, &left_key, &root_key]);
-        assert_eq!(tree.get_interval_intersec(&(Unbounded, Included(3))), vec![&left_left_key, &left_key, &root_key]);   
+        assert_eq!(
+            tree.get_interval_intersec(&root_key),
+            vec![&left_left_key, &root_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Unbounded, Unbounded)),
+            vec![&left_left_key, &left_key, &root_key, &right_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Included(100), Unbounded)),
+            vec![&right_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Included(3), Excluded(10))),
+            vec![&left_left_key, &root_key, &right_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Excluded(3), Excluded(10))),
+            vec![&left_left_key, &right_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Unbounded, Excluded(2))),
+            vec![&left_left_key, &left_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Unbounded, Included(2))),
+            vec![&left_left_key, &left_key, &root_key]
+        );
+        assert_eq!(
+            tree.get_interval_intersec(&(Unbounded, Included(3))),
+            vec![&left_left_key, &left_key, &root_key]
+        );
     }
 }
