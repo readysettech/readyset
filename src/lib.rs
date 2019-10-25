@@ -141,7 +141,7 @@ where
                     contiguous = &overlap.1;
                 }
                 (Excluded(contiguous_max), Excluded(overlap_min))
-                    if contiguous_max == overlap_min =>
+                    if contiguous_max <= overlap_min =>
                 {
                     acc.push((Included(contiguous_max), Included(overlap_min)));
                     contiguous = &overlap.1;
@@ -642,6 +642,26 @@ mod tests {
         assert_eq!(
             tree.get_interval_difference(&(Included(2), Included(10))),
             vec![(Included(&10), Included(&10))]
+        );
+    }
+
+    #[test]
+    fn consecutive_excluded_non_contiguous_difference_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(10), Excluded(20));
+        let key2 = (Excluded(30), Excluded(40));
+
+        tree.insert(key1);
+        tree.insert(key2);
+
+        assert_eq!(
+            tree.get_interval_difference(&(Included(0), Included(40))),
+            vec![
+                (Included(&0), Excluded(&10)),
+                (Included(&20), Included(&30)),
+                (Included(&40), Included(&40))
+            ]
         );
     }
 }
