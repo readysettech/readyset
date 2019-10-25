@@ -33,3 +33,5 @@ plots_files/
 .Rhistory
 
 *.swp
+
+noria-server/examples/jamb/*
