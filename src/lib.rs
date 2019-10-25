@@ -67,6 +67,127 @@ where
         acc
     }
 
+    pub fn get_interval_difference<'a>(&'a self, q: &'a Range<Q>) -> Vec<Range<&'a Q>> {
+        let overlaps = self.get_interval_overlaps(q);
+
+        // If there is no overlap, then the difference is the query `q` itself.
+        if overlaps.is_empty() {
+            let min = match q.0 {
+                Included(ref x) => Included(x),
+                Excluded(ref x) => Excluded(x),
+                Unbounded => Unbounded,
+            };
+            let max = match q.1 {
+                Included(ref x) => Included(x),
+                Excluded(ref x) => Excluded(x),
+                Unbounded => Unbounded,
+            };
+            return vec![(min, max)];
+        }
+
+        let mut acc = Vec::new();
+        let first = &overlaps.first().unwrap();
+
+        // If q.min < first.min, we have a difference to append.
+        match (&q.0, &first.0) {
+            (Unbounded, Included(first_min)) => acc.push((Unbounded, Excluded(first_min))),
+            (Unbounded, Excluded(first_min)) => acc.push((Unbounded, Included(first_min))),
+            (Included(q_min), Included(first_min)) if q_min < first_min => {
+                acc.push((Included(q_min), Excluded(first_min)))
+            }
+            (Excluded(q_min), Included(first_min)) if q_min < first_min => {
+                acc.push((Excluded(q_min), Excluded(first_min)))
+            }
+            (Excluded(q_min), Excluded(first_min)) if q_min < first_min => {
+                acc.push((Excluded(q_min), Included(first_min)))
+            }
+            (Included(q_min), Excluded(first_min)) if q_min <= first_min => {
+                acc.push((Included(q_min), Included(first_min)))
+            }
+            _ => {}
+        };
+
+        // If the max is unbounded, there can't be any difference going forward.
+        if first.1 == Unbounded {
+            return acc;
+        }
+
+        let mut contiguous = &first.1; // keeps track of the maximum of a contiguous interval.
+        for overlap in overlaps.iter().skip(1) {
+            // If contiguous < overlap.min:
+            //   1. We have a difference between contiguous -> overlap.min to fill.
+            //     1.1: Note: the endpoints of the difference appended are the opposite,
+            //          that is if contiguous was Included, then the difference must
+            //          be Excluded, and vice versa.
+            //   2. We need to update contiguous to be the new contiguous max.
+            // Note: an Included+Excluded at the same point still is contiguous!
+            match (&contiguous, &overlap.0) {
+                (Included(contiguous_max), Included(overlap_min))
+                    if contiguous_max < overlap_min =>
+                {
+                    acc.push((Excluded(contiguous_max), Excluded(overlap_min)));
+                    contiguous = &overlap.1;
+                }
+                (Included(contiguous_max), Excluded(overlap_min))
+                    if contiguous_max < overlap_min =>
+                {
+                    acc.push((Excluded(contiguous_max), Included(overlap_min)));
+                    contiguous = &overlap.1;
+                }
+                (Excluded(contiguous_max), Included(overlap_min))
+                    if contiguous_max < overlap_min =>
+                {
+                    acc.push((Included(contiguous_max), Excluded(overlap_min)));
+                    contiguous = &overlap.1;
+                }
+                (Excluded(contiguous_max), Excluded(overlap_min))
+                    if contiguous_max == overlap_min =>
+                {
+                    acc.push((Included(contiguous_max), Included(overlap_min)));
+                    contiguous = &overlap.1;
+                }
+                _ => {}
+            }
+
+            // If contiguous.max < overlap.max, we set contiguous to the new max.
+            match (&contiguous, &overlap.1) {
+                (_, Unbounded) => return acc,
+                (Included(contiguous_max), Included(overlap_max))
+                | (Excluded(contiguous_max), Excluded(overlap_max))
+                | (Included(contiguous_max), Excluded(overlap_max))
+                    if contiguous_max < overlap_max =>
+                {
+                    contiguous = &overlap.1
+                }
+                (Excluded(contiguous_max), Included(overlap_max))
+                    if contiguous_max <= overlap_max =>
+                {
+                    contiguous = &overlap.1
+                }
+                _ => {}
+            };
+        }
+
+        // If contiguous.max < q.max, we have a difference to append.
+        match (&contiguous, &q.1) {
+            (Included(contiguous_max), Included(q_max)) if contiguous_max < q_max => {
+                acc.push((Excluded(contiguous_max), Included(q_max)))
+            }
+            (Included(contiguous_max), Excluded(q_max)) if contiguous_max < q_max => {
+                acc.push((Excluded(contiguous_max), Excluded(q_max)))
+            }
+            (Excluded(contiguous_max), Excluded(q_max)) if contiguous_max < q_max => {
+                acc.push((Included(contiguous_max), Excluded(q_max)))
+            }
+            (Excluded(contiguous_max), Included(q_max)) if contiguous_max <= q_max => {
+                acc.push((Included(contiguous_max), Included(q_max)))
+            }
+            _ => {}
+        };
+
+        acc
+    }
+
     fn get_interval_overlaps_rec<'a>(
         curr: &'a Option<Box<Node<Q>>>,
         q: &Range<Q>,
@@ -462,6 +583,65 @@ mod tests {
         assert_eq!(
             tree.get_interval_overlaps(&(Unbounded, Included(3))),
             vec![&left_left_key, &left_key, &root_key]
+        );
+    }
+
+    #[test]
+    fn difference_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(2), Excluded(10));
+        let key2 = (Included(4), Included(6));
+        let key3 = (Excluded(10), Excluded(20));
+        let key4 = (Excluded(30), Included(35));
+        let key5 = (Included(30), Included(40));
+        let key6 = (Included(30), Included(35));
+        let key7 = (Excluded(45), Unbounded);
+        let key8 = (Included(60), Included(70));
+
+        tree.insert(key1);
+        tree.insert(key2);
+        tree.insert(key3);
+        tree.insert(key4);
+        tree.insert(key5);
+        tree.insert(key6);
+        tree.insert(key7);
+        tree.insert(key8);
+
+        assert_eq!(
+            tree.get_interval_difference(&(Excluded(0), Included(100))),
+            vec![
+                (Excluded(&0), Excluded(&2)),
+                (Included(&10), Included(&10)),
+                (Included(&20), Excluded(&30)),
+                (Excluded(&40), Included(&45))
+            ]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Included(19), Included(40))),
+            vec![(Included(&20), Excluded(&30))]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Included(20), Included(40))),
+            vec![(Included(&20), Excluded(&30))]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Included(20), Included(45))),
+            vec![
+                (Included(&20), Excluded(&30)),
+                (Excluded(&40), Included(&45))
+            ]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Included(20), Excluded(45))),
+            vec![
+                (Included(&20), Excluded(&30)),
+                (Excluded(&40), Excluded(&45))
+            ]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Included(2), Included(10))),
+            vec![(Included(&10), Included(&10))]
         );
     }
 }
