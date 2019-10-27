@@ -59,6 +59,14 @@ where
         }
     }
 
+    pub fn contains_point(&self, q: &Q) -> bool {
+        self.contains(&(Included(q.clone()), Included(q.clone())))
+    }
+
+    pub fn contains(&self, q: &Range<Q>) -> bool {
+        self.get_interval_difference(q).is_empty()
+    }
+
     pub fn get_interval_overlaps(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
         let curr = &self.root;
         let mut acc = Vec::new();
@@ -663,5 +671,41 @@ mod tests {
                 (Included(&40), Included(&40))
             ]
         );
+    }
+
+    #[test]
+    fn contains_point_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(10), Excluded(20));
+        let key2 = (Excluded(30), Excluded(40));
+        let key3 = (Included(40), Unbounded);
+
+        tree.insert(key1);
+        tree.insert(key2);
+        tree.insert(key3);
+
+        assert!(tree.contains_point(&10));
+        assert!(!tree.contains_point(&20));
+        assert!(tree.contains_point(&40));
+        assert!(tree.contains_point(&100));
+    }
+
+    #[test]
+    fn contains_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(10), Excluded(20));
+        let key2 = (Excluded(30), Excluded(40));
+        let key3 = (Included(40), Unbounded);
+
+        tree.insert(key1.clone());
+        tree.insert(key2.clone());
+        tree.insert(key3.clone());
+
+        assert!(tree.contains(&key1));
+        assert!(!tree.contains(&(Included(10), Included(20))));
+        assert!(!tree.contains(&(Unbounded, Included(0))));
+        assert!(tree.contains(&(Included(35), Included(37))));
     }
 }
