@@ -1090,7 +1090,7 @@ impl SqlToMirConverter {
 
                 let cond = condition.expect("Filter aggregation must have condition!");
                 match *cond {
-                    LogicalOp(ref ct) => unimplemented!(),
+                    LogicalOp(_) => unimplemented!(),
                     ComparisonOp(ref ct) => {
                         let mut fields = parent_node.borrow().columns().to_vec();
                         let filter = self.to_conditions(ct, &mut fields, &parent_node);

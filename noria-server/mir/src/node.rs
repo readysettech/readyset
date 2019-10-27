@@ -391,12 +391,14 @@ impl MirNode {
 
 /// Specifies the adapatation of an existing base node by column addition/removal.
 /// `over` is a `MirNode` of type `Base`.
+#[derive(Clone)]
 pub struct BaseNodeAdaptation {
     pub over: MirNodeRef,
     pub columns_added: Vec<ColumnSpecification>,
     pub columns_removed: Vec<ColumnSpecification>,
 }
 
+#[derive(Clone)]
 pub enum MirNodeType {
     /// over column, group_by columns
     Aggregation {

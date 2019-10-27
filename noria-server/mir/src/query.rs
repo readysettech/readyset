@@ -73,7 +73,8 @@ impl MirQuery {
         sec: bool,
     ) -> MirQuery {
         super::rewrite::pull_required_base_columns(&mut self, table_mapping, sec);
-        super::optimize::optimize(self)
+        super::optimize::optimize(&mut self);
+        self
     }
 
     pub fn optimize_post_reuse(mut self) -> MirQuery {

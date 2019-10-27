@@ -1,17 +1,170 @@
 use dataflow::ops::filter::FilterCondition;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation;
+use dataflow::ops::grouped::aggregate::Aggregation;
 use node::{MirNode, MirNodeType};
 use query::MirQuery;
 use MirNodeRef;
 
 use std::collections::HashMap;
 
-pub fn optimize(q: MirQuery) -> MirQuery {
+pub fn optimize(mut q: &mut MirQuery) {
     //remove_extraneous_projections(&mut q);
-    q
+    find_and_merge_filter_aggregates(&mut q);
 }
 
 pub fn optimize_post_reuse(_q: &mut MirQuery) {
     // find_and_merge_filter_chains(q);
+}
+
+fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
+
+    // 1. depth first search to find all the nodes, so we can process them later
+
+    let mut node_stack = Vec::new();
+    node_stack.extend(q.roots.iter().cloned());
+
+    let mut visited_nodes = HashMap::new();
+    let mut found_nodes = Vec::new();
+
+    while !node_stack.is_empty() {
+        let n = node_stack.pop().unwrap();
+        let node_name = n.borrow().versioned_name();
+
+        if visited_nodes.contains_key(&node_name) {
+            continue;
+        }
+
+        for child in n.borrow().children.iter() {
+            node_stack.push(child.clone());
+        }
+
+        visited_nodes.insert(node_name, true);
+        found_nodes.push(n);
+    }
+
+    // 2. iterate over the nodes to find candidates, i.e.
+    // nodes that are a filter followed by an aggregate with no other children, or
+    // nodes that are an aggregate followed by a filter with no other children.
+
+    let mut candidate_nodes = Vec::new();
+
+    for n in found_nodes {
+        // if we've already set this to false, we shouldn't look at it more;
+        // e.g. it might be merging with its parent node.
+        let node_name = n.borrow().versioned_name();
+        if !visited_nodes.get(&node_name).unwrap() {
+            continue;
+        }
+        // now scan for candidacy
+        let mut candidate = false;
+        match n.borrow().inner {
+            MirNodeType::Filter { .. }  => {
+                // if there's exactly one child and it's an aggregation,
+                // then this is a candidate
+                if n.borrow().children.len() == 1 {
+                    match n.borrow().children.first().unwrap().borrow().inner {
+                        MirNodeType::Aggregation { .. } => {
+                            candidate = true;
+                        },
+                        _ => {},
+                    };
+                }
+            },
+            MirNodeType::Aggregation { .. } => {
+                // if there's exactly one child and it's a filter,
+                // then this is a candidate
+                if n.borrow().children.len() == 1 {
+                    match n.borrow().children.first().unwrap().borrow().inner {
+                        MirNodeType::Filter { .. } => {
+                            candidate = true;
+                        },
+                        _ => {},
+                    };
+                }
+            },
+            _ => {},
+        };
+        if candidate {
+            candidate_nodes.push(n);
+        }
+    }
+    println!("candidate_nodes={:?}", candidate_nodes);
+
+    // TODO we need to avoid merging in cases where the filter
+    // is based on the computed aggregate column; write a test!
+
+    // 3. For each candidate, merge it, and update all parents/children
+    // of the newly merged node.
+    for n in candidate_nodes {
+        let temp = n.borrow();
+        let child = temp.children.first().unwrap().borrow();
+        // determine which is which
+        let (agg, filter) = match n.borrow().inner {
+            MirNodeType::Aggregation { .. }  => (n.borrow().inner.clone(), child.inner.clone()),
+            MirNodeType::Filter { .. } => (child.inner.clone(), n.borrow().inner.clone()),
+            _ => unreachable!(),
+        };
+
+        let new_node = MirNode::new(
+            &child.name,
+            child.from_version,
+            child.columns.clone(),
+            MirNodeType::FilterAggregation {
+                on: match &agg {
+                    MirNodeType::Aggregation { on, group_by: _, kind: _ } => on.clone(),
+                    _ => unreachable!(),
+                },
+                else_on: None,
+                group_by: match &agg {
+                    MirNodeType::Aggregation { on: _, group_by, kind: _ } => group_by.to_vec(),
+                    _ => unreachable!(),
+                },
+                //group_by.into_iter().cloned().collect(),
+                kind: match &agg {
+                    MirNodeType::Aggregation { on: _, group_by: _, kind } => {
+                        match kind {
+                            Aggregation::COUNT => FilterAggregation::COUNT,
+                            Aggregation::SUM => FilterAggregation::SUM,
+                        }
+                    },
+                    _ => unreachable!(),
+                },
+                conditions: match &filter {
+                    MirNodeType::Filter { ref conditions } => conditions.to_vec(),
+                    _ => unreachable!(),
+                },
+            },
+            n.borrow().ancestors.clone(),
+            child.children.clone(),
+        );
+
+        // now update parents/children to reference the new node
+        for c in child.children.iter() {
+            let mut new_ancestors = Vec::new();
+            for a in c.borrow().ancestors.iter() {
+                // TODO is versioned_name sufficiently unique for here (and below)?
+                if a.borrow().versioned_name() == child.versioned_name() {
+                    new_ancestors.push(new_node.clone());
+                }
+                else {
+                    new_ancestors.push(a.clone());
+                }
+            }
+            c.borrow_mut().ancestors = new_ancestors;
+        }
+        for a in n.borrow().ancestors.iter() {
+            let mut new_children = Vec::new();
+            for c in a.borrow().children.iter() {
+                if c.borrow().versioned_name() == n.borrow().versioned_name() {
+                    new_children.push(new_node.clone());
+                }
+                else {
+                    new_children.push(c.clone());
+                }
+            }
+            a.borrow_mut().children = new_children;
+        }
+    }
 }
 
 #[allow(dead_code)]
