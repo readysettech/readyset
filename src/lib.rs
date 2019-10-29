@@ -9,6 +9,11 @@ pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
 }
 
+pub struct IntervalTreeIter<'a, Q: Ord + Clone> {
+    to_visit: Vec<&'a Box<Node<Q>>>,
+    curr: &'a Option<Box<Node<Q>>>,
+}
+
 impl<Q> Default for IntervalTree<Q>
 where
     Q: Ord + Clone,
@@ -22,6 +27,13 @@ impl<Q> IntervalTree<Q>
 where
     Q: Ord + Clone,
 {
+    pub fn iter<'a>(&'a self) -> IntervalTreeIter<'a, Q> {
+        IntervalTreeIter {
+            to_visit: vec![],
+            curr: &self.root,
+        }
+    }
+
     pub fn insert(&mut self, range: Range<Q>) {
         // If the tree is empty, put new node at the root.
         if self.root.is_none() {
@@ -294,6 +306,32 @@ where
 
         // Search right subtree.
         Self::get_interval_overlaps_rec(&node.right, q, acc);
+    }
+}
+
+impl<'a, Q> Iterator for IntervalTreeIter<'a, Q>
+where
+    Q: Ord + Clone,
+{
+    type Item = &'a Range<Q>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr.is_none() && self.to_visit.is_empty() {
+            return None;
+        }
+
+        while self.curr.is_some() {
+            self.to_visit.push(self.curr.as_ref().unwrap());
+            self.curr = &self.curr.as_ref().unwrap().left;
+        }
+
+        if !self.to_visit.is_empty() {
+            let visited = self.to_visit.pop();
+            self.curr = &visited.as_ref().unwrap().right;
+            Some(&visited.unwrap().key)
+        } else {
+            None
+        }
     }
 }
 
@@ -707,5 +745,33 @@ mod tests {
         assert!(!tree.contains(&(Included(10), Included(20))));
         assert!(!tree.contains(&(Unbounded, Included(0))));
         assert!(tree.contains(&(Included(35), Included(37))));
+    }
+
+    #[test]
+    fn iter_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        assert_eq!(tree.iter().next(), None);
+
+        let key1 = (Included(10), Excluded(20));
+        let key2 = (Included(40), Unbounded);
+        let key3 = (Excluded(30), Excluded(40));
+        let key4 = (Unbounded, Included(50));
+        let key5 = (Excluded(-10), Included(-5));
+        let key6 = (Included(-10), Included(-4));
+
+        tree.insert(key1.clone());
+        tree.insert(key2.clone());
+        tree.insert(key3.clone());
+        tree.insert(key4.clone());
+        tree.insert(key5.clone());
+        tree.insert(key6.clone());
+
+        let inorder = vec![&key4, &key6, &key5, &key1, &key3, &key2];
+        for (idx, interval) in tree.iter().enumerate() {
+            assert_eq!(interval, inorder[idx]);
+        }
+
+        assert_eq!(tree.iter().count(), inorder.len());
     }
 }
