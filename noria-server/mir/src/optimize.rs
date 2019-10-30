@@ -98,6 +98,9 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
     for n in candidate_nodes {
         let temp = n.borrow();
         let child = temp.children.first().unwrap().borrow();
+        println!("columns={:?}", n.borrow().columns);
+        println!("child={:?}", child);
+        println!("columns={:?}", child.columns);
         // determine which is which
         let (agg, filter) = match n.borrow().inner {
             MirNodeType::Aggregation { .. }  => (n.borrow().inner.clone(), child.inner.clone()),
@@ -105,8 +108,11 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
             _ => unreachable!(),
         };
 
+        let mut new_name = child.name.clone();
+        new_name.push_str("_filteragg");  // TODO how should I actually generate names?
+
         let new_node = MirNode::new(
-            &child.name,
+            &new_name,
             child.from_version,
             child.columns.clone(),
             MirNodeType::FilterAggregation {
@@ -137,9 +143,12 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
             n.borrow().ancestors.clone(),
             child.children.clone(),
         );
+        println!("new_node={:?}", new_node);
+        println!("columns={:?}", new_node.borrow().columns);
 
         // now update parents/children to reference the new node
         for c in child.children.iter() {
+            println!("child={:?}", c);
             let mut new_ancestors = Vec::new();
             for a in c.borrow().ancestors.iter() {
                 // TODO is versioned_name sufficiently unique for here (and below)?
@@ -151,19 +160,28 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
                 }
             }
             c.borrow_mut().ancestors = new_ancestors;
+            println!("child_after={:?}", c);
         }
         for a in n.borrow().ancestors.iter() {
+            println!("ancestor={:?}", a);
             let mut new_children = Vec::new();
             for c in a.borrow().children.iter() {
                 if c.borrow().versioned_name() == n.borrow().versioned_name() {
-                    new_children.push(new_node.clone());
+                    // don't add anything here because MirNode::new()
+                    // automatically adds things to their ancestors, so
+                    // new_node is already in the list and we just need to
+                    // ignore the old node here
                 }
                 else {
                     new_children.push(c.clone());
                 }
             }
             a.borrow_mut().children = new_children;
+            println!("ancestor_after={:?}", a);
         }
+        println!("children={:?}", new_node.borrow().children);
+        println!("ancestors={:?}", new_node.borrow().ancestors);
+        // TODO do I also need to update the SqlToMirConverter nodes representation somehow?
     }
 }
 

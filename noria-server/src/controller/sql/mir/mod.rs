@@ -153,6 +153,11 @@ impl SqlToMirConverter {
             })
     }
 
+    // TODO: remove (this is just for debugging)
+    pub fn get_nodes(&self) -> HashMap<(String, usize), MirNodeRef> {
+        self.nodes.clone()
+    }
+
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
     /// and adds its to a vector of conditions.
     fn to_conditions(

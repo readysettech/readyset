@@ -1688,6 +1688,7 @@ mod tests {
         });
     }
 
+    // This entire test is a mess and needs rethinking.
     #[test]
     fn it_merges_filter_and_sum() {
         use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
@@ -1722,9 +1723,9 @@ mod tests {
                         right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                     }
             )));
-            let qid = query_id_hash(
+            let _qid = query_id_hash(
                 &["computed_columns", "votes"],
-                &[&Column::from("votes.userid")],
+                &[&Column::from("votes.userid"), &Column::from("votes.aid")],
                 &[&Column {
                     name: String::from("sum"),
                     alias: Some(String::from("sum")),
@@ -1732,9 +1733,14 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            // TODO compute qid correctly and use it in the below
+            // also TODO get the sumfilter into the mir converter representation
+            // so we don't have to indirectly access the node through its child
+            let agg_child = get_node(&inc, mig, &format!("q_4f38c761534f0bb8_n2"));
+            // there should only be one ancestor, so get its index and look it up in the graph
+            let agg_view = mig.graph().node_weight(*agg_child.ancestors().first().unwrap()).unwrap();
+            assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
