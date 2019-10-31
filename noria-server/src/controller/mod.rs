@@ -25,17 +25,17 @@ use tokio::sync::mpsc::UnboundedSender;
 mod domain_handle;
 mod inner;
 mod keys;
-crate mod migrate; // crate viz for tests
+pub(crate) mod migrate; // crate viz for tests
 mod mir_to_flow;
-crate mod recipe; // crate viz for tests
+pub(crate) mod recipe; // crate viz for tests
 mod schema;
 mod security;
-crate mod sql; // crate viz for tests
+pub(crate) mod sql; // crate viz for tests
 
 #[derive(Clone, Serialize, Deserialize)]
-crate struct ControllerState {
-    crate config: Config,
-    crate epoch: Epoch,
+pub(crate) struct ControllerState {
+    pub(crate) config: Config,
+    pub(crate) epoch: Epoch,
 
     recipe_version: usize,
     recipes: Vec<String>,

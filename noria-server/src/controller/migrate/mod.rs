@@ -31,7 +31,7 @@ use slog;
 
 mod assignment;
 mod augmentation;
-crate mod materialization;
+pub(crate) mod materialization;
 mod routing;
 mod sharding;
 
@@ -141,7 +141,7 @@ impl<'a> Migration<'a> {
     /// Note that if a node is marked this way, all of its children transitively _also_ have to be
     /// marked.
     #[cfg(test)]
-    crate fn mark_shallow(&mut self, ni: NodeIndex) {
+    pub(crate) fn mark_shallow(&mut self, ni: NodeIndex) {
         info!(self.log,
               "marking node as beyond materialization frontier";
               "node" => ni.index(),
@@ -226,7 +226,7 @@ impl<'a> Migration<'a> {
     }
 
     #[cfg(test)]
-    crate fn graph(&self) -> &Graph {
+    pub(crate) fn graph(&self) -> &Graph {
         self.mainline.graph()
     }
 
@@ -542,15 +542,15 @@ impl<'a> Migration<'a> {
             for ni in inform {
                 let n = &mainline.ingredients[ni];
                 let m = match change.clone() {
-                    ColumnChange::Add(field, default) => box Packet::AddBaseColumn {
+                    ColumnChange::Add(field, default) => Box::new(Packet::AddBaseColumn {
                         node: n.local_addr(),
                         field,
                         default,
-                    },
-                    ColumnChange::Drop(column) => box Packet::DropBaseColumn {
+                    }),
+                    ColumnChange::Drop(column) => Box::new(Packet::DropBaseColumn {
                         node: n.local_addr(),
                         column,
-                    },
+                    }),
                 };
 
                 let domain = mainline.domains.get_mut(&n.domain()).unwrap();

@@ -23,7 +23,7 @@ use crate::handle::Handle;
 use crate::Config;
 
 #[allow(clippy::large_enum_variant)]
-crate enum Event {
+pub(crate) enum Event {
     InternalMessage(CoordinationMessage),
     ExternalRequest(
         Method,

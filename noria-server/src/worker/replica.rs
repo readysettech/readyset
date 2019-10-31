@@ -174,23 +174,20 @@ impl Replica {
             match Pin::new(stream).poll_flush(cx) {
                 Poll::Pending => true,
                 Poll::Ready(Ok(())) => false,
-                Poll::Ready(Err(box bincode::ErrorKind::Io(e))) => {
-                    match e.kind() {
-                        io::ErrorKind::BrokenPipe
-                        | io::ErrorKind::NotConnected
-                        | io::ErrorKind::UnexpectedEof
-                        | io::ErrorKind::ConnectionAborted
-                        | io::ErrorKind::ConnectionReset => {
-                            // connection went away, no need to try more
-                            false
-                        }
-                        _ => {
-                            err.push(e.into());
-                            true
+                Poll::Ready(Err(e)) => {
+                    if let bincode::ErrorKind::Io(ref ioe) = *e {
+                        match ioe.kind() {
+                            io::ErrorKind::BrokenPipe
+                            | io::ErrorKind::NotConnected
+                            | io::ErrorKind::UnexpectedEof
+                            | io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionReset => {
+                                // connection went away, no need to try more
+                                return false;
+                            }
+                            _ => {}
                         }
                     }
-                }
-                Poll::Ready(Err(e)) => {
                     err.push(e.into());
                     true
                 }

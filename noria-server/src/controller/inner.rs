@@ -687,7 +687,7 @@ impl ControllerInner {
 
     /// Perform a new query schema migration.
     // crate viz for tests
-    crate fn migrate<F, T>(&mut self, f: F) -> T
+    pub(crate) fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T,
     {
@@ -708,7 +708,7 @@ impl ControllerInner {
     }
 
     #[cfg(test)]
-    crate fn graph(&self) -> &Graph {
+    pub(crate) fn graph(&self) -> &Graph {
         &self.ingredients
     }
 
@@ -886,7 +886,7 @@ impl ControllerInner {
             .iter_mut()
             .flat_map(|(&di, s)| {
                 trace!(log, "requesting stats from domain"; "di" => di.index());
-                s.send_to_healthy(box Packet::GetStatistics, workers)
+                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
                     .unwrap();
                 futures_executor::block_on(replies.wait_for_statistics(&s))
                     .into_iter()
@@ -914,7 +914,7 @@ impl ControllerInner {
             .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send_to_healthy(box Packet::GetStatistics, workers)
+                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
                     .unwrap();
                 let to_evict: Vec<(NodeIndex, u64)> =
                     futures_executor::block_on(replies.wait_for_statistics(&s))
@@ -942,10 +942,10 @@ impl ControllerInner {
                     .get_mut(&di)
                     .unwrap()
                     .send_to_healthy(
-                        box Packet::Evict {
+                        Box::new(Packet::Evict {
                             node: Some(na),
                             num_bytes: bytes as usize,
-                        },
+                        }),
                         workers,
                     )
                     .expect("failed to send domain flush message");
@@ -1270,7 +1270,7 @@ impl ControllerInner {
                 .domains
                 .get_mut(&domain)
                 .unwrap()
-                .send_to_healthy(box Packet::RemoveNodes { nodes }, &self.workers)
+                .send_to_healthy(Box::new(Packet::RemoveNodes { nodes }), &self.workers)
             {
                 Ok(_) => (),
                 Err(e) => match e {
@@ -1351,7 +1351,7 @@ impl Drop for ControllerInner {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
-                drop(d.send_to_healthy(box Packet::Quit, &self.workers));
+                drop(d.send_to_healthy(Box::new(Packet::Quit), &self.workers));
             }
         }
     }

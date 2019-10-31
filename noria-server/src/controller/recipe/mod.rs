@@ -22,7 +22,7 @@ type QueryID = u64;
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
 // crate viz for tests
-crate struct Recipe {
+pub(crate) struct Recipe {
     /// SQL queries represented in the recipe. Value tuple is (name, query, public).
     expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
@@ -120,7 +120,7 @@ impl Recipe {
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
     // crate viz for tests
-    crate fn blank(log: Option<slog::Logger>) -> Recipe {
+    pub(crate) fn blank(log: Option<slog::Logger>) -> Recipe {
         Recipe {
             expressions: HashMap::default(),
             expression_order: Vec::default(),
@@ -155,7 +155,7 @@ impl Recipe {
 
     /// Disable node reuse.
     // crate viz for tests
-    crate fn disable_reuse(&mut self) {
+    pub(crate) fn disable_reuse(&mut self) {
         self.inc.as_mut().unwrap().disable_reuse();
     }
 
@@ -217,7 +217,7 @@ impl Recipe {
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
     // crate viz for tests
-    crate fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> Result<Recipe, String> {
+    pub(crate) fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> Result<Recipe, String> {
         // remove comment lines
         let lines: Vec<String> = recipe_text
             .lines()
@@ -363,7 +363,7 @@ impl Recipe {
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
     // crate viz for tests
-    crate fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
+    pub(crate) fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
         debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
@@ -508,7 +508,7 @@ impl Recipe {
 
     /// Returns the query expressions in the recipe.
     // crate viz for tests
-    crate fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
+    pub(crate) fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
         self.expressions
             .values()
             .map(|&(ref n, ref q, _)| (n.as_ref(), q))
@@ -520,7 +520,7 @@ impl Recipe {
     /// recipe; use `replace` if removal of unused expressions is desired.
     /// Consumes `self` and returns a replacement recipe.
     // crate viz for tests
-    crate fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, String)> {
+    pub(crate) fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, String)> {
         // parse and compute differences to current recipe
         let add_rp = match Recipe::from_str(additions, None) {
             Ok(rp) => rp,
@@ -646,7 +646,7 @@ impl Recipe {
 
     /// Returns the predecessor from which this `Recipe` was migrated to.
     // crate viz for tests
-    crate fn prior(&self) -> Option<&Recipe> {
+    pub(crate) fn prior(&self) -> Option<&Recipe> {
         self.prior.as_ref().map(|p| &**p)
     }
 
@@ -690,7 +690,7 @@ impl Recipe {
 
     /// Returns the version number of this recipe.
     // crate viz for tests
-    crate fn version(&self) -> usize {
+    pub(crate) fn version(&self) -> usize {
         self.version
     }
 

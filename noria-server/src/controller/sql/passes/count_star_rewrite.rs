@@ -12,23 +12,23 @@ pub trait CountStarRewrite {
 fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
     match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
-            box ref left,
-            box ref right,
+            ref left,
+            ref right,
             ..
         }) => extract_condition_columns(left)
             .into_iter()
             .chain(extract_condition_columns(right).into_iter())
             .collect(),
         ConditionExpression::ComparisonOp(ConditionTree {
-            box ref left,
-            box ref right,
+            ref left,
+            ref right,
             ..
         }) => {
             let mut cols = vec![];
-            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = *left {
+            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **left {
                 cols.push(f.clone());
             }
-            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = *right {
+            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **right {
                 cols.push(f.clone());
             }
 
@@ -48,7 +48,11 @@ impl CountStarRewrite for SqlQuery {
         let rewrite_count_star =
             |c: &mut Column, tables: &Vec<Table>, avoid_columns: &Vec<Column>| {
                 assert!(!tables.is_empty());
-                if let Some(box CountStar) = c.function {
+                if c.function
+                    .as_ref()
+                    .map(|v| **v == CountStar)
+                    .unwrap_or(false)
+                {
                     let bogo_table = &tables[0];
                     let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
                     let mut bogo_column = schema_iter.next().unwrap();

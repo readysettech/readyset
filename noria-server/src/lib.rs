@@ -343,14 +343,9 @@
 //! + [id=1, title=Hello world, votes=43]
 //! ```
 #![feature(allow_fail)]
-#![feature(optin_builtin_traits)]
-#![feature(box_patterns)]
 #![feature(type_alias_impl_trait)]
-#![feature(box_syntax)]
-#![feature(nll)]
 #![feature(try_blocks)]
 #![feature(vec_remove_item)]
-#![feature(crate_visibility_modifier)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 //#![deny(unreachable_pub)]
@@ -415,17 +410,17 @@ where
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-crate struct Config {
-    crate sharding: Option<usize>,
-    crate partial_enabled: bool,
-    crate frontier_strategy: FrontierStrategy,
-    crate domain_config: DomainConfig,
-    crate persistence: PersistenceParameters,
-    crate heartbeat_every: time::Duration,
-    crate healthcheck_every: time::Duration,
-    crate quorum: usize,
-    crate reuse: ReuseConfigType,
-    crate threads: Option<usize>,
+pub(crate) struct Config {
+    pub(crate) sharding: Option<usize>,
+    pub(crate) partial_enabled: bool,
+    pub(crate) frontier_strategy: FrontierStrategy,
+    pub(crate) domain_config: DomainConfig,
+    pub(crate) persistence: PersistenceParameters,
+    pub(crate) heartbeat_every: time::Duration,
+    pub(crate) healthcheck_every: time::Duration,
+    pub(crate) quorum: usize,
+    pub(crate) reuse: ReuseConfigType,
+    pub(crate) threads: Option<usize>,
 }
 impl Default for Config {
     fn default() -> Self {

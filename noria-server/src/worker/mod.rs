@@ -396,10 +396,10 @@ async fn do_eviction(
 
                 let tx = domain_senders.get_mut(&largest.0).unwrap();
                 crate::blocking(|| {
-                    tx.send(box Packet::Evict {
+                    tx.send(Box::new(Packet::Evict {
                         node: None,
                         num_bytes: cmp::min(largest.1, total - limit),
-                    })
+                    }))
                     .unwrap()
                 })
                 .await;

@@ -1,5 +1,3 @@
-#![feature(slice_concat_ext)]
-
 use mysql::OptsBuilder;
 use mysql::Params;
 use serde_derive::Deserialize;

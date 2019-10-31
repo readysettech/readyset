@@ -44,7 +44,7 @@ enum QueryGraphReuse {
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 #[derive(Clone, Debug)]
 // crate viz for tests
-crate struct SqlIncorporator {
+pub(crate) struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
@@ -123,7 +123,7 @@ impl SqlIncorporator {
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
     #[cfg(test)]
-    crate fn add_query(
+    pub(crate) fn add_query(
         &mut self,
         query: &str,
         name: Option<String>,
@@ -802,10 +802,10 @@ impl SqlIncorporator {
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
-                        JoinRightSide::NestedSelect(box ref ns, ref alias) => {
+                        JoinRightSide::NestedSelect(ref ns, ref alias) => {
                             let qfp = self
                                 .add_parsed_query(
-                                    SqlQuery::Select(ns.clone()),
+                                    SqlQuery::Select((**ns).clone()),
                                     alias.clone(),
                                     false,
                                     mig,
