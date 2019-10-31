@@ -1,4 +1,3 @@
-#![feature(try_blocks)]
 #![feature(type_alias_impl_trait)]
 
 use clap::value_t_or_exit;

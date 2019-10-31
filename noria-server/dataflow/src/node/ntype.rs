@@ -1,6 +1,6 @@
-use node::special;
-use ops;
-use processing::Ingredient;
+use crate::node::special;
+use crate::ops;
+use crate::processing::Ingredient;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]

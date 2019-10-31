@@ -1,13 +1,13 @@
-use domain;
-use ops;
+use crate::domain;
+use crate::ops;
+use crate::prelude::*;
 use petgraph;
-use prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 mod process;
 #[cfg(test)]
-crate use self::process::materialize;
+pub(crate) use self::process::materialize;
 
 pub mod special;
 pub use self::special::StreamUpdate;
@@ -215,7 +215,7 @@ impl Node {
 
 // derefs
 impl Node {
-    crate fn with_sharder_mut<F>(&mut self, f: F)
+    pub(crate) fn with_sharder_mut<F>(&mut self, f: F)
     where
         F: FnOnce(&mut special::Sharder),
     {
@@ -236,7 +236,7 @@ impl Node {
         }
     }
 
-    crate fn with_egress_mut<F>(&mut self, f: F)
+    pub(crate) fn with_egress_mut<F>(&mut self, f: F)
     where
         F: FnOnce(&mut special::Egress),
     {
@@ -307,26 +307,26 @@ impl DerefMut for Node {
 
 // neighbors
 impl Node {
-    crate fn children(&self) -> &[LocalNodeIndex] {
+    pub(crate) fn children(&self) -> &[LocalNodeIndex] {
         &self.children
     }
 
-    crate fn parents(&self) -> &[LocalNodeIndex] {
+    pub(crate) fn parents(&self) -> &[LocalNodeIndex] {
         &self.parents
     }
 }
 
 // attributes
 impl Node {
-    crate fn beyond_mat_frontier(&self) -> bool {
+    pub(crate) fn beyond_mat_frontier(&self) -> bool {
         self.purge
     }
 
-    crate fn add_child(&mut self, child: LocalNodeIndex) {
+    pub(crate) fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
     }
 
-    crate fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
+    pub(crate) fn try_remove_child(&mut self, child: LocalNodeIndex) -> bool {
         for i in 0..self.children.len() {
             if self.children[i] == child {
                 self.children.swap_remove(i);

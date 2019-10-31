@@ -5,8 +5,8 @@ use serde;
 use tempfile::{tempdir, TempDir};
 
 use common::SizeOf;
-use prelude::*;
-use state::{RecordResult, State};
+use crate::prelude::*;
+use crate::state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.

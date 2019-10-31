@@ -13,7 +13,6 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
-use futures_util::ready;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
@@ -47,7 +46,7 @@ type FirstByte = Pin<
 #[pin_project]
 pub(super) struct Replica {
     domain: Domain,
-    log: slog::Logger,
+    pub(super) log: slog::Logger,
 
     coord: Arc<ChannelCoordinator>,
 
@@ -423,210 +422,200 @@ impl Executor for Outboxes {
 }
 
 impl Future for Replica {
-    type Output = ();
+    type Output = Result<(), failure::Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let r: Poll<Result<(), failure::Error>> = try {
-            'process: loop {
-                // FIXME: check if we should call update_state_sizes (every evict_every)
+        'process: loop {
+            // FIXME: check if we should call update_state_sizes (every evict_every)
 
-                // are there are any new connections?
-                if !self
-                    .as_mut()
-                    .try_new(cx)
-                    .context("check for new connections")?
-                {
-                    // incoming socket closed -- no more clients will arrive
-                    return Poll::Ready(());
-                }
-
-                // have any of our timers expired?
-                self.as_mut().try_timeout(cx);
-
-                // we have three logical input sources: receives from local domains, receives from
-                // remote domains, and remote mutators. we want to achieve some kind of fairness among
-                // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
-                // operations) to accepting new work. however, this is complicated by two facts:
-                //
-                //  - we cannot (currently) differentiate between receives from remote domains and
-                //    receives from mutators. they are all remote tcp channels. we *could*
-                //    differentiate them using `is_base` in `try_new` to store them separately, but
-                //    it's also unclear how that would change the receive heuristic.
-                //  - domain operations are not all "completing starting work". in many cases, traffic
-                //    from domains will be replay-related, in which case favoring domains would favor
-                //    writes over reads. while we do in general want reads to be fast, we don't want
-                //    them to fully starve writes.
-                //
-                // the current stategy is therefore that we alternate reading once from the local
-                // channel and once from the set of remote channels. this biases slightly in favor of
-                // local sends, without starving either. we also stop alternating once either source is
-                // depleted.
-                let mut local_done = false;
-                let mut remote_done = false;
-                let mut check_local = true;
-                let readiness = 'ready: loop {
-                    let mut this = self.as_mut().project();
-                    let d = this.domain;
-                    let out = this.out;
-
-                    macro_rules! process {
-                        ($retry:expr, $p:expr, $pp:expr) => {{
-                            $retry = Some($p);
-                            let retry = &mut $retry;
-                            match tokio_executor::threadpool::blocking(|| {
-                                $pp(retry.take().unwrap())
-                            }) {
-                                Poll::Ready(Ok(ProcessResult::StopPolling)) => {
-                                    // domain got a message to quit
-                                    // TODO: should we finish up remaining work?
-                                    return Poll::Ready(());
-                                }
-                                Poll::Ready(Ok(_)) => {}
-                                Poll::Pending => {
-                                    // NOTE: the packet is still left in $retry, so we'll try again
-                                    break 'ready Poll::Pending;
-                                }
-                                Poll::Ready(Err(e)) => {
-                                    unreachable!("trying to block without tokio runtime: {:?}", e)
-                                }
-                            }
-                        }};
-                    }
-
-                    let mut interrupted = false;
-                    if let Some(p) = this.retry.take() {
-                        // first try the thing we failed to process last time again
-                        process!(*this.retry, p, |p| d.on_event(out, PollEvent::Process(p),));
-                    }
-
-                    for i in 0..FORCE_INPUT_YIELD_EVERY {
-                        if !local_done && (check_local || remote_done) {
-                            match this.locals.poll_recv(cx) {
-                                Poll::Ready(Some(packet)) => {
-                                    process!(*this.retry, packet, |p| d
-                                        .on_event(out, PollEvent::Process(p),));
-                                }
-                                Poll::Ready(None) => {
-                                    // local input stream finished
-                                    // TODO: should we finish up remaining work?
-                                    warn!(this.log, "local input stream ended");
-                                    return Poll::Ready(());
-                                }
-                                Poll::Pending => {
-                                    local_done = true;
-                                }
-                            }
-                        }
-
-                        if !remote_done && (!check_local || local_done) {
-                            match this.inputs.as_mut().poll_next(cx) {
-                                Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
-                                    process!(*this.retry, packet, |p| d
-                                        .on_event(out, PollEvent::Process(p),));
-                                }
-                                Poll::Ready(Some((StreamYield::Finished, streami))) => {
-                                    out.back.remove(&streami);
-                                    out.pending.remove(&streami);
-                                    // increment the epoch to detect stale acks
-                                    *out.epochs
-                                        .get_mut(streami)
-                                        .expect("all streams are assigned an epoch") += 1;
-                                    // FIXME: what about if a later flush flushes to this stream?
-                                }
-                                Poll::Ready(None) => {
-                                    // we probably haven't booted yet
-                                    remote_done = true;
-                                }
-                                Poll::Pending => {
-                                    remote_done = true;
-                                }
-                                Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
-                                    error!(this.log, "input stream failed: {:?}", e);
-                                    remote_done = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // alternate between input sources
-                        check_local = !check_local;
-
-                        // nothing more to do -- wait to be polled again
-                        if local_done && remote_done {
-                            break;
-                        }
-
-                        if i == FORCE_INPUT_YIELD_EVERY - 1 {
-                            // we could keep processing inputs, but make sure we send some ACKs too!
-                            interrupted = true;
-                        }
-                    }
-
-                    // send to downstream
-                    // TODO: send fail == exiting?
-                    self.as_mut()
-                        .try_flush(cx)
-                        .context("downstream flush (after)")?;
-
-                    // send acks
-                    self.as_mut().try_acks(cx)?;
-
-                    if interrupted {
-                        // resume reading from our non-depleted inputs
-                        continue;
-                    }
-                    break Poll::Pending;
-                };
-
-                // check if we now need to set a timeout
-                self.out.dirty = false;
-                'resume_polling: loop {
-                    let mut this = self.as_mut().project();
-                    match this.domain.on_event(this.out, PollEvent::ResumePolling) {
-                        ProcessResult::KeepPolling(timeout) => {
-                            if let Some(timeout) = timeout {
-                                if timeout == time::Duration::new(0, 0) {
-                                    this.timeout.set(None);
-                                    *this.timed_out = true;
-                                } else {
-                                    // TODO: how about we don't create a new timer each time?
-                                    this.timeout
-                                        .set(Some(async_timer::oneshot::Timer::new(timeout)));
-                                }
-
-                                // we need to poll the timer to ensure we'll get woken up
-                                if self.as_mut().try_timeout(cx) {
-                                    // a timeout occurred, so we may have to set a new timer
-                                    if self.out.dirty {
-                                        // if we're already dirty, we'll re-do processing anyway
-                                    } else {
-                                        // try to resume polling again
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            if self.out.dirty {
-                                // more stuff appeared in our outboxes
-                                // can't yield yet -- we need to try to send it
-                                continue 'process;
-                            }
-                        }
-                        pr => {
-                            // TODO: just have resume_polling be a method...
-                            unreachable!("unexpected ResumePolling result {:?}", pr)
-                        }
-                    }
-                    break;
-                }
-
-                break readiness;
+            // are there are any new connections?
+            if !self
+                .as_mut()
+                .try_new(cx)
+                .context("check for new connections")?
+            {
+                // incoming socket closed -- no more clients will arrive
+                return Poll::Ready(Ok(()));
             }
-        };
 
-        if let Err(e) = ready!(r) {
-            let this = self.project();
-            crit!(this.log, "replica failure: {:?}", e);
+            // have any of our timers expired?
+            self.as_mut().try_timeout(cx);
+
+            // we have three logical input sources: receives from local domains, receives from
+            // remote domains, and remote mutators. we want to achieve some kind of fairness among
+            // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
+            // operations) to accepting new work. however, this is complicated by two facts:
+            //
+            //  - we cannot (currently) differentiate between receives from remote domains and
+            //    receives from mutators. they are all remote tcp channels. we *could*
+            //    differentiate them using `is_base` in `try_new` to store them separately, but
+            //    it's also unclear how that would change the receive heuristic.
+            //  - domain operations are not all "completing starting work". in many cases, traffic
+            //    from domains will be replay-related, in which case favoring domains would favor
+            //    writes over reads. while we do in general want reads to be fast, we don't want
+            //    them to fully starve writes.
+            //
+            // the current stategy is therefore that we alternate reading once from the local
+            // channel and once from the set of remote channels. this biases slightly in favor of
+            // local sends, without starving either. we also stop alternating once either source is
+            // depleted.
+            let mut local_done = false;
+            let mut remote_done = false;
+            let mut check_local = true;
+            let readiness = 'ready: loop {
+                let mut this = self.as_mut().project();
+                let d = this.domain;
+                let out = this.out;
+
+                macro_rules! process {
+                    ($retry:expr, $p:expr, $pp:expr) => {{
+                        $retry = Some($p);
+                        let retry = &mut $retry;
+                        match tokio_executor::threadpool::blocking(|| $pp(retry.take().unwrap())) {
+                            Poll::Ready(Ok(ProcessResult::StopPolling)) => {
+                                // domain got a message to quit
+                                // TODO: should we finish up remaining work?
+                                return Poll::Ready(Ok(()));
+                            }
+                            Poll::Ready(Ok(_)) => {}
+                            Poll::Pending => {
+                                // NOTE: the packet is still left in $retry, so we'll try again
+                                break 'ready Poll::Pending;
+                            }
+                            Poll::Ready(Err(e)) => {
+                                unreachable!("trying to block without tokio runtime: {:?}", e)
+                            }
+                        }
+                    }};
+                }
+
+                let mut interrupted = false;
+                if let Some(p) = this.retry.take() {
+                    // first try the thing we failed to process last time again
+                    process!(*this.retry, p, |p| d.on_event(out, PollEvent::Process(p),));
+                }
+
+                for i in 0..FORCE_INPUT_YIELD_EVERY {
+                    if !local_done && (check_local || remote_done) {
+                        match this.locals.poll_recv(cx) {
+                            Poll::Ready(Some(packet)) => {
+                                process!(*this.retry, packet, |p| d
+                                    .on_event(out, PollEvent::Process(p),));
+                            }
+                            Poll::Ready(None) => {
+                                // local input stream finished
+                                // TODO: should we finish up remaining work?
+                                warn!(this.log, "local input stream ended");
+                                return Poll::Ready(Ok(()));
+                            }
+                            Poll::Pending => {
+                                local_done = true;
+                            }
+                        }
+                    }
+
+                    if !remote_done && (!check_local || local_done) {
+                        match this.inputs.as_mut().poll_next(cx) {
+                            Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
+                                process!(*this.retry, packet, |p| d
+                                    .on_event(out, PollEvent::Process(p),));
+                            }
+                            Poll::Ready(Some((StreamYield::Finished, streami))) => {
+                                out.back.remove(&streami);
+                                out.pending.remove(&streami);
+                                // increment the epoch to detect stale acks
+                                *out.epochs
+                                    .get_mut(streami)
+                                    .expect("all streams are assigned an epoch") += 1;
+                                // FIXME: what about if a later flush flushes to this stream?
+                            }
+                            Poll::Ready(None) => {
+                                // we probably haven't booted yet
+                                remote_done = true;
+                            }
+                            Poll::Pending => {
+                                remote_done = true;
+                            }
+                            Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
+                                error!(this.log, "input stream failed: {:?}", e);
+                                remote_done = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // alternate between input sources
+                    check_local = !check_local;
+
+                    // nothing more to do -- wait to be polled again
+                    if local_done && remote_done {
+                        break;
+                    }
+
+                    if i == FORCE_INPUT_YIELD_EVERY - 1 {
+                        // we could keep processing inputs, but make sure we send some ACKs too!
+                        interrupted = true;
+                    }
+                }
+
+                // send to downstream
+                // TODO: send fail == exiting?
+                self.as_mut()
+                    .try_flush(cx)
+                    .context("downstream flush (after)")?;
+
+                // send acks
+                self.as_mut().try_acks(cx)?;
+
+                if interrupted {
+                    // resume reading from our non-depleted inputs
+                    continue;
+                }
+                break Poll::Pending;
+            };
+
+            // check if we now need to set a timeout
+            self.out.dirty = false;
+            'resume_polling: loop {
+                let mut this = self.as_mut().project();
+                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
+                    ProcessResult::KeepPolling(timeout) => {
+                        if let Some(timeout) = timeout {
+                            if timeout == time::Duration::new(0, 0) {
+                                this.timeout.set(None);
+                                *this.timed_out = true;
+                            } else {
+                                // TODO: how about we don't create a new timer each time?
+                                this.timeout
+                                    .set(Some(async_timer::oneshot::Timer::new(timeout)));
+                            }
+
+                            // we need to poll the timer to ensure we'll get woken up
+                            if self.as_mut().try_timeout(cx) {
+                                // a timeout occurred, so we may have to set a new timer
+                                if self.out.dirty {
+                                    // if we're already dirty, we'll re-do processing anyway
+                                } else {
+                                    // try to resume polling again
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if self.out.dirty {
+                            // more stuff appeared in our outboxes
+                            // can't yield yet -- we need to try to send it
+                            continue 'process;
+                        }
+                    }
+                    pr => {
+                        // TODO: just have resume_polling be a method...
+                        unreachable!("unexpected ResumePolling result {:?}", pr)
+                    }
+                }
+                break;
+            }
+
+            break readiness;
         }
-        Poll::Ready(())
     }
 }

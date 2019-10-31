@@ -1,7 +1,7 @@
 use super::{key_to_double, key_to_single, Key};
 use evmap;
 use fnv::FnvBuildHasher;
-use prelude::*;
+use crate::prelude::*;
 
 pub(super) enum Handle {
     Single(evmap::WriteHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>),

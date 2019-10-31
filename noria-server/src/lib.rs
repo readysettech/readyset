@@ -342,9 +342,7 @@
 //! - [id=1, title=Hello world, votes=42]
 //! + [id=1, title=Hello world, votes=43]
 //! ```
-#![feature(allow_fail)]
 #![feature(type_alias_impl_trait)]
-#![feature(try_blocks)]
 #![feature(vec_remove_item)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]

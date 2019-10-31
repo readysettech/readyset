@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// This will get distinct records from a set of records compared over a given set of columns
 #[derive(Clone, Serialize, Deserialize)]
@@ -167,7 +167,7 @@ impl Ingredient for Distinct {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

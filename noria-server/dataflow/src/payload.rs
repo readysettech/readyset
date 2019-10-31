@@ -1,14 +1,14 @@
 use petgraph;
 use serde::{Deserialize, Serialize};
 
+use crate::domain;
+use crate::node;
+use crate::prelude::*;
 #[cfg(debug_assertions)]
 use backtrace::Backtrace;
-use domain;
-use node;
 use noria;
 use noria::channel;
 use noria::internal::LocalOrNot;
-use prelude::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -237,7 +237,7 @@ pub enum Packet {
 }
 
 impl Packet {
-    crate fn src(&self) -> LocalNodeIndex {
+    pub(crate) fn src(&self) -> LocalNodeIndex {
         match *self {
             Packet::Input { ref inner, .. } => {
                 // inputs come "from" the base table too
@@ -249,7 +249,7 @@ impl Packet {
         }
     }
 
-    crate fn dst(&self) -> LocalNodeIndex {
+    pub(crate) fn dst(&self) -> LocalNodeIndex {
         match *self {
             Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
             Packet::Message { ref link, .. } => link.dst,
@@ -258,7 +258,7 @@ impl Packet {
         }
     }
 
-    crate fn link_mut(&mut self) -> &mut Link {
+    pub(crate) fn link_mut(&mut self) -> &mut Link {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
@@ -267,7 +267,7 @@ impl Packet {
         }
     }
 
-    crate fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
             Packet::ReplayPiece { ref data, .. } => data.is_empty(),
@@ -275,7 +275,7 @@ impl Packet {
         }
     }
 
-    crate fn map_data<F>(&mut self, map: F)
+    pub(crate) fn map_data<F>(&mut self, map: F)
     where
         F: FnOnce(&mut Records),
     {
@@ -289,14 +289,14 @@ impl Packet {
         }
     }
 
-    crate fn is_regular(&self) -> bool {
+    pub(crate) fn is_regular(&self) -> bool {
         match *self {
             Packet::Message { .. } => true,
             _ => false,
         }
     }
 
-    crate fn tag(&self) -> Option<Tag> {
+    pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. } => Some(tag),
             Packet::EvictKeys { tag, .. } => Some(tag),
@@ -304,7 +304,7 @@ impl Packet {
         }
     }
 
-    crate fn data(&self) -> &Records {
+    pub(crate) fn data(&self) -> &Records {
         match *self {
             Packet::Message { ref data, .. } => data,
             Packet::ReplayPiece { ref data, .. } => data,
@@ -312,7 +312,7 @@ impl Packet {
         }
     }
 
-    crate fn take_data(&mut self) -> Records {
+    pub(crate) fn take_data(&mut self) -> Records {
         use std::mem;
         let inner = match *self {
             Packet::Message { ref mut data, .. } => data,
@@ -322,7 +322,7 @@ impl Packet {
         mem::replace(inner, Records::default())
     }
 
-    crate fn clone_data(&self) -> Self {
+    pub(crate) fn clone_data(&self) -> Self {
         match *self {
             Packet::Message {
                 link,
@@ -348,7 +348,7 @@ impl Packet {
         }
     }
 
-    crate fn trace(&self, event: PacketEvent) {
+    pub(crate) fn trace(&self, event: PacketEvent) {
         if let Packet::Message {
             tracer: Some((tag, Some(ref sender))),
             ..
@@ -364,7 +364,7 @@ impl Packet {
         }
     }
 
-    crate fn tracer(&mut self) -> Option<&mut Tracer> {
+    pub(crate) fn tracer(&mut self) -> Option<&mut Tracer> {
         match *self {
             Packet::Message { ref mut tracer, .. } => Some(tracer),
             _ => None,
@@ -420,12 +420,12 @@ pub enum ControlReplyPacket {
 
 impl ControlReplyPacket {
     #[cfg(debug_assertions)]
-    crate fn ack() -> ControlReplyPacket {
+    pub(crate) fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(Backtrace::new())
     }
 
     #[cfg(not(debug_assertions))]
-    crate fn ack() -> ControlReplyPacket {
+    pub(crate) fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(())
     }
 }

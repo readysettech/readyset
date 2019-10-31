@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::mk_key::MakeKey;
 use common::SizeOf;
-use prelude::*;
+use crate::prelude::*;
 
 type FnvHashMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 

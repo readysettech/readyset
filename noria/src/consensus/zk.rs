@@ -207,7 +207,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    #[allow_fail]
+    #[ignore]
     fn it_works() {
         let authority =
             Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works").unwrap());

@@ -1640,7 +1640,7 @@ mod tests {
     }
 
     #[tokio::test(threadpool)]
-    #[allow_fail]
+    #[ignore]
     async fn it_incorporates_join_projecting_join_columns() {
         // set up graph
         let mut g = integration::start_simple("it_incorporates_join_projecting_join_columns").await;

@@ -1,5 +1,5 @@
-use payload;
-use prelude::*;
+use crate::payload;
+use crate::prelude::*;
 use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]
@@ -59,7 +59,7 @@ impl Sharder {
 
     #[inline]
     fn shard(&self, dt: &DataType) -> usize {
-        ::shard_by(dt, self.txs.len())
+        crate::shard_by(dt, self.txs.len())
     }
 
     pub fn process(
@@ -76,7 +76,7 @@ impl Sharder {
             let p = self
                 .sharded
                 .entry(shard)
-                .or_insert_with(|| box m.clone_data());
+                .or_insert_with(|| Box::new(m.clone_data()));
             p.map_data(|rs| rs.push(record));
         }
 
@@ -104,7 +104,7 @@ impl Sharder {
             for shard in 0..self.txs.len() {
                 self.sharded
                     .entry(shard)
-                    .or_insert_with(|| box m.clone_data());
+                    .or_insert_with(|| Box::new(m.clone_data()));
             }
         }
 
@@ -143,14 +143,13 @@ impl Sharder {
             for key in keys {
                 let shard = self.shard(&key[0]);
                 let dst = self.txs[shard].0;
-                let p = self
-                    .sharded
-                    .entry(shard)
-                    .or_insert_with(|| box Packet::EvictKeys {
+                let p = self.sharded.entry(shard).or_insert_with(|| {
+                    Box::new(Packet::EvictKeys {
                         link: Link { src, dst },
                         keys: Vec::new(),
                         tag,
-                    });
+                    })
+                });
                 match **p {
                     Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
                     _ => unreachable!(),

@@ -309,7 +309,7 @@ fn listen_df<'a>(
                     })
                     .await;
 
-                    tokio::spawn(replica::Replica::new(
+                    let replica = replica::Replica::new(
                         &valve,
                         d,
                         on,
@@ -317,7 +317,13 @@ fn listen_df<'a>(
                         ctrl_tx.clone(),
                         log.clone(),
                         coord.clone(),
-                    ));
+                    );
+                    tokio::spawn(async move {
+                        let log = replica.log.clone();
+                        if let Err(e) = replica.await {
+                            crit!(log, "replica failure: {:?}", e);
+                        }
+                    });
 
                     info!(
                         log,

@@ -3,6 +3,7 @@ name = "dataflow"
 version = "0.1.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 publish = false
+edition = "2018"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 jemallocator = "0.3"

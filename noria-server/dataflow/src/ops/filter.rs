@@ -4,7 +4,7 @@ use std::fmt::{self, Display};
 use std::sync;
 
 pub use nom_sql::Operator;
-use prelude::*;
+use crate::prelude::*;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,7 +234,7 @@ impl Ingredient for Filter {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(
         materialized: bool,

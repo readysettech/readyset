@@ -154,21 +154,3 @@ impl<A: Authority> Drop for Handle<A> {
         self.shutdown();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test(threadpool)]
-    #[should_panic]
-    #[cfg_attr(not(debug_assertions), allow_fail)]
-    async fn limit_mutator_creation() {
-        use crate::Builder;
-        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
-                     CREATE TABLE b (r int, s int);\n";
-
-        let mut c = Builder::default().start_local().await.unwrap();
-        assert!(c.install_recipe(r_txt).await.is_ok());
-        for _ in 0..2500 {
-            let _ = c.table("a").await.unwrap();
-        }
-    }
-}

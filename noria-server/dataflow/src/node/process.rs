@@ -1,12 +1,12 @@
-use node::NodeType;
-use payload;
-use prelude::*;
+use crate::node::NodeType;
+use crate::payload;
+use crate::prelude::*;
 use std::collections::HashSet;
 use std::mem;
 
 impl Node {
     #[allow(clippy::too_many_arguments)]
-    crate fn process(
+    pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<&Vec<usize>>,
@@ -29,8 +29,8 @@ impl Node {
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
-                match m.take() {
-                    Some(box Packet::Input {
+                match m.take().map(|p| *p) {
+                    Some(Packet::Input {
                         inner, mut senders, ..
                     }) => {
                         let Input { dst, data, tracer } = unsafe { inner.take() };
@@ -224,7 +224,7 @@ impl Node {
         Default::default()
     }
 
-    crate fn process_eviction(
+    pub(crate) fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
         key_columns: &[usize],
@@ -305,7 +305,11 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
 
 #[allow(clippy::borrowed_box)]
 // crate visibility due to use by tests
-crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<dyn State>>) {
+pub(crate) fn materialize(
+    rs: &mut Records,
+    partial: Option<Tag>,
+    state: Option<&mut Box<dyn State>>,
+) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope

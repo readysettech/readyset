@@ -9,18 +9,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
+use crate::group_commit::GroupCommitQueueSet;
+use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
+use crate::prelude::*;
 use futures_util::{future::FutureExt, stream::StreamExt};
-use group_commit::GroupCommitQueueSet;
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
-use payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
-use prelude::*;
 use slog::Logger;
 use stream_cancel::Valve;
 
+use crate::Readers;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio;
-use Readers;
 
 #[derive(Debug)]
 pub enum PollEvent {
@@ -303,11 +303,11 @@ impl Domain {
                 // and then get back to it after all processing has finished (at the bottom of
                 // `Self::handle()`)
                 self.delayed_for_self
-                    .push_back(box Packet::RequestPartialReplay {
+                    .push_back(Box::new(Packet::RequestPartialReplay {
                         tag,
                         key,
                         unishard: true, // local replays are necessarily single-shard
-                    });
+                    }));
                 continue;
             }
 
@@ -406,11 +406,11 @@ impl Domain {
 
                 for trigger in options {
                     if trigger
-                        .send(box Packet::RequestPartialReplay {
+                        .send(Box::new(Packet::RequestPartialReplay {
                             tag,
                             unishard: false,  // ask_all is true, so replay is sharded
                             key: key.clone(), // sad to clone here
-                        })
+                        }))
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -422,7 +422,7 @@ impl Domain {
             let shard = if options.len() == 1 {
                 0
             } else if let Some(key_shard_i) = ask_shard_by_key_i {
-                ::shard_by(&key[key_shard_i], options.len())
+                crate::shard_by(&key[key_shard_i], options.len())
             } else {
                 // would have hit the if further up
                 unreachable!();
@@ -435,11 +435,11 @@ impl Domain {
             "concurrent" => self.concurrent_replays,
             );
             if options[shard]
-                .send(box Packet::RequestPartialReplay {
+                .send(Box::new(Packet::RequestPartialReplay {
                     tag,
                     key,
                     unishard: true, // only one option / !ask_all, so only one path
-                })
+                }))
                 .is_err()
             {
                 // we're shutting down -- it's fine.
@@ -675,16 +675,16 @@ impl Domain {
             }
         }
 
-        match m.as_ref().unwrap() {
-            m @ &box Packet::Message { .. } if m.is_empty() => {
+        match &**m.as_ref().unwrap() {
+            m @ &Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
                 return;
             }
-            &box Packet::Message { .. } => {}
-            &box Packet::ReplayPiece { .. } => {
+            &Packet::Message { .. } => {}
+            &Packet::ReplayPiece { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
-            ref m => unreachable!("dispatch process got {:?}", m),
+            m => unreachable!("dispatch process got {:?}", m),
         }
 
         // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
@@ -694,7 +694,7 @@ impl Domain {
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
             } else {
-                m.as_ref().map(|m| box m.clone_data()).unwrap()
+                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
             let childi = self.nodes[me].borrow().children()[i];
@@ -834,11 +834,11 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::PrepareState { node, state } => {
-                        use payload::InitialState;
+                        use crate::payload::InitialState;
                         match state {
                             InitialState::PartialLocal(index) => {
                                 if !self.state.contains_key(node) {
-                                    self.state.insert(node, box MemoryState::default());
+                                    self.state.insert(node, Box::new(MemoryState::default()));
                                 }
                                 let state = self.state.get_mut(node).unwrap();
                                 for (key, tags) in index {
@@ -850,7 +850,7 @@ impl Domain {
                             }
                             InitialState::IndexedLocal(index) => {
                                 if !self.state.contains_key(node) {
-                                    self.state.insert(node, box MemoryState::default());
+                                    self.state.insert(node, Box::new(MemoryState::default()));
                                 }
                                 let state = self.state.get_mut(node).unwrap();
                                 for idx in index {
@@ -865,7 +865,7 @@ impl Domain {
                                 key,
                                 trigger_domain: (trigger_domain, shards),
                             } => {
-                                use backlog;
+                                use crate::backlog;
                                 let k = key.clone(); // ugh
                                 let txs = (0..shards)
                                     .map(|shard| {
@@ -881,10 +881,12 @@ impl Domain {
                                         tokio::spawn(
                                             self.shutdown_valve
                                                 .wrap(rx)
-                                                .map(move |miss| box Packet::RequestReaderReplay {
-                                                    key: miss,
-                                                    cols: key.clone(),
-                                                    node,
+                                                .map(move |miss| {
+                                                    Box::new(Packet::RequestReaderReplay {
+                                                        key: miss,
+                                                        cols: key.clone(),
+                                                        node,
+                                                    })
                                                 })
                                                 .map(Ok)
                                                 .forward(sender)
@@ -909,7 +911,7 @@ impl Domain {
                                         } else {
                                             // TODO: compound reader
                                             assert_eq!(miss.len(), 1);
-                                            &txs[::shard_by(&miss[0], n)]
+                                            &txs[crate::shard_by(&miss[0], n)]
                                         };
                                         tx.clone().try_send(Vec::from(miss)).is_ok()
                                     });
@@ -929,7 +931,7 @@ impl Domain {
                                 .unwrap();
                             }
                             InitialState::Global { gid, cols, key } => {
-                                use backlog;
+                                use crate::backlog;
                                 let (r_part, w_part) = backlog::new(cols, &key[..]);
 
                                 let mut n = self.nodes[node].borrow_mut();
@@ -972,7 +974,7 @@ impl Domain {
                             info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                         }
 
-                        use payload;
+                        use crate::payload;
                         let trigger = match trigger {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
@@ -1103,14 +1105,14 @@ impl Domain {
                         // do that inside the thread, because by the time that thread is scheduled,
                         // we may already have processed some other messages that are not yet a
                         // part of state.
-                        let p = box Packet::ReplayPiece {
+                        let p = Box::new(Packet::ReplayPiece {
                             tag,
                             link,
                             context: ReplayPieceContext::Regular {
                                 last: state.is_empty(),
                             },
                             data: Vec::<Record>::new().into(),
-                        };
+                        });
 
                         if !state.is_empty() {
                             let log = self.log.new(o!());
@@ -1174,12 +1176,12 @@ impl Domain {
                                         let chunk = Records::from_iter(chunk.map(&fix));
                                         let len = chunk.len();
                                         let last = iter.peek().is_none();
-                                        let p = box Packet::ReplayPiece {
+                                        let p = Box::new(Packet::ReplayPiece {
                                             tag,
                                             link, // to is overwritten by receiver
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
-                                        };
+                                        });
 
                                         trace!(log, "sending batch"; "#" => i, "[]" => len);
                                         if chunked_replay_tx.send(p).is_err() {
@@ -1224,9 +1226,13 @@ impl Domain {
                                             self.shard.unwrap_or(0),
                                         );
 
-                                        box PersistentState::new(base_name, base.key(), &params)
+                                        Box::new(PersistentState::new(
+                                            base_name,
+                                            base.key(),
+                                            &params,
+                                        ))
                                     }
-                                    _ => box MemoryState::default(),
+                                    _ => Box::new(MemoryState::default()),
                                 }
                             };
                             for idx in index {
@@ -1485,7 +1491,7 @@ impl Domain {
                 });
 
                 let m = if !keys.is_empty() {
-                    Some(box Packet::ReplayPiece {
+                    Some(Box::new(Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag,
                         context: ReplayPieceContext::Partial {
@@ -1494,7 +1500,7 @@ impl Domain {
                             ignore: false,
                         },
                         data: rs.into(),
-                    })
+                    }))
                 } else {
                     None
                 };
@@ -1523,10 +1529,10 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            if let box Packet::ReplayPiece {
+            if let Packet::ReplayPiece {
                 context: ReplayPieceContext::Partial { ref for_keys, .. },
                 ..
-            } = m
+            } = *m
             {
                 trace!(self.log,
                        "satisfied replay request";
@@ -1603,7 +1609,7 @@ impl Domain {
                     use std::iter::FromIterator;
                     let data = Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
 
-                    let m = Some(box Packet::ReplayPiece {
+                    let m = Some(Box::new(Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag,
                         context: ReplayPieceContext::Partial {
@@ -1612,7 +1618,7 @@ impl Domain {
                             ignore: false,
                         },
                         data,
-                    });
+                    }));
                     (m, source, None)
                 } else {
                     (None, source, Some(cols.clone()))
@@ -1769,12 +1775,12 @@ impl Domain {
                     }
 
                     // forward the current message through all local nodes.
-                    let m = box Packet::ReplayPiece {
+                    let m = Box::new(Packet::ReplayPiece {
                         link,
                         tag,
                         data,
                         context: context.clone(),
-                    };
+                    });
                     let mut m = Some(m);
 
                     for (i, segment) in path.iter().enumerate() {
@@ -1953,13 +1959,13 @@ impl Domain {
                         }
 
                         // only continue with the keys that weren't captured
-                        if let box Packet::ReplayPiece {
+                        if let Packet::ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
                                     ref mut for_keys, ..
                                 },
                             ..
-                        } = m.as_mut().unwrap()
+                        } = **m.as_mut().unwrap()
                         {
                             backfill_keys
                                 .as_mut()
@@ -1969,12 +1975,12 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let single_shard = if let box Packet::ReplayPiece {
+                            let single_shard = if let Packet::ReplayPiece {
                                 context: ReplayPieceContext::Partial { unishard, .. },
                                 ..
-                            } = m.as_mut().unwrap()
+                            } = **m.as_mut().unwrap()
                             {
-                                *unishard
+                                unishard
                             } else {
                                 unreachable!("backfill_keys.is_some() implies Context::Partial");
                             };
@@ -2189,24 +2195,24 @@ impl Domain {
                         }
 
                         // preserve whatever `last` flag that may have been set during processing
-                        if let Some(box Packet::ReplayPiece {
+                        if let Some(Packet::ReplayPiece {
                             context: ReplayPieceContext::Regular { last },
                             ..
-                        }) = m
+                        }) = m.as_ref().map(|m| &**m)
                         {
                             if let ReplayPieceContext::Regular {
                                 last: ref mut old_last,
                             } = context
                             {
-                                *old_last = last;
+                                *old_last = *last;
                             }
                         }
 
                         // feed forward any changes to the context (e.g., backfill_keys)
-                        if let Some(box Packet::ReplayPiece {
+                        if let Some(Packet::ReplayPiece {
                             context: ref mut mcontext,
                             ..
-                        }) = m
+                        }) = m.as_mut().map(|m| &mut **m)
                         {
                             *mcontext = context.clone();
                         }
@@ -2348,11 +2354,11 @@ impl Domain {
                     } in replay
                     {
                         self.delayed_for_self
-                            .push_back(box Packet::RequestPartialReplay {
+                            .push_back(Box::new(Packet::RequestPartialReplay {
                                 tag,
                                 unishard,
                                 key: replay_key,
-                            });
+                            }));
                     }
                 }
 
@@ -2375,7 +2381,8 @@ impl Domain {
                 // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
                 // this allows finish_replay to dispatch into the node by overriding replaying_to.
                 self.not_ready.remove(&ni);
-                self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
+                self.delayed_for_self
+                    .push_back(Box::new(Packet::Finish(tag, ni)));
             }
         }
     }
@@ -2407,7 +2414,7 @@ impl Domain {
                 // completely block the domain data channel, so we only process a few backlogged
                 // updates before yielding to the main loop (which might buffer more things).
 
-                if let m @ box Packet::Message { .. } = m {
+                if let Packet::Message { .. } = *m {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
@@ -2458,7 +2465,7 @@ impl Domain {
         } else {
             // we're not done -- inject a request to continue handling buffered things
             self.delayed_for_self
-                .push_back(box Packet::Finish(tag, node));
+                .push_back(Box::new(Packet::Finish(tag, node)));
         }
     }
 
@@ -2791,7 +2798,7 @@ impl Domain {
                 }
 
                 if !self.buffered_replay_requests.is_empty() || !self.timed_purges.is_empty() {
-                    self.handle(box Packet::Spin, executor, true);
+                    self.handle(Box::new(Packet::Spin), executor, true);
                 }
 
                 ProcessResult::Processed

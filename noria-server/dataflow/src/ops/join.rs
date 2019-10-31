@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -612,7 +612,7 @@ impl Ingredient for Join {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();

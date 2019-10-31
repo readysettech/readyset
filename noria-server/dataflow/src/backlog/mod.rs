@@ -1,19 +1,23 @@
+use crate::prelude::*;
 use common::SizeOf;
 use fnv::FnvBuildHasher;
-use prelude::*;
 use rand::prelude::*;
 use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-crate fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
+pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-crate fn new_partial<F>(cols: usize, key: &[usize], trigger: F) -> (SingleReadHandle, WriteHandle)
+pub(crate) fn new_partial<F>(
+    cols: usize,
+    key: &[usize],
+    trigger: F,
+) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&[DataType]) -> bool + 'static + Send + Sync,
 {
@@ -100,7 +104,7 @@ fn key_to_double(k: Key) -> Cow<(DataType, DataType)> {
     }
 }
 
-crate struct WriteHandle {
+pub(crate) struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,
     cols: usize,
@@ -110,17 +114,17 @@ crate struct WriteHandle {
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
-crate struct MutWriteHandleEntry<'a> {
+pub(crate) struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
     key: Key<'a>,
 }
-crate struct WriteHandleEntry<'a> {
+pub(crate) struct WriteHandleEntry<'a> {
     handle: &'a WriteHandle,
     key: Key<'a>,
 }
 
 impl<'a> MutWriteHandleEntry<'a> {
-    crate fn mark_filled(self) {
+    pub(crate) fn mark_filled(self) {
         if let Some((None, _)) = self
             .handle
             .handle
@@ -132,7 +136,7 @@ impl<'a> MutWriteHandleEntry<'a> {
         }
     }
 
-    crate fn mark_hole(self) {
+    pub(crate) fn mark_hole(self) {
         let size = self
             .handle
             .handle
@@ -147,7 +151,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 }
 
 impl<'a> WriteHandleEntry<'a> {
-    crate fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
+    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
     where
         F: FnMut(&[Vec<DataType>]) -> T,
     {
@@ -187,7 +191,7 @@ where
 }
 
 impl WriteHandle {
-    crate fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
+    pub(crate) fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
     where
         K: Into<Key<'a>>,
     {
@@ -197,7 +201,7 @@ impl WriteHandle {
         }
     }
 
-    crate fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
+    pub(crate) fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
     where
         K: Into<Key<'a>>,
     {
@@ -216,7 +220,7 @@ impl WriteHandle {
         self.mut_with_key(key)
     }
 
-    crate fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
+    pub(crate) fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
     where
         R: Into<Cow<'a, [DataType]>>,
     {
@@ -224,14 +228,14 @@ impl WriteHandle {
         self.with_key(key)
     }
 
-    crate fn swap(&mut self) {
+    pub(crate) fn swap(&mut self) {
         self.handle.refresh();
     }
 
     /// Add a new set of records to the backlog.
     ///
     /// These will be made visible to readers after the next call to `swap()`.
-    crate fn add<I>(&mut self, rs: I)
+    pub(crate) fn add<I>(&mut self, rs: I)
     where
         I: IntoIterator<Item = Record>,
     {
@@ -246,13 +250,13 @@ impl WriteHandle {
         }
     }
 
-    crate fn is_partial(&self) -> bool {
+    pub(crate) fn is_partial(&self) -> bool {
         self.partial
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes that will be freed once the underlying `evmap` applies the operation.
-    crate fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
+    pub(crate) fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             if self.handle.is_empty() {

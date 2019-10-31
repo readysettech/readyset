@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use prelude::*;
+use crate::prelude::*;
 
 use nom_sql::OrderType;
 
@@ -331,7 +331,7 @@ impl Ingredient for TopK {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(reversed: bool) -> (ops::test::MockGraph, IndexPair) {
         let cmp_rows = if reversed {

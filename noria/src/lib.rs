@@ -110,8 +110,6 @@
 //! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
-#![feature(allow_fail)]
-#![feature(try_blocks)]
 #![feature(type_alias_impl_trait)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]

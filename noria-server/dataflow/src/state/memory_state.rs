@@ -4,8 +4,8 @@ use std::rc::Rc;
 use rand::{self, Rng};
 
 use common::SizeOf;
-use prelude::*;
-use state::single_state::SingleState;
+use crate::prelude::*;
+use crate::state::single_state::SingleState;
 
 #[derive(Default)]
 pub struct MemoryState {

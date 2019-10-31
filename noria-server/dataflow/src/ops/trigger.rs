@@ -1,4 +1,4 @@
-use prelude::*;
+use crate::prelude::*;
 use std::collections::HashMap;
 
 /// A Trigger data-flow operator.
@@ -156,7 +156,7 @@ impl Ingredient for Trigger {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

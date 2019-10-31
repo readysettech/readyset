@@ -1,43 +1,43 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use ops;
-use prelude::*;
+use crate::ops;
+use crate::prelude::*;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
 
 #[derive(PartialEq, Eq, Debug)]
-crate struct Miss {
+pub(crate) struct Miss {
     /// The node we missed when looking up into.
-    crate on: LocalNodeIndex,
+    pub(crate) on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
-    crate lookup_idx: Vec<usize>,
+    pub(crate) lookup_idx: Vec<usize>,
     /// The columns of `record` we were using for the lookup.
-    crate lookup_cols: Vec<usize>,
+    pub(crate) lookup_cols: Vec<usize>,
     /// The columns of `record` that identify the replay key (if any).
-    crate replay_cols: Option<Vec<usize>>,
+    pub(crate) replay_cols: Option<Vec<usize>>,
     /// The record we were processing when we missed.
-    crate record: Vec<DataType>,
+    pub(crate) record: Vec<DataType>,
 }
 
 impl Miss {
-    crate fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
+    pub(crate) fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
         self.replay_cols
             .as_ref()
             .map(move |rc| rc.iter().map(move |&rc| &self.record[rc]))
     }
 
-    crate fn replay_key_vec(&self) -> Option<Vec<DataType>> {
+    pub(crate) fn replay_key_vec(&self) -> Option<Vec<DataType>> {
         self.replay_cols
             .as_ref()
             .map(|rc| rc.iter().map(|&rc| &self.record[rc]).cloned().collect())
     }
 
-    crate fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
+    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
         self.lookup_cols.iter().map(move |&rc| &self.record[rc])
     }
 
-    crate fn lookup_key_vec(&self) -> Vec<DataType> {
+    pub(crate) fn lookup_key_vec(&self) -> Vec<DataType> {
         self.lookup_cols
             .iter()
             .map(|&rc| &self.record[rc])
@@ -47,17 +47,17 @@ impl Miss {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-crate struct Lookup {
+pub(crate) struct Lookup {
     /// The node we looked up into.
-    crate on: LocalNodeIndex,
+    pub(crate) on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
-    crate cols: Vec<usize>,
+    pub(crate) cols: Vec<usize>,
     /// The key used for the lookup.
-    crate key: Vec<DataType>,
+    pub(crate) key: Vec<DataType>,
 }
 
 #[derive(Default)]
-crate struct ProcessingResult {
+pub(crate) struct ProcessingResult {
     pub(crate) results: Records,
     pub(crate) misses: Vec<Miss>,
 
@@ -67,7 +67,7 @@ crate struct ProcessingResult {
     pub(crate) lookups: Vec<Lookup>,
 }
 
-crate enum RawProcessingResult {
+pub(crate) enum RawProcessingResult {
     Regular(ProcessingResult),
     FullReplay(Records, bool),
     CapturedFull,
@@ -79,7 +79,7 @@ crate enum RawProcessingResult {
 }
 
 #[derive(Debug)]
-crate enum ReplayContext {
+pub(crate) enum ReplayContext {
     None,
     Partial {
         key_cols: Vec<usize>,
@@ -101,7 +101,7 @@ impl ReplayContext {
     }
 }
 
-crate trait Ingredient
+pub(crate) trait Ingredient
 where
     Self: Send,
 {

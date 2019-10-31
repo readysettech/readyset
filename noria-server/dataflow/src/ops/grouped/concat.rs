@@ -1,9 +1,9 @@
-use ops::grouped::GroupedOperation;
-use ops::grouped::GroupedOperator;
+use crate::ops::grouped::GroupedOperation;
+use crate::ops::grouped::GroupedOperator;
 
 use std::collections::HashSet;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Designator for what a given position in a group concat output should contain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,7 +246,7 @@ impl GroupedOperation for GroupConcat {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

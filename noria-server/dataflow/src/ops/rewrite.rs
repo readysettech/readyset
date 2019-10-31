@@ -1,4 +1,4 @@
-use prelude::*;
+use crate::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 /// A Rewrite data-flow operator.
@@ -212,7 +212,7 @@ impl Ingredient for Rewrite {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();

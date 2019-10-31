@@ -1,4 +1,4 @@
-use prelude::*;
+use crate::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
@@ -87,7 +87,7 @@ impl Egress {
             } else {
                 // we know this is a data (not a replay)
                 // because, a replay will force a take
-                m.as_ref().map(|m| box m.clone_data()).unwrap()
+                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
             // src is usually ignored and overwritten by ingress

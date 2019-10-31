@@ -1,7 +1,7 @@
-use ops::grouped::GroupedOperation;
-use ops::grouped::GroupedOperator;
+use crate::ops::grouped::GroupedOperation;
+use crate::ops::grouped::GroupedOperator;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -195,7 +195,7 @@ impl GroupedOperation for ExtremumOperator {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(op: Extremum, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

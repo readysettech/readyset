@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
@@ -68,7 +68,7 @@ impl Ingredient for Identity {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

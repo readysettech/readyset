@@ -2420,7 +2420,6 @@ async fn soupy_lobsters() {
 }
 
 #[tokio::test(threadpool)]
-#[allow_fail]
 async fn node_removal() {
     // set up graph
     let mut b = Builder::default();
