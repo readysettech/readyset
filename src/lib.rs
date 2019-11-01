@@ -5,6 +5,7 @@ use std::ops::Bound::*;
 
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
+#[derive(Clone)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
 }
@@ -335,6 +336,7 @@ where
     }
 }
 
+#[derive(Clone)]
 struct Node<Q: Ord + Clone> {
     key: Range<Q>,
     value: Bound<Q>, // Max end-point.
