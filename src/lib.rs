@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_works_as_expected() {
+    fn overlap_works_as_expected() {
         let mut tree = IntervalTree::default();
 
         let root_key = (Included(2), Included(3));
@@ -632,6 +632,21 @@ mod tests {
             tree.get_interval_overlaps(&(Unbounded, Included(3))),
             vec![&left_left_key, &left_key, &root_key]
         );
+    }
+
+    #[test]
+    fn difference_and_overlaps_with_tuple_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let root_key = (Included((1, 2)), Excluded((1, 4)));
+        let right_key = (Included((5, 10)), Included((5, 20)));
+
+        tree.insert(root_key.clone());
+        tree.insert(right_key.clone());
+
+        assert!(tree.get_interval_overlaps(&(Included((2, 0)), Included((2, 30)))).is_empty());
+        assert_eq!(tree.get_interval_overlaps(&(Included((1, 3)), Included((1, 5)))), vec![&root_key]);
+        assert_eq!(tree.get_interval_difference(&(Excluded((1, 1)), Included((1, 5)))), vec![(Excluded(&(1, 1)), Excluded(&(1, 2))), (Included(&(1, 4)), Included(&(1, 5)))]);
     }
 
     #[test]
