@@ -73,10 +73,10 @@ where
     }
 
     pub fn contains_point(&self, q: &Q) -> bool {
-        self.contains(&(Included(q.clone()), Included(q.clone())))
+        self.contains_interval(&(Included(q.clone()), Included(q.clone())))
     }
 
-    pub fn contains(&self, q: &Range<Q>) -> bool {
+    pub fn contains_interval(&self, q: &Range<Q>) -> bool {
         self.get_interval_difference(q).is_empty()
     }
 
@@ -758,10 +758,10 @@ mod tests {
         tree.insert(key2.clone());
         tree.insert(key3.clone());
 
-        assert!(tree.contains(&key1));
-        assert!(!tree.contains(&(Included(10), Included(20))));
-        assert!(!tree.contains(&(Unbounded, Included(0))));
-        assert!(tree.contains(&(Included(35), Included(37))));
+        assert!(tree.contains_interval(&key1));
+        assert!(!tree.contains_interval(&(Included(10), Included(20))));
+        assert!(!tree.contains_interval(&(Unbounded, Included(0))));
+        assert!(tree.contains_interval(&(Included(35), Included(37))));
     }
 
     #[test]
