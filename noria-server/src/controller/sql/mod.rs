@@ -538,7 +538,11 @@ impl SqlIncorporator {
         );
 
         // run MIR-level optimizations
-        let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
+        let (mut mir, nodes_added) = og_mir.optimize(table_mapping.as_ref(), sec);
+        // update mir_converter with the nodes added. Note (jamb): we never remove the nodes removed
+        // by the optimizations, but they do get disconnected pointer-wise, so I think it's fine.
+        // (If we ever want to fix this, it's also relevant to the place below that calls optimize.)
+        self.mir_converter.add_nodes(nodes_added);
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -691,7 +695,8 @@ impl SqlIncorporator {
             new_query_mir.to_graphviz().unwrap()
         );
 
-        let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
+        let (new_opt_mir, new_nodes) = new_query_mir.optimize(table_mapping.as_ref(), sec);
+        self.mir_converter.add_nodes(new_nodes);
 
         trace!(
             self.log,
@@ -1705,7 +1710,6 @@ mod tests {
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
             assert!(get_node(&inc, mig, "votes").is_base());
-            // Try a simple COUNT function
             let res = inc.add_query(
                 "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
                 None,
@@ -1733,14 +1737,61 @@ mod tests {
                     function: Some(f),
                 }],
             );
+
             // TODO compute qid correctly and use it in the below
-            // also TODO get the sumfilter into the mir converter representation
-            // so we don't have to indirectly access the node through its child
-            let agg_child = get_node(&inc, mig, &format!("q_4f38c761534f0bb8_n2"));
-            // there should only be one ancestor, so get its index and look it up in the graph
-            let agg_view = mig.graph().node_weight(*agg_child.ancestors().first().unwrap()).unwrap();
+            let agg_view = get_node(&inc, mig, &format!("q_4f38c761534f0bb8_n1_p0_f0_filteragg"));
             assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
             assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        });
+    }
+
+    #[test]
+    fn it_doesnt_merge_sum_and_filter_on_sum_result() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_doesnt_merge_sum_and_filter_on_sum_result");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            let res = inc.add_query(
+                "SELECT SUM(sign) AS sum FROM votes WHERE sum>0 GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 6);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::Sum(
+                Column::from("votes.sign"),
+                false));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.

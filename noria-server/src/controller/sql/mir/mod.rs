@@ -158,6 +158,14 @@ impl SqlToMirConverter {
         self.nodes.clone()
     }
 
+    pub fn add_nodes(&mut self, nodes: Vec<MirNodeRef>) {
+        for node in nodes {
+            let node_id = (String::from(node.borrow().name()), self.schema_version);
+            self.nodes.entry(node_id).or_insert_with(|| node.clone());
+            self.current.insert(String::from(node.borrow().name()), self.schema_version);
+        }
+    }
+
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
     /// and adds its to a vector of conditions.
     fn to_conditions(

@@ -71,10 +71,10 @@ impl MirQuery {
         mut self,
         table_mapping: Option<&HashMap<(String, Option<String>), String>>,
         sec: bool,
-    ) -> MirQuery {
+    ) -> (MirQuery, Vec<MirNodeRef>) {
         super::rewrite::pull_required_base_columns(&mut self, table_mapping, sec);
-        super::optimize::optimize(&mut self);
-        self
+        let nodes_added = super::optimize::optimize(&mut self);
+        (self, nodes_added)
     }
 
     pub fn optimize_post_reuse(mut self) -> MirQuery {

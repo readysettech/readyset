@@ -7,16 +7,16 @@ use MirNodeRef;
 
 use std::collections::HashMap;
 
-pub fn optimize(mut q: &mut MirQuery) {
+pub fn optimize(mut q: &mut MirQuery) -> Vec<MirNodeRef> {
     //remove_extraneous_projections(&mut q);
-    find_and_merge_filter_aggregates(&mut q);
+    find_and_merge_filter_aggregates(&mut q)
 }
 
 pub fn optimize_post_reuse(_q: &mut MirQuery) {
     // find_and_merge_filter_chains(q);
 }
 
-fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
+fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
 
     // 1. depth first search to find all the nodes, so we can process them later
 
@@ -92,9 +92,13 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
 
     // TODO we need to avoid merging in cases where the filter
     // is based on the computed aggregate column; write a test!
+    // TODO check the bottom node has exactly one parent, test that too!
 
     // 3. For each candidate, merge it, and update all parents/children
     // of the newly merged node.
+
+    let mut new_nodes = Vec::new();
+
     for n in candidate_nodes {
         let temp = n.borrow();
         let child = temp.children.first().unwrap().borrow();
@@ -109,7 +113,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
         };
 
         let mut new_name = child.name.clone();
-        new_name.push_str("_filteragg");  // TODO how should I actually generate names?
+        new_name.push_str("_filteragg");
 
         let new_node = MirNode::new(
             &new_name,
@@ -181,8 +185,11 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) {
         }
         println!("children={:?}", new_node.borrow().children);
         println!("ancestors={:?}", new_node.borrow().ancestors);
-        // TODO do I also need to update the SqlToMirConverter nodes representation somehow?
+
+        new_nodes.push(new_node);
     }
+
+    new_nodes
 }
 
 #[allow(dead_code)]
