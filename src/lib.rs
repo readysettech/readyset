@@ -5,11 +5,19 @@ use std::ops::Bound::*;
 
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
+/// The interval tree storing all the underlying intervals.
+/// This implementation mimics a binary search tree, where nodes are
+/// sorted by starting bound, and then by end bound. On top of that,
+/// the nodes are augmented with a value, representing the biggest end
+/// bound that can be found in the node's subtree. This is based on the
+/// data structure described in
+/// Cormen et al. (2009, Section 14.3: Interval trees, pp. 348–354).
 #[derive(Clone)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
 }
 
+/// An inorder interator through the interval tree.
 pub struct IntervalTreeIter<'a, Q: Ord + Clone> {
     to_visit: Vec<&'a Box<Node<Q>>>,
     curr: &'a Option<Box<Node<Q>>>,
@@ -28,6 +36,25 @@ impl<Q> IntervalTree<Q>
 where
     Q: Ord + Clone,
 {
+    /// Produces an inorder iterator for the interval tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::Included;
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert((Included(0), Included(10)));
+    /// tree.insert((Included(-5), Included(-1)));
+    /// tree.insert((Included(20), Included(30)));
+    ///
+    /// let mut iter = tree.iter();
+    /// assert_eq!(iter.next(), Some(&(Included(-5), Included(-1))));
+    /// assert_eq!(iter.next(), Some(&(Included(0), Included(10))));
+    /// assert_eq!(iter.next(), Some(&(Included(20), Included(30))));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn iter<'a>(&'a self) -> IntervalTreeIter<'a, Q> {
         IntervalTreeIter {
             to_visit: vec![],
@@ -35,6 +62,24 @@ where
         }
     }
 
+    /// Inserts an interval `range` into the interval tree. Insertions respect the
+    /// binary search properties of this tree. An improvement to come is to rebalance
+    /// the tree (following an AVL or a red-black scheme).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut int_tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// int_tree.insert((Included(5), Excluded(9)));
+    /// int_tree.insert((Unbounded, Included(10)));
+    ///
+    /// let mut str_tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// str_tree.insert((Included("Noria"), Unbounded));
+    /// ```
     pub fn insert(&mut self, range: Range<Q>) {
         // If the tree is empty, put new node at the root.
         if self.root.is_none() {
@@ -72,14 +117,76 @@ where
         }
     }
 
+    /// A "stabbing query" in the jargon: returns whether or not a point `q`
+    /// is contained in any of the intervals stored in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Excluded, Unbounded};
+    ///
+    /// let mut int_tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// int_tree.insert((Excluded(5), Unbounded));
+    ///
+    /// assert!(int_tree.contains_point(&100));
+    /// assert!(!int_tree.contains_point(&5));
+    /// ```
+    ///
+    /// Note that we can work with any type that implements the `Ord+Clone` traits, so
+    /// we are not limited to just integers.
+    ///
+    /// ```
+    /// use std::ops::Bound::{Excluded, Unbounded};
+    ///
+    /// let mut str_tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// str_tree.insert((Excluded("Noria"), Unbounded));
+    ///
+    /// assert!(str_tree.contains_point(&"Zebra"));
+    /// assert!(!str_tree.contains_point(&"Noria"));
+    /// ```
     pub fn contains_point(&self, q: &Q) -> bool {
         self.contains_interval(&(Included(q.clone()), Included(q.clone())))
     }
 
+    /// An alternative "stabbing query": returns whether or not an interval `q`
+    /// is fully covered by the intervals stored in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert((Included(20), Included(30)));
+    /// tree.insert((Excluded(30), Excluded(50)));
+    ///
+    /// assert!(tree.contains_interval(&(Included(20), Included(40))));
+    /// assert!(!tree.contains_interval(&(Included(30), Included(50))));
+    /// ```
     pub fn contains_interval(&self, q: &Range<Q>) -> bool {
         self.get_interval_difference(q).is_empty()
     }
 
+    /// Returns the inorder list of all intervals stored in the tree that overlaps
+    /// with a given range `q` (partially or completely).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert((Included(0), Included(5)));
+    /// tree.insert((Included(7), Excluded(10)));
+    ///
+    /// assert_eq!(tree.get_interval_overlaps(&(Included(-5), Excluded(7))),
+    ///            vec![&(Included(0), Included(5))]);
+    /// assert!(tree.get_interval_overlaps(&(Included(10), Unbounded)).is_empty());
+    /// ```
     pub fn get_interval_overlaps(&self, q: &Range<Q>) -> Vec<&Range<Q>> {
         let curr = &self.root;
         let mut acc = Vec::new();
@@ -88,6 +195,28 @@ where
         acc
     }
 
+    /// Returns the ordered list of subintervals in `q` that are not covered by the tree.
+    /// This is useful to compute what subsegments of `q` that are not covered by the intervals
+    /// stored in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert((Included(0), Excluded(10)));
+    /// tree.insert((Excluded(10), Included(30)));
+    /// tree.insert((Excluded(50), Unbounded));
+    ///
+    /// assert_eq!(tree.get_interval_difference(&(Included(-5), Included(30))),
+    ///            vec![(Included(&-5), Excluded(&0)),
+    ///                 (Included(&10), Included(&10))]);
+    /// assert_eq!(tree.get_interval_difference(&(Unbounded, Excluded(10))),
+    ///            vec![(Unbounded, Excluded(&0))]);
+    /// assert!(tree.get_interval_difference(&(Included(100), Unbounded)).is_empty());
+    /// ```
     pub fn get_interval_difference<'a>(&'a self, q: &'a Range<Q>) -> Vec<Range<&'a Q>> {
         let overlaps = self.get_interval_overlaps(q);
 
@@ -644,9 +773,20 @@ mod tests {
         tree.insert(root_key.clone());
         tree.insert(right_key.clone());
 
-        assert!(tree.get_interval_overlaps(&(Included((2, 0)), Included((2, 30)))).is_empty());
-        assert_eq!(tree.get_interval_overlaps(&(Included((1, 3)), Included((1, 5)))), vec![&root_key]);
-        assert_eq!(tree.get_interval_difference(&(Excluded((1, 1)), Included((1, 5)))), vec![(Excluded(&(1, 1)), Excluded(&(1, 2))), (Included(&(1, 4)), Included(&(1, 5)))]);
+        assert!(tree
+            .get_interval_overlaps(&(Included((2, 0)), Included((2, 30))))
+            .is_empty());
+        assert_eq!(
+            tree.get_interval_overlaps(&(Included((1, 3)), Included((1, 5)))),
+            vec![&root_key]
+        );
+        assert_eq!(
+            tree.get_interval_difference(&(Excluded((1, 1)), Included((1, 5)))),
+            vec![
+                (Excluded(&(1, 1)), Excluded(&(1, 2))),
+                (Included(&(1, 4)), Included(&(1, 5)))
+            ]
+        );
     }
 
     #[test]
