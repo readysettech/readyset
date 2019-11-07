@@ -8,7 +8,7 @@ edition = "2018"
 arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
-msql-srv = "0.8"
+msql-srv = "0.8.7"
 noria = { git = "https://github.com/mit-pdos/noria.git", branch = "async-await" }
 futures-executor-preview = "0.3.0-alpha.19"
 futures-util-preview = "0.3.0-alpha.19"
