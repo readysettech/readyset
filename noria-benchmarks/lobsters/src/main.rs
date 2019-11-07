@@ -88,7 +88,9 @@ impl trawler::LobstersClient for MysqlTrawler {
         } else {
             unreachable!("connection established before setup");
         };
-        opts.pool_constraints(my::PoolConstraints::new(1, 1));
+        opts.pool_options(my::PoolOptions::with_constraints(
+            my::PoolConstraints::new(1, 1).unwrap(),
+        ));
         let variant = self.variant;
         let db: String = my::Opts::from(opts.clone())
             .get_db_name()
@@ -403,7 +405,9 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_constraints(my::PoolConstraints::new(in_flight, in_flight));
+    opts.pool_options(my::PoolOptions::with_constraints(
+        my::PoolConstraints::new(in_flight, in_flight).unwrap(),
+    ));
     let s = MysqlTrawler::new(variant, opts.into(), simulate_shards);
 
     wl.run(s, args.is_present("prime"));
