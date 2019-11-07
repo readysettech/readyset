@@ -281,11 +281,11 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                                 let cols = &[Column {
                                     table: String::new(),
                                     column: "@@max_allowed_packet".to_owned(),
-                                    coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                                    coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
                                     colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                                 }];
                                 let mut w = w.start(cols)?;
-                                w.write_row(iter::once(1024u16))?;
+                                w.write_row(iter::once(67108864u32))?;
                                 w.finish()?;
                             }
                             _ => {

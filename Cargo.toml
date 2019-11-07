@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2018"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
