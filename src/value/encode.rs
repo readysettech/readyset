@@ -1,9 +1,9 @@
 use byteorder::{LittleEndian, WriteBytesExt};
-use myc;
-use myc::constants::{ColumnFlags, ColumnType};
-use myc::io::WriteMysqlExt;
+use crate::myc;
+use crate::myc::constants::{ColumnFlags, ColumnType};
+use crate::myc::io::WriteMysqlExt;
 use std::io::{self, Write};
-use Column;
+use crate::Column;
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMysqlValue {
@@ -659,10 +659,10 @@ impl ToMysqlValue for myc::value::Value {
 mod tests {
     use super::ToMysqlValue;
     use chrono::{self, TimeZone};
-    use myc::value;
-    use myc::value::convert::from_value;
+    use crate::myc::value;
+    use crate::myc::value::convert::from_value;
     use std::time;
-    use {Column, ColumnFlags, ColumnType};
+    use crate::{Column, ColumnFlags, ColumnType};
 
     mod roundtrip_text {
         use super::*;

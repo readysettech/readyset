@@ -1,4 +1,4 @@
-use myc::constants::{CapabilityFlags, Command as CommandByte};
+use crate::myc::constants::{CapabilityFlags, Command as CommandByte};
 use nom;
 
 #[derive(Debug)]
@@ -9,7 +9,7 @@ pub struct ClientHandshake<'a> {
     username: &'a [u8],
 }
 
-pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake> {
+pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
     let (i, cap) = nom::number::complete::le_u32(i)?;
     let (i, maxps) = nom::number::complete::le_u32(i)?;
     let (i, collation) = nom::bytes::complete::take(1u8)(i)?;
@@ -47,14 +47,14 @@ pub enum Command<'a> {
     Quit,
 }
 
-pub fn execute(i: &[u8]) -> nom::IResult<&[u8], Command> {
+pub fn execute(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
     let (i, stmt) = nom::number::complete::le_u32(i)?;
     let (i, _flags) = nom::bytes::complete::take(1u8)(i)?;
     let (i, _iterations) = nom::number::complete::le_u32(i)?;
     Ok((&[], Command::Execute { stmt, params: i }))
 }
 
-pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command> {
+pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
     let (i, stmt) = nom::number::complete::le_u32(i)?;
     let (i, param) = nom::number::complete::le_u16(i)?;
     Ok((
@@ -67,7 +67,7 @@ pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command> {
     ))
 }
 
-pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command> {
+pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
     use nom::bytes::complete::tag;
     use nom::combinator::{map, rest};
     use nom::sequence::preceded;
@@ -108,8 +108,8 @@ pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
-    use packet::PacketReader;
+    use crate::myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
+    use crate::packet::PacketReader;
     use std::io::Cursor;
 
     #[test]
