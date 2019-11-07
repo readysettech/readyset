@@ -1,6 +1,6 @@
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::myc::constants::ColumnType;
 use crate::myc::io::ReadMysqlExt;
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::io;
 
 /// MySQL value as provided when executing prepared statements.
@@ -282,11 +282,11 @@ impl<'a> Into<Duration> for Value<'a> {
 #[allow(unused_imports)]
 mod tests {
     use super::Value;
-    use chrono::{self, TimeZone};
     use crate::myc;
     use crate::myc::io::WriteMysqlExt;
-    use std::time;
     use crate::{Column, ColumnFlags, ColumnType};
+    use chrono::{self, TimeZone};
+    use std::time;
 
     macro_rules! rt {
         ($name:ident, $t:ty, $v:expr, $ct:expr) => {
