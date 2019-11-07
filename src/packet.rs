@@ -113,7 +113,7 @@ impl<R: Read> PacketReader<R> {
             self.bytes.drain(0..self.start);
             self.start = 0;
             let end = self.bytes.len();
-            self.bytes.resize(end + 1024, 0);
+            self.bytes.resize(std::cmp::max(4096, end * 2), 0);
             let read = {
                 let mut buf = &mut self.bytes[end..];
                 self.r.read(&mut buf)?
