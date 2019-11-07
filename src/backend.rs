@@ -822,12 +822,37 @@ where
         let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
             let written = match *c {
                 DataType::None => rw.write_col(None::<i32>),
-                DataType::Int(i) => rw.write_col(i as isize),
-                DataType::BigInt(i) => rw.write_col(i as isize),
-                // XXX(malte): isize case here is wrong, but expected by msql_srv.-
-                // see #9
-                DataType::UnsignedInt(i) => rw.write_col(i as usize),
-                DataType::UnsignedBigInt(i) => rw.write_col(i as usize),
+                // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
+                // this out into a helper since i has a different time depending on the DataType
+                // variant.
+                DataType::Int(i) => {
+                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                        rw.write_col(i as usize)
+                    } else {
+                        rw.write_col(i as isize)
+                    }
+                }
+                DataType::BigInt(i) => {
+                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                        rw.write_col(i as usize)
+                    } else {
+                        rw.write_col(i as isize)
+                    }
+                }
+                DataType::UnsignedInt(i) => {
+                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                        rw.write_col(i as usize)
+                    } else {
+                        rw.write_col(i as isize)
+                    }
+                }
+                DataType::UnsignedBigInt(i) => {
+                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                        rw.write_col(i as usize)
+                    } else {
+                        rw.write_col(i as isize)
+                    }
+                }
                 DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
                 ref dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
                 ref dt @ DataType::Real(_, _) => match cs.coltype {
