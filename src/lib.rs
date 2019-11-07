@@ -80,6 +80,7 @@
 //! }
 //! ```
 #![deny(missing_docs)]
+#![deny(rust_2018_idioms)]
 
 // Note to developers: you can find decent overviews of the protocol at
 //
@@ -91,10 +92,7 @@
 //
 // Wireshark also does a pretty good job at parsing the MySQL protocol.
 
-extern crate byteorder;
-extern crate chrono;
 extern crate mysql_common as myc;
-extern crate nom;
 
 use std::collections::HashMap;
 use std::io;
@@ -102,7 +100,7 @@ use std::io::prelude::*;
 use std::iter;
 use std::net;
 
-pub use myc::constants::{ColumnFlags, ColumnType, StatusFlags};
+pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 
 mod commands;
 mod errorcodes;
@@ -132,10 +130,10 @@ pub struct Column {
     pub colflags: ColumnFlags,
 }
 
-pub use errorcodes::ErrorKind;
-pub use params::{ParamParser, ParamValue, Params};
-pub use resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
-pub use value::{ToMysqlValue, Value, ValueInner};
+pub use crate::errorcodes::ErrorKind;
+pub use crate::params::{ParamParser, ParamValue, Params};
+pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use crate::value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 pub trait MysqlShim<W: Write> {
@@ -149,7 +147,11 @@ pub trait MysqlShim<W: Write> {
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
     /// notify the client of the statement id assigned to the prepared statement, as well as to
     /// give metadata about the types of parameters and returned columns.
-    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> Result<(), Self::Error>;
+    fn on_prepare(
+        &mut self,
+        query: &str,
+        info: StatementMetaWriter<'_, W>,
+    ) -> Result<(), Self::Error>;
 
     /// Called when the client executes a previously prepared statement.
     ///
@@ -159,8 +161,8 @@ pub trait MysqlShim<W: Write> {
     fn on_execute(
         &mut self,
         id: u32,
-        params: ParamParser,
-        results: QueryResultWriter<W>,
+        params: ParamParser<'_>,
+        results: QueryResultWriter<'_, W>,
     ) -> Result<(), Self::Error>;
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
@@ -171,10 +173,14 @@ pub trait MysqlShim<W: Write> {
     ///
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error>;
+    fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<'_, W>,
+    ) -> Result<(), Self::Error>;
 
     /// Called when client switches database.
-    fn on_init(&mut self, _: &str, _: InitWriter<W>) -> Result<(), Self::Error> {
+    fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -259,7 +265,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     }
 
     fn run(mut self) -> Result<(), B::Error> {
-        use commands::Command;
+        use crate::commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
         while let Some((seq, packet)) = self.reader.next()? {

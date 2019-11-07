@@ -81,7 +81,7 @@ impl<R> PacketReader<R> {
 }
 
 impl<R: Read> PacketReader<R> {
-    pub fn next(&mut self) -> io::Result<Option<(u8, Packet)>> {
+    pub fn next(&mut self) -> io::Result<Option<(u8, Packet<'_>)>> {
         self.start = self.bytes.len() - self.remaining;
 
         loop {
@@ -193,13 +193,13 @@ impl<'a> Deref for Packet<'a> {
     }
 }
 
-fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet)> {
+fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
     nom::combinator::map(
         nom::sequence::pair(
             nom::multi::fold_many0(
                 fullpacket,
                 (0, None),
-                |(seq, pkt): (_, Option<Packet>), (nseq, p)| {
+                |(seq, pkt): (_, Option<Packet<'_>>), (nseq, p)| {
                     let pkt = if let Some(mut pkt) = pkt {
                         assert_eq!(nseq, seq + 1);
                         pkt.extend(p);

@@ -1,15 +1,15 @@
+use crate::myc::constants::{ColumnFlags, StatusFlags};
+use crate::packet::PacketWriter;
+use crate::value::ToMysqlValue;
+use crate::writers;
+use crate::{Column, ErrorKind, StatementData};
 use byteorder::WriteBytesExt;
-use myc::constants::{ColumnFlags, StatusFlags};
-use packet::PacketWriter;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use value::ToMysqlValue;
-use writers;
-use {Column, ErrorKind, StatementData};
 
 /// Convenience type for responding to a client `USE <db>` command.
-pub struct InitWriter<'a, W: Write + 'a> {
+pub struct InitWriter<'a, W: Write> {
     pub(crate) writer: &'a mut PacketWriter<W>,
 }
 
@@ -37,7 +37,7 @@ impl<'a, W: Write + 'a> InitWriter<'a, W> {
 /// [`reply`](struct.StatementMetaWriter.html#method.reply) or
 /// [`error`](struct.StatementMetaWriter.html#method.error).
 #[must_use]
-pub struct StatementMetaWriter<'a, W: Write + 'a> {
+pub struct StatementMetaWriter<'a, W: Write> {
     pub(crate) writer: &'a mut PacketWriter<W>,
     pub(crate) stmts: &'a mut HashMap<u32, StatementData>,
 }
@@ -100,7 +100,7 @@ enum Finalizer {
 /// program may panic if an I/O error occurs when sending the end-of-records marker to the client.
 /// To handle such errors, call `no_more_results` explicitly.
 #[must_use]
-pub struct QueryResultWriter<'a, W: Write + 'a> {
+pub struct QueryResultWriter<'a, W: Write> {
     // XXX: specialization instead?
     pub(crate) is_bin: bool,
     pub(crate) writer: &'a mut PacketWriter<W>,
@@ -195,7 +195,7 @@ impl<'a, W: Write> Drop for QueryResultWriter<'a, W> {
 /// if an I/O error occurs when sending the end-of-records marker to the client. To avoid this,
 /// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
-pub struct RowWriter<'a, W: Write + 'a> {
+pub struct RowWriter<'a, W: Write> {
     result: Option<QueryResultWriter<'a, W>>,
     bitmap_len: usize,
     data: Vec<u8>,

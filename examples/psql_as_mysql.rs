@@ -187,7 +187,7 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
                 // we can only do that by first boxing all the values (so they can be kept in a
                 // single vec), and then collecting a *second* vec with references to those, and
                 // *then* take a slice of that vec.
-                let args: Vec<Box<postgres::types::ToSql>> = ps
+                let args: Vec<Box<dyn postgres::types::ToSql>> = ps
                     .into_iter()
                     .map(|p| match p.coltype {
                         ColumnType::MYSQL_TYPE_SHORT => {
