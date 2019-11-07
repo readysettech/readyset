@@ -145,6 +145,10 @@ where
     ///    ⋈    |  Join
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
+    ///    σ    |  Filter
+    ///    π    |  Projection
+    ///    ≡    |  Identity
+    ///    T    |  Trigger
     fn description(&self, detailed: bool) -> String;
 
     /// Called when a node is first connected to the graph.
