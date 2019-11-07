@@ -98,7 +98,7 @@ named!(query_expr<CompleteByteSlice, (bool, Option<String>, SqlQuery)>,
     )
 );
 
-named!(query_exprs<CompleteByteSlice, (Vec<(bool, Option<String>, SqlQuery)>)>,
+named!(query_exprs<CompleteByteSlice, Vec<(bool, Option<String>, SqlQuery)>>,
     many1!(query_expr)
 );
 
