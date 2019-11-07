@@ -788,7 +788,7 @@ fn prepared_nulls() {
             assert!(!params[1].value.is_null());
             assert_eq!(
                 params[0].coltype,
-                myc::constants::ColumnType::MYSQL_TYPE_SHORT
+                myc::constants::ColumnType::MYSQL_TYPE_NULL
             );
             // rust-mysql sends all numbers as LONGLONG :'(
             assert_eq!(

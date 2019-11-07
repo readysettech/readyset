@@ -1,6 +1,6 @@
 [package]
 name = "msql-srv"
-version = "0.8.5"
+version = "0.8.6"
 edition = "2018"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
@@ -24,13 +24,13 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 nom = "5.0.0"
-mysql_common = "0.17"
+mysql_common = "0.19"
 byteorder = "1"
 chrono = "0.4"
 
 [dev-dependencies]
 postgres = "0.15.2"
-mysql = "16.0.0"
+mysql = "17.0.0"
 mysql_async = "0.20.0"
 slab = "0.4.2"
 tokio = "0.1.19"
