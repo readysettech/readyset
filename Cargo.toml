@@ -1,7 +1,10 @@
 [package]
 name = "unbounded-interval-tree"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Jonathan Guillotte-Blouin <jonathan.guillotte.blouin@gmail.com>"]
 edition = "2018"
 license = "MIT"
 description = "An interval tree working with inclusive/exclusive bounds, as well as unbounded intervals"
+
+repository = "https://github.com/jonathanGB/unbounded-interval-tree"
+keywords = ["interval", "tree", "bound", "unbounded", "inclusive", "exclusive", "datastructure"]
