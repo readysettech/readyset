@@ -1,3 +1,12 @@
+//! Implementation of an interval tree that works with inclusive/exclusive
+//! bounds, as well as unbounded intervals. It is based on the
+//! data structure described in Cormen et al. 
+//! (2009, Section 14.3: Interval trees, pp. 348–354). It provides methods
+//! for "stabbing queries" (as in "is point `p` or an interval `i` contained in any intervals
+//! in the tree of intervals?"), as well as helpers to get the difference between a queried
+//! interval and the database (in order to find subsegments not covered), and the list of
+//! intervals in the database overlapping a queried interval. 
+
 use std::cmp::Ordering;
 use std::cmp::Ordering::*;
 use std::ops::Bound;
@@ -6,12 +15,6 @@ use std::ops::Bound::*;
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
 /// The interval tree storing all the underlying intervals.
-/// This implementation mimics a binary search tree, where nodes are
-/// sorted by starting bound, and then by end bound. On top of that,
-/// the nodes are augmented with a value, representing the biggest end
-/// bound that can be found in the node's subtree. This is based on the
-/// data structure described in
-/// Cormen et al. (2009, Section 14.3: Interval trees, pp. 348–354).
 #[derive(Clone)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
