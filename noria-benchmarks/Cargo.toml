@@ -39,7 +39,6 @@ futures-state-stream = "0.1"
 tiberius = "0.3.1"
 # mysql
 mysql_async = "0.21.0-alpha.4"
-async-lease = "0.2.0-alpha.1"
 # memcached
 memcached-rs = "0.4"
 # mio

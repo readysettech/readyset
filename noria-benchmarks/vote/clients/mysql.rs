@@ -2,13 +2,49 @@ use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use clap;
 use mysql_async::prelude::*;
 use std::future::Future;
+use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower_service::Service;
 
-#[derive(Clone)]
 pub(crate) struct Conn {
-    // TODO: maybe just use a pool here?
-    c: async_lease::Lease<mysql_async::Conn>,
+    pool: mysql_async::Pool,
+    next: Option<mysql_async::Conn>,
+    pending: Option<mysql_async::futures::GetConn>,
+}
+
+impl Clone for Conn {
+    fn clone(&self) -> Self {
+        Conn {
+            pool: self.pool.clone(),
+            next: None,
+            pending: None,
+        }
+    }
+}
+
+impl Conn {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
+        if self.next.is_some() {
+            return Poll::Ready(Ok(()));
+        }
+
+        if self.pending.is_none() {
+            self.pending = Some(self.pool.get_conn());
+        }
+
+        if let Some(ref mut f) = self.pending {
+            match Pin::new(f).poll(cx) {
+                Poll::Ready(r) => {
+                    self.pending = None;
+                    self.next = Some(r?);
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Pending => Poll::Pending,
+            }
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 impl VoteClient for Conn {
@@ -85,7 +121,9 @@ impl VoteClient for Conn {
             opts.stmt_cache_size(10000);
 
             Ok(Conn {
-                c: async_lease::Lease::from(mysql_async::Conn::new(opts).await.unwrap()),
+                pool: mysql_async::Pool::new(opts),
+                next: None,
+                pending: None,
             })
         }
     }
@@ -97,28 +135,22 @@ impl Service<ReadRequest> for Conn {
     type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.c.poll_acquire(cx).map(Ok)
+        Conn::poll_ready(self, cx)
     }
 
     fn call(&mut self, req: ReadRequest) -> Self::Future {
-        let mut lease = self.c.transfer();
+        let conn = self.next.take().unwrap();
         async move {
-            let conn = lease.take();
-
             let len = req.0.len();
             let ids = req.0.iter().map(|a| a as &_).collect::<Vec<_>>();
             let vals = (0..len).map(|_| "?").collect::<Vec<_>>().join(",");
             let qstring = format!("SELECT id, title, votes FROM art WHERE id IN ({})", vals);
 
             let qresult = conn.prep_exec(qstring, &ids).await.unwrap();
-            let (conn, rows) = qresult
+            let (_, rows) = qresult
                 .reduce_and_drop(0, |rows, _| rows + 1)
                 .await
                 .unwrap();
-
-            // Give back the connection for other callers.
-            // After this, `poll_ready` may return `Ok(Ready)` again.
-            lease.restore(conn);
 
             // <= because IN() collapses duplicates
             assert!(rows <= ids.len());
@@ -134,14 +166,12 @@ impl Service<WriteRequest> for Conn {
     type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.c.poll_acquire(cx).map(Ok)
+        Conn::poll_ready(self, cx)
     }
 
     fn call(&mut self, req: WriteRequest) -> Self::Future {
-        let mut lease = self.c.transfer();
+        let conn = self.next.take().unwrap();
         async move {
-            let conn = lease.take();
-
             let len = req.0.len();
             let ids = req.0.iter().map(|a| a as &_).collect::<Vec<_>>();
             let vals = (0..len).map(|_| "(0, ?)").collect::<Vec<_>>().join(", ");
@@ -151,11 +181,7 @@ impl Service<WriteRequest> for Conn {
             let vals = (0..len).map(|_| "?").collect::<Vec<_>>().join(",");
             // NOTE: this is *not* correct for duplicate ids
             let vote_qstring = format!("UPDATE art SET votes = votes + 1 WHERE id IN ({})", vals);
-            let conn = conn.drop_exec(vote_qstring, &ids).await.unwrap();
-
-            // Give back the connection for other callers.
-            // After this, `poll_ready` may return `Ok(Ready)` again.
-            lease.restore(conn);
+            let _ = conn.drop_exec(vote_qstring, &ids).await.unwrap();
 
             Ok(())
         }
