@@ -3,3 +3,5 @@ name = "unbounded-interval-tree"
 version = "0.1.0"
 authors = ["Jonathan Guillotte-Blouin <jonathan.guillotte.blouin@gmail.com>"]
 edition = "2018"
+licence = "MIT"
+description = "An interval tree working with inclusive/exclusive bounds, as well as unbounded intervals"
