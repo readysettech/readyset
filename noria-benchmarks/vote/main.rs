@@ -749,7 +749,7 @@ fn main() {
         ("netsoup", Some(largs)) => run::<clients::netsoup::Conn>(&args, largs),
         //("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
         //("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),
-        //("mysql", Some(largs)) => run::<clients::mysql::Conf>(&args, largs),
+        ("mysql", Some(largs)) => run::<clients::mysql::Conn>(&args, largs),
         //("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
         //("null", Some(largs)) => run::<()>(&args, largs),
         (name, _) => eprintln!("unrecognized backend type '{}'", name),
