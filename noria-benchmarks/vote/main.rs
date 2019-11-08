@@ -747,7 +747,7 @@ fn main() {
     match args.subcommand() {
         ("localsoup", Some(largs)) => run::<clients::localsoup::LocalNoria>(&args, largs),
         ("netsoup", Some(largs)) => run::<clients::netsoup::Conn>(&args, largs),
-        //("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
+        ("memcached", Some(largs)) => run::<clients::memcached::Conn>(&args, largs),
         //("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),
         ("mysql", Some(largs)) => run::<clients::mysql::Conn>(&args, largs),
         //("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
