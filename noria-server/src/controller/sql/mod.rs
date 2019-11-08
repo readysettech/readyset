@@ -208,6 +208,7 @@ impl SqlIncorporator {
 
         // Do we already have this exact query or a subset of it in the same universe?
         // TODO(malte): make this an O(1) lookup by QG signature
+        println!("qg.signature={:?}", qg.signature());
         let qg_hash = qg.signature().hash;
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
@@ -658,6 +659,7 @@ impl SqlIncorporator {
         // This means we cannot reuse these queries.
         match qg {
             Some(qg) => {
+                println!("qg.signature={:?}", qg.signature());
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
                 self.mir_queries.insert((qg_hash, universe), mir.clone());
@@ -1006,10 +1008,14 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        for r in relations.iter() {
+        let mut r_vec: Vec<&str> = relations.to_vec();
+        r_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        for r in &r_vec {
             r.hash(&mut hasher);
         }
-        for a in attrs.iter() {
+        let mut a_vec: Vec<&Column> = attrs.to_vec();
+        a_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        for a in &a_vec {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
@@ -1718,18 +1724,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // check aggregation view
-            let f = Box::new(FunctionExpression::SumFilter(
-                Column::from("votes.sign"),
-                None,
-                ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: Operator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
-                    }
-            )));
-            let _qid = query_id_hash(
+            // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
+            let f = Box::new(FunctionExpression::Sum(Column::from("votes.sign"), false));
+            let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
                 &[&Column {
@@ -1740,8 +1737,7 @@ mod tests {
                 }],
             );
 
-            // TODO compute qid correctly and use it in the below
-            let agg_view = get_node(&inc, mig, &format!("q_4f38c761534f0bb8_n1_p0_f0_filteragg"));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
             assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
             // check edge view -- note that it's not actually currently possible to read from
@@ -1781,9 +1777,9 @@ mod tests {
             let f = Box::new(FunctionExpression::Sum(
                 Column::from("votes.sign"),
                 false));
-            let _qid = query_id_hash(
+            let qid = query_id_hash(
                 &["computed_columns", "votes"],
-                &[&Column::from("votes.userid")],
+                &[&Column::from("votes.userid"), &Column::from("sum")],
                 &[&Column {
                     name: String::from("sum"),
                     alias: Some(String::from("sum")),
@@ -1791,9 +1787,7 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            // TODO figure out how not to hardcode the hash
-            //let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            let agg_view = get_node(&inc, mig, &format!("q_e0e20b571d0ab873_n0"));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             println!("agg_view={:?}", agg_view);
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(2) γ[0]");
@@ -1808,7 +1802,7 @@ mod tests {
 
 // currently, this test will fail because logical operations are unimplemented
 // (in particular, any complex operation that might involve multiple filter conditions
-// is currently unimplemented for filter-aggregations (TODO))
+// is currently unimplemented for filter-aggregations (TODO (jamb)))
 /*
     #[test]
     fn it_incorporates_aggregation_filter_logical_op() {

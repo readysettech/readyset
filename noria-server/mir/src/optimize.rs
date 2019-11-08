@@ -44,7 +44,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
 
     // 2. iterate over the nodes to find candidates, i.e.
     // nodes that are a filter followed by an aggregate with no other children/parents.
-    // Initially we also considered nodes that are an aggregate followed by a filter,
+    // TODO (jamb) Initially we also considered nodes that are an aggregate followed by a filter,
     // but this case is rarer and may have the problem that it is filtering on the result
     // of the aggregate, in which case they cannot be merged.
 
@@ -68,6 +68,23 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     let child = temp.children.first().unwrap().borrow();
                     match child.inner {
                         MirNodeType::Aggregation { .. } => {
+                            if child.ancestors.len() == 1 {
+                                candidate = true;
+                            }
+                        },
+                        _ => {},
+                    };
+                }
+            },
+            MirNodeType::Aggregation { .. }  => {
+                // if there's exactly one child and it's an aggregation and it has exactly one parent,
+                // then this is a candidate
+                // TODO check if the filter is on the aggregation result
+                if n.borrow().children.len() == 1 {
+                    let temp = n.borrow();
+                    let child = temp.children.first().unwrap().borrow();
+                    match child.inner {
+                        MirNodeType::Filter { .. } => {
                             if child.ancestors.len() == 1 {
                                 candidate = true;
                             }
