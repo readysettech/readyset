@@ -40,7 +40,7 @@ let overlaps = tree.get_interval_overlaps(
 // Get the difference between the database
 // of intervals and the query interval.
 let diff = tree.get_interval_difference(
-  &(Included(0), Excluded(30)));
+  (Included(0), Excluded(30)));
 ```
 
 ## Roadmap

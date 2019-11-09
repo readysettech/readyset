@@ -132,8 +132,8 @@ where
     ///
     /// int_tree.insert((Excluded(5), Unbounded));
     ///
-    /// assert!(int_tree.contains_point(&100));
-    /// assert!(!int_tree.contains_point(&5));
+    /// assert!(int_tree.contains_point(100));
+    /// assert!(!int_tree.contains_point(5));
     /// ```
     ///
     /// Note that we can work with any type that implements the `Ord+Clone` traits, so
@@ -149,8 +149,8 @@ where
     /// assert!(str_tree.contains_point(&"Zebra"));
     /// assert!(!str_tree.contains_point(&"Noria"));
     /// ```
-    pub fn contains_point(&self, q: &Q) -> bool {
-        self.contains_interval(&(Included(q.clone()), Included(q.clone())))
+    pub fn contains_point(&self, q: Q) -> bool {
+        self.contains_interval((Included(q.clone()), Included(q.clone())))
     }
 
     /// An alternative "stabbing query": returns whether or not an interval `q`
@@ -166,10 +166,10 @@ where
     /// tree.insert((Included(20), Included(30)));
     /// tree.insert((Excluded(30), Excluded(50)));
     ///
-    /// assert!(tree.contains_interval(&(Included(20), Included(40))));
-    /// assert!(!tree.contains_interval(&(Included(30), Included(50))));
+    /// assert!(tree.contains_interval((Included(20), Included(40))));
+    /// assert!(!tree.contains_interval((Included(30), Included(50))));
     /// ```
-    pub fn contains_interval(&self, q: &Range<Q>) -> bool {
+    pub fn contains_interval(&self, q: Range<Q>) -> bool {
         self.get_interval_difference(q).is_empty()
     }
 
@@ -213,26 +213,26 @@ where
     /// tree.insert((Excluded(10), Included(30)));
     /// tree.insert((Excluded(50), Unbounded));
     ///
-    /// assert_eq!(tree.get_interval_difference(&(Included(-5), Included(30))),
-    ///            vec![(Included(&-5), Excluded(&0)),
-    ///                 (Included(&10), Included(&10))]);
-    /// assert_eq!(tree.get_interval_difference(&(Unbounded, Excluded(10))),
-    ///            vec![(Unbounded, Excluded(&0))]);
-    /// assert!(tree.get_interval_difference(&(Included(100), Unbounded)).is_empty());
+    /// assert_eq!(tree.get_interval_difference((Included(-5), Included(30))),
+    ///            vec![(Included(-5), Excluded(0)),
+    ///                 (Included(10), Included(10))]);
+    /// assert_eq!(tree.get_interval_difference((Unbounded, Excluded(10))),
+    ///            vec![(Unbounded, Excluded(0))]);
+    /// assert!(tree.get_interval_difference((Included(100), Unbounded)).is_empty());
     /// ```
-    pub fn get_interval_difference<'a>(&'a self, q: &'a Range<Q>) -> Vec<Range<&'a Q>> {
-        let overlaps = self.get_interval_overlaps(q);
+    pub fn get_interval_difference(&self, q: Range<Q>) -> Vec<Range<Q>> {
+        let overlaps = self.get_interval_overlaps(&q);
 
         // If there is no overlap, then the difference is the query `q` itself.
         if overlaps.is_empty() {
             let min = match q.0 {
-                Included(ref x) => Included(x),
-                Excluded(ref x) => Excluded(x),
+                Included(x) => Included(x),
+                Excluded(x) => Excluded(x),
                 Unbounded => Unbounded,
             };
             let max = match q.1 {
-                Included(ref x) => Included(x),
-                Excluded(ref x) => Excluded(x),
+                Included(x) => Included(x),
+                Excluded(x) => Excluded(x),
                 Unbounded => Unbounded,
             };
             return vec![(min, max)];
@@ -243,19 +243,19 @@ where
 
         // If q.min < first.min, we have a difference to append.
         match (&q.0, &first.0) {
-            (Unbounded, Included(first_min)) => acc.push((Unbounded, Excluded(first_min))),
-            (Unbounded, Excluded(first_min)) => acc.push((Unbounded, Included(first_min))),
+            (Unbounded, Included(first_min)) => acc.push((Unbounded, Excluded(first_min.clone()))),
+            (Unbounded, Excluded(first_min)) => acc.push((Unbounded, Included(first_min.clone()))),
             (Included(q_min), Included(first_min)) if q_min < first_min => {
-                acc.push((Included(q_min), Excluded(first_min)))
+                acc.push((Included(q_min.clone()), Excluded(first_min.clone())))
             }
             (Excluded(q_min), Included(first_min)) if q_min < first_min => {
-                acc.push((Excluded(q_min), Excluded(first_min)))
+                acc.push((Excluded(q_min.clone()), Excluded(first_min.clone())))
             }
             (Excluded(q_min), Excluded(first_min)) if q_min < first_min => {
-                acc.push((Excluded(q_min), Included(first_min)))
+                acc.push((Excluded(q_min.clone()), Included(first_min.clone())))
             }
             (Included(q_min), Excluded(first_min)) if q_min <= first_min => {
-                acc.push((Included(q_min), Included(first_min)))
+                acc.push((Included(q_min.clone()), Included(first_min.clone())))
             }
             _ => {}
         };
@@ -278,25 +278,25 @@ where
                 (Included(contiguous_max), Included(overlap_min))
                     if contiguous_max < overlap_min =>
                 {
-                    acc.push((Excluded(contiguous_max), Excluded(overlap_min)));
+                    acc.push((Excluded(contiguous_max.clone()), Excluded(overlap_min.clone())));
                     contiguous = &overlap.1;
                 }
                 (Included(contiguous_max), Excluded(overlap_min))
                     if contiguous_max < overlap_min =>
                 {
-                    acc.push((Excluded(contiguous_max), Included(overlap_min)));
+                    acc.push((Excluded(contiguous_max.clone()), Included(overlap_min.clone())));
                     contiguous = &overlap.1;
                 }
                 (Excluded(contiguous_max), Included(overlap_min))
                     if contiguous_max < overlap_min =>
                 {
-                    acc.push((Included(contiguous_max), Excluded(overlap_min)));
+                    acc.push((Included(contiguous_max.clone()), Excluded(overlap_min.clone())));
                     contiguous = &overlap.1;
                 }
                 (Excluded(contiguous_max), Excluded(overlap_min))
                     if contiguous_max <= overlap_min =>
                 {
-                    acc.push((Included(contiguous_max), Included(overlap_min)));
+                    acc.push((Included(contiguous_max.clone()), Included(overlap_min.clone())));
                     contiguous = &overlap.1;
                 }
                 _ => {}
@@ -324,16 +324,16 @@ where
         // If contiguous.max < q.max, we have a difference to append.
         match (&contiguous, &q.1) {
             (Included(contiguous_max), Included(q_max)) if contiguous_max < q_max => {
-                acc.push((Excluded(contiguous_max), Included(q_max)))
+                acc.push((Excluded(contiguous_max.clone()), Included(q_max.clone())))
             }
             (Included(contiguous_max), Excluded(q_max)) if contiguous_max < q_max => {
-                acc.push((Excluded(contiguous_max), Excluded(q_max)))
+                acc.push((Excluded(contiguous_max.clone()), Excluded(q_max.clone())))
             }
             (Excluded(contiguous_max), Excluded(q_max)) if contiguous_max < q_max => {
-                acc.push((Included(contiguous_max), Excluded(q_max)))
+                acc.push((Included(contiguous_max.clone()), Excluded(q_max.clone())))
             }
             (Excluded(contiguous_max), Included(q_max)) if contiguous_max <= q_max => {
-                acc.push((Included(contiguous_max), Included(q_max)))
+                acc.push((Included(contiguous_max.clone()), Included(q_max.clone())))
             }
             _ => {}
         };
@@ -784,10 +784,10 @@ mod tests {
             vec![&root_key]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Excluded((1, 1)), Included((1, 5)))),
+            tree.get_interval_difference((Excluded((1, 1)), Included((1, 5)))),
             vec![
-                (Excluded(&(1, 1)), Excluded(&(1, 2))),
-                (Included(&(1, 4)), Included(&(1, 5)))
+                (Excluded((1, 1)), Excluded((1, 2))),
+                (Included((1, 4)), Included((1, 5)))
             ]
         );
     }
@@ -815,39 +815,39 @@ mod tests {
         tree.insert(key8);
 
         assert_eq!(
-            tree.get_interval_difference(&(Excluded(0), Included(100))),
+            tree.get_interval_difference((Excluded(0), Included(100))),
             vec![
-                (Excluded(&0), Excluded(&2)),
-                (Included(&10), Included(&10)),
-                (Included(&20), Excluded(&30)),
-                (Excluded(&40), Included(&45))
+                (Excluded(0), Excluded(2)),
+                (Included(10), Included(10)),
+                (Included(20), Excluded(30)),
+                (Excluded(40), Included(45))
             ]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Included(19), Included(40))),
-            vec![(Included(&20), Excluded(&30))]
+            tree.get_interval_difference((Included(19), Included(40))),
+            vec![(Included(20), Excluded(30))]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Included(20), Included(40))),
-            vec![(Included(&20), Excluded(&30))]
+            tree.get_interval_difference((Included(20), Included(40))),
+            vec![(Included(20), Excluded(30))]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Included(20), Included(45))),
+            tree.get_interval_difference((Included(20), Included(45))),
             vec![
-                (Included(&20), Excluded(&30)),
-                (Excluded(&40), Included(&45))
+                (Included(20), Excluded(30)),
+                (Excluded(40), Included(45))
             ]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Included(20), Excluded(45))),
+            tree.get_interval_difference((Included(20), Excluded(45))),
             vec![
-                (Included(&20), Excluded(&30)),
-                (Excluded(&40), Excluded(&45))
+                (Included(20), Excluded(30)),
+                (Excluded(40), Excluded(45))
             ]
         );
         assert_eq!(
-            tree.get_interval_difference(&(Included(2), Included(10))),
-            vec![(Included(&10), Included(&10))]
+            tree.get_interval_difference((Included(2), Included(10))),
+            vec![(Included(10), Included(10))]
         );
     }
 
@@ -862,11 +862,11 @@ mod tests {
         tree.insert(key2);
 
         assert_eq!(
-            tree.get_interval_difference(&(Included(0), Included(40))),
+            tree.get_interval_difference((Included(0), Included(40))),
             vec![
-                (Included(&0), Excluded(&10)),
-                (Included(&20), Included(&30)),
-                (Included(&40), Included(&40))
+                (Included(0), Excluded(10)),
+                (Included(20), Included(30)),
+                (Included(40), Included(40))
             ]
         );
     }
@@ -883,10 +883,10 @@ mod tests {
         tree.insert(key2);
         tree.insert(key3);
 
-        assert!(tree.contains_point(&10));
-        assert!(!tree.contains_point(&20));
-        assert!(tree.contains_point(&40));
-        assert!(tree.contains_point(&100));
+        assert!(tree.contains_point(10));
+        assert!(!tree.contains_point(20));
+        assert!(tree.contains_point(40));
+        assert!(tree.contains_point(100));
     }
 
     #[test]
@@ -901,10 +901,10 @@ mod tests {
         tree.insert(key2.clone());
         tree.insert(key3.clone());
 
-        assert!(tree.contains_interval(&key1));
-        assert!(!tree.contains_interval(&(Included(10), Included(20))));
-        assert!(!tree.contains_interval(&(Unbounded, Included(0))));
-        assert!(tree.contains_interval(&(Included(35), Included(37))));
+        assert!(tree.contains_interval(key1));
+        assert!(!tree.contains_interval((Included(10), Included(20))));
+        assert!(!tree.contains_interval((Unbounded, Included(0))));
+        assert!(tree.contains_interval((Included(35), Included(37))));
     }
 
     #[test]
