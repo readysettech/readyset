@@ -2312,6 +2312,7 @@ dependencies = [
  "tempfile",
  "timekeeper",
  "tokio 0.2.24",
+ "unbounded-interval-tree",
  "vec_map",
 ]
 

@@ -4,6 +4,7 @@ use common::SizeOf;
 use evbtree::refs::Values;
 use rand::prelude::*;
 use std::borrow::Cow;
+use std::ops::Bound;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -47,22 +48,34 @@ fn new_inner(
     };
 
     macro_rules! make {
-        ($variant:tt) => {{
+        ($variant:tt, $hint: ty) => {{
             use evbtree;
+            use unbounded_interval_tree::IntervalTree;
             let (w, r) = evbtree::Options::default()
                 .with_meta(-1)
                 .with_hasher(RandomState::default())
                 .construct();
-
-            (multiw::Handle::$variant(w), multir::Handle::$variant(r))
+            let mut tree: IntervalTree<$hint> = IntervalTree::default();
+            // If there is no trigger, then we are fully-materialized.
+            // We can insert a single node to the interval tree that covers
+            // all possible intervals, which means that all intervals
+            // are covered by the materialized node.
+            if trigger.is_none() {
+                use std::ops::Bound::Unbounded;
+                tree.insert((Unbounded::<$hint>, Unbounded::<$hint>));
+            }
+            (
+                multiw::Handle::$variant(w),
+                multir::Handle::$variant(r, tree),
+            )
         }};
     }
 
     let (w, r) = match key.len() {
         0 => unreachable!(),
-        1 => make!(Single),
-        2 => make!(Double),
-        _ => make!(Many),
+        1 => make!(Single, DataType),
+        2 => make!(Double, (DataType, _)),
+        _ => make!(Many, Vec<DataType>),
     };
 
     let w = WriteHandle {
@@ -296,6 +309,14 @@ impl SizeOf for WriteHandle {
     }
 }
 
+/// Signify which intervals are missing in a materialization in response to a range lookup
+#[derive(PartialEq, Debug)]
+pub enum RangeLookupMiss {
+    Single(Vec<(Bound<DataType>, Bound<DataType>)>),
+    Double(Vec<(Bound<(DataType, DataType)>, Bound<(DataType, DataType)>)>),
+    Many(Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>),
+}
+
 /// Handle to get the state of a single shard of a reader.
 #[derive(Clone)]
 pub struct SingleReadHandle {
@@ -355,20 +376,23 @@ impl SingleReadHandle {
     }
 
     /// Look up the entries whose keys are in `range`, pass each to `then`, and return them
-    pub fn try_find_range_and<F, T, R>(&self, range: R, mut then: F) -> Result<(Vec<T>, i64), ()>
+    pub fn try_find_range_and<F, T, R>(
+        &self,
+        range: R,
+        mut then: F,
+    ) -> Option<Result<(Vec<T>, i64), RangeLookupMiss>>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
         R: RangeBounds<Vec<common::DataType>>,
     {
-        self.handle
-            .meta_get_range_and(range, &mut then)
-            .ok_or(())
-            .map(|(mut records, meta)| {
+        self.handle.meta_get_range_and(range, &mut then).map(|res| {
+            res.map(|(mut records, meta)| {
                 if records.is_empty() && self.trigger.is_none() {
                     records = vec![then(&Values::default())];
                 }
                 (records, meta)
             })
+        })
     }
 
     pub fn len(&self) -> usize {

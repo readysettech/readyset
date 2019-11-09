@@ -1,3 +1,4 @@
+#![feature(bound_cloned)]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.
 #![cfg_attr(debug, feature(is_sorted))]
@@ -29,6 +30,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
 
+pub use crate::backlog::RangeLookupMiss;
 pub use crate::backlog::SingleReadHandle;
 pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;

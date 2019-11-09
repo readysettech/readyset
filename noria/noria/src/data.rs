@@ -99,6 +99,42 @@ impl fmt::Debug for DataType {
 }
 
 impl DataType {
+    /// Generates the minimum DataType corresponding to the type of a given DataType.
+    pub fn min_value(other: &Self) -> Self {
+        match other {
+            DataType::None => DataType::None,
+            DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText([0; 15]),
+            DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
+                chrono::naive::MIN_DATE,
+                chrono::naive::NaiveTime::from_hms(0, 0, 0),
+            )),
+            DataType::Real(..) => DataType::Real(i64::min_value(), i32::max_value()),
+            DataType::Int(_) => DataType::Int(i32::min_value()),
+            DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
+            DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
+            DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
+        }
+    }
+
+    /// Generates the maximum DataType corresponding to the type of a given DataType.
+    /// Note that there is no possible maximum for the `Text` variant, hence it is not implemented.
+    pub fn max_value(other: &Self) -> Self {
+        match other {
+            DataType::None => DataType::None,
+            DataType::Text(_) => unimplemented!(),
+            DataType::TinyText(_) => DataType::TinyText([u8::max_value(); 15]),
+            DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
+                chrono::naive::MAX_DATE,
+                chrono::naive::NaiveTime::from_hms(23, 59, 59),
+            )),
+            DataType::Real(..) => DataType::Real(i64::max_value(), i32::max_value()),
+            DataType::Int(_) => DataType::Int(i32::max_value()),
+            DataType::UnsignedInt(_) => DataType::UnsignedInt(u32::max_value()),
+            DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
+            DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
+        }
+    }
+
     /// Clone the value contained within this `DataType`.
     ///
     /// This method crucially does not cause cache-line conflicts with the underlying data-store
