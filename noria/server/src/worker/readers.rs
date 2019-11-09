@@ -237,13 +237,15 @@ fn handle_normal_read_query(
                 let rs = if let Some(key) = key_comparison.equal() {
                     reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0)
                 } else {
-                    reader
-                        .try_find_range_and(&key_comparison, |r| {
-                            r.into_iter().cloned().collect::<Vec<_>>()
-                        })
-                        .map(|(rs, _)|
-                             // TODO(grfn): Here's where we'd handle partial
-                             Some(serialize(&rs.into_iter().flatten().collect::<Vec<_>>())))
+                    match reader.try_find_range_and(&key_comparison, |r| {
+                        r.into_iter().cloned().collect::<Vec<_>>()
+                    }) {
+                        Some(Ok((rs, _))) => Ok(Some(serialize(
+                            &rs.into_iter().flatten().collect::<Vec<_>>(),
+                        ))),
+                        Some(Err(_)) => Ok(None),
+                        None => Err(()),
+                    }
                 };
 
                 match rs {

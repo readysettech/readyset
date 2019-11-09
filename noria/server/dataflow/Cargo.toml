@@ -45,6 +45,7 @@ rocksdb = {version = "0.14", default-features = false, features = ["lz4"] }
 # local deps
 common = { version = "0.7.0", path = "../common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../../noria" }
+unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
 
 [dev-dependencies]
 proptest = "0.10.1"
