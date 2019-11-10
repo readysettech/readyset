@@ -173,7 +173,7 @@ impl SqlToMirConverter {
         ct: &ConditionTree,
         columns: &mut Vec<Column>,
         n: &MirNodeRef,
-    ) -> Vec<Option<FilterCondition>> {
+    ) -> Vec<(usize, FilterCondition)> {
         use std::cmp::max;
 
         // TODO(malte): we only support one level of condition nesting at this point :(
@@ -182,7 +182,7 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
         use dataflow::ops::filter;
-        let f = Some(match *ct.right.as_ref() {
+        let f = match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
                 FilterCondition::Comparison(
                     ct.operator.clone(),
@@ -212,7 +212,7 @@ impl SqlToMirConverter {
                 FilterCondition::Comparison(ct.operator.clone(), filter::Value::Column(fi))
             }
             _ => unimplemented!(),
-        });
+        };
 
         let absolute_column_ids: Vec<usize> = columns
             .iter()
@@ -220,17 +220,18 @@ impl SqlToMirConverter {
             .collect();
         let max_column_id = *absolute_column_ids.iter().max().unwrap();
         let num_columns = max(columns.len(), max_column_id + 1);
-        let mut filters = vec![None; num_columns];
+        let mut filters = Vec::new();
 
         match columns.iter().rposition(|c| *c.name == l.name) {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
                 // We assume that the column is appended at the end.
                 columns.push(Column::from(l));
-                filters.push(f);
+                filters.push((num_columns, f));
             }
             Some(pos) => {
-                filters[absolute_column_ids[pos]] = f;
+                let index = absolute_column_ids[pos];
+                filters.push((index, f));
             }
         }
 

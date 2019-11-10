@@ -98,11 +98,10 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                                                     if col.name == on.name {
                                                         // this column may be the aggregation result
                                                         // so if we're filtering on it, we're not a candidate
-                                                        match conditions.get(i).unwrap() {
-                                                            None => {}, // great, we're not filtering on it
-                                                            Some(_) => {
+                                                        for (j, _cond) in conditions {
+                                                            if *j == i {
                                                                 candidate = false;
-                                                            },
+                                                            }
                                                         }
                                                     }
                                                 },
@@ -332,15 +331,16 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
 fn to_conditions(
     chained_filters: &[MirNodeRef],
     num_columns: usize,
-) -> Vec<Option<FilterCondition>> {
-    let mut merged_conditions = vec![None; num_columns];
+) -> Vec<(usize, FilterCondition)> {
+    let mut merged_conditions = Vec::new();
     for filter in chained_filters {
         match filter.borrow().inner {
             MirNodeType::Filter { ref conditions } => {
                 // Note that this assumes that there is only ever one column being filtered on for
                 // each filter that is being merged.
-                let i = conditions.iter().position(Option::is_some).unwrap();
-                merged_conditions[i] = conditions[i].clone();
+                for (i, cond) in conditions {
+                    merged_conditions.push((i.clone(), cond.clone()));
+                }
             }
             _ => unreachable!(),
         }

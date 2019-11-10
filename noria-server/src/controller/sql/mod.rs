@@ -1701,7 +1701,6 @@ mod tests {
     // This entire test is a mess and needs rethinking.
     #[test]
     fn it_merges_filter_and_sum() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_merges_filter_and_sum");
         g.migrate(|mig| {
@@ -1748,7 +1747,6 @@ mod tests {
 
     #[test]
     fn it_doesnt_merge_sum_and_filter_on_sum_result() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_doesnt_merge_sum_and_filter_on_sum_result");
         g.migrate(|mig| {

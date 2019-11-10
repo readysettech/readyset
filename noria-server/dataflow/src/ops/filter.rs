@@ -10,7 +10,7 @@ use prelude::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    filter: sync::Arc<Vec<Option<FilterCondition>>>,
+    filter: sync::Arc<Vec<(usize, FilterCondition)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,7 +44,7 @@ impl Filter {
     /// Construct a new filter operator. The `filter` vector must have as many elements as the
     /// `src` node has columns. Each column that is set to `None` matches any value, while columns
     /// in the filter that have values set will check for equality on that column.
-    pub fn new(src: NodeIndex, filter: &[Option<FilterCondition>]) -> Filter {
+    pub fn new(src: NodeIndex, filter: &[(usize, FilterCondition)]) -> Filter {
         Filter {
             src: src.into(),
             filter: sync::Arc::new(Vec::from(filter)),
@@ -83,32 +83,27 @@ impl Ingredient for Filter {
         _: &StateMap,
     ) -> ProcessingResult {
         rs.retain(|r| {
-            self.filter.iter().enumerate().all(|(i, fi)| {
+            self.filter.iter().all(|(i, cond)| {
                 // check if this filter matches
-                let d = &r[i];
-                if let Some(ref cond) = *fi {
-                    match *cond {
-                        FilterCondition::Comparison(ref op, ref f) => {
-                            let v = match *f {
-                                Value::Constant(ref dt) => dt,
-                                Value::Column(c) => &r[c],
-                            };
-                            match *op {
-                                Operator::Equal => d == v,
-                                Operator::NotEqual => d != v,
-                                Operator::Greater => d > v,
-                                Operator::GreaterOrEqual => d >= v,
-                                Operator::Less => d < v,
-                                Operator::LessOrEqual => d <= v,
-                                Operator::In => unreachable!(),
-                                _ => unimplemented!(),
-                            }
+                let d = &r[*i];
+                match cond {
+                    FilterCondition::Comparison(ref op, ref f) => {
+                        let v = match *f {
+                            Value::Constant(ref dt) => dt,
+                            Value::Column(c) => &r[c],
+                        };
+                        match *op {
+                            Operator::Equal => d == v,
+                            Operator::NotEqual => d != v,
+                            Operator::Greater => d > v,
+                            Operator::GreaterOrEqual => d >= v,
+                            Operator::Less => d < v,
+                            Operator::LessOrEqual => d <= v,
+                            Operator::In => unreachable!(),
+                            _ => unimplemented!(),
                         }
-                        FilterCondition::In(ref fs) => fs.contains(d),
                     }
-                } else {
-                    // everything matches no condition
-                    true
+                    FilterCondition::In(ref fs) => fs.contains(d),
                 }
             })
         });
@@ -144,22 +139,18 @@ impl Ingredient for Filter {
             "σ[{}]",
             self.filter
                 .iter()
-                .enumerate()
-                .filter_map(|(i, ref e)| match e.as_ref() {
-                    Some(cond) => match *cond {
-                        FilterCondition::Comparison(ref op, ref x) => {
-                            Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                        }
-                        FilterCondition::In(ref xs) => Some(format!(
-                            "f{} IN ({})",
-                            i,
-                            xs.iter()
-                                .map(|d| format!("{}", d))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )),
+                .filter_map(|(i, ref cond)| match *cond {
+                    FilterCondition::Comparison(ref op, ref x) => {
+                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
                     },
-                    None => None,
+                    FilterCondition::In(ref xs) => Some(format!(
+                        "f{} IN ({})",
+                        i,
+                        xs.iter()
+                            .map(|d| format!("{}", d))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
                 })
                 .collect::<Vec<_>>()
                 .as_slice()
@@ -183,30 +174,26 @@ impl Ingredient for Filter {
             .and_then(|result| {
                 let f = self.filter.clone();
                 let filter = move |r: &[DataType]| {
-                    r.iter().enumerate().all(|(i, d)| {
+                    f.iter().all(|(i, ref cond)| {
                         // check if this filter matches
-                        if let Some(ref cond) = f[i] {
-                            match *cond {
-                                FilterCondition::Comparison(ref op, ref f) => {
-                                    let v = match *f {
-                                        Value::Constant(ref dt) => dt,
-                                        Value::Column(c) => &r[c],
-                                    };
-                                    match *op {
-                                        Operator::Equal => d == v,
-                                        Operator::NotEqual => d != v,
-                                        Operator::Greater => d > v,
-                                        Operator::GreaterOrEqual => d >= v,
-                                        Operator::Less => d < v,
-                                        Operator::LessOrEqual => d <= v,
-                                        _ => unimplemented!(),
-                                    }
+                        let d = &r[*i];
+                        match *cond {
+                            FilterCondition::Comparison(ref op, ref f) => {
+                                let v = match *f {
+                                    Value::Constant(ref dt) => dt,
+                                    Value::Column(c) => &r[c],
+                                };
+                                match *op {
+                                    Operator::Equal => d == v,
+                                    Operator::NotEqual => d != v,
+                                    Operator::Greater => d > v,
+                                    Operator::GreaterOrEqual => d >= v,
+                                    Operator::Less => d < v,
+                                    Operator::LessOrEqual => d <= v,
+                                    _ => unimplemented!(),
                                 }
-                                FilterCondition::In(ref fs) => fs.contains(d),
                             }
-                        } else {
-                            // everything matches no condition
-                            true
+                            FilterCondition::In(ref fs) => fs.contains(d),
                         }
                     })
                 };
@@ -238,7 +225,7 @@ mod tests {
 
     fn setup(
         materialized: bool,
-        filters: Option<&[Option<FilterCondition>]>,
+        filters: Option<&[(usize, FilterCondition)]>,
     ) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
@@ -248,10 +235,9 @@ mod tests {
             Filter::new(
                 s.as_global(),
                 filters.unwrap_or(&[
-                    None,
-                    Some(FilterCondition::Comparison(
+                    (1, FilterCondition::Comparison(
                         Operator::Equal,
-                        Value::Constant("a".into()),
+                        Value::Constant("a".into())
                     )),
                 ]),
             ),
@@ -262,7 +248,7 @@ mod tests {
 
     #[test]
     fn it_forwards_nofilter() {
-        let mut g = setup(false, Some(&[None, None]));
+        let mut g = setup(false, Some(&[]));
 
         let mut left: Vec<DataType>;
 
@@ -297,11 +283,11 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::Comparison(
+                (0, FilterCondition::Comparison(
                     Operator::Equal,
                     Value::Constant(1.into()),
                 )),
-                Some(FilterCondition::Comparison(
+                (1, FilterCondition::Comparison(
                     Operator::Equal,
                     Value::Constant("a".into()),
                 )),
@@ -362,11 +348,11 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::Comparison(
+                (0, FilterCondition::Comparison(
                     Operator::LessOrEqual,
                     Value::Constant(2.into()),
                 )),
-                Some(FilterCondition::Comparison(
+                (1, FilterCondition::Comparison(
                     Operator::NotEqual,
                     Value::Constant("a".into()),
                 )),
@@ -397,11 +383,10 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::Comparison(
+                (0, FilterCondition::Comparison(
                     Operator::Equal,
                     Value::Column(1),
                 )),
-                None,
             ]),
         );
 
@@ -417,8 +402,8 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                Some(FilterCondition::In(vec![2.into(), 42.into()])),
-                Some(FilterCondition::In(vec!["b".into()])),
+                (0, FilterCondition::In(vec![2.into(), 42.into()])),
+                (1, FilterCondition::In(vec!["b".into()])),
             ]),
         );
 

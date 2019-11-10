@@ -182,22 +182,18 @@ impl GraphViz for MirNodeType {
                     "σ: {}",
                     conditions
                         .iter()
-                        .enumerate()
-                        .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(cond) => match *cond {
-                                FilterCondition::Comparison(ref op, ref x) => {
-                                    Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                                }
-                                FilterCondition::In(ref xs) => Some(format!(
-                                    "f{} IN ({})",
-                                    i,
-                                    xs.iter()
-                                        .map(|d| format!("{}", d))
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                )),
-                            },
-                            None => None,
+                        .filter_map(|(i, ref cond)| match *cond {
+                            FilterCondition::Comparison(ref op, ref x) => {
+                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                            }
+                            FilterCondition::In(ref xs) => Some(format!(
+                                "f{} IN ({})",
+                                i,
+                                xs.iter()
+                                    .map(|d| format!("{}", d))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )),
                         })
                         .collect::<Vec<_>>()
                         .as_slice()

@@ -513,7 +513,7 @@ fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    conditions: &[Option<FilterCondition>],
+    conditions: &[(usize, FilterCondition)],
     mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
@@ -536,7 +536,7 @@ fn make_grouped_node(
     kind: GroupedNodeType,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    conditions: Option<&[Option<FilterCondition>]>,
+    conditions: Option<&[(usize, FilterCondition)]>,
 ) -> FlowNode {
     assert!(!group_by.is_empty());
     assert!(

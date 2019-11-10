@@ -25,7 +25,7 @@ impl FilterAggregation {
     pub fn over(
         self,
         src: NodeIndex,
-        filter: &[Option<FilterCondition>],
+        filter: &[(usize, FilterCondition)],
         over: usize,
         over_else: Option<Literal>,
         group_by: &[usize],
@@ -65,7 +65,7 @@ impl FilterAggregation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterAggregator {
     op: FilterAggregation,
-    filter: sync::Arc<Vec<Option<FilterCondition>>>,
+    filter: sync::Arc<Vec<(usize, FilterCondition)>>,
     over: usize,
     over_else: Option<Literal>,
     group: Vec<usize>,
@@ -86,32 +86,27 @@ impl GroupedOperation for FilterAggregator {
     }
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
-        let passes_filter = self.filter.iter().enumerate().all(|(i, fi)| {
+        let passes_filter = self.filter.iter().all(|(i, cond)| {
             // check if this filter matches
-            let d = &r[i];
-            if let Some(ref cond) = *fi {
-                match *cond {
-                    FilterCondition::Comparison(ref op, ref f) => {
-                        let v = match *f {
-                            Value::Constant(ref dt) => dt,
-                            Value::Column(c) => &r[c],
-                        };
-                        match *op {
-                            Operator::Equal => d == v,
-                            Operator::NotEqual => d != v,
-                            Operator::Greater => d > v,
-                            Operator::GreaterOrEqual => d >= v,
-                            Operator::Less => d < v,
-                            Operator::LessOrEqual => d <= v,
-                            Operator::In => unreachable!(),
-                            _ => unimplemented!(),
-                        }
+            let d = &r[*i];
+            match *cond {
+                FilterCondition::Comparison(ref op, ref f) => {
+                    let v = match *f {
+                        Value::Constant(ref dt) => dt,
+                        Value::Column(c) => &r[c],
+                    };
+                    match *op {
+                        Operator::Equal => d == v,
+                        Operator::NotEqual => d != v,
+                        Operator::Greater => d > v,
+                        Operator::GreaterOrEqual => d >= v,
+                        Operator::Less => d < v,
+                        Operator::LessOrEqual => d <= v,
+                        Operator::In => unreachable!(),
+                        _ => unimplemented!(),
                     }
-                    FilterCondition::In(ref fs) => fs.contains(d),
                 }
-            } else {
-                // everything matches no condition
-                true
+                FilterCondition::In(ref fs) => fs.contains(d),
             }
         });
         let v = if passes_filter {
@@ -213,8 +208,7 @@ mod tests {
             FilterAggregation::COUNT.over(
                 s.as_global(),
                 &[
-                    None,
-                    Some(FilterCondition::Comparison(
+                    (1, FilterCondition::Comparison(
                         Operator::Equal,
                         Value::Constant(2.into()),
                     )),
@@ -236,12 +230,10 @@ mod tests {
             FilterAggregation::COUNT.over(
                 s.as_global(),
                 &[
-                    None,
-                    Some(FilterCondition::Comparison(
+                    (1, FilterCondition::Comparison(
                         Operator::Equal,
                         Value::Constant(2.into()),
                     )),
-                    None,
                 ],
                 1,
                 None,
@@ -261,12 +253,11 @@ mod tests {
             FilterAggregation::SUM.over(
                 s.as_global(),
                 &[
-                    None,
-                    Some(FilterCondition::Comparison(
+                    (1, FilterCondition::Comparison(
                         Operator::NotEqual,
                         Value::Column(0),
                     )),
-                    Some(FilterCondition::Comparison(
+                    (2, FilterCondition::Comparison(
                         Operator::Greater,
                         Value::Constant(1.into()),
                     )),
@@ -290,12 +281,10 @@ mod tests {
             FilterAggregation::SUM.over(
                 s.as_global(),
                 &[
-                    None,
-                    Some(FilterCondition::Comparison(
+                    (1, FilterCondition::Comparison(
                         Operator::GreaterOrEqual,
                         Value::Constant(3.into()),
                     )),
-                    None,
                 ],
                 2,
                 Some(Literal::Integer(6)),
@@ -310,10 +299,10 @@ mod tests {
     fn it_describes() {
         let s = 0.into();
 
-        let c = FilterAggregation::COUNT.over(s, &[None, None, None], 1, None, &[0, 2]);
+        let c = FilterAggregation::COUNT.over(s, &[], 1, None, &[0, 2]);
         assert_eq!(c.description(true), "|σ(1)| γ[0, 2]");
 
-        let s = FilterAggregation::SUM.over(s, &[None, None, None], 1, None, &[2, 0]);
+        let s = FilterAggregation::SUM.over(s, &[], 1, None, &[2, 0]);
         assert_eq!(s.description(true), "𝛴(σ(1)) γ[2, 0]");
     }
 

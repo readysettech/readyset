@@ -420,7 +420,7 @@ pub enum MirNodeType {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: Vec<Option<FilterCondition>>,
+        conditions: Vec<(usize, FilterCondition)>,
     },
     /// filter condition and grouping
     FilterAggregation {
@@ -428,7 +428,7 @@ pub enum MirNodeType {
         else_on: Option<Literal>,
         group_by: Vec<Column>,
         kind: FilterAggregationKind,
-        conditions: Vec<Option<FilterCondition>>,
+        conditions: Vec<(usize, FilterCondition)>,
     },
     /// over column, separator
     GroupConcat {
@@ -511,12 +511,9 @@ impl MirNodeType {
             } => {
                 group_by.push(c);
             }
-            MirNodeType::Filter { ref mut conditions } => {
-                conditions.push(None);
-            }
-            MirNodeType::FilterAggregation { ref mut group_by, ref mut conditions, .. } => {
+            MirNodeType::Filter { .. } => {}
+            MirNodeType::FilterAggregation { ref mut group_by, .. } => {
                 group_by.push(c);
-                conditions.push(None);
             }
             MirNodeType::Join {
                 ref mut project, ..
@@ -865,22 +862,18 @@ impl Debug for MirNodeType {
                     "σ[{}]",
                     conditions
                         .iter()
-                        .enumerate()
-                        .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(cond) => match *cond {
-                                FilterCondition::Comparison(ref op, ref x) => {
-                                    Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
-                                }
-                                FilterCondition::In(ref xs) => Some(format!(
-                                    "f{} IN ({})",
-                                    i,
-                                    xs.iter()
-                                        .map(|d| format!("{}", d))
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                )),
-                            },
-                            None => None,
+                        .filter_map(|(i, ref cond)| match *cond {
+                            FilterCondition::Comparison(ref op, ref x) => {
+                                Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
+                            }
+                            FilterCondition::In(ref xs) => Some(format!(
+                                "f{} IN ({})",
+                                i,
+                                xs.iter()
+                                    .map(|d| format!("{}", d))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )),
                         })
                         .collect::<Vec<_>>()
                         .as_slice()
