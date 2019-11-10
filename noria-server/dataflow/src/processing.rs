@@ -146,6 +146,10 @@ where
     ///    ⋈    |  Join
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
+    ///    σ    |  Filter
+    ///    π    |  Projection
+    ///    ≡    |  Identity
+    ///    T    |  Trigger
     fn description(&self, detailed: bool) -> String;
 
     /// Provide measurements of transient internal state that may be useful in debugging contexts.
