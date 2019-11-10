@@ -208,7 +208,6 @@ impl SqlIncorporator {
 
         // Do we already have this exact query or a subset of it in the same universe?
         // TODO(malte): make this an O(1) lookup by QG signature
-        println!("qg.signature={:?}", qg.signature());
         let qg_hash = qg.signature().hash;
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
@@ -659,7 +658,6 @@ impl SqlIncorporator {
         // This means we cannot reuse these queries.
         match qg {
             Some(qg) => {
-                println!("qg.signature={:?}", qg.signature());
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
                 self.mir_queries.insert((qg_hash, universe), mir.clone());
@@ -1022,7 +1020,6 @@ mod tests {
             OutputColumn::Data((*c).clone()).hash(&mut hasher);
         }
         let temp = hasher.finish();
-        println!("query_id_hash result={:x}, relations={:?}, attrs={:?}, columns={:?}", temp, relations, attrs, columns);
         temp
     }
 
@@ -1788,7 +1785,6 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            println!("agg_view={:?}", agg_view);
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(2) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
