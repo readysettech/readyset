@@ -23,12 +23,18 @@ pub(crate) struct Conn {
 
 impl Clone for Conn {
     fn clone(&self) -> Self {
+        // FIXME: this is called once per load _generator_
+        // In most cases, we'll have just one generator, and hence only one connection...
         Conn::new(&self.addr, self.fast).unwrap()
     }
 }
 
 impl Conn {
     fn new(addr: &str, fast: bool) -> memcached::proto::MemCachedResult<Self> {
+        eprintln!(
+            "OBS OBS OBS: the memcached client is effectively single-threaded -- see src FIXME"
+        );
+
         let connstr = format!("tcp://{}", addr);
         let (reqs, mut rx) =
             mpsc::channel::<(Req, oneshot::Sender<memcached::proto::MemCachedResult<()>>)>(1);
