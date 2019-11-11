@@ -125,6 +125,7 @@ where
         rt.block_on(async move { C::new(params, local_args).await.unwrap() })
     };
 
+    let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
     let generators: Vec<_> = (0..ngen)
         .map(|geni| {
             let ex = rt.executor();
@@ -140,6 +141,7 @@ where
                     if skewed {
                         run_generator(
                             handle,
+                            errd,
                             ex,
                             zipf::ZipfDistribution::new(articles, 1.08).unwrap(),
                             target,
@@ -148,6 +150,7 @@ where
                     } else {
                         run_generator(
                             handle,
+                            errd,
                             ex,
                             rand::distributions::Uniform::new(1, articles + 1),
                             target,
@@ -167,7 +170,7 @@ where
         wops += completed;
     }
     drop(handle);
-    rt.shutdown_on_idle();
+    rt.shutdown_now();
 
     // all done!
     println!("# generated ops/s: {:.2}", ops);
@@ -240,6 +243,7 @@ where
 
 fn run_generator<C, R>(
     mut handle: C,
+    errd: &'static atomic::AtomicBool,
     ex: tokio::runtime::TaskExecutor,
     id_rng: R,
     target: f64,
@@ -291,7 +295,6 @@ where
     // this may change with https://github.com/rayon-rs/rayon/issues/544, but that's what we have
     // to do for now.
     let ndone: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
-    let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
 
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
