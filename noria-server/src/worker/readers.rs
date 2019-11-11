@@ -61,11 +61,24 @@ pub(super) fn listen(
                     service_fn(move |req| handle_message(req, &readers)),
                 )
                 .map_err(|e| {
-                    if let server::Error::Service(()) = e {
-                        // server is shutting down -- no need to report this error
-                    } else {
-                        eprintln!("!!! reader client protocol error: {:?}", e);
+                    match e {
+                        server::Error::Service(()) => {
+                            // server is shutting down -- no need to report this error
+                            return;
+                        }
+                        server::Error::BrokenTransportRecv(ref e)
+                        | server::Error::BrokenTransportSend(ref e) => {
+                            if let bincode::ErrorKind::Io(ref e) = **e {
+                                if e.kind() == std::io::ErrorKind::BrokenPipe
+                                    || e.kind() == std::io::ErrorKind::ConnectionReset
+                                {
+                                    // client went away
+                                    return;
+                                }
+                            }
+                        }
                     }
+                    eprintln!("!!! reader client protocol error: {:?}", e);
                 })
                 .map(|_| ())
             }),
