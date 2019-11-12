@@ -107,13 +107,11 @@ where
 
                 match status {
                     hyper::StatusCode::OK => return Ok(body),
-                    hyper::StatusCode::INTERNAL_SERVER_ERROR => {
-                        return Err(format_err!(
-                            "rpc call to {} failed: {}",
-                            path,
-                            String::from_utf8_lossy(&*body)
-                        ))
-                    }
+                    hyper::StatusCode::INTERNAL_SERVER_ERROR => bail!(
+                        "rpc call to {} failed: {}",
+                        path,
+                        String::from_utf8_lossy(&*body)
+                    ),
                     s => {
                         if s == hyper::StatusCode::SERVICE_UNAVAILABLE {
                             url = None;
@@ -187,11 +185,9 @@ async fn finalize<R, E>(
 ) -> Result<R, failure::Error>
 where
     for<'de> R: Deserialize<'de>,
-    E: std::fmt::Debug,
+    E: std::fmt::Display + Send + Sync + 'static,
 {
-    let body: hyper::Chunk = fut
-        .await
-        .map_err(move |e| format_err!("{}: {:?}", err, e))?;
+    let body: hyper::Chunk = fut.await.map_err(failure::Context::new).context(err)?;
 
     serde_json::from_slice::<R>(&body)
         .context("failed to response")
@@ -262,7 +258,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         async move {
             let body: hyper::Chunk = fut
                 .await
-                .map_err(|e| format_err!("failed to fetch inputs: {:?}", e))?;
+                .map_err(failure::Context::new)
+                .context("failed to fetch inputs")?;
 
             serde_json::from_slice(&body)
                 .context("couldn't parse input response")
@@ -285,7 +282,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         async move {
             let body: hyper::Chunk = fut
                 .await
-                .map_err(|e| format_err!("failed to fetch outputs: {:?}", e))?;
+                .map_err(failure::Context::new)
+                .context("failed to fetch outputs")?;
 
             serde_json::from_slice(&body)
                 .context("couldn't parse output response")
@@ -311,7 +309,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         async move {
             let body: hyper::Chunk = fut
                 .await
-                .map_err(|e| format_err!("failed to fetch view builder: {:?}", e))?;
+                .map_err(failure::Context::new)
+                .context("failed to fetch view builder")?;
 
             match serde_json::from_slice::<Option<ViewBuilder>>(&body) {
                 Ok(Some(vb)) => Ok(vb.build(views)?),
@@ -341,7 +340,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         async move {
             let body: hyper::Chunk = fut
                 .await
-                .map_err(|e| format_err!("failed to fetch table builder: {:?}", e))?;
+                .map_err(failure::Context::new)
+                .context("failed to fetch table builder")?;
 
             match serde_json::from_slice::<Option<TableBuilder>>(&body) {
                 Ok(Some(tb)) => Ok(tb.build(domains)?),
