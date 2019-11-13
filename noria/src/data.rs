@@ -538,10 +538,13 @@ macro_rules! arithmetic_operation (
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => (a $op b).into(),
             (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(b)) => (a $op b).into(),
+
             (&DataType::Int(a), &DataType::BigInt(b)) => (i64::from(a) $op b).into(),
-            (&DataType::Int(a), &DataType::UnsignedBigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
             (&DataType::BigInt(a), &DataType::Int(b)) => (a $op i64::from(b)).into(),
+            (&DataType::Int(a), &DataType::UnsignedBigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
             (&DataType::UnsignedBigInt(a), &DataType::Int(b)) => (i128::from(a) $op i128::from(b)).into(),
+            (&DataType::BigInt(a), &DataType::UnsignedBigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
+            (&DataType::UnsignedBigInt(a), &DataType::BigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedInt(b)) => (a $op u64::from(b)).into(),
             (&DataType::UnsignedInt(a), &DataType::UnsignedBigInt(b)) => (u64::from(a) $op b).into(),
 
