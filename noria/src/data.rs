@@ -284,7 +284,7 @@ impl Hash for DataType {
 
 impl From<i128> for DataType {
     fn from(s: i128) -> Self {
-        if s < 0 {
+        if s <= 0 {
             if s >= std::i64::MIN.into() {
                 DataType::BigInt(s as i64)
             } else {
@@ -352,7 +352,7 @@ impl<'a> From<&'a Literal> for DataType {
     fn from(l: &'a Literal) -> Self {
         match *l {
             Literal::Null => DataType::None,
-            Literal::Integer(i) if i < 0 => (i as i64).into(),
+            Literal::Integer(i) if i <= 0 => (i as i64).into(),
             Literal::Integer(i) => (i as u64).into(),
             Literal::String(ref s) => s.as_str().into(),
             Literal::CurrentTimestamp => {
@@ -371,7 +371,7 @@ impl From<Literal> for DataType {
     fn from(l: Literal) -> Self {
         match l {
             Literal::Null => DataType::None,
-            Literal::Integer(i) if i < 0 => (i as i64).into(),
+            Literal::Integer(i) if i <= 0 => (i as i64).into(),
             Literal::Integer(i) => (i as u64).into(),
             Literal::String(s) => s.as_str().into(),
             Literal::CurrentTimestamp => {
