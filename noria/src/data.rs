@@ -288,10 +288,12 @@ impl From<i128> for DataType {
             if s >= std::i64::MIN.into() {
                 DataType::BigInt(s as i64)
             } else {
-                panic!(format!("can't fit {:?} in a DataType::BigInt", s))
+                panic!("can't fit {} in a DataType::BigInt", s)
             }
-        } else {
+        } else if s <= std::u64::MAX.into() {
             DataType::UnsignedBigInt(s as u64)
+        } else {
+            panic!("can't fit {} in a DataType::UnsignedBigInt", s)
         }
     }
 }
