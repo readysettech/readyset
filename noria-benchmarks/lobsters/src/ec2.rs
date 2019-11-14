@@ -13,7 +13,7 @@ use std::{fmt, thread, time};
 use tsunami::*;
 use yansi::Paint;
 
-const AMI: &str = "ami-09334f98436a81bd9";
+const AMI: &str = "ami-0e93c3b2927b16d34";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -119,7 +119,6 @@ fn main() {
         .arg(
             Arg::with_name("branch")
                 .takes_value(true)
-                .default_value("master")
                 .long("branch")
                 .help("Which branch of noria to benchmark"),
         )
@@ -243,12 +242,12 @@ fn main() {
         }
 
         let backends = [
-            //Backend::Mysql,
-            //Backend::Noria(0),
-            //Backend::Natural(0),
-            //Backend::Noria(1),
-            //Backend::Natural(1),
-            //Backend::Noria(2),
+            Backend::Mysql,
+            Backend::Noria(0),
+            Backend::Natural(0),
+            Backend::Noria(1),
+            Backend::Natural(1),
+            Backend::Noria(2),
             Backend::Natural(2),
         ];
 
@@ -429,8 +428,6 @@ fn main() {
                         "0",
                         "--runtime",
                         "0",
-                        "--issuers",
-                        "24",
                         "--prime",
                         "--queries",
                         backend.queries(),
@@ -465,8 +462,6 @@ fn main() {
                         "120",
                         "--runtime",
                         "0",
-                        "--issuers",
-                        "24",
                         "--queries",
                         backend.queries(),
                         &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
@@ -513,8 +508,6 @@ fn main() {
                         "20",
                         "--runtime",
                         "30",
-                        "--issuers",
-                        "24",
                         "--queries",
                         backend.queries(),
                         &hist_output,
