@@ -307,14 +307,6 @@ fn main() {
                 .help("Number of allowed concurrent requests"),
         )
         .arg(
-            Arg::with_name("issuers")
-                .short("i")
-                .long("issuers")
-                .takes_value(true)
-                .default_value("1")
-                .help("Number of issuers to run"),
-        )
-        .arg(
             Arg::with_name("prime")
                 .long("prime")
                 .help("Set if the backend must be primed with initial stories and comments."),
@@ -391,7 +383,6 @@ fn main() {
         value_t_or_exit!(args, "reqscale", f64),
     )
     .warmup_scale(3000.0)
-    .issuers(value_t_or_exit!(args, "issuers", usize))
     .time(
         time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
         time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
