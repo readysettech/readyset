@@ -139,7 +139,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("m5a.24xlarge", AMI, move |ssh| {
+        MachineSetup::new("m5d.24xlarge", AMI, move |ssh| {
             git_and_cargo(
                 ssh,
                 "noria",
@@ -193,7 +193,7 @@ fn main() {
     );
 
     b.set_max_duration(4);
-    b.wait_limit(time::Duration::from_secs(60));
+    b.wait_limit(time::Duration::from_secs(2 * 60));
 
     let scales = args
         .values_of("SCALE")
