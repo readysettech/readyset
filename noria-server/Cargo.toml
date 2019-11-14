@@ -43,7 +43,7 @@ tokio-io = "=0.2.0-alpha.6"
 tokio-sync = "=0.2.0-alpha.6"
 tracing = "0.1"
 tracing-subscriber = "0.1.0"
-streamunordered = "=0.5.0-alpha.2"
+streamunordered = "=0.5.0-alpha.3"
 stream-cancel = "=0.5.0-alpha.4"
 
 timekeeper = { version = "0.3.2", default-features = false }

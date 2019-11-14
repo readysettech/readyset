@@ -168,11 +168,18 @@ impl Replica {
         }
 
         // then, try to send on any streams we may be able to
+        let mut close = Vec::new();
         pending.retain(|&streami| {
             let stream = &mut inputs[streami];
             match Pin::new(stream).poll_flush(cx) {
                 Poll::Pending => true,
-                Poll::Ready(Ok(())) => false,
+                Poll::Ready(Ok(())) => {
+                    if inputs.is_finished(streami).unwrap() {
+                        // no more inputs on this stream, and nothing more to flush!
+                        close.push(streami);
+                    }
+                    false
+                }
                 Poll::Ready(Err(e)) => {
                     if let bincode::ErrorKind::Io(ref ioe) = *e {
                         match ioe.kind() {
@@ -195,6 +202,13 @@ impl Replica {
 
         if !err.is_empty() {
             return Err(err.swap_remove(0));
+        }
+
+        for streami in close {
+            if this.out.try_retire(streami) {
+                // this stream has no more inputs and no more outputs
+                inputs.as_mut().remove(streami);
+            }
         }
 
         Ok(())
@@ -398,6 +412,20 @@ impl Outboxes {
             dirty: false,
         }
     }
+
+    fn try_retire(&mut self, streami: usize) -> bool {
+        if !self.back.contains_key(&streami) && !self.pending.contains(&streami) {
+            // nothing more to send back on this connection -- fine to retire!
+            // increment the epoch to detect stale acks
+            *self
+                .epochs
+                .get_mut(streami)
+                .expect("all streams are assigned an epoch") += 1;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Executor for Outboxes {
@@ -519,14 +547,15 @@ impl Future for Replica {
                                 process!(*this.retry, packet, |p| d
                                     .on_event(out, PollEvent::Process(p),));
                             }
-                            Poll::Ready(Some((StreamYield::Finished, streami))) => {
-                                out.back.remove(&streami);
-                                out.pending.remove(&streami);
-                                // increment the epoch to detect stale acks
-                                *out.epochs
-                                    .get_mut(streami)
-                                    .expect("all streams are assigned an epoch") += 1;
-                                // FIXME: what about if a later flush flushes to this stream?
+                            Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
+                                if out.try_retire(streami) {
+                                    f.remove(this.inputs.as_mut());
+                                } else {
+                                    // We still have responses to send, even though there are no
+                                    // more requests. Keep the stream around for now. We'll clean
+                                    // it up when the sends have finished.
+                                    f.keep();
+                                }
                             }
                             Poll::Ready(None) => {
                                 // we probably haven't booted yet
