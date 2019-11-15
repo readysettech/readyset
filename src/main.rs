@@ -19,15 +19,15 @@ mod schema;
 mod utils;
 
 use crate::backend::NoriaBackend;
+use futures_util::stream::StreamExt;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria::{SyncControllerHandle, ZookeeperAuthority};
+use noria::{ControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
 use std::io::{self, BufReader, BufWriter};
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use tokio::prelude::*;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -107,14 +107,22 @@ fn main() {
     let sanitize = !matches.is_present("no-sanitize");
     let static_responses = !matches.is_present("no-static-responses");
 
-    let listener = tokio::net::tcp::TcpListener::bind(&std::net::SocketAddr::new(
-        std::net::Ipv4Addr::LOCALHOST.into(),
-        port,
-    ))
-    .unwrap();
+    let s = tracing_subscriber::fmt::format::Format::default()
+        .with_timer(tracing_subscriber::fmt::time::Uptime::default());
+    let s = tracing_subscriber::FmtSubscriber::builder()
+        .on_event(s)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .finish();
+    let tracer = tracing::Dispatch::new(s);
+    let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+
+    let listener = rt
+        .block_on(tokio::net::tcp::TcpListener::bind(
+            &std::net::SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), port),
+        ))
+        .unwrap();
 
     let log = logger_pls();
-
     info!(log, "listening on port {}", port);
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
@@ -124,29 +132,20 @@ fn main() {
     zk_auth.log_with(log.clone());
 
     debug!(log, "Connecting to Noria...",);
-    let s = tracing_subscriber::fmt::format::Format::default()
-        .with_timer(tracing_subscriber::fmt::time::Uptime::default());
-    let s = tracing_subscriber::FmtSubscriber::builder()
-        .on_event(s)
-        .finish();
-    let tracer = tracing::Dispatch::new(s);
-    let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
-    let ch = SyncControllerHandle::new(zk_auth, rt.executor()).unwrap();
+    let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     debug!(log, "Connected!");
 
-    let ctrlc = rt.block_on(future::lazy(tokio_signal::ctrl_c)).unwrap();
-    let mut listener = listener.incoming().select(ctrlc.then(|r| match r {
-        Ok(_) => Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c")),
-        Err(e) => Err(e),
-    }));
+    let ctrlc = rt.block_on(async { tokio::net::signal::ctrl_c() }).unwrap();
+    let mut listener = futures_util::stream::select(
+        listener.incoming(),
+        ctrlc.map(|()| Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))),
+    );
     let primed = Arc::new(atomic::AtomicBool::new(false));
     let ops = Arc::new(atomic::AtomicUsize::new(0));
 
     let mut threads = Vec::new();
     let mut i = 0;
-    while let Ok((Some(s), l)) = rt.block_on(listener.into_future()) {
-        listener = l;
-
+    while let Some(Ok(s)) = rt.block_on(listener.next()) {
         // one day, when msql-srv is async, this won't be necessary
         let s = {
             use std::os::unix::io::AsRawFd;
@@ -167,12 +166,15 @@ fn main() {
             primed.clone(),
         );
 
+        let ex = rt.executor();
         let ch = ch.clone();
         let ops = ops.clone();
 
         let jh = builder
             .spawn(move || {
-                let mut b = NoriaBackend::new(
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let b = NoriaBackend::new(
+                    ex.clone(),
                     ch,
                     auto_increments,
                     query_cache,
@@ -183,6 +185,11 @@ fn main() {
                     sanitize,
                     log,
                 );
+                ex.spawn(async move {
+                    let _ = tx.send(b.await);
+                });
+                let mut b = futures_executor::block_on(rx).unwrap();
+
                 let rs = s.try_clone().unwrap();
                 if let Err(e) =
                     MysqlIntermediary::run_on(&mut b, BufReader::new(rs), BufWriter::new(s))
@@ -209,5 +216,5 @@ fn main() {
             .unwrap();
     }
 
-    rt.shutdown_on_idle().wait().unwrap();
+    rt.shutdown_on_idle();
 }
