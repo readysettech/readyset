@@ -3,8 +3,8 @@ use indexmap::IndexMap;
 use std::rc::Rc;
 
 use super::mk_key::MakeKey;
-use common::SizeOf;
 use crate::prelude::*;
+use common::SizeOf;
 
 type FnvHashMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 

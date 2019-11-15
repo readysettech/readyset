@@ -4,9 +4,9 @@ use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde;
 use tempfile::{tempdir, TempDir};
 
-use common::SizeOf;
 use crate::prelude::*;
 use crate::state::{RecordResult, State};
+use common::SizeOf;
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.

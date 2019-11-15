@@ -1,8 +1,8 @@
 use super::mk_key::MakeKey;
-use common::SizeOf;
 use crate::prelude::*;
-use rand::prelude::*;
 use crate::state::keyed_state::KeyedState;
+use common::SizeOf;
+use rand::prelude::*;
 use std::rc::Rc;
 
 pub(super) struct SingleState {

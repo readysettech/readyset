@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::sync;
 
-pub use nom_sql::Operator;
 use crate::prelude::*;
+pub use nom_sql::Operator;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
