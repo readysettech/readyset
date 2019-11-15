@@ -1,6 +1,6 @@
 [package]
 name = "noria-mysql"
-version = "0.1.0"
+version = "0.3.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 edition = "2018"
 
@@ -9,7 +9,7 @@ arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
 msql-srv = "0.8.7"
-noria = { git = "https://github.com/mit-pdos/noria.git", branch = "async-await" }
+noria = { git = "https://github.com/mit-pdos/noria.git" }
 futures-executor-preview = "0.3.0-alpha.19"
 futures-util-preview = "0.3.0-alpha.19"
 lazy_static = "1.0.0"
@@ -26,7 +26,7 @@ tracing-subscriber = "0.1"
 [dev-dependencies]
 mysql = "16"
 zookeeper = "0.5.4"
-noria-server = { git = "https://github.com/mit-pdos/noria.git", branch = "async-await" }
+noria-server = { git = "https://github.com/mit-pdos/noria.git" }
 
 [profile.release]
 debug=true
