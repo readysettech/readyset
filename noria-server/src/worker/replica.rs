@@ -118,50 +118,41 @@ impl Replica {
         let this = self.project();
 
         let mut inputs = this.inputs;
+        let conns = &mut this.out.connections;
         let pending = &mut this.out.pending;
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        this.out.back.retain(|&streami, tags| {
+        for &streami in &*pending {
+            let conn = &mut conns[streami];
             let mut stream = Pin::new(&mut inputs[streami]);
-            let mut no_more = false;
+            let mut sent = 0;
 
-            let had = tags.len();
-            tags.retain(|&tag| {
-                if no_more {
-                    return true;
-                }
-
+            for &tag in &conn.tag_acks {
                 match stream.as_mut().poll_ready(cx) {
                     Poll::Ready(Ok(())) => {}
-                    Poll::Pending => {
-                        no_more = true;
-                        return true;
-                    }
+                    Poll::Pending => break,
                     Poll::Ready(Err(e)) => {
                         err.push(e.into());
-                        no_more = true;
-                        return true;
+                        break;
                     }
                 }
 
-                match stream.as_mut().start_send(Tagged { tag, v: () }) {
-                    Ok(()) => false,
-                    Err(e) => {
-                        // start_send shouldn't generally error
-                        err.push(e.into());
-                        no_more = true;
-                        true
-                    }
+                if let Err(e) = stream.as_mut().start_send(Tagged { tag, v: () }) {
+                    // start_send shouldn't generally error
+                    err.push(e.into());
+                    break;
                 }
-            });
 
-            if had != tags.len() {
-                pending.insert(streami);
+                sent += 1;
             }
 
-            !tags.is_empty()
-        });
+            let _ = conn.tag_acks.drain(0..sent).count();
+
+            if sent > 0 {
+                conn.pending_flush = true;
+            }
+        }
 
         if !err.is_empty() {
             return Err(err.swap_remove(0));
@@ -170,32 +161,63 @@ impl Replica {
         // then, try to send on any streams we may be able to
         let mut close = Vec::new();
         pending.retain(|&streami| {
+            let conn = &mut conns[streami];
+            if !conn.pending_flush {
+                // there better be unwritten tags, otherwise why is the stream in pending?
+                assert!(!conn.tag_acks.is_empty());
+                return true;
+            }
+
             let stream = &mut inputs[streami];
             match Pin::new(stream).poll_flush(cx) {
                 Poll::Pending => true,
                 Poll::Ready(Ok(())) => {
-                    if inputs.is_finished(streami).unwrap() {
+                    conn.pending_flush = false;
+                    if inputs.is_finished(streami).unwrap()
+                        && conn.unacked == 0
+                        && conn.tag_acks.is_empty()
+                    {
                         // no more inputs on this stream, and nothing more to flush!
                         close.push(streami);
                     }
-                    false
+
+                    // there may stil be more tags to write out
+                    !conn.tag_acks.is_empty()
                 }
                 Poll::Ready(Err(e)) => {
-                    if let bincode::ErrorKind::Io(ref ioe) = *e {
+                    let mut e = Some(e);
+                    if let bincode::ErrorKind::Io(ref ioe) = **e.as_ref().unwrap() {
                         match ioe.kind() {
                             io::ErrorKind::BrokenPipe
                             | io::ErrorKind::NotConnected
                             | io::ErrorKind::UnexpectedEof
                             | io::ErrorKind::ConnectionAborted
                             | io::ErrorKind::ConnectionReset => {
-                                // connection went away, no need to try more
-                                return false;
+                                // connection went away, let's not bother the user with it
+                                let _ = e.take();
                             }
                             _ => {}
                         }
                     }
-                    err.push(e.into());
-                    true
+
+                    // there's no point in trying to write more things, so:
+                    conn.pending_flush = false;
+                    conn.unacked = 0;
+                    conn.tag_acks.clear();
+                    if inputs.is_finished(streami).unwrap() {
+                        close.push(streami);
+                    } else {
+                        // the read side of this stream will probably error soon too. when it does,
+                        // try_retire will likely succeed, and it will remove the connection. if an
+                        // ack comes in after that, we'll just hit if again, though then take the
+                        // branch above.
+                    }
+
+                    if let Some(e) = e {
+                        err.push(e.into());
+                    }
+
+                    false
                 }
             }
         });
@@ -207,6 +229,7 @@ impl Replica {
         for streami in close {
             if this.out.try_retire(streami) {
                 // this stream has no more inputs and no more outputs
+                assert!(inputs.as_mut().is_finished(streami).unwrap());
                 inputs.as_mut().remove(streami);
             }
         }
@@ -314,12 +337,18 @@ impl Replica {
             debug!(this.log, "established new connection"; "base" => ?is_base);
             let slot = this.inputs.stream_entry();
             let token = slot.token();
-            let epoch = if let Some(e) = this.out.epochs.get_mut(token) {
-                *e
+            let epoch = if let Some(e) = this.out.connections.get_mut(token) {
+                e.epoch
             } else {
-                let t = this.out.epochs.insert(1);
+                let epoch = 1;
+                let t = this.out.connections.insert(ConnState {
+                    unacked: 0,
+                    tag_acks: Vec::new(),
+                    epoch,
+                    pending_flush: false,
+                });
                 assert_eq!(t, token);
-                1
+                epoch
             };
             if let Err(e) = stream.set_nodelay(true) {
                 warn!(this.log,
@@ -380,6 +409,20 @@ impl Replica {
     }
 }
 
+struct ConnState {
+    // number of unacked inputs
+    unacked: usize,
+
+    // unsent acks (value is the tag)
+    tag_acks: Vec<u32>,
+
+    // epoch counter for each stream index (since they're re-used)
+    epoch: usize,
+
+    // do we have stuff to flush
+    pending_flush: bool,
+}
+
 struct Outboxes {
     // anything new to send?
     dirty: bool,
@@ -387,12 +430,11 @@ struct Outboxes {
     // messages for other domains
     domains: FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
 
-    // map from inputi to number of (empty) ACKs
-    back: FnvHashMap<usize, Vec<u32>>,
-    pending: FnvHashSet<usize>,
+    // connection state for each stream
+    connections: slab::Slab<ConnState>,
 
-    // epoch counter for each stream index (since they're re-used)
-    epochs: slab::Slab<usize>,
+    // which connections have pending writes
+    pending: FnvHashSet<usize>,
 
     // for sending messages to the controller
     ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
@@ -400,27 +442,43 @@ struct Outboxes {
 
 impl Outboxes {
     fn new(ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
-        let mut epochs = slab::Slab::new();
-        epochs.insert(0); // index 0 is reserved
+        let mut connections = slab::Slab::new();
+
+        // index 0 is reserved
+        connections.insert(ConnState {
+            unacked: 0,
+            tag_acks: Vec::new(),
+            epoch: 0,
+            pending_flush: false,
+        });
 
         Outboxes {
             domains: Default::default(),
-            back: Default::default(),
+            connections,
             pending: Default::default(),
-            epochs,
             ctrl_tx,
             dirty: false,
         }
     }
 
+    fn saw_input(&mut self, token: usize, epoch: usize) {
+        let mut c = &mut self.connections[token];
+        if c.epoch == epoch {
+            c.unacked += 1;
+        }
+    }
+
     fn try_retire(&mut self, streami: usize) -> bool {
-        if !self.back.contains_key(&streami) && !self.pending.contains(&streami) {
+        let mut c = &mut self.connections[streami];
+        if c.unacked == 0 && c.tag_acks.is_empty() && !c.pending_flush {
             // nothing more to send back on this connection -- fine to retire!
             // increment the epoch to detect stale acks
-            *self
-                .epochs
-                .get_mut(streami)
-                .expect("all streams are assigned an epoch") += 1;
+            c.epoch += 1;
+
+            // no unwritten tags and not pending flush, so we shouldn't be in pending
+            assert!(!self.pending.contains(&streami));
+
+            // NOTE: the ConnState will be re-used for another connection
             true
         } else {
             false
@@ -431,10 +489,19 @@ impl Outboxes {
 impl Executor for Outboxes {
     fn ack(&mut self, id: SourceChannelIdentifier) {
         self.dirty = true;
-        if id.epoch == self.epochs[id.token] {
+        let mut c = &mut self.connections[id.token];
+        if id.epoch == c.epoch {
             // if the epoch doesn't match, the stream was closed and a new one has been established
             // note that this only matters for connections that do not wait for all acks!
-            self.back.entry(id.token).or_default().push(id.tag);
+            c.tag_acks.push(id.tag);
+
+            // NOTE: it's a little sad we can't crash on underflow here.
+            // it is because if a send fails, we set c.unacked = 0, and should the domain _then_
+            // produce an ack, a checked underflow would fail.
+            c.unacked = c.unacked.saturating_sub(1);
+
+            // we now have stuff to send for this connection
+            self.pending.insert(id.token);
         }
     }
 
@@ -443,6 +510,7 @@ impl Executor for Outboxes {
             .try_send(CoordinationPayload::CreateUniverse(universe))
             .expect("asked to send to controller, but controller has gone away");
     }
+
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
         self.dirty = true;
         self.domains.entry(dest).or_default().push_back(m);
@@ -495,10 +563,20 @@ impl Future for Replica {
                 let out = this.out;
 
                 macro_rules! process {
-                    ($retry:expr, $p:expr, $pp:expr) => {{
+                    ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
                         $retry = Some($p);
                         let retry = &mut $retry;
-                        match tokio_executor::threadpool::blocking(|| $pp(retry.take().unwrap())) {
+                        match tokio_executor::threadpool::blocking(|| {
+                            let packet = retry.take().unwrap();
+                            if let Packet::Input {
+                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
+                                ..
+                            } = *packet
+                            {
+                                $outbox.saw_input(token, epoch);
+                            }
+                            $pp(packet)
+                        }) {
                             Poll::Ready(Ok(ProcessResult::StopPolling)) => {
                                 // domain got a message to quit
                                 // TODO: should we finish up remaining work?
@@ -519,14 +597,15 @@ impl Future for Replica {
                 let mut interrupted = false;
                 if let Some(p) = this.retry.take() {
                     // first try the thing we failed to process last time again
-                    process!(*this.retry, p, |p| d.on_event(out, PollEvent::Process(p),));
+                    process!(*this.retry, out, p, |p| d
+                        .on_event(out, PollEvent::Process(p),));
                 }
 
                 for i in 0..FORCE_INPUT_YIELD_EVERY {
                     if !local_done && (check_local || remote_done) {
                         match this.locals.poll_recv(cx) {
                             Poll::Ready(Some(packet)) => {
-                                process!(*this.retry, packet, |p| d
+                                process!(*this.retry, out, packet, |p| d
                                     .on_event(out, PollEvent::Process(p),));
                             }
                             Poll::Ready(None) => {
@@ -544,7 +623,7 @@ impl Future for Replica {
                     if !remote_done && (!check_local || local_done) {
                         match this.inputs.as_mut().poll_next(cx) {
                             Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
-                                process!(*this.retry, packet, |p| d
+                                process!(*this.retry, out, packet, |p| d
                                     .on_event(out, PollEvent::Process(p),));
                             }
                             Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
