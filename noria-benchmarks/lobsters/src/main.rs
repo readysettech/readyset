@@ -1,14 +1,21 @@
-#![feature(nll)]
-
-#[macro_use]
-extern crate clap;
 extern crate mysql_async as my;
 
+// https://github.com/rust-lang/rust/pull/64856
+macro_rules! format {
+    ($($arg:tt)*) => {{
+        let res = std::format!($($arg)*);
+        res
+    }}
+}
+
+use clap::value_t_or_exit;
 use clap::{App, Arg};
-use futures::future::Either;
-use futures::{Future, IntoFuture, Stream};
+use futures_util::future::{ready, Either};
+use futures_util::try_future::TryFutureExt;
 use my::prelude::*;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time;
 use trawler::{LobstersRequest, UserId};
 
@@ -72,8 +79,8 @@ mod endpoints;
 
 impl trawler::LobstersClient for MysqlTrawler {
     type Error = my::error::Error;
-    type RequestFuture = Box<dyn futures::Future<Item = (), Error = Self::Error> + Send>;
-    type SetupFuture = Box<dyn futures::Future<Item = (), Error = Self::Error> + Send>;
+    type RequestFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
+    type SetupFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
 
     fn setup(&mut self) -> Self::SetupFuture {
         let mut opts = if let MaybeConn::None(ref opts) = self.c {
@@ -81,7 +88,9 @@ impl trawler::LobstersClient for MysqlTrawler {
         } else {
             unreachable!("connection established before setup");
         };
-        opts.pool_constraints(my::PoolConstraints::new(1, 1));
+        opts.pool_options(my::PoolOptions::with_constraints(
+            my::PoolConstraints::new(1, 1).unwrap(),
+        ));
         let variant = self.variant;
         let db: String = my::Opts::from(opts.clone())
             .get_db_name()
@@ -91,42 +100,32 @@ impl trawler::LobstersClient for MysqlTrawler {
         let db_drop = format!("DROP DATABASE {}", db);
         let db_create = format!("CREATE DATABASE {}", db);
         let db_use = format!("USE {}", db);
-        Box::new(
-            c.get_conn()
-                .and_then(move |c| c.drop_query(&db_drop))
-                .and_then(move |c| c.drop_query(&db_create))
-                .and_then(move |c| c.drop_query(&db_use))
-                .then(move |r| {
-                    let c = r.unwrap();
-                    let schema = match variant {
-                        Variant::Original => ORIGINAL_SCHEMA,
-                        Variant::Noria => NORIA_SCHEMA,
-                        Variant::Natural => NATURAL_SCHEMA,
-                    };
-                    futures::stream::iter_ok(schema.lines())
-                        .fold((c, String::new()), move |(c, mut current_q), line| {
-                            if line.starts_with("--") || line.is_empty() {
-                                return Either::A(Ok((c, current_q)).into_future());
-                            }
-                            if !current_q.is_empty() {
-                                current_q.push_str(" ");
-                            }
-                            current_q.push_str(line);
-                            if current_q.ends_with(';') {
-                                Either::B(c.drop_query(&current_q).then(
-                                    move |r| -> Result<_, my::error::Error> {
-                                        let c = r.unwrap();
-                                        current_q.clear();
-                                        Ok((c, current_q))
-                                    },
-                                ))
-                            } else {
-                                Either::A(Ok((c, current_q)).into_future())
-                            }
-                        })
-                        .map(|_| ())
-                }),
-        )
+        Box::pin(async move {
+            let mut c = c.get_conn().await?;
+            c = c.drop_query(&db_drop).await?;
+            c = c.drop_query(&db_create).await?;
+            c = c.drop_query(&db_use).await?;
+            let schema = match variant {
+                Variant::Original => ORIGINAL_SCHEMA,
+                Variant::Noria => NORIA_SCHEMA,
+                Variant::Natural => NATURAL_SCHEMA,
+            };
+            let mut current_q = String::new();
+            for line in schema.lines() {
+                if line.starts_with("--") || line.is_empty() {
+                    continue;
+                }
+                if !current_q.is_empty() {
+                    current_q.push_str(" ");
+                }
+                current_q.push_str(line);
+                if current_q.ends_with(';') {
+                    c = c.drop_query(&current_q).await?;
+                    current_q.clear();
+                }
+            }
+            Ok(())
+        })
     }
 
     fn handle(
@@ -138,31 +137,31 @@ impl trawler::LobstersClient for MysqlTrawler {
 
         let c = if let Some(u) = acting_as {
             let tokens = self.tokens.get(&u).cloned();
-            Either::A(c.and_then(move |c| {
+            Either::Left(c.and_then(move |c| {
                 if let Some(u) = tokens {
-                    Either::A(c.drop_exec(
+                    Either::Left(c.drop_exec(
                         "SELECT users.* \
                          FROM users WHERE users.session_token = ?",
                         (u,),
                     ))
                 } else {
-                    Either::B(futures::future::ok(c))
+                    Either::Right(ready(Ok(c)))
                 }
             }))
         } else {
-            Either::B(c)
+            Either::Right(c)
         };
 
         // Give shim a heads up that we have finished priming.
         let c = if let trawler::LobstersRequest::Story(..) = req {
             if !self.reset {
                 self.reset = true;
-                Either::B(c.and_then(|c| c.drop_query("SET @primed = 1")))
+                Either::Right(c.and_then(|c| c.drop_query("SET @primed = 1")))
             } else {
-                Either::A(c)
+                Either::Left(c)
             }
         } else {
-            Either::A(c)
+            Either::Left(c)
         };
 
         // TODO: traffic management
@@ -199,95 +198,86 @@ impl trawler::LobstersClient for MysqlTrawler {
         */
 
         macro_rules! handle_req {
-            ($module:tt, $req:expr) => {
+            ($module:tt, $req:expr, $sim_shards:ident) => {{
                 match req {
-                    LobstersRequest::User(uid) => endpoints::$module::user::handle(c, acting_as, uid),
-                    LobstersRequest::Frontpage => endpoints::$module::frontpage::handle(c, acting_as),
-                    LobstersRequest::Comments => endpoints::$module::comments::handle(c, acting_as),
-                    LobstersRequest::Recent => endpoints::$module::recent::handle(c, acting_as),
+                    LobstersRequest::User(uid) => endpoints::$module::user::handle(c, acting_as, uid).await,
+                    LobstersRequest::Frontpage => endpoints::$module::frontpage::handle(c, acting_as).await,
+                    LobstersRequest::Comments => endpoints::$module::comments::handle(c, acting_as).await,
+                    LobstersRequest::Recent => endpoints::$module::recent::handle(c, acting_as).await,
                     LobstersRequest::Login => {
-                        Box::new(
-                            c.and_then(move |c| {
-                                c.first_exec::<_, _, my::Row>(
+                        let c = c.await?;
+                            let (mut c, user) = c.first_exec::<_, _, my::Row>(
+                                "\
+                                 SELECT  1 as one \
+                                 FROM `users` \
+                                 WHERE `users`.`username` = ?",
+                                (format!("user{}", acting_as.unwrap()),),
+                            ).await?;
+
+                            if user.is_none() {
+                                let uid = acting_as.unwrap();
+                                c = c.drop_exec(
                                     "\
-                                     SELECT  1 as one \
-                                     FROM `users` \
-                                     WHERE `users`.`username` = ?",
-                                    (format!("user{}", acting_as.unwrap()),),
-                                )
-                            })
-                            .and_then(move |(c, user)| {
-                                if user.is_none() {
-                                    let uid = acting_as.unwrap();
-                                    futures::future::Either::A(c.drop_exec(
-                                        "\
-                                         INSERT INTO `users` \
-                                         (`username`, `email`, `password_digest`, `created_at`, \
-                                         `session_token`, `rss_token`, `mailing_list_token`) \
-                                         VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                        (
-                                            format!("user{}", uid),
-                                            format!("user{}@example.com", uid),
-                                            "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
-                                            chrono::Local::now().naive_local(),
-                                            format!("token{}", uid),
-                                            format!("rsstoken{}", uid),
-                                            format!("mtok{}", uid),
-                                        ),
-                                    ))
-                                } else {
-                                    futures::future::Either::B(futures::future::ok(c))
-                                }
-                            })
-                            .map(|c| (c, false)),
-                        )
+                                     INSERT INTO `users` \
+                                     (`username`, `email`, `password_digest`, `created_at`, \
+                                     `session_token`, `rss_token`, `mailing_list_token`) \
+                                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                    (
+                                        format!("user{}", uid),
+                                        format!("user{}@example.com", uid),
+                                        "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
+                                        chrono::Local::now().naive_local(),
+                                        format!("token{}", uid),
+                                        format!("rsstoken{}", uid),
+                                        format!("mtok{}", uid),
+                                    ),
+                                ).await?;
+                            }
+
+                            Ok((c, false))
                     }
-                    LobstersRequest::Logout => Box::new(c.map(|c| (c, false))),
+                    LobstersRequest::Logout => Ok((c.await?, false)),
                     LobstersRequest::Story(id) => {
-                        endpoints::$module::story::handle(c, acting_as, self.simulate_shards, id)
+                        endpoints::$module::story::handle(c, acting_as, $sim_shards, id).await
                     }
                     LobstersRequest::StoryVote(story, v) => {
-                        endpoints::$module::story_vote::handle(c, acting_as, story, v)
+                        endpoints::$module::story_vote::handle(c, acting_as, story, v).await
                     }
                     LobstersRequest::CommentVote(comment, v) => {
-                        endpoints::$module::comment_vote::handle(c, acting_as, comment, v)
+                        endpoints::$module::comment_vote::handle(c, acting_as, comment, v).await
                     }
                     LobstersRequest::Submit { id, title } => {
-                        endpoints::$module::submit::handle(c, acting_as, id, title)
+                        endpoints::$module::submit::handle(c, acting_as, id, title).await
                     }
                     LobstersRequest::Comment { id, story, parent } => {
-                        endpoints::$module::comment::handle(c, acting_as, id, story, parent)
+                        endpoints::$module::comment::handle(c, acting_as, id, story, parent).await
                     }
                 }
-            }
+            }}
         };
 
-        let c = match self.variant {
-            Variant::Original => handle_req!(original, req),
-            Variant::Noria => handle_req!(noria, req),
-            Variant::Natural => handle_req!(natural, req),
-        };
+        let variant = self.variant;
+        let simulate_shards = self.simulate_shards;
+        Box::pin(async move {
+            let (c, with_notifications) = match variant {
+                Variant::Original => handle_req!(original, req, simulate_shards),
+                Variant::Noria => handle_req!(noria, req, simulate_shards),
+                Variant::Natural => handle_req!(natural, req, simulate_shards),
+            }?;
 
-        // notifications
-        let c = if let Some(uid) = acting_as {
-            let variant = self.variant;
-            Either::A(c.and_then(move |(c, with_notifications)| {
-                if !with_notifications {
-                    return Either::A(futures::future::ok(c));
+            // notifications
+            if let Some(uid) = acting_as {
+                if with_notifications {
+                    match variant {
+                        Variant::Original => endpoints::original::notifications(c, uid).await,
+                        Variant::Noria => endpoints::noria::notifications(c, uid).await,
+                        Variant::Natural => endpoints::natural::notifications(c, uid).await,
+                    }?;
                 }
+            }
 
-                Either::B(match variant {
-                    Variant::Original => Box::new(endpoints::original::notifications(c, uid))
-                        as Box<dyn Future<Item = my::Conn, Error = my::error::Error> + Send>,
-                    Variant::Noria => Box::new(endpoints::noria::notifications(c, uid)),
-                    Variant::Natural => Box::new(endpoints::natural::notifications(c, uid)),
-                })
-            }))
-        } else {
-            Either::B(c.map(|(c, _)| c))
-        };
-
-        Box::new(c.map(move |_| ()))
+            Ok(())
+        })
     }
 }
 
@@ -315,14 +305,6 @@ fn main() {
                 .takes_value(true)
                 .default_value("50")
                 .help("Number of allowed concurrent requests"),
-        )
-        .arg(
-            Arg::with_name("issuers")
-                .short("i")
-                .long("issuers")
-                .takes_value(true)
-                .default_value("1")
-                .help("Number of issuers to run"),
         )
         .arg(
             Arg::with_name("prime")
@@ -401,7 +383,6 @@ fn main() {
         value_t_or_exit!(args, "reqscale", f64),
     )
     .warmup_scale(3000.0)
-    .issuers(value_t_or_exit!(args, "issuers", usize))
     .time(
         time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
         time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
@@ -415,7 +396,9 @@ fn main() {
     // check that we can indeed connect
     let mut opts = my::OptsBuilder::from_opts(args.value_of("dbn").unwrap());
     opts.tcp_nodelay(true);
-    opts.pool_constraints(my::PoolConstraints::new(in_flight, in_flight));
+    opts.pool_options(my::PoolOptions::with_constraints(
+        my::PoolConstraints::new(in_flight, in_flight).unwrap(),
+    ));
     let s = MysqlTrawler::new(variant, opts.into(), simulate_shards);
 
     wl.run(s, args.is_present("prime"));

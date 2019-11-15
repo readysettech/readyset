@@ -38,6 +38,8 @@ for (arg in args) {
 		}
 	} 
 
+	ts$sjrn[ts$sjrn > 10000000] = Inf
+	ts$rmt[ts$rmt > 10000000] = Inf
 	ts <- ts %>% group_by(op, pct) %>% summarize(sjrn_max = max(sjrn),
 						     sjrn_min = min(sjrn),
 						     sjrn = median(sjrn),
@@ -86,14 +88,15 @@ mx_rmt_norm = max(t[t$pct == 50,]$rmt_norm)
 t$sjrn <- pmin(t$sjrn, 10*mx_rmt) # otherwise ggplot tries to plot all the way to 100k
 t$sjrn_min <- pmin(t$sjrn_min, 10*mx_rmt)
 t$sjrn_max <- pmin(t$sjrn_max, 10*mx_rmt)
+cap <- 10
 #t
 
 library(ggplot2)
 p <- ggplot(data=t, aes(x=target, y=rmt, color=server, linetype=pct, shape=server, ymin=rmt_min, ymax=rmt_max))
-p <- p + coord_trans(x = "identity", y = "identity", limy=c(0, mx_rmt))
+p <- p + coord_trans(x = "identity", y = "identity", limy=c(0, min(cap, mx_rmt)))
 p <- p + facet_grid(skew ~ op)
 p <- p + scale_linetype_manual(breaks=c(50,95,99), values=c("solid","dotted","dashed"))
-p <- p + geom_point(size = 0.7, alpha = 0.8) + geom_errorbar(width = 0.1) + geom_line()
+p <- p + geom_point(size = 0.7, alpha = 0.8) + geom_errorbar(width = 0.3) + geom_line()
 p <- p + xlab("target load (Mops/s)") + ylab("batch processing time (ms)") + ggtitle("Batch processing time")
 ggsave('plot-batch.png',plot=p,width=10,height=4)
 
@@ -109,10 +112,10 @@ ggsave('plot-op-norm.png',plot=p,width=10,height=4)
 # for sojourn time, read and write should basically be the same
 worst <- data.frame(t %>% group_by(target, pct, server, skew) %>% summarize(sjrn = max(sjrn), sjrn_min = max(sjrn_min), sjrn_max = max(sjrn_max)))
 p <- ggplot(data=worst, aes(x=target, y=sjrn, color=server, linetype=pct, shape=server, ymin=sjrn_min, ymax=sjrn_max))
-p <- p + coord_trans(x = "identity", y = "identity", limy=c(0, 1.2*mx_rmt))
+p <- p + coord_trans(x = "identity", y = "identity", limy=c(0, min(cap, 1.2*mx_rmt)))
 p <- p + facet_wrap(~ skew)
 p <- p + scale_linetype_manual(breaks=c(50,95,99), values=c("solid","dotted","dashed"))
-p <- p + geom_point(size = 0.7, alpha = 0.8) + geom_errorbar(width = 0.1) + geom_line()
+p <- p + geom_point(size = 0.7, alpha = 0.8) + geom_errorbar(width = 0.3) + geom_line()
 p <- p + xlab("target load (Mops/s)") + ylab("sojourn time (ms)") + ggtitle("Sojourn time")
 ggsave('plot-sjrn.png',plot=p,width=10,height=4)
 

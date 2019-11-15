@@ -1,8 +1,8 @@
 use super::mk_key::MakeKey;
+use crate::prelude::*;
+use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
-use prelude::*;
 use rand::prelude::*;
-use state::keyed_state::KeyedState;
 use std::rc::Rc;
 
 pub(super) struct SingleState {
@@ -170,15 +170,21 @@ impl SingleState {
 
     pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
-            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Single(ref mut m) => m.swap_remove(&(key[0])),
+            KeyedState::Double(ref mut m) => {
+                m.swap_remove::<(DataType, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Tri(ref mut m) => {
+                m.swap_remove::<(DataType, _, _)>(&MakeKey::from_key(key))
+            }
+            KeyedState::Quad(ref mut m) => {
+                m.swap_remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
+            }
             KeyedState::Quin(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::Sex(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                m.swap_remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
         };
         // mark_hole should only be called on keys we called mark_filled on

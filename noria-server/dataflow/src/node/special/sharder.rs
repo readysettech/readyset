@@ -1,7 +1,5 @@
-use fnv::FnvHashMap;
-use payload;
-use prelude::*;
-use std::collections::VecDeque;
+use crate::payload;
+use crate::prelude::*;
 use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]
@@ -61,7 +59,7 @@ impl Sharder {
 
     #[inline]
     fn shard(&self, dt: &DataType) -> usize {
-        ::shard_by(dt, self.txs.len())
+        crate::shard_by(dt, self.txs.len())
     }
 
     pub fn process(
@@ -69,7 +67,7 @@ impl Sharder {
         m: &mut Option<Box<Packet>>,
         index: LocalNodeIndex,
         is_sharded: bool,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        output: &mut dyn Executor,
     ) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
@@ -78,7 +76,7 @@ impl Sharder {
             let p = self
                 .sharded
                 .entry(shard)
-                .or_insert_with(|| box m.clone_data());
+                .or_insert_with(|| Box::new(m.clone_data()));
             p.map_data(|rs| rs.push(record));
         }
 
@@ -106,7 +104,7 @@ impl Sharder {
             for shard in 0..self.txs.len() {
                 self.sharded
                     .entry(shard)
-                    .or_insert_with(|| box m.clone_data());
+                    .or_insert_with(|| Box::new(m.clone_data()));
             }
         }
 
@@ -124,7 +122,7 @@ impl Sharder {
             if let Some(mut shard) = self.sharded.remove(i) {
                 shard.link_mut().src = index;
                 shard.link_mut().dst = dst;
-                output.entry(addr).or_default().push_back(shard);
+                output.send(addr, shard);
             }
         }
     }
@@ -136,7 +134,7 @@ impl Sharder {
         keys: &[Vec<DataType>],
         src: LocalNodeIndex,
         is_sharded: bool,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        output: &mut dyn Executor,
     ) {
         assert!(!is_sharded);
 
@@ -145,14 +143,13 @@ impl Sharder {
             for key in keys {
                 let shard = self.shard(&key[0]);
                 let dst = self.txs[shard].0;
-                let p = self
-                    .sharded
-                    .entry(shard)
-                    .or_insert_with(|| box Packet::EvictKeys {
+                let p = self.sharded.entry(shard).or_insert_with(|| {
+                    Box::new(Packet::EvictKeys {
                         link: Link { src, dst },
                         keys: Vec::new(),
                         tag,
-                    });
+                    })
+                });
                 match **p {
                     Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
                     _ => unreachable!(),
@@ -161,7 +158,7 @@ impl Sharder {
 
             for (i, &mut (_, addr)) in self.txs.iter_mut().enumerate() {
                 if let Some(shard) = self.sharded.remove(i) {
-                    output.entry(addr).or_default().push_back(shard);
+                    output.send(addr, shard);
                 }
             }
         } else {
@@ -170,14 +167,14 @@ impl Sharder {
 
             // send to all shards
             for &mut (dst, addr) in self.txs.iter_mut() {
-                output
-                    .entry(addr)
-                    .or_default()
-                    .push_back(Box::new(Packet::EvictKeys {
+                output.send(
+                    addr,
+                    Box::new(Packet::EvictKeys {
                         link: Link { src, dst },
                         keys: keys.to_vec(),
                         tag,
-                    }))
+                    }),
+                )
             }
         }
     }

@@ -1,11 +1,9 @@
-#[macro_use]
-extern crate clap;
-
-use noria::{Builder, DataType, LocalAuthority, ReuseConfigType, SyncHandle};
+use clap::value_t_or_exit;
+use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::{thread, time};
+use std::time;
 
 #[macro_use]
 mod populate;
@@ -13,7 +11,7 @@ mod populate;
 use crate::populate::Populate;
 
 pub struct Backend {
-    g: SyncHandle<LocalAuthority>,
+    g: Handle<LocalAuthority>,
 }
 
 #[derive(PartialEq)]
@@ -24,7 +22,7 @@ enum PopulateType {
 }
 
 impl Backend {
-    pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
+    pub async fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
         let mut cb = Builder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
@@ -43,20 +41,18 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        let g = cb.start_simple().unwrap();
+        let g = cb.start_local().await.unwrap();
 
         Backend { g }
     }
 
-    pub fn populate(&mut self, name: &'static str, mut records: Vec<Vec<DataType>>) -> usize {
-        let mut mutator = self.g.table(name).unwrap().into_sync();
+    pub async fn populate(&mut self, name: &'static str, records: Vec<Vec<DataType>>) -> usize {
+        let mut mutator = self.g.table(name).await.unwrap();
 
         let start = time::Instant::now();
 
         let i = records.len();
-        for r in records.drain(..) {
-            mutator.insert(r).unwrap();
-        }
+        mutator.perform_all(records).await.unwrap();
 
         let dur = start.elapsed().as_secs_f64();
         println!(
@@ -70,25 +66,23 @@ impl Backend {
         i
     }
 
-    fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
-        self.g
-            .on_worker(|w| w.create_universe(user_context.clone()))
-            .unwrap();
+    async fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
+        self.g.create_universe(user_context.clone()).await.unwrap();
 
         Ok(())
     }
 
-    fn set_security_config(&mut self, config_file: &str) {
+    async fn set_security_config(&mut self, config_file: &str) {
         use std::io::Read;
         let mut config = String::new();
         let mut cf = File::open(config_file).unwrap();
         cf.read_to_string(&mut config).unwrap();
 
         // Install recipe with policies
-        self.g.on_worker(|w| w.set_security_config(config)).unwrap();
+        self.g.set_security_config(config).await.unwrap();
     }
 
-    fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
+    async fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
         use std::io::Read;
 
         // Read schema file
@@ -111,7 +105,7 @@ impl Backend {
         }
 
         // Install recipe
-        self.g.install_recipe(&rs).unwrap();
+        self.g.install_recipe(&rs).await.unwrap();
 
         Ok(())
     }
@@ -124,7 +118,8 @@ fn make_user(id: i32) -> HashMap<String, DataType> {
     user
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::{App, Arg};
     let args = App::new("piazza")
         .version("0.1")
@@ -249,11 +244,11 @@ fn main() {
 
     // Initiliaze backend application with some queries and policies
     println!("Initiliazing database schema...");
-    let mut backend = Backend::new(partial, shard, reuse);
-    backend.migrate(sloc, None).unwrap();
+    let mut backend = Backend::new(partial, shard, reuse).await;
+    backend.migrate(sloc, None).await.unwrap();
 
-    backend.set_security_config(ploc);
-    backend.migrate(sloc, Some(qloc)).unwrap();
+    backend.set_security_config(ploc).await;
+    backend.migrate(sloc, Some(qloc)).await.unwrap();
 
     let populate = match populate {
         "before" => PopulateType::Before,
@@ -269,28 +264,34 @@ fn main() {
     let posts = p.get_posts();
     let classes = p.get_classes();
 
-    backend.populate("Role", roles);
+    backend.populate("Role", roles).await;
     println!("Waiting for groups to be constructed...");
-    thread::sleep(time::Duration::from_millis(120 * (nclasses as u64)));
+    tokio::timer::delay(
+        time::Instant::now() + time::Duration::from_millis(120 * (nclasses as u64)),
+    )
+    .await;
 
-    backend.populate("User", users);
-    backend.populate("Class", classes);
+    backend.populate("User", users).await;
+    backend.populate("Class", classes).await;
 
     if populate == PopulateType::Before {
-        backend.populate("Post", posts.clone());
+        backend.populate("Post", posts.clone()).await;
         println!("Waiting for posts to propagate...");
-        thread::sleep(time::Duration::from_millis((nposts / 10) as u64));
+        tokio::timer::delay(
+            time::Instant::now() + time::Duration::from_millis((nposts / 10) as u64),
+        )
+        .await;
     }
 
     println!("Finished writing! Sleeping for 2 seconds...");
-    thread::sleep(time::Duration::from_millis(2000));
+    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(2)).await;
 
     // if partial, read 25% of the keys
     if partial {
         let leaf = "posts".to_string();
-        let mut getter = backend.g.view(&leaf).unwrap().into_sync();
+        let mut getter = backend.g.view(&leaf).await.unwrap();
         for author in 0..nusers / 4 {
-            getter.lookup(&[author.into()], false).unwrap();
+            getter.lookup(&[author.into()], false).await.unwrap();
         }
     }
 
@@ -298,16 +299,16 @@ fn main() {
     println!("Login in users...");
     for i in 0..nlogged {
         let start = time::Instant::now();
-        let _ = backend.login(make_user(i)).is_ok();
+        let _ = backend.login(make_user(i)).await.is_ok();
         let dur = start.elapsed().as_secs_f64();
         println!("Migration {} took {:.2}s!", i, dur,);
 
         // if partial, read 25% of the keys
         if partial {
             let leaf = format!("posts_u{}", i);
-            let mut getter = backend.g.view(&leaf).unwrap().into_sync();
+            let mut getter = backend.g.view(&leaf).await.unwrap();
             for author in 0..nusers / 4 {
-                getter.lookup(&[author.into()], false).unwrap();
+                getter.lookup(&[author.into()], false).await.unwrap();
             }
         }
 
@@ -319,17 +320,17 @@ fn main() {
     }
 
     if populate == PopulateType::After {
-        backend.populate("Post", posts);
+        backend.populate("Post", posts).await;
     }
 
     if !partial {
         let mut dur = time::Duration::from_millis(0);
         for uid in 0..nlogged {
             let leaf = format!("posts_u{}", uid);
-            let mut getter = backend.g.view(&leaf).unwrap().into_sync();
+            let mut getter = backend.g.view(&leaf).await.unwrap();
             let start = time::Instant::now();
             for author in 0..nusers {
-                getter.lookup(&[author.into()], true).unwrap();
+                getter.lookup(&[author.into()], true).await.unwrap();
             }
             dur += start.elapsed();
         }
@@ -349,6 +350,6 @@ fn main() {
     if gloc.is_some() {
         let graph_fname = gloc.unwrap();
         let mut gf = File::create(graph_fname).unwrap();
-        assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+        assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
     }
 }

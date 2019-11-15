@@ -4,9 +4,9 @@ use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde;
 use tempfile::{tempdir, TempDir};
 
+use crate::prelude::*;
+use crate::state::{RecordResult, State};
 use common::SizeOf;
-use prelude::*;
-use state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -1065,6 +1065,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn persistent_state_drop() {
         let path = {
             let state = PersistentState::new(

@@ -1,48 +1,24 @@
-#![feature(nll)]
-#![feature(box_syntax)]
-#![feature(box_patterns)]
-#![feature(crate_visibility_modifier)]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.
 #![cfg_attr(debug, feature(is_sorted))]
 #![deny(unused_extern_crates)]
 #![allow(clippy::redundant_closure)]
 
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-#[cfg(debug_assertions)]
-extern crate backtrace;
-extern crate bincode;
-extern crate common;
-extern crate evmap;
-extern crate fnv;
-extern crate futures;
-extern crate indexmap;
-extern crate itertools;
-extern crate nom_sql;
-extern crate noria;
-extern crate petgraph;
-extern crate rand;
-extern crate regex;
-extern crate rocksdb;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
-extern crate stream_cancel;
-extern crate tempfile;
-extern crate timekeeper;
-extern crate tokio;
-extern crate vec_map;
 
-crate mod backlog;
+pub(crate) mod backlog;
 pub mod node;
 pub mod ops;
 pub mod payload; // it makes me _really_ sad that this has to be pub
 pub mod prelude;
-crate mod state;
+pub(crate) mod state;
 
 mod domain;
 mod group_commit;
@@ -53,13 +29,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
 
-pub use backlog::SingleReadHandle;
+pub use crate::backlog::SingleReadHandle;
 pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
-pub use domain::{Domain, DomainBuilder, Index, PollEvent, ProcessResult};
-pub use payload::Packet;
+pub use crate::domain::{Domain, DomainBuilder, Index, PollEvent, ProcessResult};
+pub use crate::payload::Packet;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

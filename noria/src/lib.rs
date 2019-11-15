@@ -25,50 +25,52 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
-//! use tokio::prelude::*;
 //! # use noria::*;
-//! # let zookeeper_addr = "127.0.0.1:2181";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
+//! #[tokio::main]
+//! async fn main() {
+//!     let zookeeper_addr = "127.0.0.1:2181";
+//!     let mut db = ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
 //!
-//! // if this is the first time we interact with Noria, we must give it the schema
-//! db.install_recipe("
-//!     CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
-//!     CREATE TABLE Vote (aid int, uid int);
-//! ");
+//!     // if this is the first time we interact with Noria, we must give it the schema
+//!     db.install_recipe("
+//!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
+//!         CREATE TABLE Vote (aid int, uid int);
+//!     ").await.unwrap();
 //!
-//! // we can then get handles that let us insert into the new tables
-//! let mut article = db.table("Article").unwrap().into_sync();
-//! let mut vote = db.table("Vote").unwrap().into_sync();
+//!     // we can then get handles that let us insert into the new tables
+//!     let mut article = db.table("Article").await.unwrap();
+//!     let mut vote = db.table("Vote").await.unwrap();
 //!
-//! // let's make a new article
-//! let aid = 42;
-//! let title = "I love Soup";
-//! let url = "https://pdos.csail.mit.edu";
-//! article
-//!     .insert(vec![aid.into(), title.into(), url.into()])
-//!     .unwrap();
+//!     // let's make a new article
+//!     let aid = 42;
+//!     let title = "I love Soup";
+//!     let url = "https://pdos.csail.mit.edu";
+//!     article
+//!         .insert(vec![aid.into(), title.into(), url.into()])
+//!         .await
+//!         .unwrap();
 //!
-//! // and then vote for it
-//! vote.insert(vec![aid.into(), 1.into()]).unwrap();
+//!     // and then vote for it
+//!     vote.insert(vec![aid.into(), 1.into()]).await.unwrap();
 //!
-//! // we can also declare views that we want want to query
-//! db.extend_recipe("
-//!     VoteCount: \
-//!       SELECT Vote.aid, COUNT(uid) AS votes \
-//!       FROM Vote GROUP BY Vote.aid;
-//!     QUERY ArticleWithVoteCount: \
-//!       SELECT Article.aid, title, url, VoteCount.votes AS votes \
-//!       FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
-//!       WHERE Article.aid = ?;");
+//!     // we can also declare views that we want want to query
+//!     db.extend_recipe("
+//!         VoteCount: \
+//!           SELECT Vote.aid, COUNT(uid) AS votes \
+//!           FROM Vote GROUP BY Vote.aid;
+//!         QUERY ArticleWithVoteCount: \
+//!           SELECT Article.aid, title, url, VoteCount.votes AS votes \
+//!           FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
+//!           WHERE Article.aid = ?;").await.unwrap();
 //!
-//! // and then get handles that let us execute those queries to fetch their results
-//! let mut awvc = db.view("ArticleWithVoteCount").unwrap().into_sync();
-//! // looking up article 42 should yield the article we inserted with a vote count of 1
-//! assert_eq!(
-//!     awvc.lookup(&[aid.into()], true).unwrap(),
-//!     vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
-//! );
+//!     // and then get handles that let us execute those queries to fetch their results
+//!     let mut awvc = db.view("ArticleWithVoteCount").await.unwrap();
+//!     // looking up article 42 should yield the article we inserted with a vote count of 1
+//!     assert_eq!(
+//!         awvc.lookup(&[aid.into()], true).await.unwrap(),
+//!         vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
+//!     );
+//! }
 //! ```
 //!
 //! # Client model
@@ -108,8 +110,6 @@
 //! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
-#![feature(allow_fail)]
-#![feature(try_blocks)]
 #![feature(type_alias_impl_trait)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
@@ -120,8 +120,6 @@ extern crate failure;
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate futures;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
@@ -142,6 +140,7 @@ pub mod internal;
 pub use crate::consensus::ZookeeperAuthority;
 use crate::internal::*;
 use std::cell::RefCell;
+use std::pin::Pin;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -186,11 +185,11 @@ pub struct Tagger(slab::Slab<()>);
 impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
     type Tag = u32;
 
-    fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
+    fn assign_tag(mut self: Pin<&mut Self>, r: &mut Tagged<Request>) -> Self::Tag {
         r.tag = self.0.insert(()) as u32;
         r.tag
     }
-    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
+    fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
         self.0.remove(r.tag as usize);
         r.tag
     }
@@ -209,7 +208,7 @@ impl<T> From<T> for Tagged<T> {
     }
 }
 
-pub use crate::controller::{ControllerDescriptor, ControllerHandle, SyncControllerHandle};
+pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
 pub use crate::table::{SyncTable, Table};
 pub use crate::view::{SyncView, View};

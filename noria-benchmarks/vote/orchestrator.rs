@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::{io, thread, time};
 
-const SOUP_AMI: &str = "ami-0fe49768bcb2d68f4";
+const SOUP_AMI: &str = "ami-0e93c3b2927b16d34";
 
 #[derive(Clone, Copy)]
 struct ClientParameters<'a> {
@@ -693,28 +693,23 @@ fn run_clients(
                     public_dns, target
                 );
 
-                let c: Result<_, Box<Error>> = try {
-                    let mut cmd = Vec::<Cow<str>>::new();
-                    cmd.push("multiclient.sh".into());
-                    params.add_params(&mut cmd);
-                    cmd.push("--no-prime".into());
-                    cmd.push("--threads".into());
-                    cmd.push(format!("{}", 6 * ccores).into());
-                    cmd.push("--target".into());
-                    cmd.push(format!("{}", target_per_client).into());
-                    // tee stdout and stderr
-                    // https://stackoverflow.com/a/692407/472927
-                    cmd.push(">".into());
-                    cmd.push(">(tee run.out)".into());
-                    cmd.push("2>".into());
-                    cmd.push(">(tee run.err >&2)".into());
+                let mut cmd = Vec::<Cow<str>>::new();
+                cmd.push("multiclient.sh".into());
+                params.add_params(&mut cmd);
+                cmd.push("--no-prime".into());
+                cmd.push("--threads".into());
+                cmd.push(format!("{}", 6 * ccores).into());
+                cmd.push("--target".into());
+                cmd.push(format!("{}", target_per_client).into());
+                // tee stdout and stderr
+                // https://stackoverflow.com/a/692407/472927
+                cmd.push(">".into());
+                cmd.push(">(tee run.out)".into());
+                cmd.push("2>".into());
+                cmd.push(">(tee run.err >&2)".into());
 
-                    let cmd: Vec<_> = cmd.iter().map(|s| &**s).collect();
-                    let c = ssh.exec(&cmd[..])?;
-                    c
-                };
-
-                match c {
+                let cmd: Vec<_> = cmd.iter().map(|s| &**s).collect();
+                match ssh.exec(&cmd[..]) {
                     Ok(c) => Some((public_dns, c)),
                     Err(e) => {
                         eprintln!("{} failed to run benchmark client:", public_dns);

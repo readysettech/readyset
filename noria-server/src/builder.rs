@@ -1,15 +1,13 @@
-use crate::handle::{Handle, SyncHandle};
+use crate::handle::Handle;
 use crate::Config;
 use crate::FrontierStrategy;
 use crate::ReuseConfigType;
 use dataflow::PersistenceParameters;
-use failure;
 use noria::consensus::{Authority, LocalAuthority};
-use slog;
+use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
-use tokio::prelude::*;
 
 /// Used to construct a worker.
 pub struct Builder {
@@ -98,6 +96,7 @@ impl Builder {
     /// Set the number of pool threads to use (default is #cores)
     pub fn set_threads(&mut self, threads: usize) {
         self.config.threads = Some(threads);
+        unimplemented!();
     }
 
     /// Start a server instance and return a handle to it.
@@ -105,7 +104,7 @@ impl Builder {
     pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> impl Future<Item = Handle<A>, Error = failure::Error> {
+    ) -> impl Future<Output = Result<Handle<A>, failure::Error>> {
         let Builder {
             listen_addr,
             ref config,
@@ -116,40 +115,29 @@ impl Builder {
 
         let config = config.clone();
         let log = log.clone();
-        future::lazy(move || {
-            crate::startup::start_instance(
-                authority,
-                listen_addr,
-                config,
-                memory_limit,
-                memory_check_frequency,
-                log,
-            )
-        })
-    }
 
-    /// Start a local worker and return a handle to it.
-    ///
-    /// The returned handle executes all operations synchronously on a tokio runtime.
-    pub fn start_simple(&self) -> Result<SyncHandle<LocalAuthority>, failure::Error> {
-        let tracer = tracing::Dispatch::new(tracing_subscriber::FmtSubscriber::builder().finish());
-        let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new)?;
-        let wh = rt.block_on(self.start_local())?;
-        Ok(SyncHandle::from_existing(rt, wh))
+        crate::startup::start_instance(
+            authority,
+            listen_addr,
+            config,
+            memory_limit,
+            memory_check_frequency,
+            log,
+        )
     }
 
     /// Start a local-only worker, and return a handle to it.
     #[must_use]
     pub fn start_local(
         &self,
-    ) -> impl Future<Item = Handle<LocalAuthority>, Error = failure::Error> {
-        #[allow(unused_mut)]
-        self.start(Arc::new(LocalAuthority::new()))
-            .and_then(|mut wh| {
-                #[cfg(test)]
-                return wh.backend_ready();
-                #[cfg(not(test))]
-                Ok(wh)
-            })
+    ) -> impl Future<Output = Result<Handle<LocalAuthority>, failure::Error>> {
+        let fut = self.start(Arc::new(LocalAuthority::new()));
+        async move {
+            #[allow(unused_mut)]
+            let mut wh = fut.await?;
+            #[cfg(test)]
+            wh.backend_ready().await;
+            Ok(wh)
+        }
     }
 }

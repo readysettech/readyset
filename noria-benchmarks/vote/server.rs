@@ -291,6 +291,11 @@ pub(crate) fn start<'a>(
             }
 
             // wipe zookeeper state
+            match server.just_exec(&["sudo", "systemctl", "stop", "zookeeper"]) {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => return Ok(Err(e)),
+                Err(e) => return Err(e),
+            }
             match server.just_exec(&["sudo", "rm", "-rf", "/var/lib/zookeeper/version-2"]) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => return Ok(Err(e)),

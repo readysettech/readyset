@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///
@@ -149,7 +149,7 @@ impl Ingredient for Latest {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(key: usize, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

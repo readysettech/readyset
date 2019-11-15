@@ -3,7 +3,8 @@ use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use clap;
 use failure::ResultExt;
 use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
-use tokio::prelude::*;
+use std::future::Future;
+use std::task::{Context, Poll};
 use tower_service::Service;
 
 #[derive(Clone)]
@@ -14,68 +15,50 @@ pub(crate) struct Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = Box<dyn Future<Item = Self, Error = failure::Error> + Send>;
-    fn new(
-        _: tokio::runtime::TaskExecutor,
-        params: Parameters,
-        args: clap::ArgMatches,
-    ) -> <Self as VoteClient>::Future {
+    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future {
         let zk = format!(
             "{}/{}",
             args.value_of("zookeeper").unwrap(),
             args.value_of("deployment").unwrap()
         );
 
-        Box::new(
-            ZookeeperAuthority::new(&zk)
-                .into_future()
-                .and_then(ControllerHandle::new)
-                .and_then(move |mut c| {
-                    if params.prime {
-                        // for prepop, we need a mutator
-                        future::Either::A(
-                            c.install_recipe(RECIPE)
-                                .and_then(move |_| c.table("Article").map(move |a| (c, a)))
-                                .and_then(move |(c, a)| {
-                                    a.perform_all((0..params.articles).map(|i| {
-                                        vec![
-                                            ((i + 1) as i32).into(),
-                                            format!("Article #{}", i).into(),
-                                        ]
-                                    }))
-                                    .map(move |_| c)
-                                    .map_err(|e| e.error)
-                                    .then(|r| {
-                                        r.context("failed to do article prepopulation")
-                                            .map_err(Into::into)
-                                    })
-                                }),
-                        )
-                    } else {
-                        future::Either::B(future::ok(c))
-                    }
-                })
-                .and_then(|mut c| c.table("Vote").map(move |v| (c, v)))
-                .and_then(|(mut c, v)| c.view("ArticleWithVoteCount").map(move |awvc| (c, v, awvc)))
-                .map(|(c, v, awvc)| Conn {
-                    ch: c,
-                    r: Some(awvc),
-                    w: Some(v),
-                }),
-        )
+        async move {
+            let zk = ZookeeperAuthority::new(&zk)?;
+            let mut c = ControllerHandle::new(zk).await?;
+            if params.prime {
+                // for prepop, we need a mutator
+                c.install_recipe(RECIPE).await?;
+                let mut a = c.table("Article").await?;
+                a.perform_all(
+                    (0..params.articles)
+                        .map(|i| vec![((i + 1) as i32).into(), format!("Article #{}", i).into()]),
+                )
+                .await
+                .context("failed to do article prepopulation")?;
+            }
+
+            let v = c.table("Vote").await?;
+            let awvc = c.view("ArticleWithVoteCount").await?;
+            Ok(Conn {
+                ch: c,
+                r: Some(awvc),
+                w: Some(v),
+            })
+        }
     }
 }
 
 impl Service<ReadRequest> for Conn {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
+    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.r
             .as_mut()
             .unwrap()
-            .poll_ready()
+            .poll_ready(cx)
             .map_err(failure::Error::from)
     }
 
@@ -87,27 +70,23 @@ impl Service<ReadRequest> for Conn {
             .map(|article_id| vec![(article_id as usize).into()])
             .collect();
 
-        Box::new(
-            self.r
-                .as_mut()
-                .unwrap()
-                .call((arg, true))
-                .map(move |rows| {
-                    // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                    assert_eq!(rows.len(), len);
-                })
-                .map_err(failure::Error::from),
-        )
+        let fut = self.r.as_mut().unwrap().call((arg, true));
+        async move {
+            let rows = fut.await?;
+            // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+            assert_eq!(rows.len(), len);
+            Ok(())
+        }
     }
 }
 
 impl Service<WriteRequest> for Conn {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
+    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap(), cx)
             .map_err(failure::Error::from)
     }
 
@@ -118,14 +97,11 @@ impl Service<WriteRequest> for Conn {
             .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
             .collect();
 
-        Box::new(
-            self.w
-                .as_mut()
-                .unwrap()
-                .call(data)
-                .map(|_| ())
-                .map_err(failure::Error::from),
-        )
+        let fut = self.w.as_mut().unwrap().call(data);
+        async move {
+            fut.await?;
+            Ok(())
+        }
     }
 }
 

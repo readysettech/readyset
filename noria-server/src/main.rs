@@ -1,8 +1,4 @@
-#[macro_use]
-extern crate clap;
-extern crate noria_server;
-extern crate slog;
-
+use clap::value_t_or_exit;
 use noria_server::{Builder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -172,8 +168,7 @@ fn main() {
     if let Some(threads) = None {
         rt.core_threads(threads);
     }
-    rt.build()
-        .unwrap()
-        .block_on_all(builder.start(Arc::new(authority)))
-        .unwrap();
+    let rt = rt.build().unwrap();
+    let _server = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+    rt.shutdown_on_idle();
 }

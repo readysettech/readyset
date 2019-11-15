@@ -1,24 +1,12 @@
-#[macro_use]
-extern crate clap;
-extern crate futures;
-extern crate hdrhistogram;
-extern crate itertools;
-extern crate noria;
-extern crate rand;
-extern crate zookeeper;
-
-use clap::{App, Arg};
+use clap::{value_t_or_exit, App, Arg};
 use hdrhistogram::Histogram;
 use itertools::Itertools;
-use noria::{
-    Builder, DataType, DurabilityMode, PersistenceParameters, SyncHandle, ZookeeperAuthority,
-};
+use noria::{Builder, DataType, DurabilityMode, Handle, PersistenceParameters, ZookeeperAuthority};
 use rand::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 use zookeeper::ZooKeeper;
 
@@ -49,11 +37,11 @@ QUERY query_c8: SELECT * FROM TableRow WHERE c8 = ?;
 QUERY query_c9: SELECT * FROM TableRow WHERE c9 = ?;
 ";
 
-fn build_graph(
+async fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> SyncHandle<ZookeeperAuthority> {
+) -> Handle<ZookeeperAuthority> {
     let mut builder = Builder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
@@ -61,16 +49,13 @@ fn build_graph(
 
     builder.set_persistence(persistence);
     builder.set_sharding(None);
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
-    let fut = builder.start(authority);
-    let wh = rt.block_on(fut).unwrap();
-    SyncHandle::from_existing(rt, wh)
+    builder.start(authority).await.unwrap()
 }
 
-fn populate(g: &mut SyncHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
-    let mut mutator = g.table("TableRow").unwrap().into_sync();
+async fn populate(g: &mut Handle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+    let mut mutator = g.table("TableRow").await.unwrap();
 
-    (0..rows)
+    let chunks = (0..rows)
         .map(|i| {
             let row: Vec<DataType> = if skewed {
                 let mut row = vec![SKEWED_KEY.into(); 10];
@@ -82,17 +67,17 @@ fn populate(g: &mut SyncHandle<ZookeeperAuthority>, rows: i64, skewed: bool) {
 
             row
         })
-        .chunks(BATCH_SIZE)
-        .into_iter()
-        .for_each(|chunk| {
-            let rs: Vec<Vec<DataType>> = chunk.collect();
-            mutator.perform_all(rs).unwrap();
-        });
+        .chunks(BATCH_SIZE);
+
+    for chunk in chunks.into_iter() {
+        let rs: Vec<Vec<DataType>> = chunk.collect();
+        mutator.perform_all(rs).await.unwrap();
+    }
 }
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
-fn perform_reads(
-    g: &mut SyncHandle<ZookeeperAuthority>,
+async fn perform_reads(
+    g: &mut Handle<ZookeeperAuthority>,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -112,9 +97,9 @@ fn perform_reads(
     };
 
     if use_secondary {
-        perform_secondary_reads(g, &mut hist, rows, row_ids);
+        perform_secondary_reads(g, &mut hist, rows, row_ids).await;
     } else {
-        perform_primary_reads(g, &mut hist, row_ids);
+        perform_primary_reads(g, &mut hist, row_ids).await;
     }
 
     println!("# read {} of {} rows", reads, rows);
@@ -125,17 +110,17 @@ fn perform_reads(
 }
 
 // Reads every row with the primary key index.
-fn perform_primary_reads(
-    g: &mut SyncHandle<ZookeeperAuthority>,
+async fn perform_primary_reads(
+    g: &mut Handle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     row_ids: Vec<i64>,
 ) {
-    let mut getter = g.view("ReadRow").unwrap().into_sync();
+    let mut getter = g.view("ReadRow").await.unwrap();
 
     for i in row_ids {
         let id: DataType = DataType::UnsignedBigInt(i as u64);
         let start = Instant::now();
-        let rs = getter.lookup(&[id], true).unwrap();
+        let rs = getter.lookup(&[id], true).await.unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         assert_eq!(rs.len(), 1);
@@ -151,16 +136,17 @@ fn perform_primary_reads(
 }
 
 // Reads each row from one of the secondary indices.
-fn perform_secondary_reads(
-    g: &mut SyncHandle<ZookeeperAuthority>,
+async fn perform_secondary_reads(
+    g: &mut Handle<ZookeeperAuthority>,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,
 ) {
     let indices = 10;
-    let mut getters: Vec<_> = (1..indices)
-        .map(|i| g.view(&format!("query_c{}", i)).unwrap().into_sync())
-        .collect();
+    let mut getters = Vec::new();
+    for i in 1..indices {
+        getters.push(g.view(&format!("query_c{}", i)).await.unwrap());
+    }
 
     let skewed = row_ids.len() == 1;
     for i in row_ids {
@@ -168,7 +154,7 @@ fn perform_secondary_reads(
         let start = Instant::now();
         // Pick an arbitrary secondary index to use:
         let getter = &mut getters[i as usize % (indices - 1)];
-        let rs = getter.lookup(&[id], true).unwrap();
+        let rs = getter.lookup(&[id], true).await.unwrap();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         if skewed {
@@ -193,7 +179,8 @@ fn clear_zookeeper(address: &str) {
     let _ = zk.delete("/state", None);
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = App::new("replay")
         .version("0.1")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
@@ -320,11 +307,11 @@ fn main() {
 
     if !args.is_present("use-existing-data") {
         clear_zookeeper(zk_address);
-        let mut g = build_graph(authority.clone(), persistence.clone(), verbose);
+        let mut g = build_graph(authority.clone(), persistence.clone(), verbose).await;
         if use_secondary {
-            g.install_recipe(SECONDARY_RECIPE).unwrap();
+            g.install_recipe(SECONDARY_RECIPE).await.unwrap();
         } else {
-            g.install_recipe(RECIPE).unwrap();
+            g.install_recipe(RECIPE).await.unwrap();
         }
 
         if verbose {
@@ -332,12 +319,12 @@ fn main() {
         }
 
         // Prepopulate with n rows:
-        populate(&mut g, rows, skewed);
+        populate(&mut g, rows, skewed).await;
 
         // In memory-only mode we don't want to recover, just read right away:
         if !durable || no_recovery {
-            thread::sleep(Duration::from_secs(5));
-            perform_reads(&mut g, reads, rows, skewed, use_secondary, verbose);
+            tokio::timer::delay(Instant::now() + Duration::from_secs(5)).await;
+            perform_reads(&mut g, reads, rows, skewed, use_secondary, verbose).await;
 
             // Remove any log/database files:
             if !retain_logs && durable {
@@ -349,12 +336,12 @@ fn main() {
     }
 
     // Recover the previous graph and perform reads:
-    let mut g = build_graph(authority, persistence, verbose);
+    let mut g = build_graph(authority, persistence, verbose).await;
     // Flush disk cache:
     Command::new("sync")
         .spawn()
         .expect("Failed clearing disk buffers");
-    perform_reads(&mut g, reads, rows, skewed, use_secondary, verbose);
+    perform_reads(&mut g, reads, rows, skewed, use_secondary, verbose).await;
 
     // Remove any log/database files:
     if !retain_logs {

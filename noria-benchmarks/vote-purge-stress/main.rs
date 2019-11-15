@@ -1,15 +1,8 @@
 #![allow(clippy::many_single_char_names)]
 
-extern crate clap;
-extern crate futures;
-extern crate hdrhistogram;
-extern crate noria;
-extern crate rand;
-
 use clap::{value_t_or_exit, App, Arg};
-use futures::Future;
 use hdrhistogram::Histogram;
-use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters, SyncHandle};
+use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters};
 use std::time::{Duration, Instant};
 
 const RECIPE: &str = "# base tables
@@ -25,7 +18,8 @@ QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
             LEFT JOIN VoteCount \
             ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = App::new("purge-stress")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
         .arg(
@@ -87,32 +81,28 @@ fn main() {
         _ => unreachable!(),
     }
 
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
-    let ex = rt.executor();
-    let mut g = rt
-        .block_on(
-            builder
-                .start_local()
-                .and_then(|wh| wh.ready())
-                .and_then(|mut wh| wh.install_recipe(RECIPE).map(move |_| wh))
-                .map(move |wh| SyncHandle::from_executor(ex, wh)),
-        )
-        .unwrap();
+    let mut g = builder.start_local().await.unwrap();
+    g.ready().await.unwrap();
+    g.install_recipe(RECIPE).await.unwrap();
 
-    let mut a = g.table("Article").unwrap().into_sync();
-    let mut v = g.table("Vote").unwrap().into_sync();
-    let mut r = g.view("ArticleWithVoteCount").unwrap().into_sync();
+    let mut a = g.table("Article").await.unwrap();
+    let mut v = g.table("Vote").await.unwrap();
+    let mut r = g.view("ArticleWithVoteCount").await.unwrap();
 
     // seed articles
-    a.insert(vec![1.into(), "Hello world #1".into()]).unwrap();
-    a.insert(vec![2.into(), "Hello world #2".into()]).unwrap();
+    a.insert(vec![1.into(), "Hello world #1".into()])
+        .await
+        .unwrap();
+    a.insert(vec![2.into(), "Hello world #2".into()])
+        .await
+        .unwrap();
 
     // seed votes
-    v.insert(vec![1.into(), "a".into()]).unwrap();
-    v.insert(vec![2.into(), "a".into()]).unwrap();
-    v.insert(vec![1.into(), "b".into()]).unwrap();
-    v.insert(vec![2.into(), "c".into()]).unwrap();
-    v.insert(vec![2.into(), "d".into()]).unwrap();
+    v.insert(vec![1.into(), "a".into()]).await.unwrap();
+    v.insert(vec![2.into(), "a".into()]).await.unwrap();
+    v.insert(vec![1.into(), "b".into()]).await.unwrap();
+    v.insert(vec![2.into(), "c".into()]).await.unwrap();
+    v.insert(vec![2.into(), "d".into()]).await.unwrap();
 
     // now for the benchmark itself.
     // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
@@ -120,11 +110,11 @@ fn main() {
     let one = 1.into();
     let two = 2.into();
     assert_eq!(
-        r.lookup(&[one], true).unwrap(),
+        r.lookup(&[one], true).await.unwrap(),
         vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
     );
     assert_eq!(
-        r.lookup(&[two], true).unwrap(),
+        r.lookup(&[two], true).await.unwrap(),
         vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
     );
 
@@ -135,7 +125,7 @@ fn main() {
     while start.elapsed() < Duration::from_secs(runtime) {
         for &id in &[1, 2] {
             let start = Instant::now();
-            r.lookup(&[id.into()], true).unwrap();
+            r.lookup(&[id.into()], true).await.unwrap();
             stats.saturating_record(start.elapsed().as_micros() as u64);
             n += 1;
             // ensure that entry gets evicted

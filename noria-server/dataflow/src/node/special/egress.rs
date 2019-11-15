@@ -1,6 +1,5 @@
-use fnv::FnvHashMap;
-use prelude::*;
-use std::collections::{HashMap, VecDeque};
+use crate::prelude::*;
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 struct EgressTx {
@@ -52,7 +51,7 @@ impl Egress {
         &mut self,
         m: &mut Option<Box<Packet>>,
         shard: usize,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        output: &mut dyn Executor,
     ) {
         let &mut Self {
             ref mut txs,
@@ -88,7 +87,7 @@ impl Egress {
             } else {
                 // we know this is a data (not a replay)
                 // because, a replay will force a take
-                m.as_ref().map(|m| box m.clone_data()).unwrap()
+                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
             // src is usually ignored and overwritten by ingress
@@ -97,7 +96,7 @@ impl Egress {
             m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
             m.link_mut().dst = tx.local;
 
-            output.entry(tx.dest).or_default().push_back(m);
+            output.send(tx.dest, m);
             if take {
                 break;
             }

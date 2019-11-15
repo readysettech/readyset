@@ -1,5 +1,5 @@
-use node::{Node, NodeType};
-use prelude::*;
+use crate::node::{Node, NodeType};
+use crate::prelude::*;
 use std::fmt;
 
 impl fmt::Debug for Node {

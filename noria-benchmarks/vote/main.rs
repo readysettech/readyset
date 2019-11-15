@@ -1,10 +1,11 @@
-#![feature(try_blocks)]
 #![feature(type_alias_impl_trait)]
 
-#[macro_use]
-extern crate clap;
-
+use clap::value_t_or_exit;
 use failure::ResultExt;
+use futures_util::{
+    future::{Either, FutureExt},
+    try_future::TryFutureExt,
+};
 use hdrhistogram::Histogram;
 use rand::prelude::*;
 use rand_distr::Exp;
@@ -12,9 +13,9 @@ use std::cell::RefCell;
 use std::fs;
 use std::mem;
 use std::sync::{atomic, Arc, Barrier, Mutex};
+use std::task::Poll;
 use std::thread;
 use std::time;
-use tokio::prelude::*;
 use tower_service::Service;
 
 thread_local! {
@@ -98,7 +99,7 @@ where
         rmt_r_t.clone(),
         finished.clone(),
     );
-    let mut rt = tokio::runtime::Builder::new()
+    let rt = tokio::runtime::Builder::new()
         .name_prefix("vote-")
         .before_stop(move || {
             SJRN_W
@@ -121,11 +122,10 @@ where
         let local_args = local_args.clone();
         // we know that we won't drop the original args until the runtime has exited
         let local_args: clap::ArgMatches<'static> = unsafe { mem::transmute(local_args) };
-        let ex = rt.executor();
-        rt.block_on(future::lazy(move || C::new(ex, params, local_args)))
-            .unwrap()
+        rt.block_on(async move { C::new(params, local_args).await.unwrap() })
     };
 
+    let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
     let generators: Vec<_> = (0..ngen)
         .map(|geni| {
             let ex = rt.executor();
@@ -141,6 +141,7 @@ where
                     if skewed {
                         run_generator(
                             handle,
+                            errd,
                             ex,
                             zipf::ZipfDistribution::new(articles, 1.08).unwrap(),
                             target,
@@ -149,6 +150,7 @@ where
                     } else {
                         run_generator(
                             handle,
+                            errd,
                             ex,
                             rand::distributions::Uniform::new(1, articles + 1),
                             target,
@@ -168,7 +170,7 @@ where
         wops += completed;
     }
     drop(handle);
-    rt.shutdown_on_idle().wait().unwrap();
+    rt.shutdown_now();
 
     // all done!
     println!("# generated ops/s: {:.2}", ops);
@@ -241,6 +243,7 @@ where
 
 fn run_generator<C, R>(
     mut handle: C,
+    errd: &'static atomic::AtomicBool,
     ex: tokio::runtime::TaskExecutor,
     id_rng: R,
     target: f64,
@@ -280,7 +283,7 @@ where
     let mut queued_r_keys = Vec::new();
 
     let mut rng = rand::thread_rng();
-    let mut task = tokio_mock_task::MockTask::new();
+    let mut task = tokio_test::task::MockTask::new();
 
     // we *could* use a rayon::scope here to safely access stack variables from inside each job,
     // but that would *also* force us to place the load generators *on* the thread pool (because of
@@ -292,7 +295,6 @@ where
     // this may change with https://github.com/rayon-rs/rayon/issues/544, but that's what we have
     // to do for now.
     let ndone: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
-    let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
 
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
@@ -301,22 +303,22 @@ where
         let n = keys.len();
         let sent = time::Instant::now();
         let fut = if write {
-            future::Either::A(
+            Either::Left(
                 client
                     .call(WriteRequest(keys))
-                    .then(|r| r.context("failed to handle writes")),
+                    .map(|r| r.context("failed to handle writes")),
             )
         } else {
             // deduplicate requested keys, because not doing so would be silly
             keys.sort_unstable();
             keys.dedup();
-            future::Either::B(
+            Either::Right(
                 client
                     .call(ReadRequest(keys))
-                    .then(|r| r.context("failed to handle reads")),
+                    .map(|r| r.context("failed to handle reads")),
             )
         }
-        .map(move |_| {
+        .map_ok(move |_| {
             let done = time::Instant::now();
             ndone.fetch_add(n, atomic::Ordering::AcqRel);
 
@@ -349,11 +351,15 @@ where
             }
         });
 
-        ex.spawn(fut.map_err(move |e| {
-            if time::Instant::now() < end && !errd.swap(true, atomic::Ordering::SeqCst) {
-                eprintln!("failed to enqueue request: {:?}", e)
+        ex.spawn(async move {
+            if let Err(e) = fut.await {
+                if time::Instant::now() < (end - time::Duration::from_secs(1))
+                    && !errd.swap(true, atomic::Ordering::SeqCst)
+                {
+                    eprintln!("failed to enqueue request: {:?}", e)
+                }
             }
-        }));
+        });
     };
 
     let mut worker_ops = None;
@@ -389,9 +395,10 @@ where
             if f <= now {
                 // time to send at least one batch
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
-                    if let Async::Ready(()) =
-                        task.enter(|| Service::<WriteRequest>::poll_ready(&mut handle).unwrap())
+                    if let Poll::Ready(r) =
+                        task.enter(|cx| Service::<WriteRequest>::poll_ready(&mut handle, cx))
                     {
+                        r.unwrap();
                         ops += queued_w.len();
                         enqueue(
                             &mut handle,
@@ -405,9 +412,10 @@ where
                 }
 
                 if !queued_r.is_empty() && now.duration_since(queued_r[0]) >= max_batch_time {
-                    if let Async::Ready(()) =
-                        task.enter(|| Service::<ReadRequest>::poll_ready(&mut handle).unwrap())
+                    if let Poll::Ready(r) =
+                        task.enter(|cx| Service::<ReadRequest>::poll_ready(&mut handle, cx))
                     {
+                        r.unwrap();
                         ops += queued_r.len();
                         enqueue(
                             &mut handle,
@@ -742,9 +750,9 @@ fn main() {
     match args.subcommand() {
         ("localsoup", Some(largs)) => run::<clients::localsoup::LocalNoria>(&args, largs),
         ("netsoup", Some(largs)) => run::<clients::netsoup::Conn>(&args, largs),
-        //("memcached", Some(largs)) => run::<clients::memcached::Constructor>(&args, largs),
+        ("memcached", Some(largs)) => run::<clients::memcached::Conn>(&args, largs),
         //("mssql", Some(largs)) => run::<clients::mssql::Conf>(&args, largs),
-        //("mysql", Some(largs)) => run::<clients::mysql::Conf>(&args, largs),
+        ("mysql", Some(largs)) => run::<clients::mysql::Conn>(&args, largs),
         //("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
         //("null", Some(largs)) => run::<()>(&args, largs),
         (name, _) => eprintln!("unrecognized backend type '{}'", name),

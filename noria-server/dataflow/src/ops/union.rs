@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use prelude::*;
+use crate::prelude::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
@@ -685,7 +685,7 @@ impl Ingredient for Union {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();

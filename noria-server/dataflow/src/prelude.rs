@@ -8,40 +8,41 @@ use std::cell;
 use std::collections::HashMap;
 
 // core types
-crate use processing::Ingredient;
-crate use processing::{Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
-crate type Edge = ();
+pub(crate) use crate::processing::Ingredient;
+pub(crate) use crate::processing::{
+    Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext,
+};
+pub(crate) type Edge = ();
 
 // dataflow types
-crate use noria::debug::trace::{PacketEvent, Tracer};
-crate use noria::Input;
-crate use payload::{ReplayPathSegment, SourceChannelIdentifier};
+pub(crate) use crate::payload::{ReplayPathSegment, SourceChannelIdentifier};
+pub(crate) use noria::debug::trace::{PacketEvent, Tracer};
+pub(crate) use noria::Input;
 
 // domain local state
-crate use state::{LookupResult, MemoryState, PersistentState, RecordResult, Row, State};
-crate type StateMap = Map<Box<dyn State>>;
-crate type DomainNodes = Map<cell::RefCell<Node>>;
-crate type ReplicaAddr = (DomainIndex, usize);
-
-use fnv::FnvHashMap;
-use std::collections::VecDeque;
-crate type EnqueuedSends = FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>;
+pub(crate) use crate::state::{
+    LookupResult, MemoryState, PersistentState, RecordResult, Row, State,
+};
+pub(crate) type StateMap = Map<Box<dyn State>>;
+pub(crate) type DomainNodes = Map<cell::RefCell<Node>>;
+pub(crate) type ReplicaAddr = (DomainIndex, usize);
 
 // public exports
+pub use crate::node::Node;
+pub use crate::ops::NodeOperator;
+pub use crate::payload::Packet;
+pub use crate::Sharding;
 pub use common::*;
-pub use node::Node;
 pub use noria::internal::*;
-pub use ops::NodeOperator;
-pub use payload::Packet;
 pub use petgraph::graph::NodeIndex;
-pub use Sharding;
 pub type Graph = petgraph::Graph<Node, Edge>;
-pub use DurabilityMode;
-pub use PersistenceParameters;
+pub use crate::DurabilityMode;
+pub use crate::PersistenceParameters;
 
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
     fn ack(&mut self, tag: SourceChannelIdentifier);
     fn create_universe(&mut self, req: HashMap<String, DataType>);
+    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>);
 }

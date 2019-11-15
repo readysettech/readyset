@@ -1,7 +1,7 @@
 use crate::Backend;
 use noria::DataType;
 
-pub fn create_users(backend: &mut Backend) {
+pub async fn create_users(backend: &mut Backend) {
     // username varchar(1024),
     // email varchar(1024),
     // name varchar(1024),
@@ -50,13 +50,14 @@ pub fn create_users(backend: &mut Backend) {
     backend
         .g
         .table("UserProfile")
+        .await
         .unwrap()
-        .into_sync()
         .perform_all(users)
+        .await
         .unwrap();
 }
 
-pub fn create_papers(backend: &mut Backend) {
+pub async fn create_papers(backend: &mut Backend) {
     // Paper
     // id int,
     // author varchar(1024),
@@ -100,31 +101,33 @@ pub fn create_papers(backend: &mut Backend) {
     backend
         .g
         .table("Paper")
+        .await
         .unwrap()
-        .into_sync()
         .perform_all(papers)
+        .await
         .unwrap();
     backend
         .g
         .table("PaperVersion")
+        .await
         .unwrap()
-        .into_sync()
         .perform_all(paper_versions)
+        .await
         .unwrap();
 }
 
-pub fn dump_papers(backend: &mut Backend, user: &str) {
+pub async fn dump_papers(backend: &mut Backend, user: &str) {
     let mut get = backend
         .g
         .view(&format!("PaperList_u{}", user))
-        .unwrap()
-        .into_sync();
+        .await
+        .unwrap();
 
-    println!("{:?}", get.lookup(&[0.into()], true));
+    println!("{:?}", get.lookup(&[0.into()], true).await);
 }
 
-pub fn dump_all_papers(backend: &mut Backend) {
-    let mut get = backend.g.view("PaperList").unwrap().into_sync();
+pub async fn dump_all_papers(backend: &mut Backend) {
+    let mut get = backend.g.view("PaperList").await.unwrap();
 
-    println!("{:?}", get.lookup(&[0.into()], true));
+    println!("{:?}", get.lookup(&[0.into()], true).await);
 }

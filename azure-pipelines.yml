@@ -19,12 +19,27 @@ stages:
             vmImage: ubuntu-16.04
           MacOS:
             vmImage: macOS-10.14
+          Windows:
+            vmImage: windows-2019
       pool:
         vmImage: $(vmImage)
       steps:
        - template: azure/install-rust.yml@templates
          parameters:
            rust: nightly
+       - powershell: |
+           Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
+           ./LLVM-9.0.0-win64.exe /S
+           [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
+         displayName: Install LLVM (Windows)
+         condition: eq( variables['Agent.OS'], 'Windows_NT' )
+       - bash: |
+           brew install llvm
+           brew link --force llvm
+           echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
+           echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
+         displayName: Install LLVM (macOS)
+         condition: eq( variables['Agent.OS'], 'Darwin' )
        - script: cargo test --all -- --test-threads=1
          displayName: Run tests
          env:
@@ -44,4 +59,5 @@ resources:
     - repository: templates
       type: github
       name: crate-ci/azure-pipelines
+      ref: refs/heads/v0.2
       endpoint: mit-pdos

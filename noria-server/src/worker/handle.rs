@@ -247,21 +247,3 @@ impl<A: Authority + 'static> Drop for SyncHandle<A> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    #[should_panic]
-    #[cfg_attr(not(debug_assertions), allow_fail)]
-    fn limit_mutator_creation() {
-        use crate::controller::Builder;
-        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
-                     CREATE TABLE b (r int, s int);\n";
-
-        let mut c = Builder::default().start_simple().unwrap();
-        assert!(c.install_recipe(r_txt).is_ok());
-        for _ in 0..2500 {
-            let _ = c.table("a").unwrap();
-        }
-    }
-}

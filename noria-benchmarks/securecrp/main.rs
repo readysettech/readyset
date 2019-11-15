@@ -1,22 +1,17 @@
-extern crate clap;
-extern crate noria;
-extern crate rand;
-extern crate slog;
-
 mod test_populate;
 
-use noria::{Builder, DataType, LocalAuthority, ReuseConfigType, SyncHandle};
+use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::{thread, time};
+use std::time;
 
 pub struct Backend {
-    g: SyncHandle<LocalAuthority>,
+    g: Handle<LocalAuthority>,
 }
 
 impl Backend {
-    pub fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
+    pub async fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
         let mut cb = Builder::default();
         let log = noria::logger_pls();
         let blender_log = log.clone();
@@ -35,30 +30,28 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let g = cb.start_simple().unwrap();
+        let g = cb.start_local().await.unwrap();
 
         Backend { g }
     }
 
-    fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
-        self.g
-            .on_worker(|w| w.create_universe(user_context.clone()))
-            .unwrap();
+    async fn login(&mut self, user_context: HashMap<String, DataType>) -> Result<(), String> {
+        self.g.create_universe(user_context.clone()).await.unwrap();
 
         Ok(())
     }
 
-    fn set_security_config(&mut self, config_file: &str) {
+    async fn set_security_config(&mut self, config_file: &str) {
         use std::io::Read;
         let mut config = String::new();
         let mut cf = File::open(config_file).unwrap();
         cf.read_to_string(&mut config).unwrap();
 
         // Install recipe with policies
-        self.g.on_worker(|w| w.set_security_config(config)).unwrap();
+        self.g.set_security_config(config).await.unwrap();
     }
 
-    fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
+    async fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
         use std::io::Read;
 
         // Read schema file
@@ -81,7 +74,7 @@ impl Backend {
         }
 
         // Install recipe
-        self.g.install_recipe(&rs).unwrap();
+        self.g.install_recipe(&rs).await.unwrap();
 
         Ok(())
     }
@@ -94,7 +87,8 @@ fn make_user(name: &str) -> HashMap<String, DataType> {
     user
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::{App, Arg};
     let args = App::new("SecureCRP")
         .version("0.1")
@@ -163,31 +157,31 @@ fn main() {
     let reuse = args.value_of("reuse").unwrap();
     let user = args.value_of("user").unwrap();
 
-    let mut backend = Backend::new(partial, shard, reuse);
-    backend.migrate(sloc, None).unwrap();
-    backend.set_security_config(ploc);
-    backend.migrate(sloc, Some(qloc)).unwrap();
+    let mut backend = Backend::new(partial, shard, reuse).await;
+    backend.migrate(sloc, None).await.unwrap();
+    backend.set_security_config(ploc).await;
+    backend.migrate(sloc, Some(qloc)).await.unwrap();
 
     if args.is_present("populate") {
-        test_populate::create_users(&mut backend);
+        test_populate::create_users(&mut backend).await;
     }
 
-    thread::sleep(time::Duration::from_millis(2000));
-    let _ = backend.login(make_user(user)).is_ok();
+    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(2)).await;
+    let _ = backend.login(make_user(user)).await.is_ok();
 
     if args.is_present("populate") {
-        test_populate::create_papers(&mut backend);
-        test_populate::dump_papers(&mut backend, user);
+        test_populate::create_papers(&mut backend).await;
+        test_populate::dump_papers(&mut backend, user).await;
     }
 
-    test_populate::dump_all_papers(&mut backend);
+    test_populate::dump_all_papers(&mut backend).await;
 
     if gloc.is_some() {
         let graph_fname = gloc.unwrap();
         let mut gf = File::create(graph_fname).unwrap();
-        assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+        assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
     }
 
     // sleep "forever"
-    thread::sleep(time::Duration::from_millis(200_000_000));
+    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(200_000)).await;
 }

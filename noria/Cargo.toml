@@ -22,28 +22,33 @@ travis-ci = { repository = "mit-pdos/noria" }
 assert_infrequent = "0.1.0"
 failure = "0.1"
 futures = "0.1.16"
-hyper = "0.12.0"
+hyper = { version = "0.13.0-alpha.4", features = [ "unstable-stream" ] }
 nom-sql = "0.0.9"
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
-tokio = "0.1"
+tokio = "=0.2.0-alpha.6"
+tokio-net = "=0.2.0-alpha.6"
+tokio-io = "=0.2.0-alpha.6"
+tokio-executor = "=0.2.0-alpha.6"
 bincode = "1.0.0"
 vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.4.11", features = ["serde-1"] }
-tokio-sync = "0.1"
+tokio-sync = "=0.2.0-alpha.6"
 arccstr = "1.2.0"
 fnv = "1.0.5"
 chrono = { version = "0.4.0", features = ["serde"] }
-tower-service = "0.2"
-tower-balance = { git = "https://github.com/tower-rs/tower.git" }
-tower-discover = "0.1"
-tower-buffer = "0.1"
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", rev = "2e1d40903b9a294d8c984612400838dcdc8fd758" }
+tower-service = "=0.3.0-alpha.2"
+tower-balance = "=0.3.0-alpha.2"
+tower-discover = "=0.3.0-alpha.2"
+tower-buffer = "=0.3.0-alpha.2"
+tokio-tower = "=0.2.0-alpha.2a"
 tracing = "0.1"
-tower-util = "0.1"
-tower = "0.1"
+tower-util = "=0.3.0-alpha.2"
+tower = "=0.3.0-alpha.2"
 slab = "0.4"
+pin-project = "0.4.0"
+futures-util-preview = "=0.3.0-alpha.19"
 
 # consensus/
 slog = "2.4.0"
@@ -54,16 +59,12 @@ zookeeper = "0.5.3"
 # channel/
 bufstream = "0.1.3"
 byteorder = "1.0.0"
-mio = "0.6.9"
 net2 = "0.2"
-async-bincode = "0.4.5"
+async-bincode = "=0.5.0-alpha.6"
 
 [lib]
 path = "src/lib.rs"
 name = "noria"
 
 [[example]]
-name = "quickstart-async"
-
-[[example]]
-name = "quickstart-sync"
+name = "quickstart"

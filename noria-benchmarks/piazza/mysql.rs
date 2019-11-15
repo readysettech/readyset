@@ -1,5 +1,3 @@
-#![feature(type_ascription)]
-
 #[macro_use]
 extern crate clap;
 extern crate noria;

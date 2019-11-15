@@ -5,22 +5,21 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{self, BufWriter, Read, Write};
-use std::marker::PhantomData;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{self, SendError};
 use std::sync::RwLock;
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
-use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::prelude::*;
+use tokio_io::BufWriter;
+use tokio_net::driver::Handle;
 
-pub mod rpc;
 pub mod tcp;
 
-pub use self::tcp::{channel, DualTcpStream, TcpReceiver, TcpSender};
+pub use self::tcp::{DualTcpStream, TcpSender};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
@@ -72,7 +71,7 @@ where
         // synchronous read upon accepting a connection.
         let s = self.build_sync()?.into_inner().into_inner()?;
 
-        tokio::net::TcpStream::from_std(s, &tokio::reactor::Handle::default())
+        tokio::net::TcpStream::from_std(s, &Handle::default())
             .map(BufWriter::new)
             .map(AsyncBincodeWriter::from)
             .map(AsyncBincodeWriter::for_async)
@@ -119,7 +118,7 @@ where
 {
     pub fn build_async(
         self,
-    ) -> io::Result<Box<dyn Sink<SinkItem = T, SinkError = bincode::Error> + Send>> {
+    ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
             Ok(
                 Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))
@@ -306,150 +305,5 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
             is_for_base: false,
             _marker: MaybeLocal,
         })
-    }
-}
-
-/// A wrapper around a writer that handles `Error::WouldBlock` when attempting to write.
-///
-/// Instead of return that error, it places the bytes into a buffer so that subsequent calls to
-/// `write()` can retry writing them.
-pub struct NonBlockingWriter<T> {
-    writer: T,
-    buffer: Vec<u8>,
-    cursor: usize,
-}
-
-impl<T: Write> NonBlockingWriter<T> {
-    pub fn new(writer: T) -> Self {
-        Self {
-            writer,
-            buffer: Vec::new(),
-            cursor: 0,
-        }
-    }
-
-    pub fn needs_flush_to_inner(&self) -> bool {
-        self.buffer.len() != self.cursor
-    }
-
-    pub fn flush_to_inner(&mut self) -> io::Result<()> {
-        if !self.buffer.is_empty() {
-            while self.cursor < self.buffer.len() {
-                match self.writer.write(&self.buffer[self.cursor..])? {
-                    0 => return Err(io::Error::from(io::ErrorKind::BrokenPipe)),
-                    n => self.cursor += n,
-                }
-            }
-            self.buffer.clear();
-            self.cursor = 0;
-        }
-        Ok(())
-    }
-
-    pub fn get_ref(&self) -> &T {
-        &self.writer
-    }
-
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.writer
-    }
-}
-
-impl<T: Write> Write for NonBlockingWriter<T> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.buffer.extend_from_slice(buf);
-        match self.flush_to_inner() {
-            Ok(_) => Ok(buf.len()),
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(buf.len()),
-            Err(e) => {
-                let old_len = self.buffer.len() - buf.len();
-                self.buffer.truncate(old_len);
-                Err(e)
-            }
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.flush_to_inner()?;
-        self.writer.flush()
-    }
-}
-impl<T: Read> Read for NonBlockingWriter<T> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.writer.read(buf)
-    }
-}
-
-#[derive(Debug)]
-pub enum ReceiveError {
-    WouldBlock,
-    IoError(io::Error),
-    DeserializationError(bincode::Error),
-}
-
-impl From<io::Error> for ReceiveError {
-    fn from(error: io::Error) -> Self {
-        if error.kind() == io::ErrorKind::WouldBlock {
-            ReceiveError::WouldBlock
-        } else {
-            ReceiveError::IoError(error)
-        }
-    }
-}
-impl From<bincode::Error> for ReceiveError {
-    fn from(error: bincode::Error) -> Self {
-        ReceiveError::DeserializationError(error)
-    }
-}
-
-#[derive(Default)]
-pub struct DeserializeReceiver<T> {
-    buffer: Vec<u8>,
-    size: usize,
-    phantom: PhantomData<T>,
-}
-
-impl<T> DeserializeReceiver<T>
-where
-    for<'a> T: Deserialize<'a>,
-{
-    pub fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            size: 0,
-            phantom: PhantomData,
-        }
-    }
-
-    fn fill_from<R: Read>(
-        &mut self,
-        stream: &mut R,
-        target_size: usize,
-    ) -> Result<(), ReceiveError> {
-        if self.buffer.len() < target_size {
-            self.buffer.resize(target_size, 0u8);
-        }
-
-        while self.size < target_size {
-            let n = stream.read(&mut self.buffer[self.size..target_size])?;
-            if n == 0 {
-                return Err(io::Error::from(io::ErrorKind::BrokenPipe).into());
-            }
-            self.size += n;
-        }
-        Ok(())
-    }
-
-    pub fn try_recv<R: Read>(&mut self, reader: &mut R) -> Result<T, ReceiveError> {
-        if self.size < 4 {
-            self.fill_from(reader, 5)?;
-        }
-
-        let message_size: u32 = NetworkEndian::read_u32(&self.buffer[0..4]);
-        let target_buffer_size = message_size as usize + 4;
-        self.fill_from(reader, target_buffer_size)?;
-
-        let message = bincode::deserialize(&self.buffer[4..target_buffer_size])?;
-        self.size = 0;
-        Ok(message)
     }
 }

@@ -190,26 +190,26 @@ impl<'a> Plan<'a> {
                 }
 
                 // build the message we send to this domain to tell it about this replay path.
-                let mut setup = box Packet::SetupReplayPath {
+                let mut setup = Box::new(Packet::SetupReplayPath {
                     tag,
                     source: None,
                     path: locals,
                     notify_done: false,
                     trigger: TriggerEndpoint::None,
-                };
+                });
 
                 // the first domain also gets to know source node
                 if i == 0 {
-                    if let box Packet::SetupReplayPath { ref mut source, .. } = setup {
+                    if let Packet::SetupReplayPath { ref mut source, .. } = *setup {
                         *source = Some(self.graph[nodes[0].0].local_addr());
                     }
                 }
 
                 if let Some(ref key) = partial {
                     // for partial materializations, nodes need to know how to trigger replays
-                    if let box Packet::SetupReplayPath {
+                    if let Packet::SetupReplayPath {
                         ref mut trigger, ..
-                    } = setup
+                    } = *setup
                     {
                         if segments.len() == 1 {
                             // replay is entirely contained within one domain
@@ -313,10 +313,10 @@ impl<'a> Plan<'a> {
                 } else {
                     // for full materializations, the last domain should report when it's done
                     if i == segments.len() - 1 {
-                        if let box Packet::SetupReplayPath {
+                        if let Packet::SetupReplayPath {
                             ref mut notify_done,
                             ..
-                        } = setup
+                        } = *setup
                         {
                             *notify_done = true;
                             assert!(pending.is_none());
@@ -342,11 +342,11 @@ impl<'a> Plan<'a> {
                             .get_mut(&domain)
                             .unwrap()
                             .send_to_healthy(
-                                box Packet::UpdateEgress {
+                                Box::new(Packet::UpdateEgress {
                                     node: n.local_addr(),
                                     new_tx: None,
                                     new_tag: Some((tag, segments[i + 1].1[0].0)),
-                                },
+                                }),
                                 workers,
                             )
                             .unwrap();
@@ -358,7 +358,7 @@ impl<'a> Plan<'a> {
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
                 let ctx = self.domains.get_mut(&domain).unwrap();
                 ctx.send_to_healthy(setup, self.workers).unwrap();
-                replies.wait_for_acks(&ctx);
+                futures_executor::block_on(replies.wait_for_acks(&ctx));
             }
 
             if !self.partial {
@@ -427,10 +427,10 @@ impl<'a> Plan<'a> {
             .get_mut(&self.graph[self.node].domain())
             .unwrap()
             .send_to_healthy(
-                box Packet::PrepareState {
+                Box::new(Packet::PrepareState {
                     node: self.graph[self.node].local_addr(),
                     state: s,
-                },
+                }),
                 self.workers,
             )
             .unwrap();

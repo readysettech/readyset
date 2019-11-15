@@ -44,7 +44,7 @@ enum QueryGraphReuse {
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 #[derive(Clone, Debug)]
 // crate viz for tests
-crate struct SqlIncorporator {
+pub(crate) struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
@@ -123,7 +123,7 @@ impl SqlIncorporator {
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
     #[cfg(test)]
-    crate fn add_query(
+    pub(crate) fn add_query(
         &mut self,
         query: &str,
         name: Option<String>,
@@ -802,10 +802,10 @@ impl SqlIncorporator {
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
-                        JoinRightSide::NestedSelect(box ref ns, ref alias) => {
+                        JoinRightSide::NestedSelect(ref ns, ref alias) => {
                             let qfp = self
                                 .add_parsed_query(
-                                    SqlQuery::Select(ns.clone()),
+                                    SqlQuery::Select((**ns).clone()),
                                     alias.clone(),
                                     false,
                                     mig,
@@ -1014,10 +1014,10 @@ mod tests {
         hasher.finish()
     }
 
-    #[test]
-    fn it_parses() {
+    #[tokio::test(threadpool)]
+    async fn it_parses() {
         // set up graph
-        let mut g = integration::start_simple("it_parses");
+        let mut g = integration::start_simple("it_parses").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
@@ -1043,13 +1043,14 @@ mod tests {
                 .is_err());
             // Should still only have source, "users" and the two nodes for the above selection
             assert_eq!(mig.graph().node_count(), ncount + 2);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_simple_join() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_simple_join");
+        let mut g = integration::start_simple("it_incorporates_simple_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
@@ -1097,13 +1098,14 @@ mod tests {
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_simple_selection() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_simple_selection");
+        let mut g = integration::start_simple("it_incorporates_simple_selection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1137,13 +1139,14 @@ mod tests {
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "bogokey"]);
             assert_eq!(edge.description(true), "π[1, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_aggregation() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_aggregation");
+        let mut g = integration::start_simple("it_incorporates_aggregation").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
@@ -1188,13 +1191,14 @@ mod tests {
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_does_not_reuse_if_disabled() {
+    #[tokio::test(threadpool)]
+    async fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = integration::start_simple("it_does_not_reuse_if_disabled");
+        let mut g = integration::start_simple("it_does_not_reuse_if_disabled").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
@@ -1216,13 +1220,14 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 3);
             // should have ended up with a different leaf node
             assert_ne!(qfp.query_leaf, leaf);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_orders_parameter_columns() {
+    #[tokio::test(threadpool)]
+    async fn it_orders_parameter_columns() {
         // set up graph
-        let mut g = integration::start_simple("it_orders_parameter_columns");
+        let mut g = integration::start_simple("it_orders_parameter_columns").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1247,13 +1252,14 @@ mod tests {
             let n = get_reader(&inc, mig, &qfp.name);
             n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1, 0]))
                 .unwrap();
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_reuses_identical_query() {
+    #[tokio::test(threadpool)]
+    async fn it_reuses_identical_query() {
         // set up graph
-        let mut g = integration::start_simple("it_reuses_identical_query");
+        let mut g = integration::start_simple("it_reuses_identical_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1291,13 +1297,14 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_reuses_with_different_parameter() {
+    #[tokio::test(threadpool)]
+    async fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = integration::start_simple("it_reuses_with_different_parameter");
+        let mut g = integration::start_simple("it_reuses_with_different_parameter").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1362,14 +1369,15 @@ mod tests {
             // we should be based off the new projection as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_reuses_by_extending_existing_query() {
+    #[tokio::test(threadpool)]
+    async fn it_reuses_by_extending_existing_query() {
         use super::sql_parser;
         // set up graph
-        let mut g = integration::start_simple("it_reuses_by_extending_existing_query");
+        let mut g = integration::start_simple("it_reuses_by_extending_existing_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Add base tables
@@ -1413,13 +1421,14 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 3);
             // only the join and projection nodes are returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 2);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_aggregation_no_group_by() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_aggregation_no_group_by() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_aggregation_no_group_by");
+        let mut g = integration::start_simple("it_incorporates_aggregation_no_group_by").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1464,13 +1473,14 @@ mod tests {
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_aggregation_count_star() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_aggregation_count_star");
+        let mut g = integration::start_simple("it_incorporates_aggregation_count_star").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1512,13 +1522,14 @@ mod tests {
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_explicit_multi_join() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_explicit_multi_join");
+        let mut g = integration::start_simple("it_incorporates_explicit_multi_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -1563,13 +1574,14 @@ mod tests {
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
             assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_implicit_multi_join() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_implicit_multi_join");
+        let mut g = integration::start_simple("it_incorporates_implicit_multi_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -1623,14 +1635,15 @@ mod tests {
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
             assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    #[allow_fail]
-    fn it_incorporates_join_projecting_join_columns() {
+    #[tokio::test(threadpool)]
+    #[ignore]
+    async fn it_incorporates_join_projecting_join_columns() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_join_projecting_join_columns");
+        let mut g = integration::start_simple("it_incorporates_join_projecting_join_columns").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1668,13 +1681,14 @@ mod tests {
                 &["id", "name", "author", "title", "bogokey"]
             );
             assert_eq!(new_leaf_view.description(true), "π[1, 3, 1, 2, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_self_join() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_self_join() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_self_join");
+        let mut g = integration::start_simple("it_incorporates_self_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1691,13 +1705,14 @@ mod tests {
             assert!(q.is_ok());
             let leaf_view = get_node(&inc, mig, "q_1");
             assert_eq!(leaf_view.fields(), &["id", "fof"]);
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_literal_projection() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_literal_projection");
+        let mut g = integration::start_simple("it_incorporates_literal_projection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1711,13 +1726,14 @@ mod tests {
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "1", "bogokey"]);
             assert_eq!(edge.description(true), "π[1, lit: 1, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_arithmetic_projection() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_arithmetic_projection");
+        let mut g = integration::start_simple("it_incorporates_arithmetic_projection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1738,12 +1754,13 @@ mod tests {
                 edge.description(true),
                 "π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]"
             );
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_join_with_nested_query() {
-        let mut g = integration::start_simple("it_incorporates_join_with_nested_query");
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_join_with_nested_query() {
+        let mut g = integration::start_simple("it_incorporates_join_with_nested_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1781,13 +1798,14 @@ mod tests {
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_incorporates_compound_selection() {
+    #[tokio::test(threadpool)]
+    async fn it_incorporates_compound_selection() {
         // set up graph
-        let mut g = integration::start_simple("it_incorporates_compound_selection");
+        let mut g = integration::start_simple("it_incorporates_compound_selection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1809,13 +1827,14 @@ mod tests {
             let union_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(union_view.fields(), &["id", "name"]);
             assert_eq!(union_view.description(true), "3:[0, 1] ⋃ 6:[0, 1]");
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn it_distinguishes_predicates() {
+    #[tokio::test(threadpool)]
+    async fn it_distinguishes_predicates() {
         // set up graph
-        let mut g = integration::start_simple("it_distinguishes_predicates");
+        let mut g = integration::start_simple("it_distinguishes_predicates").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1842,13 +1861,14 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // should have added three more nodes (filter, project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
-        });
+        })
+        .await;
     }
 
-    #[test]
+    #[tokio::test(threadpool)]
     #[ignore]
-    fn it_queries_over_aliased_view() {
-        let mut g = integration::start_simple("it_queries_over_aliased_view");
+    async fn it_queries_over_aliased_view() {
+        let mut g = integration::start_simple("it_queries_over_aliased_view").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1882,6 +1902,7 @@ mod tests {
             let _res = inc.add_query("SELECT tq2.id FROM tq2;", Some("over_tq2".into()), mig);
             // should have added a projection and a reader
             assert_eq!(mig.graph().node_count(), ncount + 2);
-        });
+        })
+        .await;
     }
 }
