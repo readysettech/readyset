@@ -1,6 +1,6 @@
 [package]
 name = "dataflow"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 publish = false
 edition = "2018"

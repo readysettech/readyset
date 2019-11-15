@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 edition = "2018"
 publish = false
