@@ -12,3 +12,5 @@ debug=true
 [patch.crates-io]
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 tokio-macros = { git = "https://github.com/tokio-rs/tokio.git" }
+# https://github.com/hyperium/hyper/pull/2001
+hyper = { git = "https://github.com/hyperium/hyper.git", rev = "e6027bc02db92d1137c54a26eef2e1cb4d810e25" }
