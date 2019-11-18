@@ -195,6 +195,17 @@ fn main() {
     b.set_max_duration(4);
     b.wait_limit(time::Duration::from_secs(2 * 60));
 
+    // if the user wants us to terminate, finish whatever we're currently doing first
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    if let Err(e) = ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    }) {
+        eprintln!("==> failed to set ^C handler: {}", e);
+    }
+
     let scales = args
         .values_of("SCALE")
         .map(|it| it.map(|s| s.parse().unwrap()).collect())
@@ -697,14 +708,18 @@ fn main() {
                         _ => {}
                     }
                 }
+
+                if !running.load(Ordering::SeqCst) {
+                    // user pressed ^C
+                    break;
+                }
+            }
+
+            if !running.load(Ordering::SeqCst) {
+                // user pressed ^C
+                break;
             }
         }
-
-        /*
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
-        }
-        */
 
         Ok(())
     })
