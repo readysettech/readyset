@@ -286,15 +286,8 @@ fn main() {
         .version("0.1")
         .about("Benchmark a lobste.rs Rails installation using MySQL directly")
         .arg(
-            Arg::with_name("memscale")
-                .long("memscale")
-                .takes_value(true)
-                .default_value("1.0")
-                .help("Memory scale factor for workload"),
-        )
-        .arg(
-            Arg::with_name("reqscale")
-                .long("reqscale")
+            Arg::with_name("scale")
+                .long("scale")
                 .takes_value(true)
                 .default_value("1.0")
                 .help("Reuest load scale factor for workload"),
@@ -332,7 +325,6 @@ fn main() {
             Arg::with_name("fakeshards")
                 .long("simulate-shards")
                 .takes_value(true)
-                .conflicts_with("memscale")
                 .help("Simulate if read_ribbons base had N shards"),
         )
         .arg(
@@ -371,23 +363,15 @@ fn main() {
     let simulate_shards = args
         .value_of("fakeshards")
         .map(|_| value_t_or_exit!(args, "fakeshards", u32));
-    assert!(
-        simulate_shards.is_none() || value_t_or_exit!(args, "memscale", f64) == 1.0,
-        "cannot simulate sharding with memscale != 1 (b/c of NUM_STORIES)"
-    );
     let in_flight = value_t_or_exit!(args, "in-flight", usize);
 
     let mut wl = trawler::WorkloadBuilder::default();
-    wl.scale(
-        value_t_or_exit!(args, "memscale", f64),
-        value_t_or_exit!(args, "reqscale", f64),
-    )
-    .warmup_scale(3000.0)
-    .time(
-        time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
-        time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
-    )
-    .in_flight(in_flight);
+    wl.scale(value_t_or_exit!(args, "scale", f64))
+        .time(
+            time::Duration::from_secs(value_t_or_exit!(args, "warmup", u64)),
+            time::Duration::from_secs(value_t_or_exit!(args, "runtime", u64)),
+        )
+        .in_flight(in_flight);
 
     if let Some(h) = args.value_of("histogram") {
         wl.with_histogram(h);
