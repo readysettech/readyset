@@ -8,7 +8,7 @@ use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 
 mod read_ref;
-pub use read_ref::{MapReadRef, ReadGuardIter};
+pub use read_ref::{MapReadRef, Miss, ReadGuardIter};
 
 mod factory;
 pub use factory::ReadHandleFactory;
@@ -20,7 +20,7 @@ pub use factory::ReadHandleFactory;
 /// `ReadHandle` will *only* see writes to the map that preceeded the last call to `publish`.
 pub struct ReadHandle<K, V, M = (), S = RandomState>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, S>>,
@@ -28,7 +28,7 @@ where
 
 impl<K, V, M, S> fmt::Debug for ReadHandle<K, V, M, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     M: fmt::Debug,
 {
@@ -41,7 +41,7 @@ where
 
 impl<K, V, M, S> Clone for ReadHandle<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     fn clone(&self) -> Self {
@@ -53,7 +53,7 @@ where
 
 impl<K, V, M, S> ReadHandle<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, S>>) -> Self {
@@ -63,7 +63,7 @@ where
 
 impl<K, V, M, S> ReadHandle<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
     M: Clone,
@@ -152,7 +152,7 @@ where
     pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, V>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Clone,
     {
         ReadGuard::try_map(self.get_raw(key.borrow())?, |x| x.get_one())
     }
@@ -173,7 +173,7 @@ where
     pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Option<(Option<ReadGuard<'_, Values<V, S>>>, M)>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Clone,
     {
         let inner = self.handle.enter()?;
         if !inner.ready {

@@ -1,25 +1,18 @@
 use ahash::RandomState;
 use common::DataType;
-use evbtree::{self, refs::Values};
+use evbtree::{
+    self,
+    refs::{Miss, Values},
+};
 use noria::util::BoundFunctor;
 use std::mem;
 use std::ops::{Bound, RangeBounds};
-use unbounded_interval_tree::IntervalTree;
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(
-        evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, RandomState>,
-        IntervalTree<DataType>,
-    ),
-    Double(
-        evbtree::handles::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>,
-        IntervalTree<(DataType, DataType)>,
-    ),
-    Many(
-        evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>,
-        IntervalTree<Vec<DataType>>,
-    ),
+    Single(evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
+    Double(evbtree::handles::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
+    Many(evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
 }
 
 pub(super) unsafe fn slice_to_2_tuple<T>(slice: &[T]) -> (T, T) {
@@ -111,17 +104,17 @@ pub(crate) type LookupResult<T> = Result<(T, i64), LookupError>;
 impl Handle {
     pub(super) fn len(&self) -> usize {
         match *self {
-            Handle::Single(ref h, _) => h.len(),
-            Handle::Double(ref h, _) => h.len(),
-            Handle::Many(ref h, _) => h.len(),
+            Handle::Single(ref h) => h.len(),
+            Handle::Double(ref h) => h.len(),
+            Handle::Many(ref h) => h.len(),
         }
     }
 
     pub(super) fn keys(&self) -> Vec<Vec<DataType>> {
         match *self {
-            Handle::Single(ref h, _) => h.map_into(|k, _| vec![k.clone()]),
-            Handle::Double(ref h, _) => h.map_into(|(k1, k2), _| vec![k1.clone(), k2.clone()]),
-            Handle::Many(ref h, _) => h.map_into(|ks, _| ks.clone()),
+            Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
+            Handle::Double(ref h) => h.map_into(|(k1, k2), _| vec![k1.clone(), k2.clone()]),
+            Handle::Many(ref h) => h.map_into(|ks, _| ks.clone()),
         }
     }
 
@@ -132,14 +125,14 @@ impl Handle {
         use LookupError::*;
 
         match *self {
-            Handle::Single(ref h, _) => {
+            Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
                 let v = map.get(&key[0]).ok_or(MissPointSingle(key[0].clone(), m))?;
                 Ok((then(v), m))
             }
-            Handle::Double(ref h, _) => {
+            Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
                 unsafe {
                     let tuple_key = slice_to_2_tuple(&key);
@@ -152,7 +145,7 @@ impl Handle {
                     Ok((then(v), m))
                 }
             }
-            Handle::Many(ref h, _) => {
+            Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
                 let v = map.get(key).ok_or(MissPointMany(key.into(), m))?;
@@ -176,7 +169,7 @@ impl Handle {
         use LookupError::*;
 
         match *self {
-            Handle::Single(ref h, ref t) => {
+            Handle::Single(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|v| {
@@ -187,15 +180,12 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                let range = (start_bound.cloned(), end_bound.cloned());
-                let diff = t.get_interval_difference(range.clone());
-                if diff.is_empty() {
-                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
-                } else {
-                    Err(MissRangeSingle(diff, meta))
-                }
+                let records = map
+                    .range((start_bound.cloned(), end_bound.cloned()))
+                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
+                Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
-            Handle::Double(ref h, ref t) => {
+            Handle::Double(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|r| {
@@ -206,24 +196,18 @@ impl Handle {
                     assert_eq!(r.len(), 2);
                     (r[0].clone(), r[1].clone())
                 });
-                let range = (start_bound, end_bound);
-                let diff = t.get_interval_difference(range.clone());
-                if diff.is_empty() {
-                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
-                } else {
-                    Err(MissRangeDouble(diff, meta))
-                }
+                let records = map
+                    .range((start_bound, end_bound))
+                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
+                Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
-            Handle::Many(ref h, ref t) => {
+            Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let meta = *map.meta();
-                let range = (range.start_bound().cloned(), range.end_bound().cloned());
-                let diff = t.get_interval_difference(range.clone());
-                if diff.is_empty() {
-                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
-                } else {
-                    Err(MissRangeMany(diff, meta))
-                }
+                let records = map
+                    .range((range.start_bound(), range.end_bound()))
+                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
+                Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
         }
     }
@@ -243,7 +227,7 @@ mod tests {
             .with_meta(-1)
             .with_hasher(RandomState::default())
             .construct();
-        (w, Handle::Single(r, IntervalTree::default()))
+        (w, Handle::Single(r))
     }
 
     fn make_double() -> (
@@ -254,7 +238,7 @@ mod tests {
             .with_meta(-1)
             .with_hasher(RandomState::default())
             .construct();
-        (w, Handle::Double(r, IntervalTree::default()))
+        (w, Handle::Double(r))
     }
 
     proptest! {
@@ -281,18 +265,15 @@ mod tests {
 
     #[test]
     fn get_single_range() {
-        let (mut w, mut handle) = make_single();
-        for n in 0..10 {
-            w.insert(n.into(), vec![n.into(), n.into()]);
-        }
+        let (mut w, handle) = make_single();
+        w.insert_range(
+            (0..10)
+                .map(|n| ((n.into()), vec![n.into(), n.into()]))
+                .collect(),
+            (DataType::from(0))..(DataType::from(10)),
+        );
         w.publish();
-        match handle {
-            Handle::Single(_, ref mut t) => t.insert((
-                Bound::Included(DataType::from(2)),
-                Bound::Included(DataType::from(3)),
-            )),
-            _ => unreachable!(),
-        }
+
         let (res, meta) = handle
             .meta_get_range_and(vec![2.into()]..=vec![3.into()], |vals| {
                 vals.into_iter().cloned().collect::<Vec<_>>()
@@ -309,18 +290,15 @@ mod tests {
 
     #[test]
     fn get_double_range() {
-        let (mut w, mut handle) = make_double();
-        for n in 0..10 {
-            w.insert((n.into(), n.into()), vec![n.into(), n.into()]);
-        }
+        let (mut w, handle) = make_double();
+        w.insert_range(
+            (0..10)
+                .map(|n| ((n.into(), n.into()), vec![n.into(), n.into()]))
+                .collect(),
+            (0.into(), 0.into())..(10.into(), 10.into()),
+        );
         w.publish();
-        match handle {
-            Handle::Double(_, ref mut t) => t.insert((
-                Bound::Included((2.into(), 2.into())),
-                Bound::Included((3.into(), 3.into())),
-            )),
-            _ => unreachable!(),
-        }
+
         let (res, meta) = handle
             .meta_get_range_and(
                 vec![2.into(), 2.into()]..=vec![3.into(), 3.into()],

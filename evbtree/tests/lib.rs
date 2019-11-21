@@ -806,3 +806,32 @@ fn insert_remove_entry() {
     assert!(r.is_empty());
     assert!(r.get(&x).is_none());
 }
+
+#[test]
+fn range_works() {
+    use std::ops::Bound::{Included, Unbounded};
+
+    let (mut w, r) = evbtree::new();
+    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], (Included(2), Unbounded));
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.range(3..4).is_ok());
+
+        let results = m.range(3..4).unwrap().collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].1.iter().cloned().collect::<Vec<_>>(),
+            vec![9, 30]
+        );
+
+        let results = m.range(3..=4).unwrap().collect::<Vec<_>>();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0].1.iter().cloned().collect::<Vec<_>>(),
+            vec![9, 30]
+        );
+        assert_eq!(results[1].1.iter().cloned().collect::<Vec<_>>(), vec![10]);
+    }
+}

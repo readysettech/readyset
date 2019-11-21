@@ -1,15 +1,22 @@
 use crate::values::ValuesInner;
 use crate::{inner::Inner, values::Values, Aliased};
 use left_right::ReadGuard;
+use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::{borrow::Borrow, ops::RangeBounds};
+use std::ops::{Bound, RangeBounds};
 
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;
+
+/// Represents a miss when looking up a range.
+///
+/// Values in the vec are ranges of keys within the requested bound that are not present
+#[derive(Debug, PartialEq, Eq)]
+pub struct Miss<K>(pub Vec<(Bound<K>, Bound<K>)>);
 
 /// A live reference into the read half of an evmap.
 ///
@@ -20,7 +27,7 @@ use crate::WriteHandle;
 /// unguarded references to types contained in the map.
 pub struct MapReadRef<'rh, K, V, M = (), S = RandomState>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -29,7 +36,7 @@ where
 
 impl<'rh, K, V, M, S> fmt::Debug for MapReadRef<'rh, K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
     K: fmt::Debug,
@@ -45,7 +52,7 @@ where
 
 impl<'rh, K, V, M, S> MapReadRef<'rh, K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -63,14 +70,17 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn range<Q, R>(&self, range: R) -> RangeIter<'_, K, V, S>
+    pub fn range<R>(&self, range: R) -> Result<RangeIter<'_, K, V, S>, Miss<K>>
     where
-        K: Borrow<Q>,
-        R: RangeBounds<Q>,
-        Q: Ord + ?Sized,
+        R: RangeBounds<K> + Clone,
     {
-        RangeIter {
-            iter: self.guard.data.range(range),
+        let diff = self.guard.tree.get_interval_difference(range.clone());
+        if diff.is_empty() {
+            Ok(RangeIter {
+                iter: self.guard.data.range(range),
+            })
+        } else {
+            Err(Miss(diff))
         }
     }
 
@@ -180,7 +190,7 @@ where
 
 impl<'rh, K, Q, V, M, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, S>
 where
-    K: Ord + Borrow<Q>,
+    K: Ord + Clone + Borrow<Q>,
     V: Eq + Hash,
     Q: Ord + ?Sized,
     S: BuildHasher,
@@ -193,7 +203,7 @@ where
 
 impl<'rg, 'rh, K, V, M, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -207,7 +217,7 @@ where
 /// An [`Iterator`] over keys and values in the evmap.
 pub struct ReadGuardIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -216,7 +226,7 @@ where
 
 impl<'rg, K, V, S> fmt::Debug for ReadGuardIter<'rg, K, V, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -228,7 +238,7 @@ where
 
 impl<'rg, K, V, S> Iterator for ReadGuardIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -241,7 +251,7 @@ where
 /// An [`Iterator`] over keys.
 pub struct KeysIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -250,7 +260,7 @@ where
 
 impl<'rg, K, V, S> fmt::Debug for KeysIter<'rg, K, V, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -262,7 +272,7 @@ where
 
 impl<'rg, K, V, S> Iterator for KeysIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -275,7 +285,7 @@ where
 /// An [`Iterator`] over a range of keys.
 pub struct RangeIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -284,7 +294,7 @@ where
 
 impl<'rg, K, V, S> fmt::Debug for RangeIter<'rg, K, V, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -296,7 +306,7 @@ where
 
 impl<'rg, K, V, S> Iterator for RangeIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -313,7 +323,7 @@ where
 /// An [`Iterator`] over value sets.
 pub struct ValuesIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -322,7 +332,7 @@ where
 
 impl<'rg, K, V, S> fmt::Debug for ValuesIter<'rg, K, V, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -334,7 +344,7 @@ where
 
 impl<'rg, K, V, S> Iterator for ValuesIter<'rg, K, V, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
 {
