@@ -12,7 +12,7 @@ use std::hash::BuildHasher;
 /// you should not expect producing new handles rapidly to scale well.
 pub struct ReadHandleFactory<K, V, M, S = RandomState>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     pub(super) factory: left_right::ReadHandleFactory<Inner<K, V, M, S>>,
@@ -20,7 +20,7 @@ where
 
 impl<K, V, M, S> fmt::Debug for ReadHandleFactory<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -32,7 +32,7 @@ where
 
 impl<K, V, M, S> Clone for ReadHandleFactory<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     fn clone(&self) -> Self {
@@ -44,7 +44,7 @@ where
 
 impl<K, V, M, S> ReadHandleFactory<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     /// Produce a new [`ReadHandle`] to the same left-right data structure as this factory was

@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::BuildHasher;
+use unbounded_interval_tree::IntervalTree;
 
 use crate::values::ValuesInner;
 use left_right::aliasing::DropBehavior;
 
 pub(crate) struct Inner<K, V, M, S, D = crate::aliasing::NoDrop>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
     D: DropBehavior,
 {
     pub(crate) data: BTreeMap<K, ValuesInner<V, S, D>>,
+    pub(crate) tree: IntervalTree<K>,
     pub(crate) meta: M,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
@@ -19,7 +21,7 @@ where
 
 impl<K, V, M, S> fmt::Debug for Inner<K, V, M, S>
 where
-    K: Ord + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     V: fmt::Debug,
     M: fmt::Debug,
@@ -27,6 +29,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Inner")
             .field("data", &self.data)
+            .field("tree", &self.tree)
             .field("meta", &self.meta)
             .field("ready", &self.ready)
             .finish()
@@ -43,6 +46,7 @@ where
         assert!(self.data.is_empty());
         Inner {
             data: BTreeMap::new(),
+            tree: IntervalTree::default(),
             meta: self.meta.clone(),
             ready: self.ready,
             hasher: self.hasher.clone(),
@@ -52,12 +56,13 @@ where
 
 impl<K, V, M, S> Inner<K, V, M, S>
 where
-    K: Ord,
+    K: Ord + Clone,
     S: BuildHasher,
 {
     pub(crate) fn with_hasher(meta: M, hasher: S) -> Self {
         Inner {
             data: BTreeMap::default(),
+            tree: IntervalTree::default(),
             meta,
             ready: false,
             hasher,

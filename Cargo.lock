@@ -878,6 +878,7 @@ dependencies = [
  "quickcheck_macros",
  "rand 0.7.3",
  "smallvec 1.6.0",
+ "unbounded-interval-tree",
 ]
 
 [[package]]

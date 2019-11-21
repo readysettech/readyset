@@ -54,34 +54,21 @@ fn new_inner(
     };
 
     macro_rules! make {
-        ($variant:tt, $hint: ty) => {{
+        ($variant:tt) => {{
             use evbtree;
-            use unbounded_interval_tree::IntervalTree;
             let (w, r) = evbtree::Options::default()
                 .with_meta(-1)
                 .with_hasher(RandomState::default())
                 .construct();
-            let mut tree: IntervalTree<$hint> = IntervalTree::default();
-            // If there is no trigger, then we are fully-materialized.
-            // We can insert a single node to the interval tree that covers
-            // all possible intervals, which means that all intervals
-            // are covered by the materialized node.
-            if trigger.is_none() {
-                use std::ops::Bound::Unbounded;
-                tree.insert((Unbounded::<$hint>, Unbounded::<$hint>));
-            }
-            (
-                multiw::Handle::$variant(w),
-                multir::Handle::$variant(r, tree),
-            )
+            (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
     }
 
     let (w, r) = match key.len() {
         0 => unreachable!(),
-        1 => make!(Single, DataType),
-        2 => make!(Double, (DataType, _)),
-        _ => make!(Many, Vec<DataType>),
+        1 => make!(Single),
+        2 => make!(Double),
+        _ => make!(Many),
     };
 
     let w = WriteHandle {

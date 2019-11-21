@@ -8,6 +8,7 @@ use std::collections::btree_map::Entry;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
+use std::ops::{Bound, RangeBounds};
 
 /// A handle that may be used to modify the eventually consistent map.
 ///
@@ -158,7 +159,25 @@ where
         self.add_op(Operation::Add(k, Aliased::from(v)))
     }
 
-    /// Replace the value-bag of the given key with the given value.
+    /// Add the list of `records` to the value-set, which are assumed to have a key part of the `range`.
+    /// The `range` is then also inserted to the underlying interval tree, to keep track
+    /// of which intervals are covered by the evmap.
+    ///
+    /// The update value-set will only be visible to readers after the next call to `refresh()`.
+    pub fn insert_range<R>(&mut self, records: Vec<(K, V)>, range: R) -> &mut Self
+    where
+        R: RangeBounds<K>,
+    {
+        self.add_op(Operation::AddRange(
+            records
+                .into_iter()
+                .map(|(k, v)| (k, Aliased::from(v)))
+                .collect(),
+            (range.start_bound().cloned(), range.end_bound().cloned()),
+        ))
+    }
+
+    /// Replace the value-set of the given key with the given value.
     ///
     /// Replacing the value will automatically deallocate any heap storage and place the new value
     /// back into the `SmallVec` inline storage. This can improve cache locality for common
@@ -375,6 +394,16 @@ where
                     .or_insert_with(ValuesInner::new)
                     .push(unsafe { value.alias() }, hasher);
             }
+            Operation::AddRange(ref mut records, ref range) => {
+                for (ref key, value) in records {
+                    self.data
+                        .entry(key.clone())
+                        .or_insert_with(ValuesInner::new)
+                        .push(unsafe { value.alias() }, hasher);
+                }
+
+                self.tree.insert(range.clone());
+            }
             Operation::RemoveEntry(ref key) => {
                 self.data.remove(key);
             }
@@ -479,6 +508,17 @@ where
                     .entry(key)
                     .or_insert_with(ValuesInner::new)
                     .push(unsafe { value.change_drop() }, hasher);
+            }
+            Operation::AddRange(records, range) => {
+                for (key, value) in records {
+                    inner
+                        .data
+                        .entry(key)
+                        .or_insert_with(ValuesInner::new)
+                        .push(unsafe { value.change_drop() }, hasher);
+                }
+
+                inner.tree.insert(range);
             }
             Operation::RemoveEntry(key) => {
                 inner.data.remove(&key);
@@ -611,6 +651,11 @@ pub(super) enum Operation<K, V, M> {
     Replace(K, Aliased<V, crate::aliasing::NoDrop>),
     /// Add this value to the set of entries for this key.
     Add(K, Aliased<V, crate::aliasing::NoDrop>),
+    /// Add a list of values for the given range of keys.
+    AddRange(
+        Vec<(K, Aliased<V, crate::aliasing::NoDrop>)>,
+        (Bound<K>, Bound<K>),
+    ),
     /// Remove this value from the set of entries for this key.
     RemoveValue(K, V),
     /// Remove the value set for this key.
@@ -652,6 +697,9 @@ where
         match *self {
             Operation::Replace(ref a, ref b) => f.debug_tuple("Replace").field(a).field(b).finish(),
             Operation::Add(ref a, ref b) => f.debug_tuple("Add").field(a).field(b).finish(),
+            Operation::AddRange(ref a, ref b) => {
+                f.debug_tuple("AddRange").field(a).field(b).finish()
+            }
             Operation::RemoveValue(ref a, ref b) => {
                 f.debug_tuple("RemoveValue").field(a).field(b).finish()
             }

@@ -200,12 +200,14 @@
 // This _should_ detect if we ever accidentally leak aliasing::NoDrop.
 // But, currently, it does not..
 #![deny(unreachable_pub)]
+#![feature(bound_cloned)]
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::write::WriteHandle;
 use left_right::aliasing::Aliased;
 use std::collections::hash_map::RandomState;
+
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
@@ -229,6 +231,7 @@ pub mod refs {
     // Same here, ::{..} won't work.
     pub use super::values::Values;
     pub use crate::read::MapReadRef;
+    pub use crate::read::Miss;
     pub use crate::read::ReadGuardIter;
 
     // Expose `ReadGuard` since it has useful methods the user will likely care about.
