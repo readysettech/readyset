@@ -185,7 +185,7 @@ fn main() {
         None,
     );
 
-    b.set_max_duration(4);
+    b.set_max_duration(6);
     b.wait_limit(time::Duration::from_secs(2 * 60));
 
     // if the user wants us to terminate, finish whatever we're currently doing first
@@ -457,7 +457,7 @@ fn main() {
                         "--scale",
                         "3000",
                         "--warmup",
-                        "120",
+                        "30",
                         "--runtime",
                         "0",
                         "--queries",
@@ -501,7 +501,7 @@ fn main() {
                         "--scale",
                         &scale,
                         "--warmup",
-                        "20",
+                        "15",
                         "--runtime",
                         "30",
                         "--queries",
@@ -663,7 +663,7 @@ fn main() {
                     let line = line?;
                     if line.starts_with("# target ops/s") {
                         target = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
-                    } else if line.starts_with("# achieved ops/s") {
+                    } else if line.starts_with("# generated ops/s") {
                         actual = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
                     }
                     match (target, actual) {
@@ -671,7 +671,7 @@ fn main() {
                             eprintln!(
                                 "{}",
                                 Paint::cyan(format!(
-                                    " -> achieved {} ops/s (target: {})",
+                                    " -> generated {} ops/s (target: {})",
                                     actual, target
                                 ))
                             );
