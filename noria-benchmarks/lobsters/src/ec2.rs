@@ -13,7 +13,7 @@ use std::{fmt, thread, time};
 use tsunami::*;
 use yansi::Paint;
 
-const AMI: &str = "ami-0e93c3b2927b16d34";
+const AMI: &str = "ami-0804fdbc67d4197ab";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
