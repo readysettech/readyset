@@ -136,7 +136,9 @@ impl trawler::LobstersClient for MysqlTrawler {
     ) -> Self::RequestFuture {
         let c = self.c.pool().get_conn();
 
-        let c = if let Some(u) = acting_as {
+        let c = if priming {
+            Either::Right(c)
+        } else if let Some(u) = acting_as {
             let tokens = self.tokens.get(&u).cloned();
             Either::Left(c.and_then(move |c| {
                 if let Some(u) = tokens {
@@ -268,7 +270,7 @@ impl trawler::LobstersClient for MysqlTrawler {
 
             // notifications
             if let Some(uid) = acting_as {
-                if with_notifications {
+                if with_notifications && !priming {
                     match variant {
                         Variant::Original => endpoints::original::notifications(c, uid).await,
                         Variant::Noria => endpoints::noria::notifications(c, uid).await,
