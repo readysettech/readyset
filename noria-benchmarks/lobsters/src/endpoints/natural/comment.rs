@@ -10,6 +10,7 @@ pub(crate) async fn handle<F>(
     id: CommentId,
     story: StoryId,
     parent: Option<CommentId>,
+    priming: bool,
 ) -> Result<(my::Conn, bool), my::error::Error>
 where
     F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
@@ -27,12 +28,15 @@ where
     let story = story.unwrap();
     let author = story.get::<u32, _>("user_id").unwrap();
     let story = story.get::<u32, _>("id").unwrap();
-    c = c
-        .drop_exec(
-            "SELECT `users`.* FROM `users` WHERE `users`.`id` = ?",
-            (author,),
-        )
-        .await?;
+
+    if !priming {
+        c = c
+            .drop_exec(
+                "SELECT `users`.* FROM `users` WHERE `users`.`id` = ?",
+                (author,),
+            )
+            .await?;
+    }
 
     let parent = if let Some(parent) = parent {
         // check that parent exists
@@ -66,14 +70,16 @@ where
     // TODO: real site checks for recent comments by same author with same
     // parent to ensure we don't double-post accidentally
 
-    // check that short id is available
-    c = c
-        .drop_exec(
-            "SELECT  1 AS one FROM `comments` \
-             WHERE `comments`.`short_id` = ?",
-            (::std::str::from_utf8(&id[..]).unwrap(),),
-        )
-        .await?;
+    if !priming {
+        // check that short id is available
+        c = c
+            .drop_exec(
+                "SELECT  1 AS one FROM `comments` \
+                 WHERE `comments`.`short_id` = ?",
+                (::std::str::from_utf8(&id[..]).unwrap(),),
+            )
+            .await?;
+    }
 
     // TODO: real impl checks *new* short_id *again*
 
@@ -120,16 +126,20 @@ where
     };
     let comment = q.last_insert_id().unwrap();
     let mut c = q.drop_result().await?;
-    // but why?!
-    c = c
-        .drop_exec(
-            "SELECT  `votes`.* FROM `votes` \
-             WHERE `votes`.`user_id` = ? \
-             AND `votes`.`story_id` = ? \
-             AND `votes`.`comment_id` = ?",
-            (user, story, comment),
-        )
-        .await?;
+
+    if !priming {
+        // but why?!
+        c = c
+            .drop_exec(
+                "SELECT  `votes`.* FROM `votes` \
+                 WHERE `votes`.`user_id` = ? \
+                 AND `votes`.`story_id` = ? \
+                 AND `votes`.`comment_id` = ?",
+                (user, story, comment),
+            )
+            .await?;
+    }
+
     c = c
         .drop_exec(
             "INSERT INTO `votes` \

@@ -9,6 +9,7 @@ pub(crate) async fn handle<F>(
     acting_as: Option<UserId>,
     id: StoryId,
     title: String,
+    priming: bool,
 ) -> Result<(my::Conn, bool), my::error::Error>
 where
     F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
@@ -25,14 +26,16 @@ where
         .await?;
     let tag = tag.unwrap().get::<u32, _>("id");
 
-    // check that story id isn't already assigned
-    c = c
-        .drop_exec(
-            "SELECT  1 AS one FROM `stories` \
-             WHERE `stories`.`short_id` = ?",
-            (::std::str::from_utf8(&id[..]).unwrap(),),
-        )
-        .await?;
+    if !priming {
+        // check that story id isn't already assigned
+        c = c
+            .drop_exec(
+                "SELECT  1 AS one FROM `stories` \
+                 WHERE `stories`.`short_id` = ?",
+                (::std::str::from_utf8(&id[..]).unwrap(),),
+            )
+            .await?;
+    }
 
     // TODO: check for similar stories if there's a url
     // SELECT  `stories`.*
@@ -81,15 +84,17 @@ where
         )
         .await?;
 
-    c = c
-        .drop_exec(
-            "SELECT  `votes`.* FROM `votes` \
-             WHERE `votes`.`user_id` = ? \
-             AND `votes`.`story_id` = ? \
-             AND `votes`.`comment_id` IS NULL",
-            (user, story),
-        )
-        .await?;
+    if !priming {
+        c = c
+            .drop_exec(
+                "SELECT  `votes`.* FROM `votes` \
+                 WHERE `votes`.`user_id` = ? \
+                 AND `votes`.`story_id` = ? \
+                 AND `votes`.`comment_id` IS NULL",
+                (user, story),
+            )
+            .await?;
+    }
 
     c = c
         .drop_exec(

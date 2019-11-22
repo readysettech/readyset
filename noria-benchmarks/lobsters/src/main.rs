@@ -132,6 +132,7 @@ impl trawler::LobstersClient for MysqlTrawler {
         &mut self,
         acting_as: Option<UserId>,
         req: trawler::LobstersRequest,
+        priming: bool,
     ) -> Self::RequestFuture {
         let c = self.c.pool().get_conn();
 
@@ -153,7 +154,7 @@ impl trawler::LobstersClient for MysqlTrawler {
         };
 
         // Give shim a heads up that we have finished priming.
-        let c = if let trawler::LobstersRequest::Story(..) = req {
+        let c = if !priming {
             if !self.reset {
                 self.reset = true;
                 Either::Right(c.and_then(|c| c.drop_query("SET @primed = 1")))
@@ -247,10 +248,10 @@ impl trawler::LobstersClient for MysqlTrawler {
                         endpoints::$module::comment_vote::handle(c, acting_as, comment, v).await
                     }
                     LobstersRequest::Submit { id, title } => {
-                        endpoints::$module::submit::handle(c, acting_as, id, title).await
+                        endpoints::$module::submit::handle(c, acting_as, id, title, priming).await
                     }
                     LobstersRequest::Comment { id, story, parent } => {
-                        endpoints::$module::comment::handle(c, acting_as, id, story, parent).await
+                        endpoints::$module::comment::handle(c, acting_as, id, story, parent, priming).await
                     }
                 }
             }}
