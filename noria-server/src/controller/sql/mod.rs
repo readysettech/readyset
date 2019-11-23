@@ -1797,7 +1797,7 @@ mod tests {
 // currently, this test will fail because logical operations are unimplemented
 // (in particular, any complex operation that might involve multiple filter conditions
 // is currently unimplemented for filter-aggregations (TODO (jamb)))
-/*
+
     #[test]
     fn it_incorporates_aggregation_filter_logical_op() {
         use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
@@ -1855,17 +1855,16 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            assert_eq!(agg_view.fields(), &["comment_id", "votes"]);
+            assert_eq!(agg_view.description(true), "|σ(2)| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         });
     }
-    */
 
     #[test]
     fn it_incorporates_explicit_multi_join() {

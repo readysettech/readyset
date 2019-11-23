@@ -166,6 +166,31 @@ impl SqlToMirConverter {
         }
     }
 
+    fn logical_op_to_conditions(
+        &self,
+        ct: &ConditionTree,
+        columns: &mut Vec<Column>,
+        n: &MirNodeRef,
+    ) -> Vec<(usize, FilterCondition)> {
+        match ct.operator {
+            Operator::And => {
+                let mut left_filter = match ct.left.as_ref() {
+                    ConditionExpression::LogicalOp(ref ct2) => self.logical_op_to_conditions(ct2, columns, n),
+                    ConditionExpression::ComparisonOp(ref ct2) => self.to_conditions(ct2, columns, n),
+                    _ => unimplemented!(),
+                };
+                let mut right_filter = match ct.right.as_ref() {
+                    ConditionExpression::LogicalOp(ref ct2) => self.logical_op_to_conditions(ct2, columns, n),
+                    ConditionExpression::ComparisonOp(ref ct2) => self.to_conditions(ct2, columns, n),
+                    _ => unimplemented!(),
+                };
+                left_filter.append(&mut right_filter);
+                left_filter
+            }
+            _ => unimplemented!()
+        }
+    }
+
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
     /// and adds its to a vector of conditions.
     fn to_conditions(
@@ -1103,31 +1128,29 @@ impl SqlToMirConverter {
                 use nom_sql::ConditionExpression::*;
 
                 let cond = condition.expect("Filter aggregation must have condition!");
-                match *cond {
-                    LogicalOp(_) => unimplemented!(),
-                    ComparisonOp(ref ct) => {
-                        let mut fields = parent_node.borrow().columns().to_vec();
-                        let filter = self.to_conditions(ct, &mut fields, &parent_node);
-                        MirNode::new(
-                            name,
-                            self.schema_version,
-                            combined_columns,
-                            MirNodeType::FilterAggregation {
-                                on: over_col.clone(),
-                                else_on: else_val.clone(),
-                                group_by: group_by.into_iter().cloned().collect(),
-                                kind: filter_agg,
-                                conditions: filter,
-                            },
-                            vec![parent_node.clone()],
-                            vec![],
-                        )
-                    },
+                let mut fields = parent_node.borrow().columns().to_vec();
+                let filter = match *cond {
+                    LogicalOp(ref ct) => self.logical_op_to_conditions(ct, &mut fields, &parent_node),
+                    ComparisonOp(ref ct) => self.to_conditions(ct, &mut fields, &parent_node),
                     Bracketed(_) => unimplemented!(),
                     NegationOp(_) => unreachable!("negation should have been removed earlier"),
                     Base(_) => unreachable!("dangling base predicate"),
                     Arithmetic(_) => unimplemented!(),
-                }
+                };
+                MirNode::new(
+                    name,
+                    self.schema_version,
+                    combined_columns,
+                    MirNodeType::FilterAggregation {
+                        on: over_col.clone(),
+                        else_on: else_val.clone(),
+                        group_by: group_by.into_iter().cloned().collect(),
+                        kind: filter_agg,
+                        conditions: filter,
+                    },
+                    vec![parent_node.clone()],
+                    vec![],
+                )
             },
             GroupedNodeType::GroupConcat(sep) => MirNode::new(
                 name,
