@@ -116,6 +116,7 @@ fn main() {
         .finish();
     let tracer = tracing::Dispatch::new(s);
     let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+    tracing::dispatcher::set_global_default(tracer).unwrap();
 
     let listener = rt
         .block_on(tokio::net::tcp::TcpListener::bind(
