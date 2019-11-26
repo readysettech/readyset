@@ -7,7 +7,7 @@ extern crate failure;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
-extern crate slog;
+extern crate tracing;
 
 mod backend;
 mod convert;
