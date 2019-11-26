@@ -9,7 +9,7 @@ extern crate failure;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
-extern crate slog;
+extern crate tracing;
 
 mod backend;
 mod convert;
@@ -28,6 +28,7 @@ use std::io::{self, BufReader, BufWriter};
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use tracing::Level;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -36,7 +37,7 @@ pub fn logger_pls() -> slog::Logger {
     use slog::Logger;
     use slog_term::term_full;
     use std::sync::Mutex;
-    Logger::root(Mutex::new(term_full()).fuse(), o!())
+    Logger::root(Mutex::new(term_full()).fuse(), slog::o!())
 }
 
 fn main() {
@@ -123,7 +124,7 @@ fn main() {
         .unwrap();
 
     let log = logger_pls();
-    info!(log, "listening on port {}", port);
+    slog::info!(log, "listening on port {}", port);
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
@@ -131,9 +132,9 @@ fn main() {
     let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
     zk_auth.log_with(log.clone());
 
-    debug!(log, "Connecting to Noria...",);
+    slog::debug!(log, "Connecting to Noria...",);
     let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
-    debug!(log, "Connected!");
+    slog::debug!(log, "Connected!");
 
     let ctrlc = rt.block_on(async { tokio::net::signal::ctrl_c() }).unwrap();
     let mut listener = futures_util::stream::select(
@@ -157,14 +158,16 @@ fn main() {
         };
         s.set_nodelay(true).unwrap();
 
+        let connection = span!(Level::DEBUG, "connection");
+        {
+            let _g = connection.enter();
+            debug!(from = ?s.peer_addr().unwrap(), "accepted");
+        }
+
         let builder = thread::Builder::new().name(format!("conn-{}", i));
 
-        let (auto_increments, query_cache, log, primed) = (
-            auto_increments.clone(),
-            query_cache.clone(),
-            log.clone(),
-            primed.clone(),
-        );
+        let (auto_increments, query_cache, primed) =
+            (auto_increments.clone(), query_cache.clone(), primed.clone());
 
         let ex = rt.executor();
         let ch = ch.clone();
@@ -173,6 +176,7 @@ fn main() {
         let jh = builder
             .spawn(move || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
+                let _g = connection.enter();
                 let b = NoriaBackend::new(
                     ex.clone(),
                     ch,
@@ -183,7 +187,6 @@ fn main() {
                     slowlog,
                     static_responses,
                     sanitize,
-                    log,
                 );
                 ex.spawn(async move {
                     let _ = tx.send(b.await);
@@ -197,10 +200,13 @@ fn main() {
                     match e.kind() {
                         io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
                         _ => {
-                            panic!("{:?}", e);
+                            error!(err = ?e, "connection lost");
+                            return;
                         }
                     }
                 }
+
+                debug!("disconnected");
             })
             .unwrap();
         threads.push(jh);
@@ -208,7 +214,7 @@ fn main() {
     }
 
     drop(ch);
-    info!(log, "Exiting...");
+    slog::info!(log, "Exiting...");
 
     for t in threads.drain(..) {
         t.join()

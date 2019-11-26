@@ -7,7 +7,6 @@ use nom_sql::{
     self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery, UpdateStatement,
 };
 
-use slog;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -15,6 +14,7 @@ use std::io;
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 use std::time;
+use tracing::Level;
 
 use crate::convert::ToDataType;
 use crate::referred_tables::ReferredTables;
@@ -135,7 +135,6 @@ where
 
 pub struct NoriaBackend<E> {
     inner: NoriaBackendInner<E>,
-    log: slog::Logger,
     ops: Arc<atomic::AtomicUsize>,
     trace_every: Option<usize>,
 
@@ -173,15 +172,13 @@ where
         slowlog: bool,
         static_responses: bool,
         sanitize: bool,
-        log: slog::Logger,
     ) -> Self {
         NoriaBackend {
             inner: NoriaBackendInner::new(ex, ch).await,
-            log: log,
             ops,
             trace_every,
 
-            auto_increments: auto_increments,
+            auto_increments,
 
             prepared: HashMap::new(),
             prepared_count: 0,
@@ -235,6 +232,8 @@ where
     ) -> io::Result<()> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
+
+        info!(table = %q.table.name, "handling create table");
         match block_on!(
             self.inner,
             self.inner.noria.extend_recipe(&format!("{};", q))
@@ -256,10 +255,7 @@ where
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 
-        info!(
-            self.log,
-            "Adding view \"{}\" to Noria as {}", q.definition, q.name
-        );
+        info!(%q.definition, %q.name, "handling create view");
         match block_on!(
             self.inner,
             self.inner
@@ -279,6 +275,8 @@ where
         q: nom_sql::DeleteStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!(table = %q.table.name, "handling delete query");
+
         let cond = q
             .where_clause
             .expect("only supports DELETEs with WHERE-clauses");
@@ -307,7 +305,7 @@ where
                     match block_on_buffer(mutator.delete(key)) {
                         Ok(_) => {}
                         Err(e) => {
-                            error!(self.log, "delete error: {:?}", e);
+                            error!(error = ?e, "failed");
                             return results.error(
                                 msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                                 format!("{:?}", e).as_bytes(),
@@ -327,9 +325,12 @@ where
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let table = &q.table.name;
+        trace!(%table, "handling insert query");
 
         // create a mutator if we don't have one for this table already
+        trace!("accessing mutator");
         let putter = self.inner.ensure_mutator(table);
+        trace!("extracing schema");
         let schema = putter
             .schema()
             .expect(&format!("no schema for table '{}'", table));
@@ -354,9 +355,12 @@ where
         use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!("handling select query");
+
         let qname = match self.get_or_create_view(&q, false) {
             Ok(qn) => qn,
             Err(e) => {
+                error!(error = ?e, "failed to parse");
                 if e.kind() == io::ErrorKind::Other {
                     // maybe ER_SYNTAX_ERROR ?
                     // would be good to narrow these down
@@ -376,6 +380,7 @@ where
             .map(|l| vec![l.to_datatype()])
             .collect();
         // we need the schema for the result writer
+        trace!("analyzing schema");
         let schema = schema::convert_schema(&Schema::View(
             self.inner
                 .ensure_getter(&qname)
@@ -394,6 +399,8 @@ where
         q: nom_sql::SetStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!(%q.variable, "handling set query");
+
         if q.variable == "@primed" {
             self.primed.store(true, atomic::Ordering::SeqCst);
         }
@@ -406,6 +413,8 @@ where
         q: nom_sql::UpdateStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!(table = %q.table.name, "handling update query");
+
         self.do_update(Cow::Owned(q), None, results)
     }
 
@@ -414,12 +423,17 @@ where
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
+        trace!("preparing insert query");
+
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
             unreachable!()
         };
+
+        trace!("accessing mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
+        trace!("extracing schema");
         let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
         match sql_q {
@@ -473,6 +487,8 @@ where
         self.prepared
             .insert(self.prepared_count, PreparedStatement::Insert(q));
 
+        trace!(id = self.prepared_count, "registered prepared statement");
+
         Ok(())
     }
 
@@ -498,15 +514,9 @@ where
 
                             // add the query to Noria
                             if prepared {
-                                info!(
-                                    self.log,
-                                    "Adding parameterized query \"{}\" to Noria as {}", q, qname
-                                );
+                                info!(query = %q, name = %qname, "adding parameterized query");
                             } else {
-                                info!(
-                                    self.log,
-                                    "Adding ad-hoc query \"{}\" to Noria as {}", q, qname
-                                );
+                                info!(query = %q, name = %qname, "adding ad-hoc query");
                             }
                             if let Err(e) = block_on!(
                                 self.inner,
@@ -514,7 +524,7 @@ where
                                     .noria
                                     .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             ) {
-                                error!(self.log, "{:?}", e);
+                                error!(error = ?e, "add query failed");
                                 return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
                             }
 
@@ -538,6 +548,8 @@ where
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
+        trace!("preparing select query");
+
         // extract parameter columns
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
@@ -547,6 +559,7 @@ where
             .cloned()
             .collect();
 
+        trace!("collapsing where-in clauses");
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
@@ -555,9 +568,11 @@ where
         };
 
         // check if we already have this query prepared
+        trace!("accessing view");
         let qname = self.get_or_create_view(&q, true)?;
 
         // extract result schema
+        trace!("extracing schema");
         let schema = Schema::View(
             self.inner
                 .ensure_getter(&qname)
@@ -586,6 +601,7 @@ where
             PreparedStatement::Select(qname, q, schema, rewritten.map(|(a, b)| (a, b.len()))),
         );
 
+        trace!(id = self.prepared_count, "registered prepared statement");
         Ok(())
     }
 
@@ -594,12 +610,17 @@ where
         sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
+        trace!("preparing update query");
+
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
         } else {
             unreachable!()
         };
+
+        trace!("accessing mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
+        trace!("extracting schema");
         let schema = Schema::Table(mutator.schema().unwrap().clone());
 
         // extract parameter columns
@@ -621,6 +642,8 @@ where
         self.prepared_count += 1;
         self.prepared
             .insert(self.prepared_count, PreparedStatement::Update(q));
+        trace!(id = self.prepared_count, "registered prepared statement");
+
         info.reply(self.prepared_count, &params[..], &[])
     }
 
@@ -662,7 +685,9 @@ where
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
+        trace!("accessing mutator");
         let putter = self.inner.ensure_mutator(table);
+        trace!("extracing schema");
         let schema = putter
             .schema()
             .expect(&format!("no schema for table '{}'", table));
@@ -680,6 +705,7 @@ where
             .collect();
 
         // handle auto increment
+        trace!("preparing auto-increments");
         let auto_increment_columns: Vec<_> = schema
             .fields
             .iter()
@@ -703,6 +729,7 @@ where
         let last_insert_id = &ai_lock[table];
 
         // handle default values
+        trace!("preparing default values");
         let mut default_value_columns: Vec<_> = schema
             .fields
             .iter()
@@ -719,6 +746,7 @@ where
             })
             .collect();
 
+        trace!("constructing ops list");
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
 
         let mut first_inserted_id = None;
@@ -771,7 +799,7 @@ where
         }
 
         let result = if let Some(ref update_fields) = q.on_duplicate {
-            trace!(self.log, "inserting-or-updating {:?}", buf);
+            trace!("insert-or-update");
             assert_eq!(buf.len(), 1);
 
             let updates = {
@@ -787,7 +815,7 @@ where
             // TODO(malte): why can't I consume buf here?
             block_on_buffer(putter.insert_or_update(buf[0].clone(), updates))
         } else {
-            trace!(self.log, "inserting {:?}", buf);
+            trace!("insert");
             let buf: Vec<_> = buf
                 .into_iter()
                 .map(|r| TableOperation::Insert(r.into()))
@@ -795,10 +823,11 @@ where
             block_on_buffer(putter.perform_all(buf))
         };
 
+        trace!("writing out result");
         match result {
             Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
-                error!(self.log, "put error: {:?}", e);
+                error!(error = ?e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
@@ -817,6 +846,7 @@ where
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
+        trace!("accessing view");
         let getter = self.inner.ensure_getter(&qname);
 
         let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
@@ -874,6 +904,7 @@ where
             }
         };
 
+        trace!("lookup");
         let cols = Vec::from(getter.columns());
         let bogo = vec![vec![DataType::from(0 as i32)]];
         let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
@@ -891,6 +922,7 @@ where
         // if first lookup fails, there's no reason to try the others
         match block_on_buffer(getter.multi_lookup(keys, true)) {
             Ok(d) => {
+                trace!("writing out result");
                 let mut rw = results.start(schema).unwrap();
                 for resultsets in d {
                     for mut r in resultsets {
@@ -915,7 +947,7 @@ where
                 rw.finish()
             }
             Err(e) => {
-                error!(self.log, "error executing SELECT: {:?}", e);
+                error!(error = ?e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     "Noria returned an error".as_bytes(),
@@ -930,10 +962,12 @@ where
         params: Option<ParamParser>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!("accessing mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
 
         let q = q.into_owned();
         let (key, updates) = {
+            trace!("extracting schema");
             let schema = if let Some(cts) = mutator.schema() {
                 cts
             } else {
@@ -952,10 +986,14 @@ where
             noria::trace_my_next_op();
         }
 
+        trace!("update");
         match block_on_buffer(mutator.update(key, updates)) {
-            Ok(..) => results.completed(1 /* TODO */, 0),
+            Ok(..) => {
+                trace!("writing out result");
+                results.completed(1 /* TODO */, 0)
+            }
             Err(e) => {
-                error!(self.log, "update: {:?}", e);
+                error!(error = ?e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
@@ -972,7 +1010,7 @@ where
     type Error = io::Error;
 
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-        trace!(self.log, "prepare: {}", query);
+        debug!(query, "prepare query");
 
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
@@ -998,12 +1036,15 @@ where
                 }
                 Err(e) => {
                     // if nom-sql rejects the query, there is no chance Noria will like it
-                    error!(self.log, "query can't be parsed: \"{}\"", query);
+                    error!(%query, "query can't be parsed");
                     return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                 }
             },
             Some((q, _)) => q.clone(),
         };
+
+        let qspan = span!(Level::DEBUG, "prepare", %sql_q);
+        let _g = qspan.enter();
 
         match sql_q {
             nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
@@ -1011,10 +1052,7 @@ where
             nom_sql::SqlQuery::Update(_) => self.prepare_update(sql_q, info),
             _ => {
                 // Noria only supports prepared SELECT statements at the moment
-                error!(
-                    self.log,
-                    "unsupported query for prepared statement: {}", query
-                );
+                error!(%query, "unsupported query for prepared statement");
                 return info.error(
                     msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
                     "unsupported query".as_bytes(),
@@ -1029,6 +1067,8 @@ where
         params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
+        trace!(id, "execute prepared statement");
+
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
         }
@@ -1051,6 +1091,10 @@ where
 
         let res = match prep {
             PreparedStatement::Select(ref qname, ref _q, ref schema, ref rewritten) => {
+                let qspan = span!(Level::TRACE, "execute select", %qname);
+                let _g = qspan.enter();
+
+                trace!("applying where-in rewrites");
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
                         // this is a little tricky
@@ -1083,23 +1127,30 @@ where
                 self.execute_select(&qname, key, schema, results)
             }
             PreparedStatement::Insert(ref q) => {
+                let qspan = span!(Level::TRACE, "execute insert", table = %q.table.name);
+                let _g = qspan.enter();
+
                 let values: Vec<DataType> = params
                     .into_iter()
                     .map(|pv| pv.value.to_datatype())
                     .collect();
                 self.execute_insert(&q, values, results)
             }
-            PreparedStatement::Update(ref q) => self.execute_update(&q, params, results),
+            PreparedStatement::Update(ref q) => {
+                let qspan = span!(Level::TRACE, "execute update", table = %q.table.name);
+                let _g = qspan.enter();
+
+                self.execute_update(&q, params, results)
+            }
         };
 
         if self.slowlog {
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
                 warn!(
-                    self.log,
-                    "{:?} took {}ms",
-                    prep,
-                    took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
+                    query = ?prep,
+                    time = took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000,
+                    "slow query",
                 );
             }
         }
@@ -1110,7 +1161,9 @@ where
     fn on_close(&mut self, _: u32) {}
 
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
-        trace!(self.log, "query: {}", query);
+        trace!(query, "ad-hoc query");
+        let qspan = span!(Level::TRACE, "ad-hoc query", query);
+        let _g = qspan.enter();
 
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
@@ -1118,7 +1171,9 @@ where
 
         let start = time::Instant::now();
         let query = if self.sanitize {
-            utils::sanitize_query(query)
+            let q = utils::sanitize_query(query);
+            trace!(%q, "sanitized");
+            q
         } else {
             query.to_owned()
         };
@@ -1129,6 +1184,7 @@ where
             || query_lc.starts_with("start transaction")
             || query_lc.starts_with("commit")
         {
+            trace!("ignoring transaction bits");
             return results.completed(0, 0);
         }
 
@@ -1139,10 +1195,7 @@ where
             || query_lc.starts_with("create unique index")
             || query_lc.starts_with("create fulltext index")
         {
-            warn!(
-                self.log,
-                "ignoring unsupported query \"{}\" and returning empty results", query
-            );
+            warn!("unsupported query; returning empty results");
             return results.completed(0, 0);
         }
 
@@ -1155,13 +1208,14 @@ where
             }];
             // TODO(malte): we could find out which tables exist via RPC to Soup and return them
             let writer = results.start(&cols)?;
-            println!(" -> Ok({} rows)", 0);
+            trace!("mocking show tables");
             return writer.finish();
         }
 
         if self.static_responses {
             for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
                 if pattern.is_match(&query) {
+                    trace!("sending static response");
                     let cols: Vec<_> = columns
                         .iter()
                         .map(|c| Column {
@@ -1180,10 +1234,14 @@ where
             }
         }
 
+        trace!("analyzing query");
         let (q, use_params) = match self.parsed.get(&query) {
             None => {
+                trace!("parsing query");
                 match nom_sql::parse_query(&query) {
                     Ok(mut q) => {
+                        trace!("checking endpoint availability");
+
                         // for all tables and views mentioned in a query we're seeing for the first
                         // time, fetch the schemas if we don't have them already.
                         // Note that this implicitly also creates mutators and getters for the
@@ -1199,6 +1257,7 @@ where
                             }
                         }
 
+                        trace!("collapsing where-in clauses");
                         let mut use_params = Vec::new();
                         if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
                             use_params = p;
@@ -1211,7 +1270,7 @@ where
                     }
                     Err(_e) => {
                         // if nom-sql rejects the query, there is no chance Noria will like it
-                        error!(self.log, "query can't be parsed: \"{}\"", query);
+                        error!("query can't be parsed");
                         return results.completed(0, 0);
                         //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                     }
@@ -1228,12 +1287,12 @@ where
             nom_sql::SqlQuery::Set(q) => self.handle_set(q, results),
             nom_sql::SqlQuery::Update(q) => self.handle_update(q, results),
             nom_sql::SqlQuery::Delete(q) => self.handle_delete(q, results),
-            nom_sql::SqlQuery::DropTable(q) => {
-                warn!(self.log, "Ignoring DROP TABLE query: \"{}\"", q);
+            nom_sql::SqlQuery::DropTable(_) => {
+                warn!("ignoring drop table");
                 return results.completed(0, 0);
             }
             _ => {
-                error!(self.log, "Unsupported query: {}", query);
+                error!("unsupported query");
                 return results.error(
                     msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
                     "unsupported query".as_bytes(),
@@ -1245,10 +1304,9 @@ where
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
                 warn!(
-                    self.log,
-                    "{} took {}ms",
-                    query,
-                    took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000
+                    %query,
+                    time = took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000,
+                    "slow query",
                 );
             }
         }
