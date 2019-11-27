@@ -119,7 +119,7 @@ fn main() {
     let registry = tracing_subscriber::registry::Registry::default();
     let tracer = if histograms {
         use tracing_timing::{Builder, Histogram};
-        let s = Builder::default().layer(|| Histogram::new_with_max(1_000_000, 2).unwrap());
+        let s = Builder::default().layer(|| Histogram::new_with_bounds(1_000, 100_000_000, 3).unwrap());
         tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
     } else {
         use tracing_subscriber::fmt;
@@ -269,8 +269,21 @@ fn main() {
                             std::time::Duration::from_nanos(h.value_at_quantile(0.999)),
                             std::time::Duration::from_nanos(h.max()),
                         );
+
+                        let p95 = h.value_at_quantile(0.95);
+                        let mut scale = p95 / 5;
+                        // set all but highest digit to 0
+                        let mut shift = 0;
+                        while scale > 10 {
+                            scale /= 10;
+                            shift += 1;
+                        }
+                        for _ in 0..shift {
+                            scale *= 10;
+                        }
+
                         for v in break_once(
-                            h.iter_linear(25_000).skip_while(|v| v.quantile() < 0.01),
+                            h.iter_linear(scale).skip_while(|v| v.quantile() < 0.01),
                             |v| v.quantile() > 0.95,
                         ) {
                             println!(
