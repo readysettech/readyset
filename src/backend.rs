@@ -233,7 +233,7 @@ where
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
 
-        info!(table = %q.table.name, "handling create table");
+        info!(table = %q.table.name, "table::create");
         match block_on!(
             self.inner,
             self.inner.noria.extend_recipe(&format!("{};", q))
@@ -241,6 +241,7 @@ where
             Ok(_) => {
                 // no rows to return
                 // TODO(malte): potentially eagerly cache the mutator for this table
+                trace!("table::created");
                 results.completed(0, 0)
             }
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
@@ -255,7 +256,7 @@ where
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 
-        info!(%q.definition, %q.name, "handling create view");
+        info!(%q.definition, %q.name, "view::create");
         match block_on!(
             self.inner,
             self.inner
@@ -264,6 +265,7 @@ where
         ) {
             Ok(_) => {
                 // no rows to return
+                trace!("view::created");
                 results.completed(0, 0)
             }
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
@@ -275,15 +277,15 @@ where
         q: nom_sql::DeleteStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!(table = %q.table.name, "handling delete query");
-
         let cond = q
             .where_clause
             .expect("only supports DELETEs with WHERE-clauses");
 
         // create a mutator if we don't have one for this table already
+        trace!(table = %q.table.name, "delete::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
 
+        trace!("delete::extract schema");
         let pkey = if let Some(cts) = mutator.schema() {
             utils::get_primary_key(cts)
                 .into_iter()
@@ -294,6 +296,7 @@ where
             unimplemented!();
         };
 
+        trace!("delete::flatten conditionals");
         match utils::flatten_conditional(&cond, &pkey) {
             None => results.completed(0, 0),
             Some(ref flattened) if flattened.len() == 0 => {
@@ -301,6 +304,7 @@ where
             }
             Some(flattened) => {
                 let count = flattened.len() as u64;
+                trace!("delete::execute");
                 for key in flattened {
                     match block_on_buffer(mutator.delete(key)) {
                         Ok(_) => {}
@@ -314,6 +318,7 @@ where
                     };
                 }
 
+                trace!("delete::done");
                 results.completed(count, 0)
             }
         }
@@ -325,12 +330,11 @@ where
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         let table = &q.table.name;
-        trace!(%table, "handling insert query");
 
         // create a mutator if we don't have one for this table already
-        trace!("accessing mutator");
+        trace!(%table, "query::insert::access mutator");
         let putter = self.inner.ensure_mutator(table);
-        trace!("extracing schema");
+        trace!("query::insert::extract schema");
         let schema = putter
             .schema()
             .expect(&format!("no schema for table '{}'", table));
@@ -355,8 +359,7 @@ where
         use_params: Vec<Literal>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!("handling select query");
-
+        trace!("query::select::access view");
         let qname = match self.get_or_create_view(&q, false) {
             Ok(qn) => qn,
             Err(e) => {
@@ -375,12 +378,14 @@ where
                 }
             }
         };
+
         let keys: Vec<_> = use_params
             .into_iter()
             .map(|l| vec![l.to_datatype()])
             .collect();
+
         // we need the schema for the result writer
-        trace!("analyzing schema");
+        trace!(%qname, "query::select::extract schema");
         let schema = schema::convert_schema(&Schema::View(
             self.inner
                 .ensure_getter(&qname)
@@ -391,6 +396,8 @@ where
                 .filter(|c| c.column.name != "bogokey")
                 .collect(),
         ));
+
+        trace!(%qname, "query::select::do");
         self.do_read(&qname, keys, schema.as_slice(), results)
     }
 
@@ -399,7 +406,7 @@ where
         q: nom_sql::SetStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!(%q.variable, "handling set query");
+        trace!(%q.variable, "set");
 
         if q.variable == "@primed" {
             self.primed.store(true, atomic::Ordering::SeqCst);
@@ -413,8 +420,6 @@ where
         q: nom_sql::UpdateStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!(table = %q.table.name, "handling update query");
-
         self.do_update(Cow::Owned(q), None, results)
     }
 
@@ -423,17 +428,15 @@ where
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        trace!("preparing insert query");
-
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
             unreachable!()
         };
 
-        trace!("accessing mutator");
+        trace!(table = %q.table.name, "insert::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
-        trace!("extracing schema");
+        trace!("insert::extract schema");
         let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
         match sql_q {
@@ -487,7 +490,7 @@ where
         self.prepared
             .insert(self.prepared_count, PreparedStatement::Insert(q));
 
-        trace!(id = self.prepared_count, "registered prepared statement");
+        trace!(id = self.prepared_count, "insert::registered");
 
         Ok(())
     }
@@ -548,8 +551,6 @@ where
         mut sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        trace!("preparing select query");
-
         // extract parameter columns
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
@@ -559,7 +560,7 @@ where
             .cloned()
             .collect();
 
-        trace!("collapsing where-in clauses");
+        trace!("select::collapse where-in clauses");
         let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
@@ -568,11 +569,11 @@ where
         };
 
         // check if we already have this query prepared
-        trace!("accessing view");
+        trace!("select::access view");
         let qname = self.get_or_create_view(&q, true)?;
 
         // extract result schema
-        trace!("extracing schema");
+        trace!(qname = %qname, "select::extract schema");
         let schema = Schema::View(
             self.inner
                 .ensure_getter(&qname)
@@ -601,7 +602,8 @@ where
             PreparedStatement::Select(qname, q, schema, rewritten.map(|(a, b)| (a, b.len()))),
         );
 
-        trace!(id = self.prepared_count, "registered prepared statement");
+        trace!(id = self.prepared_count, "select::registered");
+
         Ok(())
     }
 
@@ -610,17 +612,15 @@ where
         sql_q: nom_sql::SqlQuery,
         info: StatementMetaWriter<W>,
     ) -> io::Result<()> {
-        trace!("preparing update query");
-
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
         } else {
             unreachable!()
         };
 
-        trace!("accessing mutator");
+        trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
-        trace!("extracting schema");
+        trace!("update::extract schema");
         let schema = Schema::Table(mutator.schema().unwrap().clone());
 
         // extract parameter columns
@@ -642,7 +642,8 @@ where
         self.prepared_count += 1;
         self.prepared
             .insert(self.prepared_count, PreparedStatement::Update(q));
-        trace!(id = self.prepared_count, "registered prepared statement");
+
+        trace!(id = self.prepared_count, "update::registered");
 
         info.reply(self.prepared_count, &params[..], &[])
     }
@@ -685,9 +686,9 @@ where
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
-        trace!("accessing mutator");
+        trace!(%table, "insert::access mutator");
         let putter = self.inner.ensure_mutator(table);
-        trace!("extracing schema");
+        trace!("insert::extract schema");
         let schema = putter
             .schema()
             .expect(&format!("no schema for table '{}'", table));
@@ -705,7 +706,7 @@ where
             .collect();
 
         // handle auto increment
-        trace!("preparing auto-increments");
+        trace!("insert::auto-increment");
         let auto_increment_columns: Vec<_> = schema
             .fields
             .iter()
@@ -729,7 +730,7 @@ where
         let last_insert_id = &ai_lock[table];
 
         // handle default values
-        trace!("preparing default values");
+        trace!("insert::default values");
         let mut default_value_columns: Vec<_> = schema
             .fields
             .iter()
@@ -746,7 +747,7 @@ where
             })
             .collect();
 
-        trace!("constructing ops list");
+        trace!("insert::construct ops");
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
 
         let mut first_inserted_id = None;
@@ -799,7 +800,7 @@ where
         }
 
         let result = if let Some(ref update_fields) = q.on_duplicate {
-            trace!("insert-or-update");
+            trace!("insert::complex");
             assert_eq!(buf.len(), 1);
 
             let updates = {
@@ -813,17 +814,20 @@ where
             };
 
             // TODO(malte): why can't I consume buf here?
-            block_on_buffer(putter.insert_or_update(buf[0].clone(), updates))
+            let r = block_on_buffer(putter.insert_or_update(buf[0].clone(), updates));
+            trace!("insert::complex::complete");
+            r
         } else {
-            trace!("insert");
+            trace!("insert::simple");
             let buf: Vec<_> = buf
                 .into_iter()
                 .map(|r| TableOperation::Insert(r.into()))
                 .collect();
-            block_on_buffer(putter.perform_all(buf))
+            let r = block_on_buffer(putter.perform_all(buf));
+            trace!("insert::simple::complete");
+            r
         };
 
-        trace!("writing out result");
         match result {
             Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
@@ -846,7 +850,7 @@ where
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
-        trace!("accessing view");
+        trace!("select::access view");
         let getter = self.inner.ensure_getter(&qname);
 
         let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
@@ -904,7 +908,7 @@ where
             }
         };
 
-        trace!("lookup");
+        trace!("select::lookup");
         let cols = Vec::from(getter.columns());
         let bogo = vec![vec![DataType::from(0 as i32)]];
         let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
@@ -922,7 +926,7 @@ where
         // if first lookup fails, there's no reason to try the others
         match block_on_buffer(getter.multi_lookup(keys, true)) {
             Ok(d) => {
-                trace!("writing out result");
+                trace!("select::complete");
                 let mut rw = results.start(schema).unwrap();
                 for resultsets in d {
                     for mut r in resultsets {
@@ -962,12 +966,12 @@ where
         params: Option<ParamParser>,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!("accessing mutator");
+        trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
 
         let q = q.into_owned();
         let (key, updates) = {
-            trace!("extracting schema");
+            trace!("update::extract schema");
             let schema = if let Some(cts) = mutator.schema() {
                 cts
             } else {
@@ -986,10 +990,10 @@ where
             noria::trace_my_next_op();
         }
 
-        trace!("update");
+        trace!("update::update");
         match block_on_buffer(mutator.update(key, updates)) {
             Ok(..) => {
-                trace!("writing out result");
+                trace!("update::complete");
                 results.completed(1 /* TODO */, 0)
             }
             Err(e) => {
@@ -1010,18 +1014,21 @@ where
     type Error = io::Error;
 
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-        debug!(query, "prepare query");
+        let span = span!(Level::DEBUG, "prepare", query);
+        let _g = span.enter();
 
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
         }
 
+        trace!("sanitize");
         let query = if self.sanitize {
             utils::sanitize_query(query)
         } else {
             query.to_owned()
         };
 
+        trace!("parse");
         let sql_q = match self.parsed.get(&query) {
             None => match nom_sql::parse_query(&query) {
                 Ok(sql_q) => {
@@ -1043,9 +1050,7 @@ where
             Some((q, _)) => q.clone(),
         };
 
-        let qspan = span!(Level::DEBUG, "prepare", %sql_q);
-        let _g = qspan.enter();
-
+        trace!("delegate");
         match sql_q {
             nom_sql::SqlQuery::Select(_) => self.prepare_select(sql_q, info),
             nom_sql::SqlQuery::Insert(_) => self.prepare_insert(sql_q, info),
@@ -1067,7 +1072,8 @@ where
         params: ParamParser,
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        trace!(id, "execute prepared statement");
+        let span = span!(Level::TRACE, "execute", id);
+        let _g = span.enter();
 
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
@@ -1089,12 +1095,10 @@ where
             }
         };
 
+        trace!("delegate");
         let res = match prep {
             PreparedStatement::Select(ref qname, ref _q, ref schema, ref rewritten) => {
-                let qspan = span!(Level::TRACE, "execute select", %qname);
-                let _g = qspan.enter();
-
-                trace!("applying where-in rewrites");
+                trace!("apply where-in rewrites");
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
                         // this is a little tricky
@@ -1124,24 +1128,18 @@ where
                         .map(|pv| pv.value.to_datatype())
                         .collect::<Vec<_>>()],
                 };
+
                 self.execute_select(&qname, key, schema, results)
             }
             PreparedStatement::Insert(ref q) => {
-                let qspan = span!(Level::TRACE, "execute insert", table = %q.table.name);
-                let _g = qspan.enter();
-
                 let values: Vec<DataType> = params
                     .into_iter()
                     .map(|pv| pv.value.to_datatype())
                     .collect();
+
                 self.execute_insert(&q, values, results)
             }
-            PreparedStatement::Update(ref q) => {
-                let qspan = span!(Level::TRACE, "execute update", table = %q.table.name);
-                let _g = qspan.enter();
-
-                self.execute_update(&q, params, results)
-            }
+            PreparedStatement::Update(ref q) => self.execute_update(&q, params, results),
         };
 
         if self.slowlog {
@@ -1161,9 +1159,8 @@ where
     fn on_close(&mut self, _: u32) {}
 
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
-        trace!(query, "ad-hoc query");
-        let qspan = span!(Level::TRACE, "ad-hoc query", query);
-        let _g = qspan.enter();
+        let span = span!(Level::TRACE, "query", query);
+        let _g = span.enter();
 
         if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
             self.reset = true;
@@ -1279,6 +1276,7 @@ where
             Some((q, use_params)) => (q.clone(), use_params.clone()),
         };
 
+        trace!("delegate");
         let res = match q {
             nom_sql::SqlQuery::CreateTable(q) => self.handle_create_table(q, results),
             nom_sql::SqlQuery::CreateView(q) => self.handle_create_view(q, results),
