@@ -80,6 +80,11 @@ fn main() {
                 .help("Trace client-side execution of every Nth operation"),
         )
         .arg(
+            Arg::with_name("time")
+                .long("time")
+                .help("Instead of logging trace events, time them and output metrics on exit"),
+        )
+        .arg(
             Arg::with_name("no-static-responses")
                 .long("no-static-responses")
                 .takes_value(false)
@@ -98,6 +103,7 @@ fn main() {
     assert!(!deployment.contains("-"));
 
     let port = value_t_or_exit!(matches, "port", u16);
+    let histograms = matches.is_present("time");
     let trace_every = if matches.is_present("trace") {
         Some(value_t_or_exit!(matches, "trace", usize))
     } else {
@@ -108,15 +114,21 @@ fn main() {
     let sanitize = !matches.is_present("no-sanitize");
     let static_responses = !matches.is_present("no-static-responses");
 
-    let s = tracing_subscriber::fmt::format::Format::default()
-        .with_timer(tracing_subscriber::fmt::time::Uptime::default());
-    let s = tracing_subscriber::FmtSubscriber::builder()
-        .on_event(s)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .finish();
-    let tracer = tracing::Dispatch::new(s);
+    use tracing_subscriber::Layer;
+    let filter = tracing_subscriber::EnvFilter::from_default_env();
+    let registry = tracing_subscriber::registry::Registry::default();
+    let tracer = if histograms {
+        use tracing_timing::{Builder, Histogram};
+        let s = Builder::default().layer(|| Histogram::new_with_max(1_000_000, 2).unwrap());
+        tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
+    } else {
+        use tracing_subscriber::fmt;
+        let s = fmt::format::Format::default().with_timer(fmt::time::Uptime::default());
+        let s = fmt::LayerBuilder::default().event_format(s).finish();
+        tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
+    };
+    tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
     let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
-    tracing::dispatcher::set_global_default(tracer).unwrap();
 
     let listener = rt
         .block_on(tokio::net::tcp::TcpListener::bind(
@@ -224,4 +236,79 @@ fn main() {
     }
 
     rt.shutdown_on_idle();
+
+    if let Some(timing) = tracer.downcast_ref::<tracing_timing::TimingLayer>() {
+        timing.force_synchronize();
+        timing.with_histograms(|hs| {
+            for (&span_group, hs) in hs {
+                if span_group == "connection" {
+                    // we don't care about the event timings relative to the connection context
+                    continue;
+                }
+
+                println!("==> {}", span_group);
+                for (event_group, h) in hs {
+                    // make sure we see the latest samples:
+                    h.refresh();
+                    // compute the "Coefficient of Variation"
+                    // < 1 means "low variance", > 1 means "high variance"
+                    if h.stdev() / h.mean() < 1.0 {
+                        // low variance -- print the median:
+                        println!(
+                            ".. {:?} (median)",
+                            std::time::Duration::from_nanos(h.value_at_quantile(0.5)),
+                        )
+                    } else {
+                        // high variance -- show more stats
+                        println!(
+                            "mean: {:?}, p50: {:?}, p90: {:?}, p99: {:?}, p999: {:?}, max: {:?}",
+                            std::time::Duration::from_nanos(h.mean() as u64),
+                            std::time::Duration::from_nanos(h.value_at_quantile(0.5)),
+                            std::time::Duration::from_nanos(h.value_at_quantile(0.9)),
+                            std::time::Duration::from_nanos(h.value_at_quantile(0.99)),
+                            std::time::Duration::from_nanos(h.value_at_quantile(0.999)),
+                            std::time::Duration::from_nanos(h.max()),
+                        );
+                        for v in break_once(
+                            h.iter_linear(25_000).skip_while(|v| v.quantile() < 0.01),
+                            |v| v.quantile() > 0.95,
+                        ) {
+                            println!(
+                                "{:6?} | {:40} | {:4.1}th %-ile",
+                                std::time::Duration::from_nanos(v.value_iterated_to() + 1),
+                                "*".repeat(
+                                    (v.count_since_last_iteration() as f64 * 40.0 / h.len() as f64)
+                                        .ceil() as usize
+                                ),
+                                v.percentile(),
+                            );
+                        }
+                    }
+                    println!(" -> {}", event_group);
+                }
+            }
+        });
+    }
+}
+
+// until we have https://github.com/rust-lang/rust/issues/62208
+fn break_once<I, F>(it: I, mut f: F) -> impl Iterator<Item = I::Item>
+where
+    I: IntoIterator,
+    F: FnMut(&I::Item) -> bool,
+{
+    let mut got_true = false;
+    it.into_iter().take_while(move |i| {
+        if got_true {
+            // we've already yielded when f was true
+            return false;
+        }
+        if f(i) {
+            // this must be the first time f returns true
+            // we should yield i, and then no more
+            got_true = true;
+        }
+        // f returned false, so we should keep yielding
+        true
+    })
 }
