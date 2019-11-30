@@ -2214,7 +2214,6 @@ fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: b
             }
         }
     });
-    println!("{:#?}", g.graphviz());
 }
 
 #[test]

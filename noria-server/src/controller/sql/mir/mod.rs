@@ -153,11 +153,6 @@ impl SqlToMirConverter {
             })
     }
 
-    // TODO: remove (this is just for debugging)
-    pub fn get_nodes(&self) -> HashMap<(String, usize), MirNodeRef> {
-        self.nodes.clone()
-    }
-
     pub fn add_nodes(&mut self, nodes: Vec<MirNodeRef>) {
         for node in nodes {
             let node_id = (String::from(node.borrow().name()), self.schema_version);

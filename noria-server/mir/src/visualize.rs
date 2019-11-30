@@ -152,10 +152,9 @@ impl GraphViz for MirNodeType {
             }
             MirNodeType::FilterAggregation {
                 ref on,
-                else_on: _,
                 ref group_by,
                 ref kind,
-                conditions: _,
+                ..
             } => {
                 let op_string = match *kind {
                     FilterAggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),

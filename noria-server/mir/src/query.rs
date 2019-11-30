@@ -67,6 +67,10 @@ impl MirQuery {
         nodes
     }
 
+    // Mutate our MirQuery in order to optimize it, for example by
+    // merging certain nodes together, and return it.
+    // Also return a list of any new nodes created so that the 
+    // caller can add them to any other internal representations.
     pub fn optimize(
         mut self,
         table_mapping: Option<&HashMap<(String, Option<String>), String>>,
