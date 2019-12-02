@@ -148,7 +148,7 @@ mod tests {
         use super::ArithmeticBase::Column as ABColumn;
         use super::ArithmeticBase::Scalar;
         use super::ArithmeticOperator::*;
-        use column::FunctionExpression;
+        use column::{FunctionArguments, FunctionExpression};
 
         let lit_ae = [
             "5 + 42",
@@ -199,7 +199,9 @@ mod tests {
                     name: String::from("max(foo)"),
                     alias: None,
                     table: None,
-                    function: Some(Box::new(FunctionExpression::Max("foo".into()))),
+                    function: Some(Box::new(FunctionExpression::Max(
+                        FunctionArguments::Column("foo".into()),
+                    ))),
                 }),
                 Scalar(3333.into()),
                 None,
