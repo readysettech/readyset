@@ -1146,8 +1146,8 @@ where
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
                 warn!(
-                    query = ?prep,
-                    time = took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000,
+                    query = %prep,
+                    time = ?took,
                     "slow query",
                 );
             }
@@ -1303,7 +1303,7 @@ where
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
                 warn!(
                     %query,
-                    time = took.as_secs() * 1_000 + took.subsec_nanos() as u64 / 1_000_000,
+                    time = ?took,
                     "slow query",
                 );
             }
