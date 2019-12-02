@@ -1145,8 +1145,13 @@ where
         if self.slowlog {
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                let query: &dyn std::fmt::Display = match prep {
+                    PreparedStatement::Select(_, ref q, ..) => q,
+                    PreparedStatement::Insert(ref q) => q,
+                    PreparedStatement::Update(ref q) => q,
+                };
                 warn!(
-                    query = %prep,
+                    %query,
                     time = ?took,
                     "slow query",
                 );
