@@ -1745,9 +1745,9 @@ mod tests {
     }
 
     #[test]
-    fn it_merges_sum_and_filter() {
+    fn it_doesnt_merge_filter_and_sum_on_filter_column() {
         // set up graph
-        let mut g = integration::start_simple("it_merges_sum_and_filter");
+        let mut g = integration::start_simple("it_doesnt_merge_filter_and_sum_on_filter_column");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1765,28 +1765,7 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
-            let f = Box::new(FunctionExpression::Sum(Column::from("votes.sign"), false));
-            let qid = query_id_hash(
-                &["computed_columns", "votes"],
-                &[&Column::from("votes.userid"), &Column::from("votes.aid")],
-                &[&Column {
-                    name: String::from("sum"),
-                    alias: Some(String::from("sum")),
-                    table: None,
-                    function: Some(f),
-                }],
-            );
-
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
-            // check edge view -- note that it's not actually currently possible to read from
-            // this for a lack of key (the value would be the key). Hence, the view also has a
-            // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
-            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+            assert_eq!(mig.graph().node_count(), 6);
         });
     }
 

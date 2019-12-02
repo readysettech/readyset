@@ -70,12 +70,26 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
         // now scan for candidacy
         let mut candidate = false;
         match n.borrow().inner {
-            MirNodeType::Filter { .. }  => {
+            MirNodeType::Filter { ref conditions, .. }  => {
                 // if the child is an aggregation and it has exactly one parent,
                 // then this is a candidate
-                if let MirNodeType::Aggregation { .. } = child.inner {
-                    if child.ancestors.len() == 1 {
-                        candidate = true;
+                if let MirNodeType::Aggregation { ref on, .. } = child.inner {
+                    if child.ancestors.len() != 1 {
+                        continue;
+                    }
+                    candidate = true;
+
+                    // But wait -- need to check if the aggregation is on a filter column
+                    for (i, _cond) in conditions {
+                        let cond_col = n.borrow().columns[*i].clone();
+                        if cond_col.name == on.name {
+                            // this column is the one being aggregated, so we won't
+                            // have a corresponding column in the output of the aggregator.
+                            // Since we can't store a column index for this filter,
+                            // we're not a candidate
+                            candidate = false;
+                            break;
+                        }
                     }
                 }
             },
@@ -150,7 +164,6 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                             found += 1;
                         }
                     }
-                    println!("found={}, cond_col={}", found, cond_col.name);
                     assert!(found == 1);
                 }
                 (conds, child.inner.clone())
