@@ -1,13 +1,13 @@
 use nom::types::CompleteByteSlice;
 use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
 use std::fmt::{self, Display};
+use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
-use std::ops::Deref;
 
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
-use column::{Column, FunctionExpression};
-use condition::{ConditionExpression, condition_expr};
+use case::case_when_column;
+use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
 use table::Table;
 
@@ -540,39 +540,20 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
        )
 );
 
-named!(pub case_when_column<CompleteByteSlice, (Column, Option<Literal>, ConditionExpression)>,
-       do_parse!(
-           tag_no_case!("case when") >>
-           opt_multispace >>
-           cond: condition_expr >>
-           opt_multispace >>
-           tag_no_case!("then") >>
-           opt_multispace >>
-           column: column_identifier_no_alias >>
-           opt_multispace >>
-           else_value: opt!(do_parse!(
-               tag_no_case!("else") >>
-               opt_multispace >>
-               else_val: literal >>
-               opt_multispace >>
-               (else_val)
-           )) >>
-           tag_no_case!("end") >>
-           (column, else_value, cond)
-       )
-);
-
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-named!(pub function_arguments<CompleteByteSlice, (Column, bool)>,
+named!(pub function_arguments<CompleteByteSlice, (FunctionArguments, bool)>,
        do_parse!(
            distinct: opt!(do_parse!(
                tag_no_case!("distinct") >>
                multispace >>
                ()
            )) >>
-           column: column_identifier_no_alias >>
-           (column, distinct.is_some())
+           args: alt_complete!(
+               map!(case_when_column, |cw| FunctionArguments::Conditional(cw))
+             | map!(column_identifier_no_alias, |c| FunctionArguments::Column(c))
+           ) >>
+           (args, distinct.is_some())
        )
 );
 
@@ -584,18 +565,8 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
         )
     |   do_parse!(
             tag_no_case!("count") >>
-            args: delimited!(tag!("("), case_when_column, tag!(")")) >>
-            (FunctionExpression::CountFilter(args.0.clone(), args.1.clone(), args.2.clone()))
-        )
-    |   do_parse!(
-            tag_no_case!("count") >>
             args: delimited!(tag!("("), function_arguments, tag!(")")) >>
             (FunctionExpression::Count(args.0.clone(), args.1))
-        )
-    |   do_parse!(
-            tag_no_case!("sum") >>
-            args: delimited!(tag!("("), case_when_column, tag!(")")) >>
-            (FunctionExpression::SumFilter(args.0.clone(), args.1.clone(), args.2.clone()))
         )
     |   do_parse!(
             tag_no_case!("sum") >>
@@ -642,7 +613,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
                     Some(s) => String::from_utf8(s.to_vec()).unwrap(),
                 };
 
-                FunctionExpression::GroupConcat(col.clone(), sep)
+                FunctionExpression::GroupConcat(FunctionArguments::Column(col.clone()), sep)
             })
         )
     )
@@ -1114,7 +1085,9 @@ mod tests {
             name: String::from("max(addr_id)"),
             alias: None,
             table: None,
-            function: Some(Box::new(FunctionExpression::Max(Column::from("addr_id")))),
+            function: Some(Box::new(FunctionExpression::Max(
+                FunctionArguments::Column(Column::from("addr_id")),
+            ))),
         };
         assert_eq!(res.unwrap().1, expected);
     }

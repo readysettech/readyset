@@ -10,6 +10,7 @@ extern crate serde_derive;
 extern crate pretty_assertions;
 
 pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+pub use self::case::CaseWhenExpression;
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification, FunctionExpression};
 pub use self::common::{
     FieldDefinitionExpression, FieldValueExpression, Literal, LiteralExpression, Operator, Real,
@@ -33,6 +34,7 @@ pub mod parser;
 #[macro_use]
 mod keywords;
 mod arithmetic;
+mod case;
 mod column;
 mod common;
 mod compound_select;

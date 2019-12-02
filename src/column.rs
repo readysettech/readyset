@@ -2,21 +2,19 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::str;
 
+use case::CaseWhenExpression;
 use common::{Literal, SqlType};
 use keywords::escape_if_keyword;
-use condition::ConditionExpression;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
-    Avg(Column, bool),
-    Count(Column, bool),
+    Avg(FunctionArguments, bool),
+    Count(FunctionArguments, bool),
     CountStar,
-    CountFilter(Column, Option<Literal>, ConditionExpression),
-    Sum(Column, bool),
-    SumFilter(Column, Option<Literal>, ConditionExpression),
-    Max(Column),
-    Min(Column),
-    GroupConcat(Column, String),
+    Sum(FunctionArguments, bool),
+    Max(FunctionArguments),
+    Min(FunctionArguments),
+    GroupConcat(FunctionArguments, String),
 }
 
 impl Display for FunctionExpression {
@@ -30,14 +28,30 @@ impl Display for FunctionExpression {
             FunctionExpression::Count(ref col, _) => write!(f, "count({})", col),
             FunctionExpression::CountStar => write!(f, "count(*)"),
             FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col),
-            FunctionExpression::CountFilter(ref col, _, _) =>  write!(f, "count(filter {})", col),
-            FunctionExpression::SumFilter(ref col, _, _) => write!(f, "sum(filter {})", col),
             FunctionExpression::Max(ref col) => write!(f, "max({})", col),
             FunctionExpression::Min(ref col) => write!(f, "min({})", col),
             FunctionExpression::GroupConcat(ref col, ref s) => {
                 write!(f, "group_concat({}, {})", col, s)
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum FunctionArguments {
+    Column(Column),
+    Conditional(CaseWhenExpression),
+}
+
+impl Display for FunctionArguments {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FunctionArguments::Column(ref col) => write!(f, "{}", col)?,
+            FunctionArguments::Conditional(ref e) => {
+                write!(f, "{}", e)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -233,7 +247,7 @@ mod tests {
             alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Sum(
-                Column::from("mytab.foo"),
+                FunctionArguments::Column(Column::from("mytab.foo")),
                 false,
             ))),
         };

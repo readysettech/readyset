@@ -293,7 +293,8 @@ named!(pub nested_selection<CompleteByteSlice, SelectStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use column::{Column, FunctionExpression};
+    use case::{CaseWhenExpression, ColumnOrLiteral};
+    use column::{Column, FunctionArguments, FunctionExpression};
     use common::{FieldDefinitionExpression, FieldValueExpression, Literal, Operator};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
@@ -660,7 +661,7 @@ mod tests {
         let qstring = "SELECT max(addr_id) FROM address;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
-        let agg_expr = FunctionExpression::Max(Column::from("addr_id"));
+        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -681,7 +682,7 @@ mod tests {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
-        let agg_expr = FunctionExpression::Max(Column::from("addr_id"));
+        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -723,7 +724,8 @@ mod tests {
         let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
-        let agg_expr = FunctionExpression::Count(Column::from("vote_id"), true);
+        let agg_expr =
+            FunctionExpression::Count(FunctionArguments::Column(Column::from("vote_id")), true);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -743,7 +745,8 @@ mod tests {
 
     #[test]
     fn count_filter() {
-        let qstring = "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
+        let qstring =
+            "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
 
@@ -752,11 +755,18 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
             operator: Operator::Greater,
         });
-        let agg_expr = FunctionExpression::CountFilter(Column::from("vote_id"), None, filter_cond);
+        let agg_expr = FunctionExpression::Count(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
+                else_expr: None,
+                condition: filter_cond,
+            }),
+            false,
+        );
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("count(filter vote_id)"),
+                name: format!("{}", agg_expr),
                 alias: None,
                 table: None,
                 function: Some(Box::new(agg_expr)),
@@ -781,11 +791,18 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
             operator: Operator::Equal,
         });
-        let agg_expr = FunctionExpression::SumFilter(Column::from("vote_id"), None, filter_cond);
+        let agg_expr = FunctionExpression::Sum(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
+                else_expr: None,
+                condition: filter_cond,
+            }),
+            false,
+        );
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("sum(filter vote_id)"),
+                name: format!("{}", agg_expr),
                 alias: None,
                 table: None,
                 function: Some(Box::new(agg_expr)),
@@ -801,7 +818,8 @@ mod tests {
 
     #[test]
     fn sum_filter_else_literal() {
-        let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
+        let qstring =
+            "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
 
         let res = selection(CompleteByteSlice(qstring.as_bytes()));
 
@@ -810,11 +828,18 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
             operator: Operator::Equal,
         });
-        let agg_expr = FunctionExpression::SumFilter(Column::from("vote_id"), Some(Literal::Integer(6)), filter_cond);
+        let agg_expr = FunctionExpression::Sum(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
+                else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
+                condition: filter_cond,
+            }),
+            false,
+        );
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("sum(filter vote_id)"),
+                name: format!("{}", agg_expr),
                 alias: None,
                 table: None,
                 function: Some(Box::new(agg_expr)),
@@ -830,8 +855,7 @@ mod tests {
 
     #[test]
     fn count_filter_lobsters() {
-        let qstring =
-            "SELECT
+        let qstring = "SELECT
             COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) as votes
             FROM votes
             GROUP BY votes.comment_id;";
@@ -851,7 +875,14 @@ mod tests {
             })),
             operator: Operator::And,
         });
-        let agg_expr = FunctionExpression::CountFilter(Column::from("votes.vote"), None, filter_cond);
+        let agg_expr = FunctionExpression::Count(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
+                else_expr: None,
+                condition: filter_cond,
+            }),
+            false,
+        );
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1060,7 +1091,7 @@ mod tests {
 
         let res = selection(CompleteByteSlice(qstr.as_bytes()));
 
-        let agg_expr = FunctionExpression::Max(Column::from("o_id"));
+        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("o_id")));
         let recursive_select = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1174,7 +1205,9 @@ mod tests {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                        function: Some(Box::new(FunctionExpression::Max(
+                            FunctionArguments::Column("o_id".into()),
+                        ))),
                     }),
                     right: ArithmeticBase::Scalar(3333.into()),
                 }),
@@ -1202,7 +1235,9 @@ mod tests {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                        function: Some(Box::new(FunctionExpression::Max(
+                            FunctionArguments::Column("o_id".into()),
+                        ))),
                     }),
                     right: ArithmeticBase::Scalar(2.into()),
                 }),
