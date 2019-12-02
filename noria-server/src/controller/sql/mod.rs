@@ -1698,7 +1698,6 @@ mod tests {
         });
     }
 
-    // This entire test is a mess and needs rethinking.
     #[test]
     fn it_merges_filter_and_sum() {
         // set up graph
@@ -1716,6 +1715,52 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
+            let f = Box::new(FunctionExpression::Sum(Column::from("votes.sign"), false));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid"), &Column::from("votes.aid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        });
+    }
+
+    #[test]
+    fn it_merges_sum_and_filter() {
+        // set up graph
+        let mut g = integration::start_simple("it_merges_sum_and_filter");
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            let res = inc.add_query(
+                "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
                 None,
                 mig,
             );

@@ -125,10 +125,36 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
     for n in candidate_nodes {
         let temp = n.borrow();
         let child = temp.children.first().unwrap().borrow();
-        // determine which is which
-        let (agg, filter) = match n.borrow().inner {
-            MirNodeType::Aggregation { .. }  => (n.borrow().inner.clone(), child.inner.clone()),
-            MirNodeType::Filter { .. } => (child.inner.clone(), n.borrow().inner.clone()),
+
+        // determine which is the aggregation, and update the conditions if the second isn't filter
+        let (cond, agg) = match n.borrow().inner {
+            MirNodeType::Aggregation { .. }  => {
+                if let MirNodeType::Filter { ref conditions } = child.inner {
+                    (conditions.clone(), n.borrow().inner.clone())
+                }
+                else {
+                    unreachable!()
+                }
+            },
+            MirNodeType::Filter { ref conditions } => {
+                // for each column in filter's conditions, we need to figure out
+                // which column in aggregation has the same name so we can reindex
+                // the condition to that column
+                let mut conds = Vec::new();
+                for (i, cond) in conditions {
+                    let mut found = 0;
+                    let cond_col = n.borrow().columns[*i].clone();
+                    for (j, col) in child.columns.iter().enumerate() {
+                        if cond_col.name == col.name {
+                            conds.push((j, cond.clone()));
+                            found += 1;
+                        }
+                    }
+                    println!("found={}, cond_col={}", found, cond_col.name);
+                    assert!(found == 1);
+                }
+                (conds, child.inner.clone())
+            },
             _ => unreachable!(),
         };
 
@@ -154,9 +180,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                         Aggregation::SUM => FilterAggregation::SUM,
                     }
                 } else { unimplemented!() },
-                conditions: if let MirNodeType::Filter { ref conditions } = &filter {
-                    conditions.to_vec()
-                } else { unimplemented!() },
+                conditions: cond,
             },
             n.borrow().ancestors.clone(),
             child.children.clone(),
