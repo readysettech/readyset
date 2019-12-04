@@ -10,7 +10,8 @@ use dataflow::ops::join::JoinType;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    ArithmeticExpression, ColumnSpecification, CompoundSelectOperator, ConditionBase,
+    ArithmeticExpression, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
+    CompoundSelectOperator, ConditionBase,
     ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey,
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
@@ -973,6 +974,7 @@ impl SqlToMirConverter {
         use dataflow::ops::grouped::filteraggregate::FilterAggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
+        use nom_sql::FunctionArguments;
 
         let mut out_nodes = Vec::new();
 
@@ -1008,21 +1010,36 @@ impl SqlToMirConverter {
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(ref col, distinct) => mknode(
+            Sum(FunctionArguments::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
                 None,
             ),
-            SumFilter(ref col, ref else_val, ref condition) => mknode(
+            Sum(FunctionArguments::Conditional(CaseWhenExpression{
+                condition: ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
+            }), _) => mknode(
                 &Column::from(col),
-                else_val.clone(),
+                Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
                 false,
                 Some(condition),
             ),
-            Count(ref col, distinct) => mknode(
+            Sum(FunctionArguments::Conditional(CaseWhenExpression{
+                condition: ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: None
+            }), _) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                false,
+                Some(condition),
+            ),
+            Count(FunctionArguments::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
@@ -1038,28 +1055,43 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             },
-            CountFilter(ref col, ref else_val, ref condition) => mknode(
+            Count(FunctionArguments::Conditional(CaseWhenExpression{
+                condition: ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
+            }), _) => mknode(
                 &Column::from(col),
-                else_val.clone(),
+                Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
                 false,
                 Some(condition),
             ),
-            Max(ref col) => mknode(
+            Count(FunctionArguments::Conditional(CaseWhenExpression{
+                condition: ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: None
+            }), _) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                false,
+                Some(condition),
+            ),
+            Max(FunctionArguments::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
                 None,
             ),
-            Min(ref col) => mknode(
+            Min(FunctionArguments::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
                 None,
             ),
-            GroupConcat(ref col, ref separator) => mknode(
+            GroupConcat(FunctionArguments::Column(ref col), ref separator) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::GroupConcat(separator.clone()),

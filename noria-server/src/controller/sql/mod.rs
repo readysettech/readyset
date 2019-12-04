@@ -975,7 +975,7 @@ mod tests {
     use crate::controller::Migration;
     use crate::integration;
     use dataflow::prelude::*;
-    use nom_sql::{Column, FunctionExpression, Literal};
+    use nom_sql::{CaseWhenExpression, Column, ColumnOrLiteral, FunctionExpression, FunctionArguments, Literal};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -1177,7 +1177,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                Column::from("votes.userid"),
+                FunctionArguments::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1447,7 +1447,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check project helper node
             let f = Box::new(FunctionExpression::Count(
-                Column::from("votes.userid"),
+                FunctionArguments::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1501,7 +1501,7 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
+            let f = Box::new(FunctionExpression::Count(FunctionArguments::Column(Column::from("votes.aid")), false));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1550,16 +1550,20 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::CountFilter(
-                Column::from("votes.aid"),
-                None,
-                ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: Operator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
-                    }
-            )));
+            let f = Box::new(FunctionExpression::Count(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                    ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.aid")),
+                    else_expr: None,
+                }),
+                false
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1608,16 +1612,20 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::SumFilter(
-                Column::from("votes.sign"),
-                None,
-                ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: Operator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
-                    }
-            )));
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
+                    else_expr: None,
+                }),
+                false
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1666,16 +1674,20 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::SumFilter(
-                Column::from("votes.sign"),
-                Some(Literal::Integer(6)),
-                ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: Operator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
-                    }
-            )));
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
+                    else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
+                }),
+                false
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1720,7 +1732,7 @@ mod tests {
             );
             assert!(res.is_ok());
             // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
-            let f = Box::new(FunctionExpression::Sum(Column::from("votes.sign"), false));
+            let f = Box::new(FunctionExpression::Sum(FunctionArguments::Column(Column::from("votes.sign")), false));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
@@ -1794,7 +1806,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                Column::from("votes.sign"),
+                FunctionArguments::Column(Column::from("votes.sign")),
                 false));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
@@ -1864,10 +1876,14 @@ mod tests {
                 })),
                 operator: Operator::And,
             });
-            let f = Box::new(FunctionExpression::CountFilter(
-                Column::from("votes.vote"),
-                None,
-                filter_cond));
+            let f = Box::new(FunctionExpression::Count(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: filter_cond,
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
+                    else_expr: None,
+                }),
+                false
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.comment_id")],

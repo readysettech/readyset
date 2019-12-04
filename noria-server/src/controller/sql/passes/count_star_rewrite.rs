@@ -1,6 +1,6 @@
 use nom_sql::{
-    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression, SqlQuery,
-    Table,
+    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
+    FunctionArguments, SqlQuery, Table,
 };
 
 use std::collections::HashMap;
@@ -59,12 +59,12 @@ impl CountStarRewrite for SqlQuery {
                     }
 
                     c.function = Some(Box::new(Count(
-                        Column {
+                        FunctionArguments::Column(Column {
                             name: bogo_column.clone(),
                             alias: None,
                             table: Some(bogo_table.name.clone()),
                             function: None,
-                        },
+                        }),
                         false,
                     )));
                 }
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn it_expands_count_star() {
         use nom_sql::parser::parse_query;
-        use nom_sql::FunctionExpression;
+        use nom_sql::{FunctionExpression, FunctionArguments};
 
         // SELECT COUNT(*) FROM users;
         // -->
@@ -132,7 +132,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            Column::from("users.id"),
+                            FunctionArguments::Column(Column::from("users.id")),
                             false,
                         ))),
                     })]
@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn it_expands_count_star_with_group_by() {
         use nom_sql::parser::parse_query;
-        use nom_sql::FunctionExpression;
+        use nom_sql::{FunctionExpression, FunctionArguments};
 
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
@@ -168,7 +168,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            Column::from("users.name"),
+                            FunctionArguments::Column(Column::from("users.name")),
                             false,
                         ))),
                     })]

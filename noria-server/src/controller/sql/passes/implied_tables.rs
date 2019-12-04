@@ -1,6 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldDefinitionExpression,
-    FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
+    ArithmeticBase, CaseWhenExpression, Column, ColumnOrLiteral, ConditionExpression, ConditionTree,
+    FieldDefinitionExpression, FieldValueExpression, FunctionArguments, JoinRightSide,
+    SelectStatement, SqlQuery, Table,
 };
 
 use std::collections::HashMap;
@@ -76,7 +77,8 @@ fn rewrite_selection(
     write_schemas: &HashMap<String, Vec<String>>,
 ) -> SelectStatement {
     use nom_sql::FunctionExpression::*;
-    use nom_sql::{GroupByClause, OrderClause};
+    use nom_sql::FunctionArguments::*;
+    use nom_sql::{Column, GroupByClause, OrderClause};
 
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
@@ -139,14 +141,18 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match **f {
-                            Avg(ref mut fe, _)
-                            | Count(ref mut fe, _)
-                            | Sum(ref mut fe, _)
-                            | Min(ref mut fe)
-                            | Max(ref mut fe)
-                            | GroupConcat(ref mut fe, _)
-                            | CountFilter(ref mut fe, _, _)
-                            | SumFilter(ref mut fe, _, _) => {
+                            Avg(Column(ref mut fe), _)
+                            | Count(FunctionArguments::Conditional(CaseWhenExpression{
+                                then_expr: ColumnOrLiteral::Column(ref mut fe), ..
+                              }), _)
+                            | Count(Column(ref mut fe), _)
+                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{
+                                then_expr: ColumnOrLiteral::Column(ref mut fe), ..
+                              }), _)
+                            | Sum(Column(ref mut fe), _)
+                            | Min(Column(ref mut fe))
+                            | Max(Column(ref mut fe))
+                            | GroupConcat(Column(ref mut fe), _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
@@ -193,8 +199,8 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => {
                         match **f {
-                            CountFilter(_, _, ref mut condition)
-                            | SumFilter(_, _, ref mut condition) => {
+                            Count(FunctionArguments::Conditional(CaseWhenExpression{ condition: ref mut condition, .. }), _)
+                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{ condition: ref mut condition, .. }), _) => {
                                 *condition = rewrite_conditional(&expand_columns, condition.clone(), &tables);
                             }
                             _ => {}
