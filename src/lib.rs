@@ -10,8 +10,8 @@ extern crate serde_derive;
 extern crate pretty_assertions;
 
 pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
-pub use self::case::CaseWhenExpression;
-pub use self::column::{Column, ColumnConstraint, ColumnSpecification, FunctionExpression};
+pub use self::case::{CaseWhenExpression, ColumnOrLiteral};
+pub use self::column::{Column, ColumnConstraint, ColumnSpecification, FunctionExpression, FunctionArguments};
 pub use self::common::{
     FieldDefinitionExpression, FieldValueExpression, Literal, LiteralExpression, Operator, Real,
     SqlType, TableKey,
