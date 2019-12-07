@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -42,7 +41,7 @@ impl fmt::Display for OrderClause {
     }
 }
 
-named!(pub order_type<CompleteByteSlice, OrderType>,
+named!(pub order_type<&[u8], OrderType>,
     alt!(
           map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
         | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
@@ -50,7 +49,7 @@ named!(pub order_type<CompleteByteSlice, OrderType>,
 );
 
 // Parse ORDER BY clause
-named!(pub order_clause<CompleteByteSlice, OrderClause>,
+named!(pub order_clause<&[u8], OrderClause>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("order by") >>
@@ -110,9 +109,9 @@ mod tests {
             columns: vec![("name".into(), OrderType::OrderAscending)],
         };
 
-        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
-        let res2 = selection(CompleteByteSlice(qstring2.as_bytes()));
-        let res3 = selection(CompleteByteSlice(qstring3.as_bytes()));
+        let res1 = selection(&[u8](qstring1.as_bytes()));
+        let res2 = selection(&[u8](qstring2.as_bytes()));
+        let res3 = selection(&[u8](qstring3.as_bytes()));
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));

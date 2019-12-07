@@ -1,5 +1,4 @@
-use nom::multispace;
-use nom::types::CompleteByteSlice;
+use nom::character::complete::multispace1;
 use std::{fmt, str};
 
 use column::Column;
@@ -75,7 +74,7 @@ impl fmt::Display for ArithmeticExpression {
     }
 }
 
-named!(pub arithmetic_cast<CompleteByteSlice, (ArithmeticBase, Option<SqlType>)>,
+named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
     alt!(
         do_parse!(
             tag_no_case!("cast") >>
@@ -84,10 +83,10 @@ named!(pub arithmetic_cast<CompleteByteSlice, (ArithmeticBase, Option<SqlType>)>
             opt_multispace >>
             // TODO(malte): should be arbitrary expr
             v: arithmetic_base >>
-            multispace >>
+            multispace1 >>
             tag_no_case!("as") >>
-            multispace >>
-            _sign: opt!(terminated!(tag_no_case!("signed"), multispace)) >>
+            multispace1 >>
+            _sign: opt!(terminated!(tag_no_case!("signed"), multispace1)) >>
             typ: type_identifier >>
             opt_multispace >>
             tag!(")") >>
@@ -99,7 +98,7 @@ named!(pub arithmetic_cast<CompleteByteSlice, (ArithmeticBase, Option<SqlType>)>
 
 // Parse standard math operators.
 // TODO(malte): this doesn't currently observe operator precedence.
-named!(pub arithmetic_operator<CompleteByteSlice, ArithmeticOperator>,
+named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
     alt!(
           map!(tag!("+"), |_| ArithmeticOperator::Add)
         | map!(tag!("-"), |_| ArithmeticOperator::Subtract)
@@ -109,7 +108,7 @@ named!(pub arithmetic_operator<CompleteByteSlice, ArithmeticOperator>,
 );
 
 // Base case for nested arithmetic expressions: column name or literal.
-named!(pub arithmetic_base<CompleteByteSlice, ArithmeticBase>,
+named!(pub arithmetic_base<&[u8], ArithmeticBase>,
     alt!(
           map!(integer_literal, |il| ArithmeticBase::Scalar(il))
         | map!(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci))
@@ -118,7 +117,7 @@ named!(pub arithmetic_base<CompleteByteSlice, ArithmeticBase>,
 
 // Parse simple arithmetic expressions combining literals, and columns and literals.
 // TODO(malte): this doesn't currently support nested expressions.
-named!(pub arithmetic_expression<CompleteByteSlice, ArithmeticExpression>,
+named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     do_parse!(
         left: arithmetic_cast >>
         opt_multispace >>
@@ -209,13 +208,13 @@ mod tests {
         ];
 
         for (i, e) in lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            let res = arithmetic_expression(e.as_bytes());
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, expected_lit_ae[i]);
         }
 
         for (i, e) in col_lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            let res = arithmetic_expression(e.as_bytes());
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, expected_col_lit_ae[i]);
         }
@@ -281,10 +280,9 @@ mod tests {
         ];
 
         for (i, e) in exprs.iter().enumerate() {
-            let res = arithmetic_expression(CompleteByteSlice(e.as_bytes()));
+            let res = arithmetic_expression(e.as_bytes());
             assert!(res.is_ok(), "{} failed to parse", e);
             assert_eq!(res.unwrap().1, expected[i]);
         }
     }
-
 }

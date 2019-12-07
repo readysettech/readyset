@@ -1,4 +1,3 @@
-use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -85,7 +84,7 @@ impl fmt::Display for JoinConstraint {
 }
 
 // Parse binary comparison operators
-named!(pub join_operator<CompleteByteSlice, JoinOperator>,
+named!(pub join_operator<&[u8], JoinOperator>,
         alt!(
               map!(tag_no_case!("join"), |_| JoinOperator::Join)
             | map!(tag_no_case!("left join"), |_| JoinOperator::LeftJoin)
@@ -110,7 +109,7 @@ mod tests {
         let qstring = "SELECT tags.* FROM tags \
                        INNER JOIN taggings ON tags.id = taggings.tag_id";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
 
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("tags.id")))),

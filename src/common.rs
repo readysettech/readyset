@@ -1,4 +1,3 @@
-use nom::types::CompleteByteSlice;
 use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
 use std::fmt::{self, Display};
 use std::ops::Deref;
@@ -334,7 +333,7 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 }
 
 #[inline]
-fn len_as_u16(len: CompleteByteSlice) -> u16 {
+fn len_as_u16(len: &[u8]) -> u16 {
     match str::from_utf8(*len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => v,
@@ -344,7 +343,7 @@ fn len_as_u16(len: CompleteByteSlice) -> u16 {
     }
 }
 
-named!(pub precision<CompleteByteSlice, (u8, Option<u8>)>,
+named!(pub precision<&[u8], (u8, Option<u8>)>,
     delimited!(tag!("("),
                do_parse!(
                    m: digit >>
@@ -360,7 +359,7 @@ named!(pub precision<CompleteByteSlice, (u8, Option<u8>)>,
 );
 
 // A SQL type specifier.
-named!(pub type_identifier<CompleteByteSlice, SqlType>,
+named!(pub type_identifier<&[u8], SqlType>,
     alt!(
           do_parse!(
               tag_no_case!("bool") >>
@@ -542,7 +541,7 @@ named!(pub type_identifier<CompleteByteSlice, SqlType>,
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-named!(pub function_arguments<CompleteByteSlice, (FunctionArguments, bool)>,
+named!(pub function_arguments<&[u8], (FunctionArguments, bool)>,
        do_parse!(
            distinct: opt!(do_parse!(
                tag_no_case!("distinct") >>
@@ -557,7 +556,7 @@ named!(pub function_arguments<CompleteByteSlice, (FunctionArguments, bool)>,
        )
 );
 
-named!(pub column_function<CompleteByteSlice, FunctionExpression>,
+named!(pub column_function<&[u8], FunctionExpression>,
     alt!(
         do_parse!(
             tag_no_case!("count(*)") >>
@@ -599,7 +598,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
                                        tag_no_case!("separator") >>
                                        sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
                                        opt_multispace >>
-                                       (sep.unwrap_or(CompleteByteSlice(&[])))
+                                       (sep.unwrap_or(&[u8](&[])))
                                    )
                                ) >>
                                (column, seperator)
@@ -620,7 +619,7 @@ named!(pub column_function<CompleteByteSlice, FunctionExpression>,
 );
 
 // Parses a SQL column identifier in the table.column format
-named!(pub column_identifier_no_alias<CompleteByteSlice, Column>,
+named!(pub column_identifier_no_alias<&[u8], Column>,
     alt!(
         do_parse!(
             function: column_function >>
@@ -654,7 +653,7 @@ named!(pub column_identifier_no_alias<CompleteByteSlice, Column>,
 );
 
 // Parses a SQL column identifier in the table.column format
-named!(pub column_identifier<CompleteByteSlice, Column>,
+named!(pub column_identifier<&[u8], Column>,
     alt!(
         do_parse!(
             function: column_function >>
@@ -699,7 +698,7 @@ named!(pub column_identifier<CompleteByteSlice, Column>,
 );
 
 // Parses a SQL identifier (alphanumeric and "_").
-named!(pub sql_identifier<CompleteByteSlice, CompleteByteSlice>,
+named!(pub sql_identifier<&[u8], &[u8]>,
     alt!(
           do_parse!(
                 not!(peek!(sql_keyword)) >>
@@ -712,7 +711,7 @@ named!(pub sql_identifier<CompleteByteSlice, CompleteByteSlice>,
 );
 
 // Parse an unsigned integer.
-named!(pub unsigned_number<CompleteByteSlice, u64>,
+named!(pub unsigned_number<&[u8], u64>,
     do_parse!(
         d: digit >>
         (FromStr::from_str(str::from_utf8(*d).unwrap()).unwrap())
@@ -720,7 +719,7 @@ named!(pub unsigned_number<CompleteByteSlice, u64>,
 );
 
 // Parse a terminator that ends a SQL statement.
-named!(pub statement_terminator<CompleteByteSlice, ()>,
+named!(pub statement_terminator<&[u8], ()>,
     do_parse!(
         delimited!(
             opt_multispace,
@@ -731,12 +730,12 @@ named!(pub statement_terminator<CompleteByteSlice, ()>,
     )
 );
 
-named!(pub opt_multispace<CompleteByteSlice, Option<CompleteByteSlice>>,
+named!(pub opt_multispace<&[u8], Option<&[u8]>>,
        opt!(multispace)
 );
 
 // Parse binary comparison operators
-named!(pub binary_comparison_operator<CompleteByteSlice, Operator>,
+named!(pub binary_comparison_operator<&[u8], Operator>,
     alt!(
            map!(tag_no_case!("not_like"), |_| Operator::NotLike)
          | map!(tag_no_case!("like"), |_| Operator::Like)
@@ -752,7 +751,7 @@ named!(pub binary_comparison_operator<CompleteByteSlice, Operator>,
 );
 
 // Parse rule for AS-based aliases for SQL entities.
-named!(pub as_alias<CompleteByteSlice, &str>,
+named!(pub as_alias<&[u8], &str>,
     do_parse!(
         multispace >>
         opt!(do_parse!(tag_no_case!("as") >> multispace >> ())) >>
@@ -761,7 +760,7 @@ named!(pub as_alias<CompleteByteSlice, &str>,
     )
 );
 
-named!(field_value_expr<CompleteByteSlice, FieldValueExpression>,
+named!(field_value_expr<&[u8], FieldValueExpression>,
     alt!(
         map!(literal, |l| FieldValueExpression::Literal(LiteralExpression {
             value: l.into(),
@@ -771,7 +770,7 @@ named!(field_value_expr<CompleteByteSlice, FieldValueExpression>,
     )
 );
 
-named!(assignment_expr<CompleteByteSlice, (Column, FieldValueExpression) >,
+named!(assignment_expr<&[u8], (Column, FieldValueExpression) >,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
@@ -782,7 +781,7 @@ named!(assignment_expr<CompleteByteSlice, (Column, FieldValueExpression) >,
     )
 );
 
-named!(pub assignment_expr_list<CompleteByteSlice, Vec<(Column, FieldValueExpression)> >,
+named!(pub assignment_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
        many1!(
            do_parse!(
                field_value: assignment_expr >>
@@ -800,7 +799,7 @@ named!(pub assignment_expr_list<CompleteByteSlice, Vec<(Column, FieldValueExpres
 );
 
 // Parse rule for a comma-separated list of fields without aliases.
-named!(pub field_list<CompleteByteSlice, Vec<Column> >,
+named!(pub field_list<&[u8], Vec<Column> >,
        many0!(
            do_parse!(
                fieldname: column_identifier_no_alias >>
@@ -818,7 +817,7 @@ named!(pub field_list<CompleteByteSlice, Vec<Column> >,
 );
 
 // Parse list of column/field definitions.
-named!(pub field_definition_expr<CompleteByteSlice, Vec<FieldDefinitionExpression>>,
+named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
        many0!(
            do_parse!(
                field: alt!(
@@ -861,7 +860,7 @@ named!(pub field_definition_expr<CompleteByteSlice, Vec<FieldDefinitionExpressio
 
 // Parse list of table names.
 // XXX(malte): add support for aliases
-named!(pub table_list<CompleteByteSlice, Vec<Table> >,
+named!(pub table_list<&[u8], Vec<Table> >,
        many0!(
            do_parse!(
                table: table_reference >>
@@ -879,7 +878,7 @@ named!(pub table_list<CompleteByteSlice, Vec<Table> >,
 );
 
 // Integer literal value
-named!(pub integer_literal<CompleteByteSlice, Literal>,
+named!(pub integer_literal<&[u8], Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
         val: digit >>
@@ -894,7 +893,7 @@ named!(pub integer_literal<CompleteByteSlice, Literal>,
 );
 
 // Floating point literal value
-named!(pub float_literal<CompleteByteSlice, Literal>,
+named!(pub float_literal<&[u8], Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
         mant: digit >>
@@ -918,7 +917,7 @@ named!(pub float_literal<CompleteByteSlice, Literal>,
 
 /// String literal value
 
-fn raw_string_quoted(input: CompleteByteSlice, quote: u8) -> IResult<CompleteByteSlice, Vec<u8>> {
+fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
     let quote_slice: &[u8] = &[quote];
     let double_quote_slice: &[u8] = &[quote, quote];
     let backslash_quote: &[u8] = &[b'\\', quote];
@@ -927,21 +926,21 @@ fn raw_string_quoted(input: CompleteByteSlice, quote: u8) -> IResult<CompleteByt
         fold_many0!(
             alt!(
                 is_not!(backslash_quote) |
-                map!(tag!(double_quote_slice), |_| CompleteByteSlice(quote_slice)) |
-                map!(tag!("\\\\"), |_| CompleteByteSlice(&b"\\"[..])) |
-                map!(tag!("\\b"), |_| CompleteByteSlice(&b"\x7f"[..])) |
-                map!(tag!("\\r"), |_| CompleteByteSlice(&b"\r"[..])) |
-                map!(tag!("\\n"), |_| CompleteByteSlice(&b"\n"[..])) |
-                map!(tag!("\\t"), |_| CompleteByteSlice(&b"\t"[..])) |
-                map!(tag!("\\0"), |_| CompleteByteSlice(&b"\0"[..])) |
-                map!(tag!("\\Z"), |_| CompleteByteSlice(&b"\x1A"[..])) |
+                map!(tag!(double_quote_slice), |_| &[u8](quote_slice)) |
+                map!(tag!("\\\\"), |_| &[u8](&b"\\"[..])) |
+                map!(tag!("\\b"), |_| &[u8](&b"\x7f"[..])) |
+                map!(tag!("\\r"), |_| &[u8](&b"\r"[..])) |
+                map!(tag!("\\n"), |_| &[u8](&b"\n"[..])) |
+                map!(tag!("\\t"), |_| &[u8](&b"\t"[..])) |
+                map!(tag!("\\0"), |_| &[u8](&b"\0"[..])) |
+                map!(tag!("\\Z"), |_| &[u8](&b"\x1A"[..])) |
                 do_parse!(
                         _escape: tag!("\\") >>
                         escaped: take!(1) >>
                         (escaped ))
             ),
             Vec::new(),
-            |mut acc: Vec<u8>, bytes: CompleteByteSlice| {
+            |mut acc: Vec<u8>, bytes: &[u8]| {
                 acc.extend(bytes.0);
                 acc
             }
@@ -950,10 +949,10 @@ fn raw_string_quoted(input: CompleteByteSlice, quote: u8) -> IResult<CompleteByt
     )
 }
 
-named!(raw_string_singlequoted< CompleteByteSlice, Vec<u8> >, call!(raw_string_quoted, b'\''));
-named!(raw_string_doublequoted< CompleteByteSlice, Vec<u8> >, call!(raw_string_quoted, b'"'));
+named!(raw_string_singlequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'\''));
+named!(raw_string_doublequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'"'));
 
-named!(pub string_literal<CompleteByteSlice, Literal>,
+named!(pub string_literal<&[u8], Literal>,
        map!(alt!(raw_string_singlequoted | raw_string_doublequoted),
              |bytes| match String::from_utf8(bytes) {
                  Ok(s) => Literal::String(s),
@@ -963,7 +962,7 @@ named!(pub string_literal<CompleteByteSlice, Literal>,
 );
 
 // Any literal value.
-named!(pub literal<CompleteByteSlice, Literal>,
+named!(pub literal<&[u8], Literal>,
     alt!(
           float_literal
         | integer_literal
@@ -976,7 +975,7 @@ named!(pub literal<CompleteByteSlice, Literal>,
     )
 );
 
-named!(pub literal_expression<CompleteByteSlice, LiteralExpression>,
+named!(pub literal_expression<&[u8], LiteralExpression>,
     do_parse!(
         literal: delimited!(opt!(tag!("(")), literal, opt!(tag!(")"))) >>
         alias: opt!(as_alias) >>
@@ -988,7 +987,7 @@ named!(pub literal_expression<CompleteByteSlice, LiteralExpression>,
 );
 
 // Parse a list of values (e.g., for INSERT syntax).
-named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
+named!(pub value_list<&[u8], Vec<Literal> >,
        many0!(
            do_parse!(
                opt_multispace >>
@@ -1008,7 +1007,7 @@ named!(pub value_list<CompleteByteSlice, Vec<Literal> >,
 
 // Parse a reference to a named table, with an optional alias
 // TODO(malte): add support for schema.table notation
-named!(pub table_reference<CompleteByteSlice, Table>,
+named!(pub table_reference<&[u8], Table>,
     do_parse!(
         table: sql_identifier >>
         alias: opt!(as_alias) >>
@@ -1023,7 +1022,7 @@ named!(pub table_reference<CompleteByteSlice, Table>,
 );
 
 // Parse rule for a comment part.
-named!(pub parse_comment<CompleteByteSlice, String>,
+named!(pub parse_comment<&[u8], String>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("comment") >>
@@ -1039,12 +1038,12 @@ mod tests {
 
     #[test]
     fn sql_identifiers() {
-        let id1 = CompleteByteSlice(b"foo");
-        let id2 = CompleteByteSlice(b"f_o_o");
-        let id3 = CompleteByteSlice(b"foo12");
-        let id4 = CompleteByteSlice(b":fo oo");
-        let id5 = CompleteByteSlice(b"primary ");
-        let id6 = CompleteByteSlice(b"`primary`");
+        let id1 = &[u8](b"foo");
+        let id2 = &[u8](b"f_o_o");
+        let id3 = &[u8](b"foo12");
+        let id4 = &[u8](b":fo oo");
+        let id5 = &[u8](b"primary ");
+        let id6 = &[u8](b"`primary`");
 
         assert!(sql_identifier(id1).is_ok());
         assert!(sql_identifier(id2).is_ok());
@@ -1061,11 +1060,11 @@ mod tests {
 
         let res_ok: Vec<_> = ok
             .iter()
-            .map(|t| type_identifier(CompleteByteSlice(t.as_bytes())).unwrap().1)
+            .map(|t| type_identifier(&[u8](t.as_bytes())).unwrap().1)
             .collect();
         let res_not_ok: Vec<_> = not_ok
             .iter()
-            .map(|t| type_identifier(CompleteByteSlice(t.as_bytes())).is_ok())
+            .map(|t| type_identifier(&[u8](t.as_bytes())).is_ok())
             .collect();
 
         assert_eq!(
@@ -1080,7 +1079,7 @@ mod tests {
     fn simple_column_function() {
         let qs = b"max(addr_id)";
 
-        let res = column_identifier(CompleteByteSlice(qs));
+        let res = column_identifier(&[u8](qs));
         let expected = Column {
             name: String::from("max(addr_id)"),
             alias: None,
@@ -1094,7 +1093,7 @@ mod tests {
 
     #[test]
     fn comment_data() {
-        let res = parse_comment(CompleteByteSlice(b" COMMENT 'test'"));
+        let res = parse_comment(&[u8](b" COMMENT 'test'"));
         assert_eq!(res.unwrap().1, "test");
     }
 
@@ -1103,23 +1102,23 @@ mod tests {
         let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
         for quote in [&b"'"[..], &b"\""[..]].iter() {
             let quoted = &[quote, &all_escaped[..], quote].concat();
-            let res = string_literal(CompleteByteSlice(quoted));
+            let res = string_literal(&[u8](quoted));
             let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-            assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
+            assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
         }
     }
 
     #[test]
     fn literal_string_single_quote() {
-        let res = string_literal(CompleteByteSlice(b"'a''b'"));
+        let res = string_literal(&[u8](b"'a''b'"));
         let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
+        assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
     }
 
     #[test]
     fn literal_string_double_quote() {
-        let res = string_literal(CompleteByteSlice(br#""a""b""#));
+        let res = string_literal(&[u8](br#""a""b""#));
         let expected = Literal::String(r#"a"b"#.to_string());
-        assert_eq!(res, Ok((CompleteByteSlice(&b""[..]), expected)));
+        assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
     }
 }

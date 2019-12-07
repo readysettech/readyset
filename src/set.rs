@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::types::CompleteByteSlice;
 use std::{fmt, str};
 
 use common::{literal, opt_multispace, sql_identifier, statement_terminator, Literal};
@@ -18,7 +17,7 @@ impl fmt::Display for SetStatement {
     }
 }
 
-named!(pub set<CompleteByteSlice, SetStatement>,
+named!(pub set<&[u8], SetStatement>,
     do_parse!(
         tag_no_case!("set") >>
         multispace >>
@@ -42,7 +41,7 @@ mod tests {
     #[test]
     fn simple_set() {
         let qstring = "SET SQL_AUTO_IS_NULL = 0;";
-        let res = set(CompleteByteSlice(qstring.as_bytes()));
+        let res = set(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -55,7 +54,7 @@ mod tests {
     #[test]
     fn user_defined_vars() {
         let qstring = "SET @var = 123;";
-        let res = set(CompleteByteSlice(qstring.as_bytes()));
+        let res = set(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -69,7 +68,7 @@ mod tests {
     fn format_set() {
         let qstring = "set autocommit=1";
         let expected = "SET autocommit = 1";
-        let res = set(CompleteByteSlice(qstring.as_bytes()));
+        let res = set(&[u8](qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }

@@ -14,7 +14,7 @@ license = "MIT"
 [dependencies]
 serde = "1.0"
 serde_derive = "1.0"
-nom = "^4.2.0"
+nom = "5.0.1"
 
 [dev-dependencies]
 pretty_assertions = "0.5.1"

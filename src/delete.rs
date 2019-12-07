@@ -1,4 +1,3 @@
-use nom::types::CompleteByteSlice;
 use std::{fmt, str};
 
 use common::{opt_multispace, statement_terminator, table_reference};
@@ -25,7 +24,7 @@ impl fmt::Display for DeleteStatement {
     }
 }
 
-named!(pub deletion<CompleteByteSlice, DeleteStatement>,
+named!(pub deletion<&[u8], DeleteStatement>,
     do_parse!(
         tag_no_case!("delete") >>
         delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
@@ -54,7 +53,7 @@ mod tests {
     #[test]
     fn simple_delete() {
         let qstring = "DELETE FROM users;";
-        let res = deletion(CompleteByteSlice(qstring.as_bytes()));
+        let res = deletion(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
@@ -67,7 +66,7 @@ mod tests {
     #[test]
     fn delete_with_where_clause() {
         let qstring = "DELETE FROM users WHERE id = 1;";
-        let res = deletion(CompleteByteSlice(qstring.as_bytes()));
+        let res = deletion(&[u8](qstring.as_bytes()));
         let expected_left = Base(Field(Column::from("id")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
@@ -88,7 +87,7 @@ mod tests {
     fn format_delete() {
         let qstring = "DELETE FROM users WHERE id = 1";
         let expected = "DELETE FROM users WHERE id = 1";
-        let res = deletion(CompleteByteSlice(qstring.as_bytes()));
+        let res = deletion(&[u8](qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }

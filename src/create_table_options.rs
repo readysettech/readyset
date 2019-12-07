@@ -1,11 +1,10 @@
 use nom::{alphanumeric, multispace};
-use nom::types::CompleteByteSlice;
 
 use common::{
     integer_literal, opt_multispace, sql_identifier, string_literal,
 };
 
-named!(pub table_options<CompleteByteSlice, ()>, do_parse!(
+named!(pub table_options<&[u8], ()>, do_parse!(
        separated_list!(table_options_separator, create_option)
         >>
         (
@@ -14,7 +13,7 @@ named!(pub table_options<CompleteByteSlice, ()>, do_parse!(
         )
 ));
 
-named!(table_options_separator<CompleteByteSlice, ()>, do_parse!(
+named!(table_options_separator<&[u8], ()>, do_parse!(
     alt!(
         map!(multispace, |_| ()) |
         do_parse!(
@@ -26,7 +25,7 @@ named!(table_options_separator<CompleteByteSlice, ()>, do_parse!(
     ) >> ()
 ));
 
-named!(create_option<CompleteByteSlice, ()>, alt!(
+named!(create_option<&[u8], ()>, alt!(
         create_option_type |
         create_option_pack_keys |
         create_option_engine |
@@ -40,7 +39,7 @@ named!(create_option<CompleteByteSlice, ()>, alt!(
         create_option_key_block_size
 ));
 
-named!(create_option_type<CompleteByteSlice, ()>,
+named!(create_option_type<&[u8], ()>,
     do_parse!(
         tag_no_case!("type") >>
         opt_multispace >>
@@ -51,7 +50,7 @@ named!(create_option_type<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_pack_keys<CompleteByteSlice, ()>,
+named!(create_option_pack_keys<&[u8], ()>,
     do_parse!(
         tag_no_case!("pack_keys") >>
         opt_multispace >>
@@ -62,7 +61,7 @@ named!(create_option_pack_keys<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_engine<CompleteByteSlice, ()>,
+named!(create_option_engine<&[u8], ()>,
     do_parse!(
         tag_no_case!("engine") >>
         opt_multispace >>
@@ -73,7 +72,7 @@ named!(create_option_engine<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_auto_increment<CompleteByteSlice, ()>,
+named!(create_option_auto_increment<&[u8], ()>,
     do_parse!(
         tag_no_case!("auto_increment") >>
         opt_multispace >>
@@ -84,7 +83,7 @@ named!(create_option_auto_increment<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_default_charset<CompleteByteSlice, ()>,
+named!(create_option_default_charset<&[u8], ()>,
     do_parse!(
         tag_no_case!("default charset") >>
         opt_multispace >>
@@ -102,7 +101,7 @@ named!(create_option_default_charset<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_collate<CompleteByteSlice, ()>,
+named!(create_option_collate<&[u8], ()>,
     do_parse!(
         tag_no_case!("collate") >>
         opt_multispace >>
@@ -114,7 +113,7 @@ named!(create_option_collate<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_comment<CompleteByteSlice, ()>,
+named!(create_option_comment<&[u8], ()>,
     do_parse!(
         tag_no_case!("comment") >>
         opt_multispace >>
@@ -125,7 +124,7 @@ named!(create_option_comment<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_max_rows<CompleteByteSlice, ()>,
+named!(create_option_max_rows<&[u8], ()>,
     do_parse!(
         tag_no_case!("max_rows") >>
         opt_multispace >>
@@ -136,7 +135,7 @@ named!(create_option_max_rows<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_avg_row_length<CompleteByteSlice, ()>,
+named!(create_option_avg_row_length<&[u8], ()>,
     do_parse!(
         tag_no_case!("avg_row_length") >>
         opt_multispace >>
@@ -147,7 +146,7 @@ named!(create_option_avg_row_length<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_row_format<CompleteByteSlice, ()>,
+named!(create_option_row_format<&[u8], ()>,
     do_parse!(
         tag_no_case!("row_format") >>
         opt_multispace >>
@@ -165,7 +164,7 @@ named!(create_option_row_format<CompleteByteSlice, ()>,
     )
 );
 
-named!(create_option_key_block_size<CompleteByteSlice, ()>,
+named!(create_option_key_block_size<&[u8], ()>,
     do_parse!(
         tag_no_case!("key_block_size") >>
         opt_multispace >>
@@ -182,8 +181,8 @@ mod tests {
 
     fn should_parse_all(qstring: &str) {
         assert_eq!(
-            Ok((CompleteByteSlice(&b""[..]), ())),
-            table_options(CompleteByteSlice(qstring.as_bytes()))
+            Ok((&[u8](&b""[..]), ())),
+            table_options(&[u8](qstring.as_bytes()))
         )
     }
 

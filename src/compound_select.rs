@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -52,7 +51,7 @@ impl fmt::Display for CompoundSelectStatement {
 }
 
 // Parse compound operator
-named!(compound_op<CompleteByteSlice, CompoundSelectOperator>,
+named!(compound_op<&[u8], CompoundSelectOperator>,
     alt!(
           do_parse!(
               tag_no_case!("union") >>
@@ -79,7 +78,7 @@ named!(compound_op<CompleteByteSlice, CompoundSelectOperator>,
 );
 
 // Parse compound selection
-named!(pub compound_selection<CompleteByteSlice, CompoundSelectStatement>,
+named!(pub compound_selection<&[u8], CompoundSelectStatement>,
     do_parse!(
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
@@ -122,8 +121,8 @@ mod tests {
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
         let qstr2 = "(SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating);";
-        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
-        let res2 = compound_selection(CompleteByteSlice(qstr2.as_bytes()));
+        let res = compound_selection(&[u8](qstr.as_bytes()));
+        let res2 = compound_selection(&[u8](qstr2.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -161,7 +160,7 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote \
                     UNION SELECT id, stars from Rating \
                     UNION DISTINCT SELECT 42, 5 FROM Vote;";
-        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = compound_selection(&[u8](qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -210,7 +209,7 @@ mod tests {
     #[test]
     fn union_all() {
         let qstr = "SELECT id, 1 FROM Vote UNION ALL SELECT id, stars from Rating;";
-        let res = compound_selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = compound_selection(&[u8](qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],

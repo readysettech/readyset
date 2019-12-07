@@ -1,4 +1,3 @@
-use nom::types::CompleteByteSlice;
 use std::{fmt, str};
 
 use common::{opt_multispace, statement_terminator, table_list};
@@ -28,7 +27,7 @@ impl fmt::Display for DropTableStatement {
     }
 }
 
-named!(pub drop_table<CompleteByteSlice, DropTableStatement>,
+named!(pub drop_table<&[u8], DropTableStatement>,
     do_parse!(
         tag_no_case!("drop table") >>
         if_exists: opt!(delimited!(opt_multispace, tag_no_case!("if exists"), opt_multispace)) >>
@@ -58,7 +57,7 @@ mod tests {
     #[test]
     fn simple_drop_table() {
         let qstring = "DROP TABLE users;";
-        let res = drop_table(CompleteByteSlice(qstring.as_bytes()));
+        let res = drop_table(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             DropTableStatement {
@@ -72,7 +71,7 @@ mod tests {
     fn format_drop_table() {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
         let expected = "DROP TABLE IF EXISTS users, posts";
-        let res = drop_table(CompleteByteSlice(qstring.as_bytes()));
+        let res = drop_table(&[u8](qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }
