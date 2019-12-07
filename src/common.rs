@@ -1,4 +1,6 @@
-use nom::{alphanumeric, digit, is_alphanumeric, line_ending, multispace, IResult};
+use nom::IResult;
+use nom::character::is_alphanumeric;
+use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace1};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::str;
@@ -334,7 +336,7 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 
 #[inline]
 fn len_as_u16(len: &[u8]) -> u16 {
-    match str::from_utf8(*len) {
+    match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => v,
             Err(e) => panic!(e),
@@ -346,14 +348,14 @@ fn len_as_u16(len: &[u8]) -> u16 {
 named!(pub precision<&[u8], (u8, Option<u8>)>,
     delimited!(tag!("("),
                do_parse!(
-                   m: digit >>
+                   m: digit1 >>
                    d: opt!(do_parse!(
                              tag!(",") >>
                              opt_multispace >>
-                             d: digit >>
+                             d: digit1 >>
                              (d)
                         )) >>
-                   ((m.0[0], d.map(|r| r.0[0])))
+                   ((m[0], d.map(|r| r[0])))
                ),
                tag!(")"))
 );
@@ -371,13 +373,13 @@ named!(pub type_identifier<&[u8], SqlType>,
           )
         | do_parse!(
               tag_no_case!("timestamp") >>
-              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+              _len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
               opt_multispace >>
               (SqlType::Timestamp)
           )
          | do_parse!(
                tag_no_case!("varbinary") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: delimited!(tag!("("), digit1, tag!(")")) >>
                opt_multispace >>
                (SqlType::Varbinary(len_as_u16(len)))
            )
@@ -399,26 +401,26 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("varchar") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: delimited!(tag!("("), digit1, tag!(")")) >>
                opt_multispace >>
                _binary: opt!(tag_no_case!("binary")) >>
                (SqlType::Varchar(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("binary") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: delimited!(tag!("("), digit1, tag!(")")) >>
                opt_multispace >>
                (SqlType::Binary(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("varbinary") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: delimited!(tag!("("), digit1, tag!(")")) >>
                opt_multispace >>
                (SqlType::Varbinary(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("tinyint") >>
-               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
                opt_multispace >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
@@ -435,7 +437,7 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("bigint") >>
-               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
                opt_multispace >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
@@ -469,7 +471,7 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("datetime") >>
-               fsp: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               fsp: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
                (SqlType::DateTime(match fsp {
                    Some(fsp) => len_as_u16(fsp),
                    None => 0 as u16,
@@ -495,14 +497,14 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("char") >>
-               len: delimited!(tag!("("), digit, tag!(")")) >>
+               len: delimited!(tag!("("), digit1, tag!(")")) >>
                opt_multispace >>
                _binary: opt!(tag_no_case!("binary")) >>
                (SqlType::Char(len_as_u16(len)))
            )
          | do_parse!(
                alt!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
-               len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
                opt_multispace >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
@@ -545,7 +547,7 @@ named!(pub function_arguments<&[u8], (FunctionArguments, bool)>,
        do_parse!(
            distinct: opt!(do_parse!(
                tag_no_case!("distinct") >>
-               multispace >>
+               multispace1 >>
                ()
            )) >>
            args: alt_complete!(
@@ -596,9 +598,9 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                    do_parse!(
                                        opt_multispace >>
                                        tag_no_case!("separator") >>
-                                       sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) >>
+                                       sep: delimited!(tag!("'"), opt!(alphanumeric1), tag!("'")) >>
                                        opt_multispace >>
-                                       (sep.unwrap_or(&[u8](&[])))
+                                       (sep.unwrap_or(&[]))
                                    )
                                ) >>
                                (column, seperator)
@@ -635,16 +637,16 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
                 do_parse!(
                     tbl_name: sql_identifier >>
                     tag!(".") >>
-                    (str::from_utf8(*tbl_name).unwrap())
+                    (tbl_name)
                 )
             ) >>
             column: sql_identifier >>
             (Column {
-                name: String::from(str::from_utf8(*column).unwrap()),
+                name: str::from_utf8(column).unwrap().to_owned(), // TODO: is unwrap fine?
                 alias: None,
                 table: match table {
                     None => None,
-                    Some(t) => Some(String::from(t)),
+                    Some(t) => Some(str::from_utf8(t).unwrap().to_owned()) // TODO: is unwrap fine?
                 },
                 function: None,
             })
@@ -676,7 +678,7 @@ named!(pub column_identifier<&[u8], Column>,
                 do_parse!(
                     tbl_name: sql_identifier >>
                     tag!(".") >>
-                    (str::from_utf8(*tbl_name).unwrap())
+                    (tbl_name)
                 )
             ) >>
             column: sql_identifier >>
@@ -689,7 +691,7 @@ named!(pub column_identifier<&[u8], Column>,
                 },
                 table: match table {
                     None => None,
-                    Some(t) => Some(String::from(t)),
+                    Some(t) => Some(str::from_utf8(t).unwrap().to_owned()), // TODO: is unwrap fine?
                 },
                 function: None,
             })
@@ -697,7 +699,7 @@ named!(pub column_identifier<&[u8], Column>,
     )
 );
 
-// Parses a SQL identifier (alphanumeric and "_").
+// Parses a SQL identifier (alphanumeric1 and "_").
 named!(pub sql_identifier<&[u8], &[u8]>,
     alt!(
           do_parse!(
@@ -713,8 +715,8 @@ named!(pub sql_identifier<&[u8], &[u8]>,
 // Parse an unsigned integer.
 named!(pub unsigned_number<&[u8], u64>,
     do_parse!(
-        d: digit >>
-        (FromStr::from_str(str::from_utf8(*d).unwrap()).unwrap())
+        d: digit1 >>
+        (FromStr::from_str(str::from_utf8(d).unwrap()).unwrap())
     )
 );
 
@@ -731,7 +733,7 @@ named!(pub statement_terminator<&[u8], ()>,
 );
 
 named!(pub opt_multispace<&[u8], Option<&[u8]>>,
-       opt!(multispace)
+       opt!(multispace1)
 );
 
 // Parse binary comparison operators
@@ -753,10 +755,10 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
 // Parse rule for AS-based aliases for SQL entities.
 named!(pub as_alias<&[u8], &str>,
     do_parse!(
-        multispace >>
-        opt!(do_parse!(tag_no_case!("as") >> multispace >> ())) >>
+        multispace1 >>
+        opt!(do_parse!(tag_no_case!("as") >> multispace1 >> ())) >>
         alias: sql_identifier >>
-        (str::from_utf8(*alias).unwrap())
+        (str::from_utf8(alias).unwrap())
     )
 );
 
@@ -881,9 +883,9 @@ named!(pub table_list<&[u8], Vec<Table> >,
 named!(pub integer_literal<&[u8], Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
-        val: digit >>
+        val: digit1 >>
         ({
-            let mut intval = i64::from_str(str::from_utf8(*val).unwrap()).unwrap();
+            let mut intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
             if sign.is_some() {
                 intval *= -1;
             }
@@ -896,9 +898,9 @@ named!(pub integer_literal<&[u8], Literal>,
 named!(pub float_literal<&[u8], Literal>,
     do_parse!(
         sign: opt!(tag!("-")) >>
-        mant: digit >>
+        mant: digit1 >>
         tag!(".") >>
-        frac: digit >>
+        frac: digit1 >>
         ({
             let unpack = |v: &[u8]| -> i32 {
                 i32::from_str(str::from_utf8(v).unwrap()).unwrap()
@@ -1012,7 +1014,7 @@ named!(pub table_reference<&[u8], Table>,
         table: sql_identifier >>
         alias: opt!(as_alias) >>
         (Table {
-            name: String::from(str::from_utf8(*table).unwrap()),
+            name: String::from(str::from_utf8(table).unwrap()),
             alias: match alias {
                 Some(a) => Some(String::from(a)),
                 None => None,
@@ -1026,9 +1028,9 @@ named!(pub parse_comment<&[u8], String>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("comment") >>
-        multispace >>
+        multispace1 >>
         comment: delimited!(tag!("'"), take_until!("'"), tag!("'")) >>
-        (String::from(str::from_utf8(*comment).unwrap()))
+        (String::from(str::from_utf8(comment).unwrap()))
     )
 );
 
@@ -1038,12 +1040,12 @@ mod tests {
 
     #[test]
     fn sql_identifiers() {
-        let id1 = &[u8](b"foo");
-        let id2 = &[u8](b"f_o_o");
-        let id3 = &[u8](b"foo12");
-        let id4 = &[u8](b":fo oo");
-        let id5 = &[u8](b"primary ");
-        let id6 = &[u8](b"`primary`");
+        let id1 = b"foo";
+        let id2 = b"f_o_o";
+        let id3 = b"foo12";
+        let id4 = b":fo oo";
+        let id5 = b"primary ";
+        let id6 = b"`primary`";
 
         assert!(sql_identifier(id1).is_ok());
         assert!(sql_identifier(id2).is_ok());
@@ -1060,11 +1062,11 @@ mod tests {
 
         let res_ok: Vec<_> = ok
             .iter()
-            .map(|t| type_identifier(&[u8](t.as_bytes())).unwrap().1)
+            .map(|t| type_identifier(t.as_bytes()).unwrap().1)
             .collect();
         let res_not_ok: Vec<_> = not_ok
             .iter()
-            .map(|t| type_identifier(&[u8](t.as_bytes())).is_ok())
+            .map(|t| type_identifier(t.as_bytes()).is_ok())
             .collect();
 
         assert_eq!(
@@ -1079,7 +1081,7 @@ mod tests {
     fn simple_column_function() {
         let qs = b"max(addr_id)";
 
-        let res = column_identifier(&[u8](qs));
+        let res = column_identifier(qs);
         let expected = Column {
             name: String::from("max(addr_id)"),
             alias: None,
@@ -1093,7 +1095,7 @@ mod tests {
 
     #[test]
     fn comment_data() {
-        let res = parse_comment(&[u8](b" COMMENT 'test'"));
+        let res = parse_comment(b" COMMENT 'test'");
         assert_eq!(res.unwrap().1, "test");
     }
 
@@ -1102,23 +1104,23 @@ mod tests {
         let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
         for quote in [&b"'"[..], &b"\""[..]].iter() {
             let quoted = &[quote, &all_escaped[..], quote].concat();
-            let res = string_literal(&[u8](quoted));
+            let res = string_literal(quoted);
             let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-            assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
+            assert_eq!(res, Ok((&b""[..]), expected));
         }
     }
 
     #[test]
     fn literal_string_single_quote() {
-        let res = string_literal(&[u8](b"'a''b'"));
+        let res = string_literal(b"'a''b'");
         let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
+        assert_eq!(res, Ok((&b""[..]), expected));
     }
 
     #[test]
     fn literal_string_double_quote() {
-        let res = string_literal(&[u8](br#""a""b""#));
+        let res = string_literal(br#""a""b""#);
         let expected = Literal::String(r#"a"b"#.to_string());
-        assert_eq!(res, Ok((&[u8](&b""[..]), expected)));
+        assert_eq!(res, Ok((&b""[..]), expected));
     }
 }
