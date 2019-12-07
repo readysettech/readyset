@@ -1,5 +1,4 @@
 use nom::multispace;
-use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 
@@ -132,7 +131,7 @@ impl fmt::Display for SelectStatement {
 }
 
 // Parse GROUP BY clause
-named!(group_by_clause<CompleteByteSlice, GroupByClause>,
+named!(group_by_clause<&[u8], GroupByClause>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("group by") >>
@@ -155,7 +154,7 @@ named!(group_by_clause<CompleteByteSlice, GroupByClause>,
 );
 
 // Parse LIMIT clause
-named!(pub limit_clause<CompleteByteSlice, LimitClause>,
+named!(pub limit_clause<&[u8], LimitClause>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("limit") >>
@@ -180,7 +179,7 @@ named!(pub limit_clause<CompleteByteSlice, LimitClause>,
 );
 
 // Parse JOIN clause
-named!(join_clause<CompleteByteSlice, JoinClause>,
+named!(join_clause<&[u8], JoinClause>,
     do_parse!(
         opt_multispace >>
         _natural: opt!(tag_no_case!("natural")) >>
@@ -221,7 +220,7 @@ named!(join_clause<CompleteByteSlice, JoinClause>,
 );
 
 // Different options for the right hand side of the join operator in a `join_clause`
-named!(join_rhs<CompleteByteSlice, JoinRightSide>,
+named!(join_rhs<&[u8], JoinRightSide>,
     alt!(
           do_parse!(
               select: delimited!(tag!("("), nested_selection, tag!(")")) >>
@@ -244,7 +243,7 @@ named!(join_rhs<CompleteByteSlice, JoinRightSide>,
 );
 
 // Parse WHERE clause of a selection
-named!(pub where_clause<CompleteByteSlice, ConditionExpression>,
+named!(pub where_clause<&[u8], ConditionExpression>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("where") >>
@@ -255,7 +254,7 @@ named!(pub where_clause<CompleteByteSlice, ConditionExpression>,
 );
 
 // Parse rule for a SQL selection query.
-named!(pub selection<CompleteByteSlice, SelectStatement>,
+named!(pub selection<&[u8], SelectStatement>,
     do_parse!(
         select: nested_selection >>
         statement_terminator >>
@@ -263,7 +262,7 @@ named!(pub selection<CompleteByteSlice, SelectStatement>,
     )
 );
 
-named!(pub nested_selection<CompleteByteSlice, SelectStatement>,
+named!(pub nested_selection<&[u8], SelectStatement>,
     do_parse!(
         tag_no_case!("select") >>
         multispace >>
@@ -312,7 +311,7 @@ mod tests {
     fn simple_select() {
         let qstring = "SELECT id, name FROM users;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -327,7 +326,7 @@ mod tests {
     fn more_involved_select() {
         let qstring = "SELECT users.id, users.name FROM users;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -344,7 +343,7 @@ mod tests {
 
         let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -372,7 +371,7 @@ mod tests {
     fn select_all() {
         let qstring = "SELECT * FROM users;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -387,7 +386,7 @@ mod tests {
     fn select_all_in_table() {
         let qstring = "SELECT users.* FROM users, votes;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -402,7 +401,7 @@ mod tests {
     fn spaces_optional() {
         let qstring = "SELECT id,name FROM users;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -419,8 +418,8 @@ mod tests {
         let qstring_uc = "SELECT id, name FROM users;";
 
         assert_eq!(
-            selection(CompleteByteSlice(qstring_lc.as_bytes())).unwrap(),
-            selection(CompleteByteSlice(qstring_uc.as_bytes())).unwrap()
+            selection(&[u8](qstring_lc.as_bytes())).unwrap(),
+            selection(&[u8](qstring_uc.as_bytes())).unwrap()
         );
     }
 
@@ -430,9 +429,9 @@ mod tests {
         let qstring_nosem = "select id, name from users";
         let qstring_linebreak = "select id, name from users\n";
 
-        let r1 = selection(CompleteByteSlice(qstring_sem.as_bytes())).unwrap();
-        let r2 = selection(CompleteByteSlice(qstring_nosem.as_bytes())).unwrap();
-        let r3 = selection(CompleteByteSlice(qstring_linebreak.as_bytes())).unwrap();
+        let r1 = selection(&[u8](qstring_sem.as_bytes())).unwrap();
+        let r2 = selection(&[u8](qstring_nosem.as_bytes())).unwrap();
+        let r3 = selection(&[u8](qstring_linebreak.as_bytes())).unwrap();
         assert_eq!(r1, r2);
         assert_eq!(r2, r3);
     }
@@ -441,7 +440,7 @@ mod tests {
     fn where_clause() {
         let qstring = "select * from ContactInfo where email=?;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
 
         let expected_left = Base(Field(Column::from("email")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
@@ -474,8 +473,8 @@ mod tests {
             offset: 10,
         };
 
-        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
-        let res2 = selection(CompleteByteSlice(qstring2.as_bytes()));
+        let res1 = selection(&[u8](qstring1.as_bytes()));
+        let res2 = selection(&[u8](qstring2.as_bytes()));
         assert_eq!(res1.unwrap().1.limit, Some(expected_lim1));
         assert_eq!(res2.unwrap().1.limit, Some(expected_lim2));
     }
@@ -485,7 +484,7 @@ mod tests {
         let qstring1 = "select * from PaperTag as t;";
         // let qstring2 = "select * from PaperTag t;";
 
-        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
+        let res1 = selection(&[u8](qstring1.as_bytes()));
         assert_eq!(
             res1.clone().unwrap().1,
             SelectStatement {
@@ -506,7 +505,7 @@ mod tests {
         let qstring1 = "select name as TagName from PaperTag;";
         let qstring2 = "select PaperTag.name as TagName from PaperTag;";
 
-        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
+        let res1 = selection(&[u8](qstring1.as_bytes()));
         assert_eq!(
             res1.clone().unwrap().1,
             SelectStatement {
@@ -520,7 +519,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        let res2 = selection(CompleteByteSlice(qstring2.as_bytes()));
+        let res2 = selection(&[u8](qstring2.as_bytes()));
         assert_eq!(
             res2.clone().unwrap().1,
             SelectStatement {
@@ -541,7 +540,7 @@ mod tests {
         let qstring1 = "select name TagName from PaperTag;";
         let qstring2 = "select PaperTag.name TagName from PaperTag;";
 
-        let res1 = selection(CompleteByteSlice(qstring1.as_bytes()));
+        let res1 = selection(&[u8](qstring1.as_bytes()));
         assert_eq!(
             res1.clone().unwrap().1,
             SelectStatement {
@@ -555,7 +554,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        let res2 = selection(CompleteByteSlice(qstring2.as_bytes()));
+        let res2 = selection(&[u8](qstring2.as_bytes()));
         assert_eq!(
             res2.clone().unwrap().1,
             SelectStatement {
@@ -575,7 +574,7 @@ mod tests {
     fn distinct() {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let expected_left = Base(Field(Column::from("paperId")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
@@ -598,7 +597,7 @@ mod tests {
     fn simple_condition_expr() {
         let qstring = "select infoJson from PaperStorage where paperId=? and paperStorageId=?;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
 
         let left_ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("paperId")))),
@@ -631,7 +630,7 @@ mod tests {
     #[test]
     fn where_and_limit_clauses() {
         let qstring = "select * from users where id = ? limit 10\n";
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
 
         let expected_lim = Some(LimitClause {
             limit: 10,
@@ -660,7 +659,7 @@ mod tests {
     fn aggregation_column() {
         let qstring = "SELECT max(addr_id) FROM address;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
         assert_eq!(
             res.unwrap().1,
@@ -681,7 +680,7 @@ mod tests {
     fn aggregation_column_with_alias() {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
@@ -700,7 +699,7 @@ mod tests {
     fn count_all() {
         let qstring = "SELECT COUNT(*) FROM votes GROUP BY aid;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let agg_expr = FunctionExpression::CountStar;
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
@@ -723,7 +722,7 @@ mod tests {
     fn count_distinct() {
         let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let agg_expr =
             FunctionExpression::Count(FunctionArguments::Column(Column::from("vote_id")), true);
         let expected_stmt = SelectStatement {
@@ -905,7 +904,7 @@ mod tests {
         let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let expected_where_cond = Some(LogicalOp(ConditionTree {
             left: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("item.i_a_id")))),
@@ -941,7 +940,7 @@ mod tests {
     fn simple_joins() {
         let qstring = "select paperId from PaperConflict join PCMember using (contactId);";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("PaperConflict")],
             fields: columns(&["paperId"]),
@@ -963,7 +962,7 @@ mod tests {
                        join PaperReview on (PCMember.contactId=PaperReview.contactId) \
                        order by contactId;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("PCMember.contactId")))),
             right: Box::new(Base(Field(Column::from("PaperReview.contactId")))),
@@ -990,7 +989,7 @@ mod tests {
                        from PCMember \
                        join PaperReview on PCMember.contactId=PaperReview.contactId \
                        order by contactId;";
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         assert_eq!(res.unwrap().1, expected);
     }
 
@@ -1010,7 +1009,7 @@ mod tests {
                        (contactId) left join ChairAssistant using (contactId) left join Chair \
                        using (contactId) where ContactInfo.contactId=?;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(&[u8](qstring.as_bytes()));
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("ContactInfo.contactId")))),
             right: Box::new(Base(Literal(Literal::Placeholder))),
@@ -1052,7 +1051,7 @@ mod tests {
                     WHERE orders.o_c_id IN (SELECT o_c_id FROM orders, order_line \
                     WHERE orders.o_id = order_line.ol_o_id);";
 
-        let res = selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = selection(&[u8](qstr.as_bytes()));
         let inner_where_clause = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_id")))),
             right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
@@ -1089,7 +1088,7 @@ mod tests {
                     WHERE orders.o_id = order_line.ol_o_id \
                     AND orders.o_id > (SELECT MAX(o_id) FROM orders));";
 
-        let res = selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = selection(&[u8](qstr.as_bytes()));
 
         let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("o_id")));
         let recursive_select = SelectStatement {
@@ -1149,19 +1148,19 @@ mod tests {
         let t0 = b"(SELECT ol_i_id FROM order_line)";
         let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
-        assert!(join_rhs(CompleteByteSlice(t0)).is_ok());
-        assert!(join_rhs(CompleteByteSlice(t1)).is_ok());
+        assert!(join_rhs(&[u8](t0)).is_ok());
+        assert!(join_rhs(&[u8](t1)).is_ok());
 
         let t0 = b"JOIN (SELECT ol_i_id FROM order_line) ON (orders.o_id = ol_i_id)";
         let t1 = b"JOIN (SELECT ol_i_id FROM order_line) AS ids ON (orders.o_id = ids.ol_i_id)";
 
-        assert!(join_clause(CompleteByteSlice(t0)).is_ok());
-        assert!(join_clause(CompleteByteSlice(t1)).is_ok());
+        assert!(join_clause(&[u8](t0)).is_ok());
+        assert!(join_clause(&[u8](t1)).is_ok());
 
         let qstr_with_alias = "SELECT o_id, ol_i_id FROM orders JOIN \
                                (SELECT ol_i_id FROM order_line) AS ids \
                                ON (orders.o_id = ids.ol_i_id);";
-        let res = selection(CompleteByteSlice(qstr_with_alias.as_bytes()));
+        let res = selection(&[u8](qstr_with_alias.as_bytes()));
 
         // N.B.: Don't alias the inner select to `inner`, which is, well, a SQL keyword!
         let inner_select = SelectStatement {
@@ -1193,7 +1192,7 @@ mod tests {
         use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 
         let qstr = "SELECT MAX(o_id)-3333 FROM orders;";
-        let res = selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = selection(&[u8](qstr.as_bytes()));
 
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
@@ -1223,7 +1222,7 @@ mod tests {
         use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 
         let qstr = "SELECT max(o_id) * 2 as double_max FROM orders;";
-        let res = selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = selection(&[u8](qstr.as_bytes()));
 
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
@@ -1255,7 +1254,7 @@ mod tests {
                     JOIN `django_content_type`
                       ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
                     WHERE `auth_permission`.`content_type_id` IN (0);";
-        let res = selection(CompleteByteSlice(qstr.as_bytes()));
+        let res = selection(&[u8](qstr.as_bytes()));
 
         let expected_where_clause = Some(ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),

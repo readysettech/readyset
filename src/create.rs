@@ -1,5 +1,4 @@
 use nom::{digit, multispace};
-use nom::types::CompleteByteSlice;
 use std::fmt;
 use std::str;
 use std::str::FromStr;
@@ -95,7 +94,7 @@ impl fmt::Display for CreateViewStatement {
 }
 
 // MySQL grammar element for index column definition (§13.1.18, index_col_name)
-named!(pub index_col_name<CompleteByteSlice, (Column, Option<u16>, Option<OrderType>)>,
+named!(pub index_col_name<&[u8], (Column, Option<u16>, Option<OrderType>)>,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
@@ -106,7 +105,7 @@ named!(pub index_col_name<CompleteByteSlice, (Column, Option<u16>, Option<OrderT
 );
 
 // Helper for list of index columns
-named!(pub index_col_list<CompleteByteSlice, Vec<Column> >,
+named!(pub index_col_list<&[u8], Vec<Column> >,
        many0!(
            do_parse!(
                entry: index_col_name >>
@@ -125,7 +124,7 @@ named!(pub index_col_list<CompleteByteSlice, Vec<Column> >,
 );
 
 // Parse rule for an individual key specification.
-named!(pub key_specification<CompleteByteSlice, TableKey>,
+named!(pub key_specification<&[u8], TableKey>,
     alt!(
           do_parse!(
               tag_no_case!("fulltext") >>
@@ -191,7 +190,7 @@ named!(pub key_specification<CompleteByteSlice, TableKey>,
 );
 
 // Parse rule for a comma-separated list.
-named!(pub key_specification_list<CompleteByteSlice, Vec<TableKey>>,
+named!(pub key_specification_list<&[u8], Vec<TableKey>>,
        many1!(
            do_parse!(
                key: key_specification >>
@@ -209,7 +208,7 @@ named!(pub key_specification_list<CompleteByteSlice, Vec<TableKey>>,
 );
 
 // Parse rule for a comma-separated list.
-named!(pub field_specification_list<CompleteByteSlice, Vec<ColumnSpecification> >,
+named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
        many1!(
            do_parse!(
                identifier: column_identifier_no_alias >>
@@ -246,7 +245,7 @@ named!(pub field_specification_list<CompleteByteSlice, Vec<ColumnSpecification> 
 );
 
 // Parse rule for a column definition contraint.
-named!(pub column_constraint<CompleteByteSlice, Option<ColumnConstraint>>,
+named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
     alt!(
           do_parse!(
               opt_multispace >>
@@ -323,7 +322,7 @@ named!(pub column_constraint<CompleteByteSlice, Option<ColumnConstraint>>,
 
 // Parse rule for a SQL CREATE TABLE query.
 // TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
-named!(pub creation<CompleteByteSlice, CreateTableStatement>,
+named!(pub creation<&[u8], CreateTableStatement>,
     do_parse!(
         tag_no_case!("create") >>
         multispace >>
@@ -401,7 +400,7 @@ named!(pub creation<CompleteByteSlice, CreateTableStatement>,
 );
 
 // Parse rule for a SQL CREATE VIEW query.
-named!(pub view_creation<CompleteByteSlice, CreateViewStatement>,
+named!(pub view_creation<&[u8], CreateViewStatement>,
     do_parse!(
         tag_no_case!("create") >>
         multispace >>
@@ -439,15 +438,15 @@ mod tests {
         let type2 = "bigint(20) unsigned";
         let type3 = "bigint(20) signed";
 
-        let res = type_identifier(CompleteByteSlice(type0.as_bytes()));
+        let res = type_identifier(&[u8](type0.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
-        let res = type_identifier(CompleteByteSlice(type1.as_bytes()));
+        let res = type_identifier(&[u8](type1.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::Varchar(255));
-        let res = type_identifier(CompleteByteSlice(type2.as_bytes()));
+        let res = type_identifier(&[u8](type2.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
-        let res = type_identifier(CompleteByteSlice(type3.as_bytes()));
+        let res = type_identifier(&[u8](type3.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
-        let res = type_identifier(CompleteByteSlice(type2.as_bytes()));
+        let res = type_identifier(&[u8](type2.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
     }
 
@@ -457,7 +456,7 @@ mod tests {
         // because it is never validly the end of a query
         let qstring = "id bigint(20), name varchar(255),";
 
-        let res = field_specification_list(CompleteByteSlice(qstring.as_bytes()));
+        let res = field_specification_list(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             vec![
@@ -471,7 +470,7 @@ mod tests {
     fn simple_create() {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255));";
 
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -489,7 +488,7 @@ mod tests {
     #[test]
     fn create_without_space_after_tablename() {
         let qstring = "CREATE TABLE t(x integer);";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -506,7 +505,7 @@ mod tests {
     fn mediawiki_create() {
         let qstring = "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -553,7 +552,7 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-        creation(CompleteByteSlice(qstring.as_bytes())).unwrap();
+        creation(&[u8](qstring.as_bytes())).unwrap();
     }
 
     #[test]
@@ -566,7 +565,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-        creation(CompleteByteSlice(qstring.as_bytes())).unwrap();
+        creation(&[u8](qstring.as_bytes())).unwrap();
     }
 
     #[test]
@@ -586,7 +585,7 @@ mod tests {
           KEY `el_index_60` (`el_index_60`,`el_id`),
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
         )";
-        creation(CompleteByteSlice(qstring.as_bytes())).unwrap();
+        creation(&[u8](qstring.as_bytes())).unwrap();
     }
 
     #[test]
@@ -595,7 +594,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        PRIMARY KEY (id));";
 
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -614,7 +613,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        UNIQUE KEY id_k (id));";
 
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -644,7 +643,7 @@ mod tests {
                        `object_repr` varchar(200) NOT NULL,
                        `action_flag` smallint UNSIGNED NOT NULL,
                        `change_message` longtext NOT NULL);";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -700,7 +699,7 @@ mod tests {
         let qstring = "CREATE TABLE `auth_group` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        `name` varchar(80) NOT NULL UNIQUE)";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -735,7 +734,7 @@ mod tests {
         let expected = "CREATE TABLE auth_group (\
                         id INT(32) AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         name VARCHAR(80) NOT NULL UNIQUE)";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
@@ -746,7 +745,7 @@ mod tests {
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
-        let res = view_creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = view_creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
@@ -777,7 +776,7 @@ mod tests {
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
 
-        let res = view_creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = view_creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
@@ -813,7 +812,7 @@ mod tests {
     fn format_create_view() {
         let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
         let expected = "CREATE VIEW v AS SELECT * FROM t";
-        let res = view_creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = view_creation(&[u8](qstring.as_bytes()));
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
@@ -829,7 +828,7 @@ mod tests {
             INDEX `thread_id`  (`thread_id`),
             INDEX `index_comments_on_user_id`  (`user_id`))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-        let res = creation(CompleteByteSlice(qstring.as_bytes()));
+        let res = creation(&[u8](qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {

@@ -1,12 +1,11 @@
-use nom::types::CompleteByteSlice;
 
-named!(keyword_follow_char<CompleteByteSlice, CompleteByteSlice>,
+named!(keyword_follow_char<&[u8], &[u8]>,
        peek!(alt!(tag!(" ") | tag!("\n") | tag!(";") |
                            tag!("(") | tag!(")") | tag!("\t") |
                            tag!(",") | tag!("=") | eof!()))
 );
 
-named!(keyword_a_to_c<CompleteByteSlice, CompleteByteSlice>,
+named!(keyword_a_to_c<&[u8], &[u8]>,
        alt!(
           terminated!(tag_no_case!("ABORT"), keyword_follow_char)
         | terminated!(tag_no_case!("ACTION"), keyword_follow_char)
@@ -41,7 +40,7 @@ named!(keyword_a_to_c<CompleteByteSlice, CompleteByteSlice>,
     )
 );
 
-named!(keyword_d_to_i<CompleteByteSlice, CompleteByteSlice>,
+named!(keyword_d_to_i<&[u8], &[u8]>,
     alt!(
           terminated!(tag_no_case!("DATABASE"), keyword_follow_char)
         | terminated!(tag_no_case!("DEFAULT"), keyword_follow_char)
@@ -86,7 +85,7 @@ named!(keyword_d_to_i<CompleteByteSlice, CompleteByteSlice>,
     )
 );
 
-named!(keyword_j_to_s<CompleteByteSlice, CompleteByteSlice>,
+named!(keyword_j_to_s<&[u8], &[u8]>,
     alt!(
           terminated!(tag_no_case!("ORDER"), keyword_follow_char)
         | terminated!(tag_no_case!("JOIN"), keyword_follow_char)
@@ -127,7 +126,7 @@ named!(keyword_j_to_s<CompleteByteSlice, CompleteByteSlice>,
     )
 );
 
-named!(keyword_t_to_z<CompleteByteSlice, CompleteByteSlice>,
+named!(keyword_t_to_z<&[u8], &[u8]>,
     alt!(
           terminated!(tag_no_case!("TABLE"), keyword_follow_char)
         | terminated!(tag_no_case!("TEMP"), keyword_follow_char)
@@ -152,7 +151,7 @@ named!(keyword_t_to_z<CompleteByteSlice, CompleteByteSlice>,
 );
 
 // Matches any SQL reserved keyword
-named!(pub sql_keyword<CompleteByteSlice, CompleteByteSlice>,
+named!(pub sql_keyword<&[u8], &[u8]>,
     do_parse!(
         kw: alt!(
               keyword_a_to_c
@@ -164,7 +163,7 @@ named!(pub sql_keyword<CompleteByteSlice, CompleteByteSlice>,
 );
 
 pub fn escape_if_keyword(s: &str) -> String {
-    if sql_keyword(CompleteByteSlice(s.as_bytes())).is_ok() {
+    if sql_keyword(&[u8](s.as_bytes())).is_ok() {
         format!("`{}`", s)
     } else {
         s.to_owned()
