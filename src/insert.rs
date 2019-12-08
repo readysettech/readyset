@@ -1,4 +1,4 @@
-use nom::multispace;
+use nom::character::complete::multispace1;
 use std::fmt;
 use std::str;
 
@@ -57,10 +57,10 @@ impl fmt::Display for InsertStatement {
 named!(pub insertion<&[u8], InsertStatement>,
     do_parse!(
         tag_no_case!("insert") >>
-        ignore: opt!(preceded!(multispace, tag_no_case!("ignore"))) >>
-        multispace >>
+        ignore: opt!(preceded!(multispace1, tag_no_case!("ignore"))) >>
+        multispace1 >>
         tag_no_case!("into") >>
-        multispace >>
+        multispace1 >>
         table: table_reference >>
         opt_multispace >>
         fields: opt!(do_parse!(
@@ -69,7 +69,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 fields: field_list >>
                 opt_multispace >>
                 tag!(")") >>
-                multispace >>
+                multispace1 >>
                 (fields)
                 )
             ) >>
@@ -94,7 +94,7 @@ named!(pub insertion<&[u8], InsertStatement>,
         upd_if_dup: opt!(do_parse!(
                 opt_multispace >>
                 tag_no_case!("on duplicate key update") >>
-                multispace >>
+                multispace1 >>
                 assigns: assignment_expr_list >>
                 (assigns)
         )) >>
@@ -124,7 +124,7 @@ mod tests {
     fn simple_insert() {
         let qstring = "INSERT INTO users VALUES (42, \"test\");";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -140,7 +140,7 @@ mod tests {
     fn complex_insert() {
         let qstring = "INSERT INTO users VALUES (42, 'test', \"test\", CURRENT_TIMESTAMP);";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -161,7 +161,7 @@ mod tests {
     fn insert_with_field_names() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\");";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -178,7 +178,7 @@ mod tests {
     fn insert_without_spaces() {
         let qstring = "INSERT INTO users(id, name) VALUES(42, \"test\");";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -194,7 +194,7 @@ mod tests {
     fn multi_insert() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -213,7 +213,7 @@ mod tests {
     fn insert_with_parameters() {
         let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -230,7 +230,7 @@ mod tests {
         let qstring = "INSERT INTO keystores (`key`, `value`) VALUES (?, ?) \
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         let expected_ae = ArithmeticExpression {
             op: ArithmeticOperator::Add,
             left: ArithmeticBase::Column(Column::from("value")),
@@ -256,7 +256,7 @@ mod tests {
     fn insert_with_leading_value_whitespace() {
         let qstring = "INSERT INTO users (id, name) VALUES ( 42, \"test\");";
 
-        let res = insertion(&[u8](qstring.as_bytes()));
+        let res = insertion(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -267,5 +267,4 @@ mod tests {
             }
         );
     }
-
 }
