@@ -54,15 +54,19 @@ named!(pub sql_query<&[u8], SqlQuery>,
 );
 
 pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
-    where T: AsRef<[u8]> {
-    match sql_query(&[u8](input.as_ref())) {
+where
+    T: AsRef<[u8]>,
+{
+    match sql_query(input.as_ref()) {
         Ok((_, o)) => Ok(o),
         Err(_) => Err("failed to parse query"),
     }
 }
 
 pub fn parse_query<T>(input: T) -> Result<SqlQuery, &'static str>
-    where T: AsRef<str> {
+where
+    T: AsRef<str>,
+{
     parse_query_bytes(input.as_ref().trim().as_bytes())
 }
 
