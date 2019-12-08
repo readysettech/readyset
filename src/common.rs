@@ -1,6 +1,6 @@
-use nom::IResult;
-use nom::character::is_alphanumeric;
 use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace1};
+use nom::character::is_alphanumeric;
+use nom::IResult;
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::str;
@@ -923,27 +923,25 @@ fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
     let quote_slice: &[u8] = &[quote];
     let double_quote_slice: &[u8] = &[quote, quote];
     let backslash_quote: &[u8] = &[b'\\', quote];
-    delimited!(input,
+    delimited!(
+        input,
         tag!(quote_slice),
         fold_many0!(
             alt!(
-                is_not!(backslash_quote) |
-                map!(tag!(double_quote_slice), |_| quote_slice) |
-                map!(tag!("\\\\"), |_| &b"\\"[..]) |
-                map!(tag!("\\b"), |_| &b"\x7f"[..]) |
-                map!(tag!("\\r"), |_| &b"\r"[..]) |
-                map!(tag!("\\n"), |_| &b"\n"[..]) |
-                map!(tag!("\\t"), |_| &b"\t"[..]) |
-                map!(tag!("\\0"), |_| &b"\0"[..]) |
-                map!(tag!("\\Z"), |_| &b"\x1A"[..]) |
-                do_parse!(
-                        _escape: tag!("\\") >>
-                        escaped: take!(1) >>
-                        (escaped ))
+                is_not!(backslash_quote)
+                    | map!(tag!(double_quote_slice), |_| quote_slice)
+                    | map!(tag!("\\\\"), |_| &b"\\"[..])
+                    | map!(tag!("\\b"), |_| &b"\x7f"[..])
+                    | map!(tag!("\\r"), |_| &b"\r"[..])
+                    | map!(tag!("\\n"), |_| &b"\n"[..])
+                    | map!(tag!("\\t"), |_| &b"\t"[..])
+                    | map!(tag!("\\0"), |_| &b"\0"[..])
+                    | map!(tag!("\\Z"), |_| &b"\x1A"[..])
+                    | do_parse!(_escape: tag!("\\") >> escaped: take!(1) >> (escaped))
             ),
             Vec::new(),
             |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes.0);
+                acc.extend(bytes);
                 acc
             }
         ),
