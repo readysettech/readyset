@@ -907,18 +907,18 @@ named!(pub float_literal<&[u8], Literal>,
             };
             Literal::FixedPoint(Real {
                 integral: if sign.is_some() {
-                    -1 * unpack(mant.0)
+                    -1 * unpack(mant)
                 } else {
-                    unpack(mant.0)
+                    unpack(mant)
                 },
-                fractional: unpack(frac.0) as i32,
+                fractional: unpack(frac) as i32,
             })
         })
     )
 );
 
+// TODO: get this function to compile
 /// String literal value
-
 fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
     let quote_slice: &[u8] = &[quote];
     let double_quote_slice: &[u8] = &[quote, quote];
@@ -928,14 +928,14 @@ fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
         fold_many0!(
             alt!(
                 is_not!(backslash_quote) |
-                map!(tag!(double_quote_slice), |_| &[u8](quote_slice)) |
-                map!(tag!("\\\\"), |_| &[u8](&b"\\"[..])) |
-                map!(tag!("\\b"), |_| &[u8](&b"\x7f"[..])) |
-                map!(tag!("\\r"), |_| &[u8](&b"\r"[..])) |
-                map!(tag!("\\n"), |_| &[u8](&b"\n"[..])) |
-                map!(tag!("\\t"), |_| &[u8](&b"\t"[..])) |
-                map!(tag!("\\0"), |_| &[u8](&b"\0"[..])) |
-                map!(tag!("\\Z"), |_| &[u8](&b"\x1A"[..])) |
+                map!(tag!(double_quote_slice), |_| quote_slice) |
+                map!(tag!("\\\\"), |_| &b"\\"[..]) |
+                map!(tag!("\\b"), |_| &b"\x7f"[..]) |
+                map!(tag!("\\r"), |_| &b"\r"[..]) |
+                map!(tag!("\\n"), |_| &b"\n"[..]) |
+                map!(tag!("\\t"), |_| &b"\t"[..]) |
+                map!(tag!("\\0"), |_| &b"\0"[..]) |
+                map!(tag!("\\Z"), |_| &b"\x1A"[..]) |
                 do_parse!(
                         _escape: tag!("\\") >>
                         escaped: take!(1) >>
@@ -1106,7 +1106,7 @@ mod tests {
             let quoted = &[quote, &all_escaped[..], quote].concat();
             let res = string_literal(quoted);
             let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-            assert_eq!(res, Ok((&b""[..]), expected));
+            assert_eq!(res, Ok((&b""[..], expected)));
         }
     }
 
@@ -1114,13 +1114,13 @@ mod tests {
     fn literal_string_single_quote() {
         let res = string_literal(b"'a''b'");
         let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, Ok((&b""[..]), expected));
+        assert_eq!(res, Ok((&b""[..], expected)));
     }
 
     #[test]
     fn literal_string_double_quote() {
         let res = string_literal(br#""a""b""#);
         let expected = Literal::String(r#"a"b"#.to_string());
-        assert_eq!(res, Ok((&b""[..]), expected));
+        assert_eq!(res, Ok((&b""[..], expected)));
     }
 }
