@@ -1,4 +1,4 @@
-use nom::{alphanumeric, multispace};
+use nom::character::complete::{alphanumeric1, multispace1};
 
 use common::{
     integer_literal, opt_multispace, sql_identifier, string_literal,
@@ -15,7 +15,7 @@ named!(pub table_options<&[u8], ()>, do_parse!(
 
 named!(table_options_separator<&[u8], ()>, do_parse!(
     alt!(
-        map!(multispace, |_| ()) |
+        map!(multispace1, |_| ()) |
         do_parse!(
             opt_multispace >>
             tag!(",") >>
@@ -45,7 +45,7 @@ named!(create_option_type<&[u8], ()>,
         opt_multispace >>
         tag!("=") >>
         opt_multispace >>
-        alphanumeric >>
+        alphanumeric1 >>
         ()
     )
 );
@@ -67,7 +67,7 @@ named!(create_option_engine<&[u8], ()>,
         opt_multispace >>
         tag!("=") >>
         opt_multispace >>
-        opt!(alphanumeric) >>
+        opt!(alphanumeric1) >>
         ()
     )
 );
@@ -181,8 +181,8 @@ mod tests {
 
     fn should_parse_all(qstring: &str) {
         assert_eq!(
-            Ok((&[u8](&b""[..]), ())),
-            table_options(&[u8](qstring.as_bytes()))
+            Ok((&b""[..], ())),
+            table_options(qstring.as_bytes())
         )
     }
 
