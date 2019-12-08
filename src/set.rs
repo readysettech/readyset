@@ -1,4 +1,4 @@
-use nom::multispace;
+use nom::character::complete::multispace1;
 use std::{fmt, str};
 
 use common::{literal, opt_multispace, sql_identifier, statement_terminator, Literal};
@@ -20,7 +20,7 @@ impl fmt::Display for SetStatement {
 named!(pub set<&[u8], SetStatement>,
     do_parse!(
         tag_no_case!("set") >>
-        multispace >>
+        multispace1 >>
         var: sql_identifier >>
         opt_multispace >>
         tag_no_case!("=") >>
@@ -28,7 +28,7 @@ named!(pub set<&[u8], SetStatement>,
         val: literal >>
         statement_terminator >>
         (SetStatement {
-            variable: String::from(str::from_utf8(*var).unwrap()),
+            variable: String::from(str::from_utf8(var).unwrap()),
             value: val,
         })
     )
@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn simple_set() {
         let qstring = "SET SQL_AUTO_IS_NULL = 0;";
-        let res = set(&[u8](qstring.as_bytes()));
+        let res = set(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn user_defined_vars() {
         let qstring = "SET @var = 123;";
-        let res = set(&[u8](qstring.as_bytes()));
+        let res = set(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -68,7 +68,7 @@ mod tests {
     fn format_set() {
         let qstring = "set autocommit=1";
         let expected = "SET autocommit = 1";
-        let res = set(&[u8](qstring.as_bytes()));
+        let res = set(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }
