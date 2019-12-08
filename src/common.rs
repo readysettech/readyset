@@ -919,7 +919,8 @@ named!(pub float_literal<&[u8], Literal>,
 
 // TODO: get this function to compile
 /// String literal value
-fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
+/*
+fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], &[u8]> {
     let quote_slice: &[u8] = &[quote];
     let double_quote_slice: &[u8] = &[quote, quote];
     let backslash_quote: &[u8] = &[b'\\', quote];
@@ -948,9 +949,40 @@ fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], Vec<u8>> {
         tag!(quote_slice)
     )
 }
+*/
 
-named!(raw_string_singlequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'\''));
-named!(raw_string_doublequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'"'));
+//named!(raw_string_singlequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'\''));
+//named!(raw_string_doublequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'"'));
+
+named!(raw_string_singlequoted< &[u8], Vec<u8> >,
+    delimited!(
+        tag!("\'"),
+        fold_many0!(
+            tag!("hello"),
+            Vec::new(),
+            |mut acc: Vec<u8>, bytes: &[u8]| {
+                acc.extend(bytes);
+                acc
+            }
+        ),
+        tag!("\'")
+    )
+);
+
+named!(raw_string_doublequoted< &[u8], Vec<u8> >,
+    delimited!(
+        tag!("\""),
+        fold_many0!(
+            tag!("hello"),
+            Vec::new(),
+            |mut acc: Vec<u8>, bytes: &[u8]| {
+                acc.extend(bytes);
+                acc
+            }
+        ),
+        tag!("\"")
+    )
+);
 
 named!(pub string_literal<&[u8], Literal>,
        map!(alt!(raw_string_singlequoted | raw_string_doublequoted),

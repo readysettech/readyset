@@ -109,7 +109,7 @@ mod tests {
         let qstring = "SELECT tags.* FROM tags \
                        INNER JOIN taggings ON tags.id = taggings.tag_id";
 
-        let res = selection(&[u8](qstring.as_bytes()));
+        let res = selection(qstring.as_bytes());
 
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("tags.id")))),

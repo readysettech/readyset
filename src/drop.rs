@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn simple_drop_table() {
         let qstring = "DROP TABLE users;";
-        let res = drop_table(&[u8](qstring.as_bytes()));
+        let res = drop_table(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             DropTableStatement {
@@ -71,7 +71,7 @@ mod tests {
     fn format_drop_table() {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
         let expected = "DROP TABLE IF EXISTS users, posts";
-        let res = drop_table(&[u8](qstring.as_bytes()));
+        let res = drop_table(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }
