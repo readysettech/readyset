@@ -1,4 +1,3 @@
-
 named!(keyword_follow_char<&[u8], &[u8]>,
        peek!(alt!(tag!(" ") | tag!("\n") | tag!(";") |
                            tag!("(") | tag!(")") | tag!("\t") |
@@ -163,7 +162,7 @@ named!(pub sql_keyword<&[u8], &[u8]>,
 );
 
 pub fn escape_if_keyword(s: &str) -> String {
-    if sql_keyword(&[u8](s.as_bytes())).is_ok() {
+    if sql_keyword(s.as_bytes()).is_ok() {
         format!("`{}`", s)
     } else {
         s.to_owned()

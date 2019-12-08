@@ -1,4 +1,4 @@
-use nom::multispace;
+use nom::character::complete::multispace1;
 use std::fmt;
 use std::str;
 
@@ -53,7 +53,7 @@ named!(pub order_clause<&[u8], OrderClause>,
     do_parse!(
         opt_multispace >>
         tag_no_case!("order by") >>
-        multispace >>
+        multispace1 >>
         order_expr: many0!(
             do_parse!(
                 fieldname: column_identifier_no_alias >>
@@ -109,9 +109,9 @@ mod tests {
             columns: vec![("name".into(), OrderType::OrderAscending)],
         };
 
-        let res1 = selection(&[u8](qstring1.as_bytes()));
-        let res2 = selection(&[u8](qstring2.as_bytes()));
-        let res3 = selection(&[u8](qstring3.as_bytes()));
+        let res1 = selection(qstring1.as_bytes());
+        let res2 = selection(qstring2.as_bytes());
+        let res3 = selection(qstring3.as_bytes());
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
