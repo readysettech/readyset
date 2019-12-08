@@ -1,4 +1,4 @@
-use nom::{digit, multispace};
+use nom::character::complete::{digit1, multispace1};
 use std::fmt;
 use std::str;
 use std::str::FromStr;
@@ -98,9 +98,9 @@ named!(pub index_col_name<&[u8], (Column, Option<u16>, Option<OrderType>)>,
     do_parse!(
         column: column_identifier_no_alias >>
         opt_multispace >>
-        len: opt!(delimited!(tag!("("), digit, tag!(")"))) >>
+        len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
         order: opt!(order_type) >>
-        ((column, len.map(|l| u16::from_str(str::from_utf8(*l).unwrap()).unwrap()), order))
+        ((column, len.map(|l| u16::from_str(str::from_utf8(l).unwrap()).unwrap()), order))
     )
 );
 
@@ -128,7 +128,7 @@ named!(pub key_specification<&[u8], TableKey>,
     alt!(
           do_parse!(
               tag_no_case!("fulltext") >>
-              multispace >>
+              multispace1 >>
               alt!(tag_no_case!("key") | tag_no_case!("index")) >>
               opt_multispace >>
               name: opt!(sql_identifier) >>
@@ -147,7 +147,7 @@ named!(pub key_specification<&[u8], TableKey>,
               opt_multispace >>
               columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
               opt!(do_parse!(
-                          multispace >>
+                          multispace1 >>
                           tag_no_case!("autoincrement") >>
                           ()
                    )
@@ -156,7 +156,7 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               tag_no_case!("unique") >>
-              opt!(preceded!(multispace,
+              opt!(preceded!(multispace1,
                              alt!(
                                    tag_no_case!("key")
                                  | tag_no_case!("index")
@@ -212,7 +212,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
        many1!(
            do_parse!(
                identifier: column_identifier_no_alias >>
-               fieldtype: opt!(do_parse!(multispace >>
+               fieldtype: opt!(do_parse!(multispace1 >>
                                       ti: type_identifier >>
                                       opt_multispace >>
                                       (ti)
@@ -268,21 +268,21 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
         | do_parse!(
               opt_multispace >>
               tag_no_case!("default") >>
-              multispace >>
+              multispace1 >>
               def: alt!(
                     do_parse!(s: delimited!(tag!("'"), take_until!("'"), tag!("'")) >> (
                         Literal::String(String::from_utf8(s.to_vec()).unwrap())
                     ))
-                  | do_parse!(i: digit >>
+                  | do_parse!(i: digit1 >>
                               tag!(".") >>
-                              f: digit >> (
+                              f: digit1 >> (
                               Literal::FixedPoint(Real {
-                                  integral: i32::from_str(str::from_utf8(*i).unwrap()).unwrap(),
-                                  fractional: i32::from_str(str::from_utf8(*f).unwrap()).unwrap()
+                                  integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
+                                  fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap()
                               })
                     ))
-                  | do_parse!(d: digit >> (
-                        Literal::Integer(i64::from_str(str::from_utf8(*d).unwrap()).unwrap())
+                  | do_parse!(d: digit1 >> (
+                        Literal::Integer(i64::from_str(str::from_utf8(d).unwrap()).unwrap())
                     ))
                   | do_parse!(tag!("''") >> (Literal::String(String::from(""))))
                   | do_parse!(tag_no_case!("null") >> (Literal::Null))
@@ -306,16 +306,16 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
         | do_parse!(
               opt_multispace >>
               tag_no_case!("character set") >>
-              multispace >>
+              multispace1 >>
               charset: sql_identifier >>
-              (Some(ColumnConstraint::CharacterSet(str::from_utf8(*charset).unwrap().to_owned())))
+              (Some(ColumnConstraint::CharacterSet(str::from_utf8(charset).unwrap().to_owned())))
           )
         | do_parse!(
               opt_multispace >>
               tag_no_case!("collate") >>
-              multispace >>
+              multispace1 >>
               collation: sql_identifier >>
-              (Some(ColumnConstraint::Collation(str::from_utf8(*collation).unwrap().to_owned())))
+              (Some(ColumnConstraint::Collation(str::from_utf8(collation).unwrap().to_owned())))
           )
     )
 );
@@ -325,9 +325,9 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
 named!(pub creation<&[u8], CreateTableStatement>,
     do_parse!(
         tag_no_case!("create") >>
-        multispace >>
+        multispace1 >>
         tag_no_case!("table") >>
-        multispace >>
+        multispace1 >>
         table: table_reference >>
         opt_multispace >>
         tag!("(") >>
@@ -403,13 +403,13 @@ named!(pub creation<&[u8], CreateTableStatement>,
 named!(pub view_creation<&[u8], CreateViewStatement>,
     do_parse!(
         tag_no_case!("create") >>
-        multispace >>
+        multispace1 >>
         tag_no_case!("view") >>
-        multispace >>
+        multispace1 >>
         name: sql_identifier >>
-        multispace >>
+        multispace1 >>
         tag_no_case!("as") >>
-        multispace >>
+        multispace1 >>
         definition: alt!(
               map!(compound_selection, |s| SelectSpecification::Compound(s))
             | map!(nested_selection, |s| SelectSpecification::Simple(s))
@@ -438,15 +438,15 @@ mod tests {
         let type2 = "bigint(20) unsigned";
         let type3 = "bigint(20) signed";
 
-        let res = type_identifier(&[u8](type0.as_bytes()));
+        let res = type_identifier(type0.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
-        let res = type_identifier(&[u8](type1.as_bytes()));
+        let res = type_identifier(type1.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Varchar(255));
-        let res = type_identifier(&[u8](type2.as_bytes()));
+        let res = type_identifier(type2.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
-        let res = type_identifier(&[u8](type3.as_bytes()));
+        let res = type_identifier(type3.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
-        let res = type_identifier(&[u8](type2.as_bytes()));
+        let res = type_identifier(type2.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
     }
 
@@ -456,7 +456,7 @@ mod tests {
         // because it is never validly the end of a query
         let qstring = "id bigint(20), name varchar(255),";
 
-        let res = field_specification_list(&[u8](qstring.as_bytes()));
+        let res = field_specification_list(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             vec![
@@ -470,7 +470,7 @@ mod tests {
     fn simple_create() {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255));";
 
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn create_without_space_after_tablename() {
         let qstring = "CREATE TABLE t(x integer);";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -505,7 +505,7 @@ mod tests {
     fn mediawiki_create() {
         let qstring = "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -552,7 +552,7 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-        creation(&[u8](qstring.as_bytes())).unwrap();
+        creation(qstring.as_bytes()).unwrap();
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-        creation(&[u8](qstring.as_bytes())).unwrap();
+        creation(qstring.as_bytes()).unwrap();
     }
 
     #[test]
@@ -585,7 +585,7 @@ mod tests {
           KEY `el_index_60` (`el_index_60`,`el_id`),
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
         )";
-        creation(&[u8](qstring.as_bytes())).unwrap();
+        creation(qstring.as_bytes()).unwrap();
     }
 
     #[test]
@@ -594,7 +594,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        PRIMARY KEY (id));";
 
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -613,7 +613,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        UNIQUE KEY id_k (id));";
 
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -643,7 +643,7 @@ mod tests {
                        `object_repr` varchar(200) NOT NULL,
                        `action_flag` smallint UNSIGNED NOT NULL,
                        `change_message` longtext NOT NULL);";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -699,7 +699,7 @@ mod tests {
         let qstring = "CREATE TABLE `auth_group` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        `name` varchar(80) NOT NULL UNIQUE)";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -734,7 +734,7 @@ mod tests {
         let expected = "CREATE TABLE auth_group (\
                         id INT(32) AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         name VARCHAR(80) NOT NULL UNIQUE)";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
@@ -745,7 +745,7 @@ mod tests {
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
-        let res = view_creation(&[u8](qstring.as_bytes()));
+        let res = view_creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
@@ -776,7 +776,7 @@ mod tests {
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
 
-        let res = view_creation(&[u8](qstring.as_bytes()));
+        let res = view_creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
@@ -812,7 +812,7 @@ mod tests {
     fn format_create_view() {
         let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
         let expected = "CREATE VIEW v AS SELECT * FROM t";
-        let res = view_creation(&[u8](qstring.as_bytes()));
+        let res = view_creation(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 
@@ -828,7 +828,7 @@ mod tests {
             INDEX `thread_id`  (`thread_id`),
             INDEX `index_comments_on_user_id`  (`user_id`))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-        let res = creation(&[u8](qstring.as_bytes()));
+        let res = creation(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
