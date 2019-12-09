@@ -1745,21 +1745,21 @@ mod tests {
             );
 
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum", "aid"]);
+            assert_eq!(agg_view.fields(), &["userid", "aid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
-            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+            assert_eq!(edge_view.description(true), "π[2, lit: 0]");
         });
     }
 
     #[test]
-    fn it_doesnt_merge_filter_and_sum_on_filter_column() {
+    fn it_merges_filter_and_sum_on_filter_column() {
         // set up graph
-        let mut g = integration::start_simple("it_doesnt_merge_filter_and_sum_on_filter_column");
+        let mut g = integration::start_simple("it_merges_filter_and_sum_on_filter_column");
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1777,7 +1777,7 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(mig.graph().node_count(), 5);
         });
     }
 

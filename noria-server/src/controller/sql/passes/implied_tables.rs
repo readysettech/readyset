@@ -77,8 +77,7 @@ fn rewrite_selection(
     write_schemas: &HashMap<String, Vec<String>>,
 ) -> SelectStatement {
     use nom_sql::FunctionExpression::*;
-    use nom_sql::FunctionArguments::*;
-    use nom_sql::{Column, GroupByClause, OrderClause};
+    use nom_sql::{GroupByClause, OrderClause};
 
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
@@ -141,18 +140,18 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match **f {
-                            Avg(Column(ref mut fe), _)
+                            Avg(FunctionArguments::Column(ref mut fe), _)
                             | Count(FunctionArguments::Conditional(CaseWhenExpression{
                                 then_expr: ColumnOrLiteral::Column(ref mut fe), ..
                               }), _)
-                            | Count(Column(ref mut fe), _)
+                            | Count(FunctionArguments::Column(ref mut fe), _)
                             | Sum(FunctionArguments::Conditional(CaseWhenExpression{
                                 then_expr: ColumnOrLiteral::Column(ref mut fe), ..
                               }), _)
-                            | Sum(Column(ref mut fe), _)
-                            | Min(Column(ref mut fe))
-                            | Max(Column(ref mut fe))
-                            | GroupConcat(Column(ref mut fe), _) => {
+                            | Sum(FunctionArguments::Column(ref mut fe), _)
+                            | Min(FunctionArguments::Column(ref mut fe))
+                            | Max(FunctionArguments::Column(ref mut fe))
+                            | GroupConcat(FunctionArguments::Column(ref mut fe), _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
@@ -199,8 +198,8 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => {
                         match **f {
-                            Count(FunctionArguments::Conditional(CaseWhenExpression{ condition: ref mut condition, .. }), _)
-                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{ condition: ref mut condition, .. }), _) => {
+                            Count(FunctionArguments::Conditional(CaseWhenExpression{ ref mut condition, .. }), _)
+                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{ ref mut condition, .. }), _) => {
                                 *condition = rewrite_conditional(&expand_columns, condition.clone(), &tables);
                             }
                             _ => {}

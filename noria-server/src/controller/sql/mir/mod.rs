@@ -247,8 +247,16 @@ impl SqlToMirConverter {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
                 // We assume that the column is appended at the end.
-                columns.push(Column::from(l));
-                filters.push((num_columns, f));
+                match n.borrow().inner {
+                    MirNodeType::Aggregation { .. }  => {
+                        columns.insert(columns.len()-1, Column::from(l));
+                        filters.push((num_columns-1, f));
+                    }
+                    _ => {
+                        columns.push(Column::from(l));
+                        filters.push((num_columns, f));
+                    }
+                }
             }
             Some(pos) => {
                 let index = absolute_column_ids[pos];
@@ -1018,7 +1026,7 @@ impl SqlToMirConverter {
                 None,
             ),
             Sum(FunctionArguments::Conditional(CaseWhenExpression{
-                condition: ref condition,
+                ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
             }), _) => mknode(
@@ -1029,7 +1037,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Sum(FunctionArguments::Conditional(CaseWhenExpression{
-                condition: ref condition,
+                ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: None
             }), _) => mknode(
@@ -1056,7 +1064,7 @@ impl SqlToMirConverter {
                 panic!("COUNT(*) should have been rewritten earlier!")
             },
             Count(FunctionArguments::Conditional(CaseWhenExpression{
-                condition: ref condition,
+                ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
             }), _) => mknode(
@@ -1067,7 +1075,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Count(FunctionArguments::Conditional(CaseWhenExpression{
-                condition: ref condition,
+                ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: None
             }), _) => mknode(

@@ -69,7 +69,7 @@ impl MirQuery {
 
     // Mutate our MirQuery in order to optimize it, for example by
     // merging certain nodes together, and return it.
-    // Also return a list of any new nodes created so that the 
+    // Also return a list of any new nodes created so that the
     // caller can add them to any other internal representations.
     pub fn optimize(
         mut self,
