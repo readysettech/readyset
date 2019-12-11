@@ -1,4 +1,4 @@
-use nom::character::complete::{digit1, multispace1};
+use nom::character::complete::{digit1, multispace0, multispace1};
 use std::fmt;
 use std::str;
 use std::str::FromStr;
@@ -6,7 +6,7 @@ use std::str::FromStr;
 use create_table_options::table_options;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
-    column_identifier_no_alias, opt_multispace, parse_comment, sql_identifier,
+    column_identifier_no_alias, parse_comment, sql_identifier,
     statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
     TableKey,
 };
@@ -97,7 +97,7 @@ impl fmt::Display for CreateViewStatement {
 named!(pub index_col_name<&[u8], (Column, Option<u16>, Option<OrderType>)>,
     do_parse!(
         column: column_identifier_no_alias >>
-        opt_multispace >>
+        multispace0 >>
         len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
         order: opt!(order_type) >>
         ((column, len.map(|l| u16::from_str(str::from_utf8(l).unwrap()).unwrap()), order))
@@ -111,9 +111,9 @@ named!(pub index_col_list<&[u8], Vec<Column> >,
                entry: index_col_name >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -130,10 +130,10 @@ named!(pub key_specification<&[u8], TableKey>,
               tag_no_case!("fulltext") >>
               multispace1 >>
               alt!(tag_no_case!("key") | tag_no_case!("index")) >>
-              opt_multispace >>
+              multispace0 >>
               name: opt!(sql_identifier) >>
-              opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
+              multispace0 >>
+              columns: delimited!(tag!("("), delimited!(multispace0, index_col_list, multispace0), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from_utf8(name.to_vec()).unwrap();
@@ -144,8 +144,8 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               tag_no_case!("primary key") >>
-              opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
+              multispace0 >>
+              columns: delimited!(tag!("("), delimited!(multispace0, index_col_list, multispace0), tag!(")")) >>
               opt!(do_parse!(
                           multispace1 >>
                           tag_no_case!("autoincrement") >>
@@ -163,10 +163,10 @@ named!(pub key_specification<&[u8], TableKey>,
                              )
                    )
               ) >>
-              opt_multispace >>
+              multispace0 >>
               name: opt!(sql_identifier) >>
-              opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
+              multispace0 >>
+              columns: delimited!(tag!("("), delimited!(multispace0, index_col_list, multispace0), tag!(")")) >>
               (match name {
                   Some(name) => {
                       let n = String::from_utf8(name.to_vec()).unwrap();
@@ -177,10 +177,10 @@ named!(pub key_specification<&[u8], TableKey>,
           )
         | do_parse!(
               alt!(tag_no_case!("key") | tag_no_case!("index")) >>
-              opt_multispace >>
+              multispace0 >>
               name: sql_identifier >>
-              opt_multispace >>
-              columns: delimited!(tag!("("), delimited!(opt_multispace, index_col_list, opt_multispace), tag!(")")) >>
+              multispace0 >>
+              columns: delimited!(tag!("("), delimited!(multispace0, index_col_list, multispace0), tag!(")")) >>
               ({
                   let n = String::from_utf8(name.to_vec()).unwrap();
                   TableKey::Key(n, columns)
@@ -196,9 +196,9 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
                key: key_specification >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -214,7 +214,7 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                identifier: column_identifier_no_alias >>
                fieldtype: opt!(do_parse!(multispace1 >>
                                       ti: type_identifier >>
-                                      opt_multispace >>
+                                      multispace0 >>
                                       (ti)
                                )
                ) >>
@@ -222,9 +222,9 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
                comment: opt!(parse_comment) >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -248,25 +248,25 @@ named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
 named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
     alt!(
           do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("not null") >>
-              opt_multispace >>
+              multispace0 >>
               (Some(ColumnConstraint::NotNull))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("null") >>
-              opt_multispace >>
+              multispace0 >>
               (None)
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("auto_increment") >>
-              opt_multispace >>
+              multispace0 >>
               (Some(ColumnConstraint::AutoIncrement))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("default") >>
               multispace1 >>
               def: alt!(
@@ -288,30 +288,30 @@ named!(pub column_constraint<&[u8], Option<ColumnConstraint>>,
                   | do_parse!(tag_no_case!("null") >> (Literal::Null))
                   | do_parse!(tag_no_case!("current_timestamp") >> (Literal::CurrentTimestamp))
               ) >>
-              opt_multispace >>
+              multispace0 >>
               (Some(ColumnConstraint::DefaultValue(def)))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("primary key") >>
-              opt_multispace >>
+              multispace0 >>
               (Some(ColumnConstraint::PrimaryKey))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("unique") >>
-              opt_multispace >>
+              multispace0 >>
               (Some(ColumnConstraint::Unique))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("character set") >>
               multispace1 >>
               charset: sql_identifier >>
               (Some(ColumnConstraint::CharacterSet(str::from_utf8(charset).unwrap().to_owned())))
           )
         | do_parse!(
-              opt_multispace >>
+              multispace0 >>
               tag_no_case!("collate") >>
               multispace1 >>
               collation: sql_identifier >>
@@ -329,15 +329,15 @@ named!(pub creation<&[u8], CreateTableStatement>,
         tag_no_case!("table") >>
         multispace1 >>
         table: table_reference >>
-        opt_multispace >>
+        multispace0 >>
         tag!("(") >>
-        opt_multispace >>
+        multispace0 >>
         fields: field_specification_list >>
-        opt_multispace >>
+        multispace0 >>
         keys: opt!(key_specification_list) >>
-        opt_multispace >>
+        multispace0 >>
         tag!(")") >>
-        opt_multispace >>
+        multispace0 >>
         table_options >>
         statement_terminator >>
         ({

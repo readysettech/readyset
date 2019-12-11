@@ -1,11 +1,11 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
 use column::Column;
 use common::FieldDefinitionExpression;
 use common::{
-    as_alias, field_definition_expr, field_list, opt_multispace, statement_terminator, table_list,
+    as_alias, field_definition_expr, field_list, statement_terminator, table_list,
     table_reference, unsigned_number,
 };
 use condition::{condition_expr, ConditionExpression};
@@ -133,15 +133,15 @@ impl fmt::Display for SelectStatement {
 // Parse GROUP BY clause
 named!(group_by_clause<&[u8], GroupByClause>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         tag_no_case!("group by") >>
         multispace1 >>
         group_columns: field_list >>
         having_clause: opt!(
             do_parse!(
-                opt_multispace >>
+                multispace0 >>
                 tag_no_case!("having") >>
-                opt_multispace >>
+                multispace0 >>
                 ce: condition_expr >>
                 (ce)
             )
@@ -156,13 +156,13 @@ named!(group_by_clause<&[u8], GroupByClause>,
 // Parse LIMIT clause
 named!(pub limit_clause<&[u8], LimitClause>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         tag_no_case!("limit") >>
         multispace1 >>
         limit_val: unsigned_number >>
         offset_val: opt!(
             do_parse!(
-                opt_multispace >>
+                multispace0 >>
                 tag_no_case!("offset") >>
                 multispace1 >>
                 val: unsigned_number >>
@@ -181,9 +181,9 @@ named!(pub limit_clause<&[u8], LimitClause>,
 // Parse JOIN clause
 named!(join_clause<&[u8], JoinClause>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         _natural: opt!(tag_no_case!("natural")) >>
-        opt_multispace >>
+        multispace0 >>
         op: join_operator >>
         multispace1 >>
         right: join_rhs >>
@@ -193,9 +193,9 @@ named!(join_clause<&[u8], JoinClause>,
                   tag_no_case!("using") >>
                   multispace1 >>
                   fields: delimited!(
-                      terminated!(tag!("("), opt_multispace),
+                      terminated!(tag!("("), multispace0),
                       field_list,
-                      preceded!(opt_multispace, tag!(")"))
+                      preceded!(multispace0, tag!(")"))
                   ) >>
                   (JoinConstraint::Using(fields))
               )
@@ -204,9 +204,9 @@ named!(join_clause<&[u8], JoinClause>,
                   multispace1 >>
                   cond: alt!(
                       delimited!(
-                          terminated!(tag!("("), opt_multispace),
+                          terminated!(tag!("("), multispace0),
                           condition_expr,
-                          preceded!(opt_multispace, tag!(")"))
+                          preceded!(multispace0, tag!(")"))
                       )
                       | condition_expr) >>
                   (JoinConstraint::On(cond))
@@ -245,7 +245,7 @@ named!(join_rhs<&[u8], JoinRightSide>,
 // Parse WHERE clause of a selection
 named!(pub where_clause<&[u8], ConditionExpression>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         tag_no_case!("where") >>
         multispace1 >>
         cond: condition_expr >>
@@ -267,9 +267,9 @@ named!(pub nested_selection<&[u8], SelectStatement>,
         tag_no_case!("select") >>
         multispace1 >>
         distinct: opt!(tag_no_case!("distinct")) >>
-        opt_multispace >>
+        multispace0 >>
         fields: field_definition_expr >>
-        delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
+        delimited!(multispace0, tag_no_case!("from"), multispace0) >>
         tables: table_list >>
         join: many0!(join_clause) >>
         cond: opt!(where_clause) >>

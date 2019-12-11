@@ -1,7 +1,7 @@
-use nom::character::complete::{alphanumeric1, multispace1};
+use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
 use common::{
-    integer_literal, opt_multispace, sql_identifier, string_literal,
+    integer_literal, sql_identifier, string_literal,
 };
 
 named!(pub table_options<&[u8], ()>, do_parse!(
@@ -17,9 +17,9 @@ named!(table_options_separator<&[u8], ()>, do_parse!(
     alt!(
         map!(multispace1, |_| ()) |
         do_parse!(
-            opt_multispace >>
+            multispace0 >>
             tag!(",") >>
-            opt_multispace >>
+            multispace0 >>
             ()
         )
     ) >> ()
@@ -42,9 +42,9 @@ named!(create_option<&[u8], ()>, alt!(
 named!(create_option_type<&[u8], ()>,
     do_parse!(
         tag_no_case!("type") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         alphanumeric1 >>
         ()
     )
@@ -53,9 +53,9 @@ named!(create_option_type<&[u8], ()>,
 named!(create_option_pack_keys<&[u8], ()>,
     do_parse!(
         tag_no_case!("pack_keys") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         alt!(tag!("0") | tag!("1")) >>
         ()
     )
@@ -64,9 +64,9 @@ named!(create_option_pack_keys<&[u8], ()>,
 named!(create_option_engine<&[u8], ()>,
     do_parse!(
         tag_no_case!("engine") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         opt!(alphanumeric1) >>
         ()
     )
@@ -75,9 +75,9 @@ named!(create_option_engine<&[u8], ()>,
 named!(create_option_auto_increment<&[u8], ()>,
     do_parse!(
         tag_no_case!("auto_increment") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         integer_literal >>
         ()
     )
@@ -86,9 +86,9 @@ named!(create_option_auto_increment<&[u8], ()>,
 named!(create_option_default_charset<&[u8], ()>,
     do_parse!(
         tag_no_case!("default charset") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         alt!(
             tag!("utf8mb4") |
             tag!("utf8") |
@@ -104,9 +104,9 @@ named!(create_option_default_charset<&[u8], ()>,
 named!(create_option_collate<&[u8], ()>,
     do_parse!(
         tag_no_case!("collate") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         // TODO(malte): imprecise hack, should not accept everything
         sql_identifier >>
         ()
@@ -116,9 +116,9 @@ named!(create_option_collate<&[u8], ()>,
 named!(create_option_comment<&[u8], ()>,
     do_parse!(
         tag_no_case!("comment") >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         string_literal >>
         ()
     )
@@ -127,9 +127,9 @@ named!(create_option_comment<&[u8], ()>,
 named!(create_option_max_rows<&[u8], ()>,
     do_parse!(
         tag_no_case!("max_rows") >>
-        opt_multispace >>
+        multispace0 >>
         opt!(tag!("=")) >>
-        opt_multispace >>
+        multispace0 >>
         integer_literal >>
         ()
     )
@@ -138,9 +138,9 @@ named!(create_option_max_rows<&[u8], ()>,
 named!(create_option_avg_row_length<&[u8], ()>,
     do_parse!(
         tag_no_case!("avg_row_length") >>
-        opt_multispace >>
+        multispace0 >>
         opt!(tag!("=")) >>
-        opt_multispace >>
+        multispace0 >>
         integer_literal >>
         ()
     )
@@ -149,9 +149,9 @@ named!(create_option_avg_row_length<&[u8], ()>,
 named!(create_option_row_format<&[u8], ()>,
     do_parse!(
         tag_no_case!("row_format") >>
-        opt_multispace >>
+        multispace0 >>
         opt!(tag!("=")) >>
-        opt_multispace >>
+        multispace0 >>
         alt!(
             tag_no_case!("DEFAULT")|
             tag_no_case!("DYNAMIC") |
@@ -167,9 +167,9 @@ named!(create_option_row_format<&[u8], ()>,
 named!(create_option_key_block_size<&[u8], ()>,
     do_parse!(
         tag_no_case!("key_block_size") >>
-        opt_multispace >>
+        multispace0 >>
         opt!(tag!("=")) >>
-        opt_multispace >>
+        multispace0 >>
         integer_literal >>
         ()
     )

@@ -1,9 +1,9 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use column::Column;
 use common::{
-    as_alias, column_identifier_no_alias, integer_literal, opt_multispace, type_identifier,
+    as_alias, column_identifier_no_alias, integer_literal, type_identifier,
     Literal, SqlType,
 };
 
@@ -78,9 +78,9 @@ named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
     alt!(
         do_parse!(
             tag_no_case!("cast") >>
-            opt_multispace >>
+            multispace0 >>
             tag!("(") >>
-            opt_multispace >>
+            multispace0 >>
             // TODO(malte): should be arbitrary expr
             v: arithmetic_base >>
             multispace1 >>
@@ -88,7 +88,7 @@ named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
             multispace1 >>
             _sign: opt!(terminated!(tag_no_case!("signed"), multispace1)) >>
             typ: type_identifier >>
-            opt_multispace >>
+            multispace0 >>
             tag!(")") >>
             (v, Some(typ))
         ) |
@@ -120,9 +120,9 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     do_parse!(
         left: arithmetic_cast >>
-        opt_multispace >>
+        multispace0 >>
         op: arithmetic_operator >>
-        opt_multispace >>
+        multispace0 >>
         right: arithmetic_cast >>
         alias: opt!(as_alias) >>
         (ArithmeticExpression {

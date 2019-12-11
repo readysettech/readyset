@@ -1,4 +1,4 @@
-use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace1};
+use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
 use nom::IResult;
 use std::fmt::{self, Display};
@@ -351,7 +351,7 @@ named!(pub precision<&[u8], (u8, Option<u8>)>,
                    m: digit1 >>
                    d: opt!(do_parse!(
                              tag!(",") >>
-                             opt_multispace >>
+                             multispace0 >>
                              d: digit1 >>
                              (d)
                         )) >>
@@ -374,13 +374,13 @@ named!(pub type_identifier<&[u8], SqlType>,
         | do_parse!(
               tag_no_case!("timestamp") >>
               _len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-              opt_multispace >>
+              multispace0 >>
               (SqlType::Timestamp)
           )
          | do_parse!(
                tag_no_case!("varbinary") >>
                len: delimited!(tag!("("), digit1, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                (SqlType::Varbinary(len_as_u16(len)))
            )
          | do_parse!(
@@ -402,26 +402,26 @@ named!(pub type_identifier<&[u8], SqlType>,
          | do_parse!(
                tag_no_case!("varchar") >>
                len: delimited!(tag!("("), digit1, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                _binary: opt!(tag_no_case!("binary")) >>
                (SqlType::Varchar(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("binary") >>
                len: delimited!(tag!("("), digit1, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                (SqlType::Binary(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("varbinary") >>
                len: delimited!(tag!("("), digit1, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                (SqlType::Varbinary(len_as_u16(len)))
            )
          | do_parse!(
                tag_no_case!("tinyint") >>
                len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               opt_multispace >>
+               multispace0 >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
                    Some(ref sign) => {
@@ -438,7 +438,7 @@ named!(pub type_identifier<&[u8], SqlType>,
          | do_parse!(
                tag_no_case!("bigint") >>
                len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               opt_multispace >>
+               multispace0 >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
                    Some(ref sign) => {
@@ -454,15 +454,15 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("double") >>
-               opt_multispace >>
+               multispace0 >>
                _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Double)
            )
          | do_parse!(
                tag_no_case!("float") >>
-               opt_multispace >>
+               multispace0 >>
                _prec: opt!(precision) >>
-               opt_multispace >>
+               multispace0 >>
                (SqlType::Float)
            )
          | do_parse!(
@@ -483,7 +483,7 @@ named!(pub type_identifier<&[u8], SqlType>,
            )
          | do_parse!(
                tag_no_case!("real") >>
-               opt_multispace >>
+               multispace0 >>
                _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (SqlType::Real)
            )
@@ -498,14 +498,14 @@ named!(pub type_identifier<&[u8], SqlType>,
          | do_parse!(
                tag_no_case!("char") >>
                len: delimited!(tag!("("), digit1, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                _binary: opt!(tag_no_case!("binary")) >>
                (SqlType::Char(len_as_u16(len)))
            )
          | do_parse!(
                alt!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
                len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               opt_multispace >>
+               multispace0 >>
                signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
                (match signed {
                    Some(ref sign) => {
@@ -522,7 +522,7 @@ named!(pub type_identifier<&[u8], SqlType>,
          | do_parse!(
                tag_no_case!("enum") >>
                variants: delimited!(tag!("("), value_list, tag!(")")) >>
-               opt_multispace >>
+               multispace0 >>
                (SqlType::Enum(variants))
            )
          | do_parse!(
@@ -531,7 +531,7 @@ named!(pub type_identifier<&[u8], SqlType>,
                // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
                alt!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
                prec: opt!(precision) >>
-               opt_multispace >>
+               multispace0 >>
                (match prec {
                    None => SqlType::Decimal(32, 0),
                    Some((m, None)) => SqlType::Decimal(m, 0),
@@ -596,10 +596,10 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                column: column_identifier_no_alias >>
                                seperator: opt!(
                                    do_parse!(
-                                       opt_multispace >>
+                                       multispace0 >>
                                        tag_no_case!("separator") >>
                                        sep: delimited!(tag!("'"), opt!(alphanumeric1), tag!("'")) >>
-                                       opt_multispace >>
+                                       multispace0 >>
                                        (sep.unwrap_or(&[]))
                                    )
                                ) >>
@@ -724,16 +724,12 @@ named!(pub unsigned_number<&[u8], u64>,
 named!(pub statement_terminator<&[u8], ()>,
     do_parse!(
         delimited!(
-            opt_multispace,
+            multispace0,
             alt!(tag!(";") | line_ending | eof!()),
-            opt_multispace
+            multispace0
         ) >>
         ()
     )
-);
-
-named!(pub opt_multispace<&[u8], Option<&[u8]>>,
-       opt!(multispace1)
 );
 
 // Parse binary comparison operators
@@ -775,9 +771,9 @@ named!(field_value_expr<&[u8], FieldValueExpression>,
 named!(assignment_expr<&[u8], (Column, FieldValueExpression) >,
     do_parse!(
         column: column_identifier_no_alias >>
-        opt_multispace >>
+        multispace0 >>
         tag!("=") >>
-        opt_multispace >>
+        multispace0 >>
         value: field_value_expr >>
         (column, value)
     )
@@ -789,9 +785,9 @@ named!(pub assignment_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
                field_value: assignment_expr >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -807,9 +803,9 @@ named!(pub field_list<&[u8], Vec<Column> >,
                fieldname: column_identifier_no_alias >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -849,9 +845,9 @@ named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
                ) >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -868,9 +864,9 @@ named!(pub table_list<&[u8], Vec<Table> >,
                table: table_reference >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -1022,13 +1018,13 @@ named!(pub literal_expression<&[u8], LiteralExpression>,
 named!(pub value_list<&[u8], Vec<Literal> >,
        many0!(
            do_parse!(
-               opt_multispace >>
+               multispace0 >>
                val: literal >>
                opt!(
                    do_parse!(
-                       opt_multispace >>
+                       multispace0 >>
                        tag!(",") >>
-                       opt_multispace >>
+                       multispace0 >>
                        ()
                    )
                ) >>
@@ -1056,7 +1052,7 @@ named!(pub table_reference<&[u8], Table>,
 // Parse rule for a comment part.
 named!(pub parse_comment<&[u8], String>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         tag_no_case!("comment") >>
         multispace1 >>
         comment: delimited!(tag!("'"), take_until!("'"), tag!("'")) >>
@@ -1152,5 +1148,11 @@ mod tests {
         let res = string_literal(br#""a""b""#);
         let expected = Literal::String(r#"a"b"#.to_string());
         assert_eq!(res, Ok((&b""[..], expected)));
+    }
+
+    #[test]
+    fn terminated_by_semicolon(){
+        let res = statement_terminator(b"   ;  ");
+        assert_eq!(res, Ok((&b""[..], ())));
     }
 }

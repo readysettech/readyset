@@ -1,4 +1,4 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
@@ -6,7 +6,7 @@ use std::str;
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::Column;
 use common::{
-    binary_comparison_operator, column_identifier, literal, opt_multispace, value_list, Literal,
+    binary_comparison_operator, column_identifier, literal, value_list, Literal,
     Operator,
 };
 
@@ -108,7 +108,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
        alt!(
            do_parse!(
                left: and_expr >>
-               opt_multispace >>
+               multispace0 >>
                tag_no_case!("or") >>
                multispace1 >>
                right: condition_expr >>
@@ -127,7 +127,7 @@ named!(pub and_expr<&[u8], ConditionExpression>,
        alt!(
            do_parse!(
                left: parenthetical_expr >>
-               opt_multispace >>
+               multispace0 >>
                tag_no_case!("and") >>
                multispace1 >>
                right: and_expr >>
@@ -146,13 +146,13 @@ named!(pub parenthetical_expr<&[u8], ConditionExpression>,
        alt!(
            do_parse!(
                 tag!("(") >>
-                opt_multispace >>
+                multispace0 >>
                 left: simple_expr >>
-                opt_multispace >>
+                multispace0 >>
                 tag!(")") >>
-                opt_multispace >>
+                multispace0 >>
                 op: binary_comparison_operator >>
-                opt_multispace >>
+                multispace0 >>
                 right: simple_expr >>
                 (ConditionExpression::ComparisonOp(
                     ConditionTree {
@@ -166,9 +166,9 @@ named!(pub parenthetical_expr<&[u8], ConditionExpression>,
             )
         |    map!(
                delimited!(
-                   do_parse!(tag!("(") >> opt_multispace >> ()),
+                   do_parse!(tag!("(") >> multispace0 >> ()),
                    condition_expr,
-                   do_parse!(opt_multispace >> tag!(")") >> opt_multispace >> ())
+                   do_parse!(multispace0 >> tag!(")") >> multispace0 >> ())
                ),
                |inner| (ConditionExpression::Bracketed(Box::new(inner)))
             )
@@ -190,12 +190,12 @@ named!(boolean_primary<&[u8], ConditionExpression>,
     alt!(
         do_parse!(
             left: predicate >>
-            opt_multispace >>
+            multispace0 >>
             rest: alt!(
                 do_parse!(tag_no_case!("is") >>
-                          opt_multispace >>
+                          multispace0 >>
                           not: opt!(tag_no_case!("not")) >>
-                          opt_multispace >>
+                          multispace0 >>
                           tag_no_case!("null") >>
                           (
                               // XXX(malte): bit of a hack; would consumers ever need to know
@@ -212,7 +212,7 @@ named!(boolean_primary<&[u8], ConditionExpression>,
 
                 ) |
                 do_parse!(op: binary_comparison_operator >>
-                          opt_multispace >>
+                          multispace0 >>
                           right: predicate >>
                           (op, right)
                 )
@@ -235,7 +235,7 @@ named!(predicate<&[u8], ConditionExpression>,
         op_right: opt!(
             alt!(
                   do_parse!(
-                      neg: opt!(preceded!(opt_multispace, tag_no_case!("not"))) >>
+                      neg: opt!(preceded!(multispace0, tag_no_case!("not"))) >>
                       multispace1 >>
                       tag_no_case!("in") >>
                       multispace1 >>
@@ -252,7 +252,7 @@ named!(predicate<&[u8], ConditionExpression>,
                       })
                   )
                 | do_parse!(
-                      neg: opt!(preceded!(opt_multispace, tag_no_case!("not"))) >>
+                      neg: opt!(preceded!(multispace0, tag_no_case!("not"))) >>
                       multispace1 >>
                       tag_no_case!("in") >>
                       multispace1 >>
@@ -288,9 +288,9 @@ named!(simple_expr<&[u8], ConditionExpression>,
             )
         |   do_parse!(
                 tag!("(") >>
-                opt_multispace >>
+                multispace0 >>
                 arit_expr: arithmetic_expression >>
-                opt_multispace >>
+                multispace0 >>
                 tag!(")") >>
                 (ConditionExpression::Bracketed(Box::new(
                     ConditionExpression::Arithmetic(Box::new(arit_expr))

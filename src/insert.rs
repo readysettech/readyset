@@ -1,10 +1,10 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
 use column::Column;
 use common::{
-    assignment_expr_list, field_list, opt_multispace, statement_terminator, table_reference,
+    assignment_expr_list, field_list, statement_terminator, table_reference,
     value_list, FieldValueExpression, Literal,
 };
 use keywords::escape_if_keyword;
@@ -62,19 +62,19 @@ named!(pub insertion<&[u8], InsertStatement>,
         tag_no_case!("into") >>
         multispace1 >>
         table: table_reference >>
-        opt_multispace >>
+        multispace0 >>
         fields: opt!(do_parse!(
                 tag!("(") >>
-                opt_multispace >>
+                multispace0 >>
                 fields: field_list >>
-                opt_multispace >>
+                multispace0 >>
                 tag!(")") >>
                 multispace1 >>
                 (fields)
                 )
             ) >>
         tag_no_case!("values") >>
-        opt_multispace >>
+        multispace0 >>
         data: many1!(
             do_parse!(
                 tag!("(") >>
@@ -82,9 +82,9 @@ named!(pub insertion<&[u8], InsertStatement>,
                 tag!(")") >>
                 opt!(
                     do_parse!(
-                            opt_multispace >>
+                            multispace0 >>
                             tag!(",") >>
-                            opt_multispace >>
+                            multispace0 >>
                             ()
                     )
                 ) >>
@@ -92,7 +92,7 @@ named!(pub insertion<&[u8], InsertStatement>,
             )
         ) >>
         upd_if_dup: opt!(do_parse!(
-                opt_multispace >>
+                multispace0 >>
                 tag_no_case!("on duplicate key update") >>
                 multispace1 >>
                 assigns: assignment_expr_list >>

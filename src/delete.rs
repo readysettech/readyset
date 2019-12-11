@@ -1,6 +1,7 @@
 use std::{fmt, str};
+use nom::character::complete::multispace0;
 
-use common::{opt_multispace, statement_terminator, table_reference};
+use common::{statement_terminator, table_reference};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use select::where_clause;
@@ -27,7 +28,7 @@ impl fmt::Display for DeleteStatement {
 named!(pub deletion<&[u8], DeleteStatement>,
     do_parse!(
         tag_no_case!("delete") >>
-        delimited!(opt_multispace, tag_no_case!("from"), opt_multispace) >>
+        delimited!(multispace0, tag_no_case!("from"), multispace0) >>
         table: table_reference >>
         cond: opt!(where_clause) >>
         statement_terminator >>
