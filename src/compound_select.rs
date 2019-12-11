@@ -1,8 +1,8 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use common::{opt_multispace, statement_terminator};
+use common::statement_terminator;
 use order::{order_clause, OrderClause};
 use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 
@@ -82,18 +82,18 @@ named!(pub compound_selection<&[u8], CompoundSelectStatement>,
     do_parse!(
         first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
         other_selects: many1!(
-            do_parse!(opt_multispace >>
+            do_parse!(multispace0 >>
                     op: compound_op >>
                     multispace1 >>
                     opt!(tag!("(")) >>
-                    opt_multispace >>
+                    multispace0 >>
                     select: nested_selection >>
-                    opt_multispace >>
+                    multispace0 >>
                     opt!(tag!(")")) >>
                     (Some(op), select)
             )
         ) >>
-        opt_multispace >>
+        multispace0 >>
         order: opt!(order_clause) >>
         limit: opt!(limit_clause) >>
         statement_terminator >>

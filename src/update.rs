@@ -1,9 +1,9 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use column::Column;
 use common::{
-    assignment_expr_list, opt_multispace, statement_terminator, table_reference,
+    assignment_expr_list, statement_terminator, table_reference,
     FieldValueExpression,
 };
 use condition::ConditionExpression;
@@ -48,7 +48,7 @@ named!(pub updating<&[u8], UpdateStatement>,
         tag_no_case!("set") >>
         multispace1 >>
         fields: assignment_expr_list >>
-        opt_multispace >>
+        multispace0 >>
         cond: opt!(where_clause) >>
         statement_terminator >>
         (UpdateStatement {

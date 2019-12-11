@@ -1,9 +1,9 @@
-use nom::character::complete::multispace1;
+use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
 use column::Column;
-use common::{column_identifier_no_alias, opt_multispace};
+use common::{column_identifier_no_alias};
 use keywords::escape_if_keyword;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ named!(pub order_type<&[u8], OrderType>,
 // Parse ORDER BY clause
 named!(pub order_clause<&[u8], OrderClause>,
     do_parse!(
-        opt_multispace >>
+        multispace0 >>
         tag_no_case!("order by") >>
         multispace1 >>
         order_expr: many0!(
@@ -59,16 +59,16 @@ named!(pub order_clause<&[u8], OrderClause>,
                 fieldname: column_identifier_no_alias >>
                 ordering: opt!(
                     do_parse!(
-                        opt_multispace >>
+                        multispace0 >>
                         ordering: order_type >>
                         (ordering)
                     )
                 ) >>
                 opt!(
                     do_parse!(
-                        opt_multispace >>
+                        multispace0 >>
                         tag!(",") >>
-                        opt_multispace >>
+                        multispace0 >>
                         ()
                     )
                 ) >>

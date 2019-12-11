@@ -1,6 +1,7 @@
 use std::{fmt, str};
+use nom::character::complete::multispace0;
 
-use common::{opt_multispace, statement_terminator, table_list};
+use common::{statement_terminator, table_list};
 use keywords::escape_if_keyword;
 use table::Table;
 
@@ -30,15 +31,15 @@ impl fmt::Display for DropTableStatement {
 named!(pub drop_table<&[u8], DropTableStatement>,
     do_parse!(
         tag_no_case!("drop table") >>
-        if_exists: opt!(delimited!(opt_multispace, tag_no_case!("if exists"), opt_multispace)) >>
-        opt_multispace >>
+        if_exists: opt!(delimited!(multispace0, tag_no_case!("if exists"), multispace0)) >>
+        multispace0 >>
         tables: table_list >>
-        opt_multispace >>
+        multispace0 >>
         // MySQL 5.7 reference manual, §13.1.29:
         // The RESTRICT and CASCADE keywords do nothing. They are permitted to make porting easier from
         // other database systems.
-        opt!(delimited!(opt_multispace, tag_no_case!("restricted"), opt_multispace)) >>
-        opt!(delimited!(opt_multispace, tag_no_case!("cascade"), opt_multispace)) >>
+        opt!(delimited!(multispace0, tag_no_case!("restricted"), multispace0)) >>
+        opt!(delimited!(multispace0, tag_no_case!("cascade"), multispace0)) >>
         statement_terminator >>
         ({
             DropTableStatement {
