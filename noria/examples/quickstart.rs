@@ -19,7 +19,7 @@ async fn main() {
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
     let aid = 1;
 
-    let mut srv = ControllerHandle::from_zk("127.0.0.1:2181/basicdist")
+    let mut srv = ControllerHandle::from_zk("127.0.0.1:2181/quickstart")
         .await
         .unwrap();
     srv.install_recipe(sql).await.unwrap();
