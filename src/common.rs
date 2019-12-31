@@ -1,3 +1,5 @@
+use nom::branch::alt;
+use nom::combinator::map;
 use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
 use nom::IResult;
@@ -11,6 +13,9 @@ use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
 use table::Table;
+use nom::sequence::tuple;
+use nom::combinator::opt;
+use nom::bytes::complete::tag_no_case;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -543,20 +548,13 @@ named!(pub type_identifier<&[u8], SqlType>,
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-named!(pub function_arguments<&[u8], (FunctionArguments, bool)>,
-       do_parse!(
-           distinct: opt!(do_parse!(
-               tag_no_case!("distinct") >>
-               multispace1 >>
-               ()
-           )) >>
-           args: alt_complete!(
-               map!(case_when_column, |cw| FunctionArguments::Conditional(cw))
-             | map!(column_identifier_no_alias, |c| FunctionArguments::Column(c))
-           ) >>
-           (args, distinct.is_some())
-       )
-);
+pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)> {
+    let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
+    let args_parser = alt((map(case_when_column, |cw| FunctionArguments::Conditional(cw)),
+                                          map(column_identifier_no_alias, |c| FunctionArguments::Column(c))));
+    let (remaining_input, (distinct, args)) = tuple((distinct_parser, args_parser))(i)?;
+    Ok((remaining_input, (args, distinct.is_some())))
+}
 
 named!(pub column_function<&[u8], FunctionExpression>,
     alt!(

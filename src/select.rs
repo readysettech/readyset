@@ -746,8 +746,7 @@ mod tests {
     fn count_filter() {
         let qstring =
             "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
-
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(qstring.as_bytes());
 
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("vote_id")))),
@@ -783,7 +782,7 @@ mod tests {
     fn sum_filter() {
         let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id END) FROM votes GROUP BY aid;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(qstring.as_bytes());
 
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("sign")))),
@@ -820,7 +819,7 @@ mod tests {
         let qstring =
             "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(qstring.as_bytes());
 
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("sign")))),
@@ -859,7 +858,7 @@ mod tests {
             FROM votes
             GROUP BY votes.comment_id;";
 
-        let res = selection(CompleteByteSlice(qstring.as_bytes()));
+        let res = selection(qstring.as_bytes());
 
         let filter_cond = LogicalOp(ConditionTree {
             left: Box::new(ComparisonOp(ConditionTree {

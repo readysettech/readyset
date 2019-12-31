@@ -1,9 +1,10 @@
-use nom::types::CompleteByteSlice;
 use std::fmt;
 
 use column::Column;
-use common::{column_identifier_no_alias, literal, opt_multispace, Literal};
+use common::{column_identifier_no_alias, literal, Literal};
 use condition::{condition_expr, ConditionExpression};
+
+use nom::character::complete::multispace0;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ColumnOrLiteral {
@@ -38,21 +39,21 @@ impl fmt::Display for CaseWhenExpression {
     }
 }
 
-named!(pub case_when_column<CompleteByteSlice, CaseWhenExpression>,
+named!(pub case_when_column<&[u8], CaseWhenExpression>,
        do_parse!(
            tag_no_case!("case when") >>
-           opt_multispace >>
+           multispace0 >>
            cond: condition_expr >>
-           opt_multispace >>
+           multispace0 >>
            tag_no_case!("then") >>
-           opt_multispace >>
+           multispace0 >>
            column: column_identifier_no_alias >>
-           opt_multispace >>
+           multispace0 >>
            else_value: opt!(do_parse!(
                tag_no_case!("else") >>
-               opt_multispace >>
+               multispace0 >>
                else_val: literal >>
-               opt_multispace >>
+               multispace0 >>
                (else_val)
            )) >>
            tag_no_case!("end") >>

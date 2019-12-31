@@ -1,7 +1,10 @@
+use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use common::{literal, sql_identifier, statement_terminator, Literal};
+use nom::IResult;
+use nom::sequence::tuple;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetStatement {
@@ -17,22 +20,13 @@ impl fmt::Display for SetStatement {
     }
 }
 
-named!(pub set<&[u8], SetStatement>,
-    do_parse!(
-        tag_no_case!("set") >>
-        multispace1 >>
-        var: sql_identifier >>
-        multispace0 >>
-        tag_no_case!("=") >>
-        multispace0 >>
-        val: literal >>
-        statement_terminator >>
-        (SetStatement {
-            variable: String::from(str::from_utf8(var).unwrap()),
-            value: val,
-        })
-    )
-);
+pub fn set(i: &[u8]) -> IResult<&[u8], SetStatement> {
+    let (input, (_, _, var, _, _, _, value, _)) =
+        tuple((tag_no_case("set"), multispace1, sql_identifier, multispace0, tag_no_case("="),
+                    multispace0, literal, statement_terminator))(i)?;
+    let variable = String::from(str::from_utf8(var).unwrap());
+    Ok((input, SetStatement { variable, value }))
+}
 
 #[cfg(test)]
 mod tests {
