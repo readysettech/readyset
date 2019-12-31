@@ -21,11 +21,11 @@ impl fmt::Display for SetStatement {
 }
 
 pub fn set(i: &[u8]) -> IResult<&[u8], SetStatement> {
-    let (input, (_, _, var, _, _, _, value, _)) =
+    let (remaining_input, (_, _, var, _, _, _, value, _)) =
         tuple((tag_no_case("set"), multispace1, sql_identifier, multispace0, tag_no_case("="),
                     multispace0, literal, statement_terminator))(i)?;
     let variable = String::from(str::from_utf8(var).unwrap());
-    Ok((input, SetStatement { variable, value }))
+    Ok((remaining_input, SetStatement { variable, value }))
 }
 
 #[cfg(test)]
