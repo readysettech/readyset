@@ -10,6 +10,10 @@ use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use select::where_clause;
 use table::Table;
+use nom::IResult;
+use nom::sequence::tuple;
+use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -39,25 +43,13 @@ impl fmt::Display for UpdateStatement {
     }
 }
 
-named!(pub updating<&[u8], UpdateStatement>,
-    do_parse!(
-        tag_no_case!("update") >>
-        multispace1 >>
-        table: table_reference >>
-        multispace1 >>
-        tag_no_case!("set") >>
-        multispace1 >>
-        fields: assignment_expr_list >>
-        multispace0 >>
-        cond: opt!(where_clause) >>
-        statement_terminator >>
-        (UpdateStatement {
-            table: table,
-            fields: fields,
-            where_clause: cond,
-        })
-    )
-);
+pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
+    let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) =
+        tuple((tag_no_case("update"), multispace1, table_reference, multispace1,
+                  tag_no_case("set"), multispace1, assignment_expr_list, multispace0,
+                  opt(where_clause), statement_terminator))(i)?;
+    Ok((remaining_input, UpdateStatement { table, fields, where_clause }))
+}
 
 #[cfg(test)]
 mod tests {
