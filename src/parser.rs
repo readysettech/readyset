@@ -9,6 +9,9 @@ use insert::{insertion, InsertStatement};
 use select::{selection, SelectStatement};
 use set::{set, SetStatement};
 use update::{updating, UpdateStatement};
+use nom::IResult;
+use nom::branch::alt;
+use nom::combinator::map;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
@@ -39,19 +42,17 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-named!(pub sql_query<&[u8], SqlQuery>,
-    alt!(
-          do_parse!(c: creation >> (SqlQuery::CreateTable(c)))
-        | do_parse!(i: insertion >> (SqlQuery::Insert(i)))
-        | do_parse!(c: compound_selection >> (SqlQuery::CompoundSelect(c)))
-        | do_parse!(s: selection >> (SqlQuery::Select(s)))
-        | do_parse!(d: deletion >> (SqlQuery::Delete(d)))
-        | do_parse!(dt: drop_table >> (SqlQuery::DropTable(dt)))
-        | do_parse!(u: updating >> (SqlQuery::Update(u)))
-        | do_parse!(s: set >> (SqlQuery::Set(s)))
-        | do_parse!(c: view_creation >> (SqlQuery::CreateView(c)))
-    )
-);
+pub fn sql_query(i: &[u8]) -> IResult<&[u8], SqlQuery> {
+    alt((map(creation, |c| SqlQuery::CreateTable(c)),
+            map(insertion, |i| SqlQuery::Insert(i)),
+            map(compound_selection, |cs| SqlQuery::CompoundSelect(cs)),
+            map(selection, |s| SqlQuery::Select(s)),
+            map(deletion, |d| SqlQuery::Delete(d)),
+            map(drop_table, |dt| SqlQuery::DropTable(dt)),
+            map(updating, |u| SqlQuery::Update(u)),
+            map(set, |s| SqlQuery::Set(s)),
+            map(view_creation, |vc| SqlQuery::CreateView(vc))))(i)
+}
 
 pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
 where
