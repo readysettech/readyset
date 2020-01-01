@@ -12,6 +12,12 @@ use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use order::{order_clause, OrderClause};
 use table::Table;
+use nom::IResult;
+use nom::sequence::{tuple, delimited, terminated, preceded};
+use nom::bytes::complete::{tag_no_case, tag};
+use nom::combinator::{opt, map};
+use nom::branch::alt;
+use nom::multi::many0;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -130,164 +136,110 @@ impl fmt::Display for SelectStatement {
     }
 }
 
+fn having_clause(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let (remaining_input, (_, _, _, ce)) =
+        tuple((multispace0, tag_no_case("having"), multispace1, condition_expr))(i)?;
+
+    Ok((remaining_input, ce))
+}
+
 // Parse GROUP BY clause
-named!(group_by_clause<&[u8], GroupByClause>,
-    do_parse!(
-        multispace0 >>
-        tag_no_case!("group by") >>
-        multispace1 >>
-        group_columns: field_list >>
-        having_clause: opt!(
-            do_parse!(
-                multispace0 >>
-                tag_no_case!("having") >>
-                multispace0 >>
-                ce: condition_expr >>
-                (ce)
-            )
-        ) >>
-        (GroupByClause {
-            columns: group_columns,
-            having: having_clause,
-        })
-    )
-);
+pub fn group_by_clause(i: &[u8]) -> IResult<&[u8], GroupByClause> {
+    let (remaining_input, (_, _, _, columns, having)) =
+        tuple((multispace0, tag_no_case("group by"), multispace1, field_list,
+                  opt(having_clause)))(i)?;
+
+    Ok((remaining_input, GroupByClause { columns, having }))
+}
+
+fn offset(i: &[u8]) -> IResult<&[u8], u64> {
+    let (remaining_input, (_, _, _, val)) =
+        tuple((multispace0, tag_no_case("offset"), multispace1, unsigned_number))(i)?;
+
+    Ok((remaining_input, val))
+}
 
 // Parse LIMIT clause
-named!(pub limit_clause<&[u8], LimitClause>,
-    do_parse!(
-        multispace0 >>
-        tag_no_case!("limit") >>
-        multispace1 >>
-        limit_val: unsigned_number >>
-        offset_val: opt!(
-            do_parse!(
-                multispace0 >>
-                tag_no_case!("offset") >>
-                multispace1 >>
-                val: unsigned_number >>
-                (val)
-            )
-        ) >>
-    (LimitClause {
-        limit: limit_val,
-        offset: match offset_val {
-            None => 0,
-            Some(v) => v,
-        },
-    }))
-);
+pub fn limit_clause(i: &[u8]) -> IResult<&[u8], LimitClause> {
+    let(remaining_input, (_, _, _, limit, opt_offset)) =
+        tuple((multispace0, tag_no_case("limit"), multispace1, unsigned_number,
+                  opt(offset)))(i)?;
+    let offset = match opt_offset {
+        None => 0,
+        Some(v) => v,
+    };
+
+    Ok((remaining_input, LimitClause { limit, offset }))
+}
+
+fn join_constraint(i: &[u8]) -> IResult<&[u8], JoinConstraint> {
+    // TODO: multispace0 following opt(tag_no_case("natural")) should probably be conditional,
+    // and use multispace1 if natural is there and multispace0 if it's not
+    let using_clause =
+        map(tuple((tag_no_case("using"), multispace1,
+               delimited(terminated(tag("("), multispace0), field_list,
+                            preceded(multispace0, tag(")"))))),
+            |t| JoinConstraint::Using(t.2));
+    let on_condition = alt((delimited(
+                                        terminated(tag("("), multispace0),
+                                        condition_expr,
+                                        preceded(multispace0, tag(")"))),
+                                        condition_expr));
+    let on_clause =
+        map(tuple((tag_no_case("on"), multispace1, on_condition)),
+            |t| JoinConstraint::On(t.2));
+
+    alt((using_clause, on_clause))(i)
+}
 
 // Parse JOIN clause
-named!(join_clause<&[u8], JoinClause>,
-    do_parse!(
-        multispace0 >>
-        _natural: opt!(tag_no_case!("natural")) >>
-        multispace0 >>
-        op: join_operator >>
-        multispace1 >>
-        right: join_rhs >>
-        multispace1 >>
-        constraint: alt!(
-              do_parse!(
-                  tag_no_case!("using") >>
-                  multispace1 >>
-                  fields: delimited!(
-                      terminated!(tag!("("), multispace0),
-                      field_list,
-                      preceded!(multispace0, tag!(")"))
-                  ) >>
-                  (JoinConstraint::Using(fields))
-              )
-            | do_parse!(
-                  tag_no_case!("on") >>
-                  multispace1 >>
-                  cond: alt!(
-                      delimited!(
-                          terminated!(tag!("("), multispace0),
-                          condition_expr,
-                          preceded!(multispace0, tag!(")"))
-                      )
-                      | condition_expr) >>
-                  (JoinConstraint::On(cond))
-              )
-        ) >>
-    (JoinClause {
-        operator: op,
-        right: right,
-        constraint: constraint,
-    }))
-);
+fn join_clause(i: &[u8]) -> IResult<&[u8], JoinClause> {
+    let (remaining_input, (_, _natural, _, operator, _, right, _, constraint)) =
+        tuple((multispace0, opt(tag_no_case("natural")), multispace0, join_operator,
+               multispace1, join_rhs, multispace1, join_constraint))(i)?;
 
-// Different options for the right hand side of the join operator in a `join_clause`
-named!(join_rhs<&[u8], JoinRightSide>,
-    alt!(
-          do_parse!(
-              select: delimited!(tag!("("), nested_selection, tag!(")")) >>
-              alias: opt!(as_alias) >>
-              (JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from)))
-          )
-        | do_parse!(
-              nested_join: delimited!(tag!("("), join_clause, tag!(")")) >>
-              (JoinRightSide::NestedJoin(Box::new(nested_join)))
-          )
-        | do_parse!(
-              table: table_reference >>
-              (JoinRightSide::Table(table))
-          )
-        | do_parse!(
-              tables: delimited!(tag!("("), table_list, tag!(")")) >>
-              (JoinRightSide::Tables(tables))
-          )
-    )
-);
+    Ok((remaining_input, JoinClause { operator, right, constraint }))
+}
+
+fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
+    let nested_select =
+        map(tuple((delimited(tag("("),nested_selection,tag(")")),
+                    opt(as_alias))),
+            |t| JoinRightSide::NestedSelect(Box::new(t.0), t.1.map(String::from)));
+    let nested_join =
+        map(delimited(tag("("), join_clause, tag(")")),
+            |nj| JoinRightSide::NestedJoin(Box::new(nj)));
+    let table = map(table_reference, |t| JoinRightSide::Table(t));
+    let tables = map(delimited(tag("("), table_list, tag(")")),
+                    |tables| JoinRightSide::Tables(tables));
+    alt((nested_select, nested_join, table, tables))(i)
+}
 
 // Parse WHERE clause of a selection
-named!(pub where_clause<&[u8], ConditionExpression>,
-    do_parse!(
-        multispace0 >>
-        tag_no_case!("where") >>
-        multispace1 >>
-        cond: condition_expr >>
-        (cond)
-    )
-);
+pub fn where_clause(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let (remaining_input, (_, _, _, where_condition)) =
+        tuple((multispace0, tag_no_case("where"), multispace1, condition_expr))(i)?;
+
+    Ok((remaining_input, where_condition))
+}
 
 // Parse rule for a SQL selection query.
-named!(pub selection<&[u8], SelectStatement>,
-    do_parse!(
-        select: nested_selection >>
-        statement_terminator >>
-        (select)
-    )
-);
+pub fn selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
+    terminated(nested_selection, statement_terminator)(i)
+}
 
-named!(pub nested_selection<&[u8], SelectStatement>,
-    do_parse!(
-        tag_no_case!("select") >>
-        multispace1 >>
-        distinct: opt!(tag_no_case!("distinct")) >>
-        multispace0 >>
-        fields: field_definition_expr >>
-        delimited!(multispace0, tag_no_case!("from"), multispace0) >>
-        tables: table_list >>
-        join: many0!(join_clause) >>
-        cond: opt!(where_clause) >>
-        group_by: opt!(group_by_clause) >>
-        order: opt!(order_clause) >>
-        limit: opt!(limit_clause) >>
-        (SelectStatement {
-            tables: tables,
-            distinct: distinct.is_some(),
-            fields: fields,
-            join: join,
-            where_clause: cond,
-            group_by: group_by,
-            order: order,
-            limit: limit,
-        })
-    )
-);
+pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
+    let (remaining_input,
+        (_, _, distinct, _, fields, _, tables, join, where_clause, group_by, order, limit)) =
+            tuple((tag_no_case("select"), multispace1, opt(tag_no_case("distinct")),
+                    multispace0, field_definition_expr,
+                    delimited(multispace0, tag_no_case("from"), multispace0),
+                    table_list, many0(join_clause), opt(where_clause), opt(group_by_clause),
+                    opt(order_clause), opt(limit_clause)))(i)?;
+    Ok((remaining_input, SelectStatement {
+        tables, distinct: distinct.is_some(), fields, join, where_clause, group_by, order, limit
+    }))
+}
 
 #[cfg(test)]
 mod tests {
