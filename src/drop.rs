@@ -4,6 +4,10 @@ use nom::character::complete::multispace0;
 use common::{statement_terminator, table_list};
 use keywords::escape_if_keyword;
 use table::Table;
+use nom::IResult;
+use nom::sequence::{delimited, tuple};
+use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
@@ -28,27 +32,22 @@ impl fmt::Display for DropTableStatement {
     }
 }
 
-named!(pub drop_table<&[u8], DropTableStatement>,
-    do_parse!(
-        tag_no_case!("drop table") >>
-        if_exists: opt!(delimited!(multispace0, tag_no_case!("if exists"), multispace0)) >>
-        multispace0 >>
-        tables: table_list >>
-        multispace0 >>
-        // MySQL 5.7 reference manual, §13.1.29:
-        // The RESTRICT and CASCADE keywords do nothing. They are permitted to make porting easier from
-        // other database systems.
-        opt!(delimited!(multispace0, tag_no_case!("restricted"), multispace0)) >>
-        opt!(delimited!(multispace0, tag_no_case!("cascade"), multispace0)) >>
-        statement_terminator >>
-        ({
-            DropTableStatement {
-                tables: tables,
-                if_exists: if_exists.is_some(),
-            }
-        })
-    )
-);
+pub fn drop_table(i: &[u8]) -> IResult<&[u8], DropTableStatement> {
+    let (remaining_input, (_, opt_if_exists, _, tables, _, _, _, _)) =
+        tuple((tag_no_case("drop table"),
+               opt(delimited(multispace0,
+                             tag_no_case("if exists"),
+                             multispace0)),
+                multispace0, table_list, multispace0, opt(delimited(multispace0,
+                                           tag_no_case("restricted"),
+                                           multispace0)),
+                opt(delimited(multispace0,
+                              tag_no_case("cascade"),
+                              multispace0)),
+                statement_terminator))(i)?;
+
+    Ok((remaining_input, DropTableStatement { tables, if_exists: opt_if_exists.is_some() }))
+}
 
 #[cfg(test)]
 mod tests {
