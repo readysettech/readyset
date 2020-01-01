@@ -9,6 +9,12 @@ use common::{
 };
 use keywords::escape_if_keyword;
 use table::Table;
+use nom::IResult;
+use nom::sequence::{tuple, preceded, delimited};
+use nom::bytes::complete::{tag_no_case, tag};
+use nom::combinator::opt;
+use nom::multi::many1;
+use common::Operator::In;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -52,66 +58,42 @@ impl fmt::Display for InsertStatement {
     }
 }
 
+fn fields(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
+    delimited(preceded(tag("("), multispace0),
+                field_list,
+                delimited(multispace0, tag(")"), multispace1))(i)
+}
+
+fn data(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
+    delimited(tag("("),
+                    value_list,
+                    preceded(tag(")"),
+                             opt(delimited(multispace0,
+                                            tag(","),
+                                            multispace0))))(i)
+}
+
+fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
+    preceded(multispace0,
+                 preceded(tag_no_case("on duplicate key update"),
+                            preceded(multispace1, assignment_expr_list)))(i)
+}
+
 // Parse rule for a SQL insert query.
 // TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
-named!(pub insertion<&[u8], InsertStatement>,
-    do_parse!(
-        tag_no_case!("insert") >>
-        ignore: opt!(preceded!(multispace1, tag_no_case!("ignore"))) >>
-        multispace1 >>
-        tag_no_case!("into") >>
-        multispace1 >>
-        table: table_reference >>
-        multispace0 >>
-        fields: opt!(do_parse!(
-                tag!("(") >>
-                multispace0 >>
-                fields: field_list >>
-                multispace0 >>
-                tag!(")") >>
-                multispace1 >>
-                (fields)
-                )
-            ) >>
-        tag_no_case!("values") >>
-        multispace0 >>
-        data: many1!(
-            do_parse!(
-                tag!("(") >>
-                values: value_list >>
-                tag!(")") >>
-                opt!(
-                    do_parse!(
-                            multispace0 >>
-                            tag!(",") >>
-                            multispace0 >>
-                            ()
-                    )
-                ) >>
-                (values)
-            )
-        ) >>
-        upd_if_dup: opt!(do_parse!(
-                multispace0 >>
-                tag_no_case!("on duplicate key update") >>
-                multispace1 >>
-                assigns: assignment_expr_list >>
-                (assigns)
-        )) >>
-        statement_terminator >>
-        ({
-            // "table AS alias" isn't legal in INSERT statements
-            assert!(table.alias.is_none());
-            InsertStatement {
-                table: table,
-                fields: fields,
-                data: data,
-                ignore: ignore.is_some(),
-                on_duplicate: upd_if_dup,
-            }
-        })
-    )
-);
+pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
+    let (remaining_input, (_, ignore_res, _, _, _, table, _, fields, _, _, data, on_duplicate,
+                            statement_terminator)) =
+        tuple((tag_no_case("insert"), opt(preceded(multispace1,
+                                                   tag_no_case("ignore"))),
+                multispace1, tag_no_case("into"), multispace1, table_reference, multispace1,
+                opt(fields), tag_no_case("values"), multispace1, many1(data),
+                opt(on_duplicate), statement_terminator))(i)?;
+    assert!(table.alias.is_none());
+    let ignore = ignore_res.is_some();
+
+    Ok((remaining_input, InsertStatement { table, fields, data, ignore, on_duplicate }))
+}
 
 #[cfg(test)]
 mod tests {
