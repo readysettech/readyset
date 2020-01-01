@@ -5,6 +5,12 @@ use std::str;
 use column::Column;
 use common::{column_identifier_no_alias};
 use keywords::escape_if_keyword;
+use nom::IResult;
+use nom::combinator::{map, opt};
+use nom::branch::alt;
+use nom::bytes::complete::{tag_no_case, tag};
+use nom::sequence::{preceded, delimited, tuple};
+use nom::multi::many0;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
@@ -41,49 +47,26 @@ impl fmt::Display for OrderClause {
     }
 }
 
-named!(pub order_type<&[u8], OrderType>,
-    alt!(
-          map!(tag_no_case!("desc"), |_| OrderType::OrderDescending)
-        | map!(tag_no_case!("asc"), |_| OrderType::OrderAscending)
-    )
-);
+pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
+    alt((map(tag_no_case("desc"), |_| OrderType::OrderDescending),
+          map(tag_no_case("asc"), |_| OrderType::OrderAscending)))(i)
+}
+
+fn order_expr(i: &[u8]) -> IResult<&[u8], (Column, OrderType)> {
+    let (remaining_input, (field_name, ordering, _)) =
+        tuple((column_identifier_no_alias, opt(preceded(multispace0, order_type)),
+                opt(delimited(multispace0, tag(","), multispace0))))(i)?;
+
+    Ok((remaining_input, (field_name, ordering.unwrap_or(OrderType::OrderAscending))))
+}
 
 // Parse ORDER BY clause
-named!(pub order_clause<&[u8], OrderClause>,
-    do_parse!(
-        multispace0 >>
-        tag_no_case!("order by") >>
-        multispace1 >>
-        order_expr: many0!(
-            do_parse!(
-                fieldname: column_identifier_no_alias >>
-                ordering: opt!(
-                    do_parse!(
-                        multispace0 >>
-                        ordering: order_type >>
-                        (ordering)
-                    )
-                ) >>
-                opt!(
-                    do_parse!(
-                        multispace0 >>
-                        tag!(",") >>
-                        multispace0 >>
-                        ()
-                    )
-                ) >>
-                (fieldname, ordering.unwrap_or(OrderType::OrderAscending))
-            )
-        ) >>
-        (OrderClause {
-            columns: order_expr,
-            // order: match ordering {
-            //     None => OrderType::OrderAscending,
-            //     Some(ref o) => o.clone(),
-            // },
-        })
-    )
-);
+pub fn order_clause(i: &[u8]) -> IResult<&[u8], OrderClause> {
+    let (remaining_input, (_, _, _, columns)) =
+        tuple((multispace0, tag_no_case("order by"), multispace1, many0(order_expr)))(i)?;
+
+    Ok((remaining_input, OrderClause { columns }))
+}
 
 #[cfg(test)]
 mod tests {
