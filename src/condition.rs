@@ -11,6 +11,11 @@ use common::{
 };
 
 use select::{nested_selection, SelectStatement};
+use nom::IResult;
+use nom::branch::alt;
+use nom::combinator::{map, opt};
+use nom::sequence::{separated_pair, delimited, tuple, terminated, preceded, pair};
+use nom::bytes::complete::{tag_no_case, tag};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
@@ -104,216 +109,184 @@ impl fmt::Display for ConditionExpression {
 }
 
 // Parse a conditional expression into a condition tree structure
-named!(pub condition_expr<&[u8], ConditionExpression>,
-       alt!(
-           do_parse!(
-               left: and_expr >>
-               multispace0 >>
-               tag_no_case!("or") >>
-               multispace1 >>
-               right: condition_expr >>
-               (ConditionExpression::LogicalOp(
-                   ConditionTree {
-                       operator: Operator::Or,
-                       left: Box::new(left),
-                       right: Box::new(right),
-                   }
-               ))
-           )
-       |   and_expr)
-);
-
-named!(pub and_expr<&[u8], ConditionExpression>,
-       alt!(
-           do_parse!(
-               left: parenthetical_expr >>
-               multispace0 >>
-               tag_no_case!("and") >>
-               multispace1 >>
-               right: and_expr >>
-               (ConditionExpression::LogicalOp(
-                   ConditionTree {
-                       operator: Operator::And,
-                       left: Box::new(left),
-                       right: Box::new(right),
-                   }
-               ))
-           )
-       |   parenthetical_expr)
-);
-
-named!(pub parenthetical_expr<&[u8], ConditionExpression>,
-       alt!(
-           do_parse!(
-                tag!("(") >>
-                multispace0 >>
-                left: simple_expr >>
-                multispace0 >>
-                tag!(")") >>
-                multispace0 >>
-                op: binary_comparison_operator >>
-                multispace0 >>
-                right: simple_expr >>
-                (ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: op,
-                        left: Box::new(
-                            ConditionExpression::Bracketed(Box::new(left))
-                        ),
-                        right: Box::new(right)
-                    })
-                )
-            )
-        |    map!(
-               delimited!(
-                   do_parse!(tag!("(") >> multispace0 >> ()),
-                   condition_expr,
-                   do_parse!(multispace0 >> tag!(")") >> multispace0 >> ())
-               ),
-               |inner| (ConditionExpression::Bracketed(Box::new(inner)))
-            )
-       |   not_expr)
-);
-
-named!(pub not_expr<&[u8], ConditionExpression>,
-       alt!(
-           do_parse!(
-               tag_no_case!("not") >>
-               multispace1 >>
-               right: parenthetical_expr >>
-               (ConditionExpression::NegationOp(Box::new(right)))
-           )
-       |   boolean_primary)
-);
-
-named!(boolean_primary<&[u8], ConditionExpression>,
-    alt!(
-        do_parse!(
-            left: predicate >>
-            multispace0 >>
-            rest: alt!(
-                do_parse!(tag_no_case!("is") >>
-                          multispace0 >>
-                          not: opt!(tag_no_case!("not")) >>
-                          multispace0 >>
-                          tag_no_case!("null") >>
-                          (
-                              // XXX(malte): bit of a hack; would consumers ever need to know
-                              // about "IS NULL" vs. "= NULL"?
-                              if not.is_some() {
-                                  Operator::NotEqual
-                              } else {
-                                  Operator::Equal
-                              },
-                              ConditionExpression::Base(
-                                  ConditionBase::Literal(Literal::Null)
-                              )
-                          )
-
-                ) |
-                do_parse!(op: binary_comparison_operator >>
-                          multispace0 >>
-                          right: predicate >>
-                          (op, right)
-                )
-            ) >>
-            (ConditionExpression::ComparisonOp(
-                    ConditionTree {
-                        operator: rest.0,
-                        left: Box::new(left),
-                        right: Box::new(rest.1),
-                    })
-            )
-        ) |
-        predicate
-    )
-);
-
-named!(predicate<&[u8], ConditionExpression>,
-    do_parse!(
-        left: simple_expr >>
-        op_right: opt!(
-            alt!(
-                  do_parse!(
-                      neg: opt!(preceded!(multispace0, tag_no_case!("not"))) >>
-                      multispace1 >>
-                      tag_no_case!("in") >>
-                      multispace1 >>
-                      sq: nested_selection >>
-                      ({
-                          let nested = ConditionExpression::Base(
-                              ConditionBase::NestedSelect(Box::new(sq))
-                          );
-                          if neg.is_some() {
-                              ConditionExpression::NegationOp(Box::new(nested))
-                          } else {
-                              nested
+pub fn condition_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let cond = map(separated_pair(and_expr,
+                                  delimited(multispace0,
+                                            tag_no_case("or"),
+                                            multispace1),
+                                  condition_expr),
+                  |p| {
+                      ConditionExpression::LogicalOp(
+                          ConditionTree {
+                              operator: Operator::Or,
+                              left: Box::new(p.0),
+                              right: Box::new(p.1)
                           }
-                      })
-                  )
-                | do_parse!(
-                      neg: opt!(preceded!(multispace0, tag_no_case!("not"))) >>
-                      multispace1 >>
-                      tag_no_case!("in") >>
-                      multispace1 >>
-                      vl: delimited!(tag!("("), value_list, tag!(")")) >>
-                      ({
-                          let list = ConditionExpression::Base(ConditionBase::LiteralList(vl));
-                          if neg.is_some() {
-                              ConditionExpression::NegationOp(Box::new(list))
-                          } else {
-                              list
-                          }
-                      })
-                  )
-            )
-        ) >>
-        (match op_right {
-            Some(right) => ConditionExpression::ComparisonOp(
-                ConditionTree {
-                    operator: Operator::In,
-                    left: Box::new(left),
-                    right: Box::new(right),
+                      )
+                  });
+
+    alt((cond, and_expr))(i)
+}
+
+pub fn and_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let cond = map(separated_pair(parenthetical_expr,
+                                  delimited(multispace0,
+                                            tag_no_case("and"),
+                                            multispace1),
+                                  and_expr),
+                   |p| {
+                       ConditionExpression::LogicalOp(
+                           ConditionTree {
+                               operator: Operator::And,
+                               left: Box::new(p.0),
+                               right: Box::new(p.1)
+                           }
+                       )
+                   });
+
+    alt((cond, parenthetical_expr))(i)
+}
+
+fn parenthetical_expr_helper(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let (remaining_input, (_, _, left_expr, _, _, _, operator, _, right_expr)) =
+        tuple((tag("("),
+            multispace0,
+            simple_expr,
+            multispace0,
+            tag(")"),
+            multispace0,
+            binary_comparison_operator,
+            multispace0,
+            simple_expr))(i)?;
+
+    let left = Box::new(ConditionExpression::Bracketed(Box::new(left_expr)));
+    let right = Box::new(right_expr);
+    let cond = ConditionExpression::ComparisonOp(ConditionTree { operator, left, right });
+
+    Ok((remaining_input, cond))
+}
+
+pub fn parenthetical_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    alt((parenthetical_expr_helper,
+        map(delimited(terminated(tag("("), multispace0),
+                        condition_expr,
+                        delimited(multispace0, tag(")"), multispace0)),
+            |inner| ConditionExpression::Bracketed(Box::new(inner))),
+        not_expr))(i)
+}
+
+pub fn not_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    alt((map(preceded(pair(tag_no_case("not"), multispace1),
+                    parenthetical_expr),
+        |right| ConditionExpression::NegationOp(Box::new(right))),
+        boolean_primary))(i)
+}
+
+fn is_null(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+    let (remaining_input, (_, _, not, _, _)) =
+        tuple((tag_no_case("is"),
+               multispace0,
+               opt(tag_no_case("not")),
+               multispace0,
+               tag_no_case("null")))(i)?;
+
+    // XXX(malte): bit of a hack; would consumers ever need to know
+    // about "IS NULL" vs. "= NULL"?
+    Ok((remaining_input, (
+    if not.is_some() {
+        Operator::NotEqual
+    } else {
+        Operator::Equal
+    },
+    ConditionExpression::Base(
+        ConditionBase::Literal(Literal::Null)
+    ))))
+}
+
+fn boolean_primary_rest(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+    alt((is_null,
+         separated_pair(binary_comparison_operator,
+                        multispace0,
+                        predicate)))(i)
+}
+
+fn boolean_primary(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    alt((map(separated_pair(predicate, multispace0, boolean_primary_rest),
+                |e: (ConditionExpression, (Operator, ConditionExpression))| {
+                    ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: (e.1).0,
+                            left: Box::new(e.0),
+                            right: Box::new((e.1).1),
+                        }
+                    )
                 }),
-            None => left,
-        })
-    )
-);
+        predicate))(i)
+}
 
-named!(simple_expr<&[u8], ConditionExpression>,
-    alt!(
-            do_parse!(
-                arit_expr: arithmetic_expression >>
-                (ConditionExpression::Arithmetic(Box::new(arit_expr)))
-            )
-        |   do_parse!(
-                tag!("(") >>
-                multispace0 >>
-                arit_expr: arithmetic_expression >>
-                multispace0 >>
-                tag!(")") >>
-                (ConditionExpression::Bracketed(Box::new(
-                    ConditionExpression::Arithmetic(Box::new(arit_expr))
-                )))
-            )
-        |    do_parse!(
-                lit: literal >>
-                (ConditionExpression::Base(ConditionBase::Literal(lit)))
-            )
-        |   do_parse!(
-                field: column_identifier >>
-                (ConditionExpression::Base(
-                    ConditionBase::Field(field)
-                ))
-            )
-        |   do_parse!(
-                select: delimited!(tag!("("), nested_selection, tag!(")")) >>
-                (ConditionExpression::Base(
-                    ConditionBase::NestedSelect(Box::new(select))
-                ))
-            )
-    )
-);
+fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    let nested_sel_pred =
+        map(separated_pair(opt(preceded(multispace0, tag_no_case("not"))),
+                            delimited(multispace1, tag_no_case("in"), multispace1),
+                            nested_selection),
+            |p| {
+                let nested = ConditionExpression::Base(
+                    ConditionBase::NestedSelect(Box::new(p.1))
+                );
+                if (p.0).is_some() {
+                    ConditionExpression::NegationOp(Box::new(nested))
+                } else {
+                    nested
+                }
+            });
+    let in_list_pred =
+        map(separated_pair(opt(preceded(multispace0, tag_no_case("not"))),
+                           delimited(multispace1, tag_no_case("in"), multispace1),
+                           delimited(tag("("), value_list, tag(")"))),
+            |p| {
+                let list = ConditionExpression::Base(ConditionBase::LiteralList(p.1));
+                if (p.0).is_some() {
+                    ConditionExpression::NegationOp(Box::new(list))
+                } else {
+                    list
+                }
+            });
+
+    let (remaining_input, (left, op_right)) =
+        tuple((simple_expr, opt(alt((nested_sel_pred, in_list_pred)))))(i)?;
+
+    match op_right {
+        Some(right) => Ok((remaining_input, ConditionExpression::ComparisonOp(
+            ConditionTree {
+                operator: Operator::In,
+                left: Box::new(left),
+                right: Box::new(right),
+            }))),
+        None => Ok((remaining_input, left)),
+    }
+}
+
+fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
+    alt((map(arithmetic_expression,
+             |e| ConditionExpression::Arithmetic(Box::new(e))),
+            map(delimited(terminated(tag("("), multispace0),
+                arithmetic_expression,
+                preceded(multispace0, tag(")"))),
+                |e| {
+                    ConditionExpression::Bracketed(Box::new(
+                        ConditionExpression::Arithmetic(Box::new(e))
+                    ))
+                }),
+        map(literal,
+            |lit| ConditionExpression::Base(ConditionBase::Literal(lit))),
+        map(column_identifier,
+            |f| ConditionExpression::Base(ConditionBase::Field(f))),
+        map(delimited(tag("("), nested_selection, tag(")")),
+            |s| {
+                ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(s)))
+            })
+    ))(i)
+}
 
 #[cfg(test)]
 mod tests {
