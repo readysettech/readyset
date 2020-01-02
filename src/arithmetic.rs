@@ -3,8 +3,7 @@ use std::{fmt, str};
 
 use column::Column;
 use common::{
-    as_alias, column_identifier_no_alias, integer_literal, type_identifier,
-    Literal, SqlType,
+    as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
 };
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]

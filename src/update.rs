@@ -2,18 +2,15 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use column::Column;
-use common::{
-    assignment_expr_list, statement_terminator, table_reference,
-    FieldValueExpression,
-};
+use common::{assignment_expr_list, statement_terminator, table_reference, FieldValueExpression};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
-use select::where_clause;
-use table::Table;
-use nom::IResult;
-use nom::sequence::tuple;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
+use nom::sequence::tuple;
+use nom::IResult;
+use select::where_clause;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -44,11 +41,26 @@ impl fmt::Display for UpdateStatement {
 }
 
 pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
-    let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) =
-        tuple((tag_no_case("update"), multispace1, table_reference, multispace1,
-                  tag_no_case("set"), multispace1, assignment_expr_list, multispace0,
-                  opt(where_clause), statement_terminator))(i)?;
-    Ok((remaining_input, UpdateStatement { table, fields, where_clause }))
+    let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
+        tag_no_case("update"),
+        multispace1,
+        table_reference,
+        multispace1,
+        tag_no_case("set"),
+        multispace1,
+        assignment_expr_list,
+        multispace0,
+        opt(where_clause),
+        statement_terminator,
+    ))(i)?;
+    Ok((
+        remaining_input,
+        UpdateStatement {
+            table,
+            fields,
+            where_clause,
+        },
+    ))
 }
 
 #[cfg(test)]

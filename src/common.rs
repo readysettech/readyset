@@ -1,7 +1,7 @@
 use nom::branch::alt;
-use nom::combinator::map;
 use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
+use nom::combinator::map;
 use nom::IResult;
 use std::fmt::{self, Display};
 use std::ops::Deref;
@@ -12,10 +12,10 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use table::Table;
-use nom::sequence::tuple;
-use nom::combinator::opt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
+use nom::sequence::tuple;
+use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -550,8 +550,10 @@ named!(pub type_identifier<&[u8], SqlType>,
 // present.
 pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)> {
     let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
-    let args_parser = alt((map(case_when_column, |cw| FunctionArguments::Conditional(cw)),
-                                          map(column_identifier_no_alias, |c| FunctionArguments::Column(c))));
+    let args_parser = alt((
+        map(case_when_column, |cw| FunctionArguments::Conditional(cw)),
+        map(column_identifier_no_alias, |c| FunctionArguments::Column(c)),
+    ));
     let (remaining_input, (distinct, args)) = tuple((distinct_parser, args_parser))(i)?;
     Ok((remaining_input, (args, distinct.is_some())))
 }
@@ -1149,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn terminated_by_semicolon(){
+    fn terminated_by_semicolon() {
         let res = statement_terminator(b"   ;  ");
         assert_eq!(res, Ok((&b""[..], ())));
     }

@@ -3,8 +3,8 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use common::{literal, sql_identifier, statement_terminator, Literal};
-use nom::IResult;
 use nom::sequence::tuple;
+use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetStatement {
@@ -21,9 +21,16 @@ impl fmt::Display for SetStatement {
 }
 
 pub fn set(i: &[u8]) -> IResult<&[u8], SetStatement> {
-    let (remaining_input, (_, _, var, _, _, _, value, _)) =
-        tuple((tag_no_case("set"), multispace1, sql_identifier, multispace0, tag_no_case("="),
-                    multispace0, literal, statement_terminator))(i)?;
+    let (remaining_input, (_, _, var, _, _, _, value, _)) = tuple((
+        tag_no_case("set"),
+        multispace1,
+        sql_identifier,
+        multispace0,
+        tag_no_case("="),
+        multispace0,
+        literal,
+        statement_terminator,
+    ))(i)?;
     let variable = String::from(str::from_utf8(var).unwrap());
     Ok((remaining_input, SetStatement { variable, value }))
 }
