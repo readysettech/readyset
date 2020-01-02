@@ -2,9 +2,15 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use column::Column;
+use common::FieldValueExpression::Arithmetic;
 use common::{
     as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
 };
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case};
+use nom::combinator::{map, opt};
+use nom::sequence::{terminated, tuple};
+use nom::IResult;
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
@@ -73,69 +79,76 @@ impl fmt::Display for ArithmeticExpression {
     }
 }
 
-named!(pub arithmetic_cast<&[u8], (ArithmeticBase, Option<SqlType>)>,
-    alt!(
-        do_parse!(
-            tag_no_case!("cast") >>
-            multispace0 >>
-            tag!("(") >>
-            multispace0 >>
-            // TODO(malte): should be arbitrary expr
-            v: arithmetic_base >>
-            multispace1 >>
-            tag_no_case!("as") >>
-            multispace1 >>
-            _sign: opt!(terminated!(tag_no_case!("signed"), multispace1)) >>
-            typ: type_identifier >>
-            multispace0 >>
-            tag!(")") >>
-            (v, Some(typ))
-        ) |
-        map!(arithmetic_base, |v| (v, None))
-    )
-);
+fn arithmetic_cast_helper(i: &[u8]) -> IResult<&[u8], (ArithmeticBase, Option<SqlType>)> {
+    let (remaining_input, (_, _, _, _, a_base, _, _, _, _sign, sql_type, _, _)) = tuple((
+        tag_no_case("cast"),
+        multispace0,
+        tag("("),
+        multispace0,
+        // TODO(malte): should be arbitrary expr
+        arithmetic_base,
+        multispace1,
+        tag_no_case("as"),
+        multispace1,
+        opt(terminated(tag_no_case("signed"), multispace1)),
+        type_identifier,
+        multispace0,
+        tag(")"),
+    ))(i)?;
+
+    Ok((remaining_input, (a_base, Some(sql_type))))
+}
+
+pub fn arithmetic_cast(i: &[u8]) -> IResult<&[u8], (ArithmeticBase, Option<SqlType>)> {
+    alt((arithmetic_cast_helper, map(arithmetic_base, |v| (v, None))))(i)
+}
 
 // Parse standard math operators.
 // TODO(malte): this doesn't currently observe operator precedence.
-named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
-    alt!(
-          map!(tag!("+"), |_| ArithmeticOperator::Add)
-        | map!(tag!("-"), |_| ArithmeticOperator::Subtract)
-        | map!(tag!("*"), |_| ArithmeticOperator::Multiply)
-        | map!(tag!("/"), |_| ArithmeticOperator::Divide)
-    )
-);
+pub fn arithmetic_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
+    alt((
+        map(tag("+"), |_| ArithmeticOperator::Add),
+        map(tag("-"), |_| ArithmeticOperator::Subtract),
+        map(tag("*"), |_| ArithmeticOperator::Multiply),
+        map(tag("/"), |_| ArithmeticOperator::Divide),
+    ))(i)
+}
 
 // Base case for nested arithmetic expressions: column name or literal.
-named!(pub arithmetic_base<&[u8], ArithmeticBase>,
-    alt!(
-          map!(integer_literal, |il| ArithmeticBase::Scalar(il))
-        | map!(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci))
-    )
-);
+pub fn arithmetic_base(i: &[u8]) -> IResult<&[u8], ArithmeticBase> {
+    alt((
+        map(integer_literal, |il| ArithmeticBase::Scalar(il)),
+        map(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci)),
+    ))(i)
+}
 
 // Parse simple arithmetic expressions combining literals, and columns and literals.
 // TODO(malte): this doesn't currently support nested expressions.
-named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
-    do_parse!(
-        left: arithmetic_cast >>
-        multispace0 >>
-        op: arithmetic_operator >>
-        multispace0 >>
-        right: arithmetic_cast >>
-        alias: opt!(as_alias) >>
-        (ArithmeticExpression {
-            op: op,
-            // TODO(malte): discards casts
+pub fn arithmetic_expression(i: &[u8]) -> IResult<&[u8], ArithmeticExpression> {
+    let (remaining_input, (left, _, op, _, right, opt_alias)) = tuple((
+        arithmetic_cast,
+        multispace0,
+        arithmetic_operator,
+        multispace0,
+        arithmetic_cast,
+        opt(as_alias),
+    ))(i)?;
+
+    let alias = match opt_alias {
+        None => None,
+        Some(a) => Some(String::from(a)),
+    };
+
+    Ok((
+        remaining_input,
+        ArithmeticExpression {
             left: left.0,
             right: right.0,
-            alias: match alias {
-                None => None,
-                Some(a) => Some(String::from(a)),
-            },
-        })
-    )
-);
+            op,
+            alias,
+        },
+    ))
+}
 
 #[cfg(test)]
 mod tests {
