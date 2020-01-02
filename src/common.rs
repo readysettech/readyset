@@ -1,7 +1,7 @@
 use nom::branch::alt;
 use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
-use nom::combinator::map;
+use nom::combinator::{map, not, peek};
 use nom::{IResult, InputLength};
 use std::fmt::{self, Display};
 use std::str;
@@ -11,11 +11,12 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::{tag, tag_no_case, take_while1, take, is_not};
 use nom::combinator::opt;
-use nom::sequence::{delimited, pair, preceded, terminated, tuple};
+use nom::error::{ErrorKind, ParseError};
+use nom::multi::{many0, many1, fold_many0};
+use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use table::Table;
-use nom::error::{ParseError, ErrorKind};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -652,104 +653,78 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
 }
 
 // Parses a SQL column identifier in the table.column format
-named!(pub column_identifier_no_alias<&[u8], Column>,
-    alt!(
-        do_parse!(
-            function: column_function >>
-            (Column {
-                name: format!("{}", function),
-                alias: None,
-                table: None,
-                function: Some(Box::new(function)),
-            })
-        )
-        | do_parse!(
-            table: opt!(
-                do_parse!(
-                    tbl_name: sql_identifier >>
-                    tag!(".") >>
-                    (tbl_name)
-                )
-            ) >>
-            column: sql_identifier >>
-            (Column {
-                name: str::from_utf8(column).unwrap().to_owned(), // TODO: is unwrap fine?
-                alias: None,
-                table: match table {
-                    None => None,
-                    Some(t) => Some(str::from_utf8(t).unwrap().to_owned()) // TODO: is unwrap fine?
-                },
-                function: None,
-            })
-        )
-    )
-);
+pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
+    let table_parser = pair(opt(terminated(sql_identifier, tag("."))), sql_identifier);
+    alt((
+        map(column_function, |f| Column {
+            name: format!("{}", f),
+            alias: None,
+            table: None,
+            function: Some(Box::new(f)),
+        }),
+        map(table_parser, |tup| Column {
+            name: str::from_utf8(tup.1).unwrap().to_string(),
+            alias: None,
+            table: match tup.0 {
+                None => None,
+                Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
+            },
+            function: None,
+        }),
+    ))(i)
+}
 
 // Parses a SQL column identifier in the table.column format
-named!(pub column_identifier<&[u8], Column>,
-    alt!(
-        do_parse!(
-            function: column_function >>
-            alias: opt!(as_alias) >>
-            (Column {
-                name: match alias {
-                    None => format!("{}", function),
-                    Some(a) => String::from(a),
-                },
-                alias: match alias {
-                    None => None,
-                    Some(a) => Some(String::from(a)),
-                },
-                table: None,
-                function: Some(Box::new(function)),
-            })
-        )
-        | do_parse!(
-            table: opt!(
-                do_parse!(
-                    tbl_name: sql_identifier >>
-                    tag!(".") >>
-                    (tbl_name)
-                )
-            ) >>
-            column: sql_identifier >>
-            alias: opt!(as_alias) >>
-            (Column {
-                name: String::from_utf8(column.to_vec()).unwrap(),
-                alias: match alias {
-                    None => None,
-                    Some(a) => Some(String::from(a)),
-                },
-                table: match table {
-                    None => None,
-                    Some(t) => Some(str::from_utf8(t).unwrap().to_owned()), // TODO: is unwrap fine?
-                },
-                function: None,
-            })
-        )
-    )
-);
+pub fn column_identifier(i: &[u8]) -> IResult<&[u8], Column> {
+    let col_func_no_table = map(pair(column_function, opt(as_alias)), |tup| Column {
+        name: match tup.1 {
+            None => format!("{}", tup.0),
+            Some(a) => String::from(a),
+        },
+        alias: match tup.1 {
+            None => None,
+            Some(a) => Some(String::from(a)),
+        },
+        table: None,
+        function: Some(Box::new(tup.0)),
+    });
+    let col_w_table = map(
+        tuple((
+            opt(terminated(sql_identifier, tag("."))),
+            sql_identifier,
+            opt(as_alias),
+        )),
+        |tup| Column {
+            name: str::from_utf8(tup.1).unwrap().to_string(),
+            alias: match tup.2 {
+                None => None,
+                Some(a) => Some(String::from(a)),
+            },
+            table: match tup.0 {
+                None => None,
+                Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
+            },
+            function: None,
+        },
+    );
+    alt((col_func_no_table, col_w_table))(i)
+}
 
 // Parses a SQL identifier (alphanumeric1 and "_").
-named!(pub sql_identifier<&[u8], &[u8]>,
-    alt!(
-          do_parse!(
-                not!(peek!(sql_keyword)) >>
-                ident: take_while1!(is_sql_identifier) >>
-                (ident)
-          )
-        | delimited!(tag!("`"), take_while1!(is_sql_identifier), tag!("`"))
-        | delimited!(tag!("["), take_while1!(is_sql_identifier), tag!("]"))
-    )
-);
+pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
+        preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
+        delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
+        delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
+    ))(i)
+}
 
 // Parse an unsigned integer.
-named!(pub unsigned_number<&[u8], u64>,
-    do_parse!(
-        d: digit1 >>
-        (FromStr::from_str(str::from_utf8(d).unwrap()).unwrap())
-    )
-);
+pub fn unsigned_number(i: &[u8]) -> IResult<&[u8], u64> {
+    map(digit1, |d| {
+        FromStr::from_str(str::from_utf8(d).unwrap()).unwrap()
+    })(i)
+}
 
 pub fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
     if input.input_len() == 0 {
@@ -761,267 +736,192 @@ pub fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E
 
 // Parse a terminator that ends a SQL statement.
 pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, _) = delimited(multispace0, alt((tag(";"), line_ending, eof)), multispace0)(i)?;
+    let (remaining_input, _) =
+        delimited(multispace0, alt((tag(";"), line_ending, eof)), multispace0)(i)?;
 
     Ok((remaining_input, ()))
 }
 
 // Parse binary comparison operators
-named!(pub binary_comparison_operator<&[u8], Operator>,
-    alt!(
-           map!(tag_no_case!("not_like"), |_| Operator::NotLike)
-         | map!(tag_no_case!("like"), |_| Operator::Like)
-         | map!(tag_no_case!("!="), |_| Operator::NotEqual)
-         | map!(tag_no_case!("<>"), |_| Operator::NotEqual)
-         | map!(tag_no_case!(">="), |_| Operator::GreaterOrEqual)
-         | map!(tag_no_case!("<="), |_| Operator::LessOrEqual)
-         | map!(tag_no_case!("="), |_| Operator::Equal)
-         | map!(tag_no_case!("<"), |_| Operator::Less)
-         | map!(tag_no_case!(">"), |_| Operator::Greater)
-         | map!(tag_no_case!("in"), |_| Operator::In)
-    )
-);
+pub fn binary_comparison_operator(i: &[u8]) -> IResult<&[u8], Operator> {
+    alt((
+        map(tag_no_case("not_like"), |_| Operator::NotLike),
+        map(tag_no_case("like"), |_| Operator::Like),
+        map(tag_no_case("!="), |_| Operator::NotEqual),
+        map(tag_no_case("<>"), |_| Operator::NotEqual),
+        map(tag_no_case(">="), |_| Operator::GreaterOrEqual),
+        map(tag_no_case("<="), |_| Operator::LessOrEqual),
+        map(tag_no_case("="), |_| Operator::Equal),
+        map(tag_no_case("<"), |_| Operator::Less),
+        map(tag_no_case(">"), |_| Operator::Greater),
+        map(tag_no_case("in"), |_| Operator::In),
+    ))(i)
+}
 
 // Parse rule for AS-based aliases for SQL entities.
-named!(pub as_alias<&[u8], &str>,
-    do_parse!(
-        multispace1 >>
-        opt!(do_parse!(tag_no_case!("as") >> multispace1 >> ())) >>
-        alias: sql_identifier >>
-        (str::from_utf8(alias).unwrap())
-    )
-);
+pub fn as_alias(i: &[u8]) -> IResult<&[u8], &str> {
+    map(
+        tuple((
+            multispace1,
+            opt(pair(tag_no_case("as"), multispace1)),
+            sql_identifier,
+        )),
+        |a| str::from_utf8(a.2).unwrap(),
+    )(i)
+}
 
-named!(field_value_expr<&[u8], FieldValueExpression>,
-    alt!(
-        map!(literal, |l| FieldValueExpression::Literal(LiteralExpression {
-            value: l.into(),
-            alias: None,
-        }))
-        | map!(arithmetic_expression, |ae| FieldValueExpression::Arithmetic(ae))
-    )
-);
+fn field_value_expr(i: &[u8]) -> IResult<&[u8], FieldValueExpression> {
+    alt((
+        map(literal, |l| {
+            FieldValueExpression::Literal(LiteralExpression {
+                value: l.into(),
+                alias: None,
+            })
+        }),
+        map(arithmetic_expression, |ae| {
+            FieldValueExpression::Arithmetic(ae)
+        }),
+    ))(i)
+}
 
-named!(assignment_expr<&[u8], (Column, FieldValueExpression) >,
-    do_parse!(
-        column: column_identifier_no_alias >>
-        multispace0 >>
-        tag!("=") >>
-        multispace0 >>
-        value: field_value_expr >>
-        (column, value)
-    )
-);
+fn assignment_expr(i: &[u8]) -> IResult<&[u8], (Column, FieldValueExpression)> {
+    separated_pair(
+        column_identifier_no_alias,
+        delimited(multispace0, tag("="), multispace0),
+        field_value_expr,
+    )(i)
+}
 
-named!(pub assignment_expr_list<&[u8], Vec<(Column, FieldValueExpression)> >,
-       many1!(
-           do_parse!(
-               field_value: assignment_expr >>
-               opt!(
-                   do_parse!(
-                       multispace0 >>
-                       tag!(",") >>
-                       multispace0 >>
-                       ()
-                   )
-               ) >>
-               (field_value)
-           )
-       )
-);
+fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    delimited(multispace0, tag(","), multispace0)(i)
+}
+
+pub fn assignment_expr_list(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
+    many1(terminated(assignment_expr, opt(ws_sep_comma)))(i)
+}
 
 // Parse rule for a comma-separated list of fields without aliases.
-named!(pub field_list<&[u8], Vec<Column> >,
-       many0!(
-           do_parse!(
-               fieldname: column_identifier_no_alias >>
-               opt!(
-                   do_parse!(
-                       multispace0 >>
-                       tag!(",") >>
-                       multispace0 >>
-                       ()
-                   )
-               ) >>
-               (fieldname)
-           )
-       )
-);
+pub fn field_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
+    many0(terminated(column_identifier_no_alias, opt(ws_sep_comma)))(i)
+}
 
 // Parse list of column/field definitions.
-named!(pub field_definition_expr<&[u8], Vec<FieldDefinitionExpression>>,
-       many0!(
-           do_parse!(
-               field: alt!(
-                   do_parse!(
-                       tag!("*") >>
-                       (FieldDefinitionExpression::All)
-                   )
-                 | do_parse!(
-                     table: table_reference >>
-                     tag!(".*") >>
-                     (FieldDefinitionExpression::AllInTable(table.name.clone()))
-                 )
-                 | do_parse!(
-                     expr: arithmetic_expression >>
-                     (FieldDefinitionExpression::Value(
-                             FieldValueExpression::Arithmetic(expr)))
-                 )
-                 | do_parse!(
-                     literal: literal_expression >>
-                     (FieldDefinitionExpression::Value(
-                             FieldValueExpression::Literal(literal)))
-                 )
-                 | do_parse!(
-                     column: column_identifier >>
-                     (FieldDefinitionExpression::Col(column))
-                 )
-               ) >>
-               opt!(
-                   do_parse!(
-                       multispace0 >>
-                       tag!(",") >>
-                       multispace0 >>
-                       ()
-                   )
-               ) >>
-               (field)
-           )
-       )
-);
+pub fn field_definition_expr(i: &[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
+    many0(terminated(
+        alt((
+            map(tag("*"), |_| FieldDefinitionExpression::All),
+            map(terminated(table_reference, tag(".*")), |t| {
+                FieldDefinitionExpression::AllInTable(t.name.clone())
+            }),
+            map(arithmetic_expression, |expr| {
+                FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(expr))
+            }),
+            map(literal_expression, |lit| {
+                FieldDefinitionExpression::Value(FieldValueExpression::Literal(lit))
+            }),
+            map(column_identifier, |col| FieldDefinitionExpression::Col(col)),
+        )),
+        opt(ws_sep_comma),
+    ))(i)
+}
 
 // Parse list of table names.
 // XXX(malte): add support for aliases
-named!(pub table_list<&[u8], Vec<Table> >,
-       many0!(
-           do_parse!(
-               table: table_reference >>
-               opt!(
-                   do_parse!(
-                       multispace0 >>
-                       tag!(",") >>
-                       multispace0 >>
-                       ()
-                   )
-               ) >>
-               (table)
-           )
-       )
-);
+pub fn table_list(i: &[u8]) -> IResult<&[u8], Vec<Table>> {
+    many0(terminated(table_reference, opt(ws_sep_comma)))(i)
+}
 
 // Integer literal value
-named!(pub integer_literal<&[u8], Literal>,
-    do_parse!(
-        sign: opt!(tag!("-")) >>
-        val: digit1 >>
-        ({
-            let mut intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
-            if sign.is_some() {
-                intval *= -1;
-            }
-            Literal::Integer(intval)
-        })
-    )
-);
+pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+    map(pair(opt(tag("-")), digit1), |tup| {
+        let mut intval = i64::from_str(str::from_utf8(tup.1).unwrap()).unwrap();
+        if (tup.0).is_some() {
+            intval *= -1;
+        }
+        Literal::Integer(intval)
+    })(i)
+}
+
+fn unpack(v: &[u8]) -> i32 {
+    i32::from_str(str::from_utf8(v).unwrap()).unwrap()
+}
 
 // Floating point literal value
-named!(pub float_literal<&[u8], Literal>,
-    do_parse!(
-        sign: opt!(tag!("-")) >>
-        mant: digit1 >>
-        tag!(".") >>
-        frac: digit1 >>
-        ({
-            let unpack = |v: &[u8]| -> i32 {
-                i32::from_str(str::from_utf8(v).unwrap()).unwrap()
-            };
-            Literal::FixedPoint(Real {
-                integral: if sign.is_some() {
-                    -1 * unpack(mant)
-                } else {
-                    unpack(mant)
-                },
-                fractional: unpack(frac) as i32,
-            })
+pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+    map(tuple((opt(tag("-")), digit1, tag("."), digit1)), |tup| {
+        Literal::FixedPoint(Real {
+            integral: if (tup.0).is_some() {
+                -1 * unpack(tup.1)
+            } else {
+                unpack(tup.1)
+            },
+            fractional: unpack(tup.3) as i32,
         })
-    )
-);
-
-// TODO: get this function to compile
-/// String literal value
-/*
-fn raw_string_quoted(input: &[u8], quote: u8) -> IResult<&[u8], &[u8]> {
-    let quote_slice: &[u8] = &[quote];
-    let double_quote_slice: &[u8] = &[quote, quote];
-    let backslash_quote: &[u8] = &[b'\\', quote];
-    delimited!(
-        input,
-        tag!(quote_slice),
-        fold_many0!(
-            alt!(
-                is_not!(backslash_quote)
-                    | map!(tag!(double_quote_slice), |_| quote_slice)
-                    | map!(tag!("\\\\"), |_| &b"\\"[..])
-                    | map!(tag!("\\b"), |_| &b"\x7f"[..])
-                    | map!(tag!("\\r"), |_| &b"\r"[..])
-                    | map!(tag!("\\n"), |_| &b"\n"[..])
-                    | map!(tag!("\\t"), |_| &b"\t"[..])
-                    | map!(tag!("\\0"), |_| &b"\0"[..])
-                    | map!(tag!("\\Z"), |_| &b"\x1A"[..])
-                    | do_parse!(_escape: tag!("\\") >> escaped: take!(1) >> (escaped))
-            ),
-            Vec::new(),
-            |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes);
-                acc
-            }
-        ),
-        tag!(quote_slice)
-    )
+    })(i)
 }
-*/
 
-//named!(raw_string_singlequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'\''));
-//named!(raw_string_doublequoted< &[u8], Vec<u8> >, call!(raw_string_quoted, b'"'));
-
-named!(raw_string_singlequoted< &[u8], Vec<u8> >,
-    delimited!(
-        tag!("\'"),
-        fold_many0!(
-            tag!("hello"),
+/// String literal value
+fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<u8>> {
+    // TODO: clean up these assignments. lifetimes and temporary values made it difficult
+    let quote_slice: &[u8] = if is_single_quote {
+        b"\'"
+    } else {
+        b"\""
+    };
+    let double_quote_slice: &[u8] = if is_single_quote {
+        b"\'\'"
+    } else {
+        b"\"\""
+    };
+    let backslash_quote: &[u8] = if is_single_quote {
+        b"\\"
+    } else {
+        b"\""
+    };
+    delimited(
+        tag(quote_slice),
+        fold_many0(
+            alt((
+                is_not(backslash_quote),
+                    map(tag(double_quote_slice), |_| -> &[u8] { if is_single_quote {
+                        b"\'"
+                    } else {
+                        b"\""
+                    }}),
+                    map(tag("\\\\"), |_| &b"\\"[..]),
+                    map(tag("\\b"), |_| &b"\x7f"[..]),
+                    map(tag("\\r"), |_| &b"\r"[..]),
+                    map(tag("\\n"), |_| &b"\n"[..]),
+                    map(tag("\\t"), |_| &b"\t"[..]),
+                    map(tag("\\0"), |_| &b"\0"[..]),
+                    map(tag("\\Z"), |_| &b"\x1A"[..]),
+                    preceded(tag("\\"), take(1usize))
+            )),
             Vec::new(),
             |mut acc: Vec<u8>, bytes: &[u8]| {
                 acc.extend(bytes);
                 acc
             }
         ),
-        tag!("\'")
-    )
-);
+        tag(quote_slice)
+    )(input)
+}
 
-named!(raw_string_doublequoted< &[u8], Vec<u8> >,
-    delimited!(
-        tag!("\""),
-        fold_many0!(
-            tag!("hello"),
-            Vec::new(),
-            |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes);
-                acc
-            }
-        ),
-        tag!("\"")
-    )
-);
+fn raw_string_singlequoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    raw_string_quoted(i, true)
+}
 
-named!(pub string_literal<&[u8], Literal>,
-       map!(alt!(raw_string_singlequoted | raw_string_doublequoted),
-             |bytes| match String::from_utf8(bytes) {
-                 Ok(s) => Literal::String(s),
-                 Err(err) => Literal::Blob(err.into_bytes())
-             }
-           )
-);
+fn raw_string_doublequoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    raw_string_quoted(i, false)
+}
+
+pub fn string_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+    map(alt((raw_string_singlequoted, raw_string_doublequoted)),
+        |bytes| match String::from_utf8(bytes) {
+            Ok(s) => Literal::String(s),
+            Err(err) => Literal::Blob(err.into_bytes()),
+        })(i)
+}
 
 // Any literal value.
 named!(pub literal<&[u8], Literal>,
