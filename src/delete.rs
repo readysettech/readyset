@@ -1,15 +1,15 @@
+use nom::character::complete::multispace1;
 use std::{fmt, str};
-use nom::character::complete::{multispace1};
 
 use common::{statement_terminator, table_reference};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
-use select::where_clause;
-use table::Table;
-use nom::IResult;
-use nom::sequence::{tuple, delimited};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
+use nom::sequence::{delimited, tuple};
+use nom::IResult;
+use select::where_clause;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
@@ -30,13 +30,21 @@ impl fmt::Display for DeleteStatement {
 }
 
 pub fn deletion(i: &[u8]) -> IResult<&[u8], DeleteStatement> {
-    let (remaining_input, (_, _, table, where_clause, _)) =
-        tuple((tag_no_case("delete"), delimited(multispace1,
-                                                tag_no_case("from"),
-                                                multispace1),
-                table_reference, opt(where_clause), statement_terminator))(i)?;
+    let (remaining_input, (_, _, table, where_clause, _)) = tuple((
+        tag_no_case("delete"),
+        delimited(multispace1, tag_no_case("from"), multispace1),
+        table_reference,
+        opt(where_clause),
+        statement_terminator,
+    ))(i)?;
 
-    Ok((remaining_input, DeleteStatement { table, where_clause }))
+    Ok((
+        remaining_input,
+        DeleteStatement {
+            table,
+            where_clause,
+        },
+    ))
 }
 
 #[cfg(test)]

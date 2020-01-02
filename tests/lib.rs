@@ -51,7 +51,8 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
             } else {
                 String::from(l)
             }
-        }).collect();
+        })
+        .collect();
     println!("\nLoaded {} {} queries", lines.len(), name);
 
     // Try parsing them all
@@ -78,7 +79,8 @@ fn parse_file(path: &str) -> (i32, i32) {
                 && !l.starts_with("--")
                 && !l.starts_with("DROP")
                 && !(l.starts_with("/*") && l.ends_with("*/;"))
-        }).collect();
+        })
+        .collect();
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {
@@ -97,7 +99,8 @@ fn parse_file(path: &str) -> (i32, i32) {
     parse_queryset(queries)
 }
 
-#[test] #[ignore]
+#[test]
+#[ignore]
 fn hotcrp_queries() {
     assert!(test_queries_from_file(Path::new("tests/hotcrp-queries.txt"), "HotCRP").is_ok());
 }
@@ -140,7 +143,8 @@ fn hotcrp_schema() {
         .map(str::trim)
         .filter(|l| {
             !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP")
-        }).collect();
+        })
+        .collect();
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {

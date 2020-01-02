@@ -1,13 +1,13 @@
-use std::{fmt, str};
 use nom::character::complete::multispace0;
+use std::{fmt, str};
 
 use common::{statement_terminator, table_list};
 use keywords::escape_if_keyword;
-use table::Table;
-use nom::IResult;
-use nom::sequence::{delimited, tuple};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
+use nom::sequence::{delimited, tuple};
+use nom::IResult;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
@@ -33,20 +33,32 @@ impl fmt::Display for DropTableStatement {
 }
 
 pub fn drop_table(i: &[u8]) -> IResult<&[u8], DropTableStatement> {
-    let (remaining_input, (_, opt_if_exists, _, tables, _, _, _, _)) =
-        tuple((tag_no_case("drop table"),
-               opt(delimited(multispace0,
-                             tag_no_case("if exists"),
-                             multispace0)),
-                multispace0, table_list, multispace0, opt(delimited(multispace0,
-                                           tag_no_case("restricted"),
-                                           multispace0)),
-                opt(delimited(multispace0,
-                              tag_no_case("cascade"),
-                              multispace0)),
-                statement_terminator))(i)?;
+    let (remaining_input, (_, opt_if_exists, _, tables, _, _, _, _)) = tuple((
+        tag_no_case("drop table"),
+        opt(delimited(
+            multispace0,
+            tag_no_case("if exists"),
+            multispace0,
+        )),
+        multispace0,
+        table_list,
+        multispace0,
+        opt(delimited(
+            multispace0,
+            tag_no_case("restricted"),
+            multispace0,
+        )),
+        opt(delimited(multispace0, tag_no_case("cascade"), multispace0)),
+        statement_terminator,
+    ))(i)?;
 
-    Ok((remaining_input, DropTableStatement { tables, if_exists: opt_if_exists.is_some() }))
+    Ok((
+        remaining_input,
+        DropTableStatement {
+            tables,
+            if_exists: opt_if_exists.is_some(),
+        },
+    ))
 }
 
 #[cfg(test)]

@@ -4,16 +4,16 @@ use std::str;
 
 use column::Column;
 use common::{
-    assignment_expr_list, field_list, statement_terminator, table_reference,
-    value_list, FieldValueExpression, Literal,
+    assignment_expr_list, field_list, statement_terminator, table_reference, value_list,
+    FieldValueExpression, Literal,
 };
 use keywords::escape_if_keyword;
-use table::Table;
-use nom::IResult;
-use nom::sequence::{tuple, preceded, delimited};
-use nom::bytes::complete::{tag_no_case, tag};
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::many1;
+use nom::sequence::{delimited, preceded, tuple};
+use nom::IResult;
+use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -58,40 +58,63 @@ impl fmt::Display for InsertStatement {
 }
 
 fn fields(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
-    delimited(preceded(tag("("), multispace0),
-                field_list,
-                delimited(multispace0, tag(")"), multispace1))(i)
+    delimited(
+        preceded(tag("("), multispace0),
+        field_list,
+        delimited(multispace0, tag(")"), multispace1),
+    )(i)
 }
 
 fn data(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
-    delimited(tag("("),
-                    value_list,
-                    preceded(tag(")"),
-                             opt(delimited(multispace0,
-                                            tag(","),
-                                            multispace0))))(i)
+    delimited(
+        tag("("),
+        value_list,
+        preceded(tag(")"), opt(delimited(multispace0, tag(","), multispace0))),
+    )(i)
 }
 
 fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
-    preceded(multispace0,
-                 preceded(tag_no_case("on duplicate key update"),
-                            preceded(multispace1, assignment_expr_list)))(i)
+    preceded(
+        multispace0,
+        preceded(
+            tag_no_case("on duplicate key update"),
+            preceded(multispace1, assignment_expr_list),
+        ),
+    )(i)
 }
 
 // Parse rule for a SQL insert query.
 // TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
 pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
-    let (remaining_input, (_, ignore_res, _, _, _, table, _, fields, _, _, data,
-                            on_duplicate, _)) =
-        tuple((tag_no_case("insert"), opt(preceded(multispace1,
-                                                   tag_no_case("ignore"))),
-                multispace1, tag_no_case("into"), multispace1, table_reference, multispace1,
-                opt(fields), tag_no_case("values"), multispace1, many1(data),
-                opt(on_duplicate), statement_terminator))(i)?;
+    let (remaining_input, (_, ignore_res, _, _, _, table, _, fields, _, _, data, on_duplicate, _)) =
+        tuple((
+            tag_no_case("insert"),
+            opt(preceded(multispace1, tag_no_case("ignore"))),
+            multispace1,
+            tag_no_case("into"),
+            multispace1,
+            table_reference,
+            multispace1,
+            opt(fields),
+            tag_no_case("values"),
+            multispace1,
+            many1(data),
+            opt(on_duplicate),
+            statement_terminator,
+        ))(i)?;
     assert!(table.alias.is_none());
     let ignore = ignore_res.is_some();
 
-    Ok((remaining_input, InsertStatement { table, fields, data, ignore, on_duplicate }))
+    Ok((
+        remaining_input,
+        InsertStatement {
+            table,
+            fields,
+            data,
+            ignore,
+            on_duplicate,
+        },
+    ))
 }
 
 #[cfg(test)]

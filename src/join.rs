@@ -3,12 +3,12 @@ use std::str;
 
 use column::Column;
 use condition::ConditionExpression;
+use nom::branch::alt;
+use nom::bytes::complete::tag_no_case;
+use nom::combinator::map;
+use nom::IResult;
 use select::{JoinClause, SelectStatement};
 use table::Table;
-use nom::IResult;
-use nom::branch::alt;
-use nom::combinator::map;
-use nom::bytes::complete::tag_no_case;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -89,12 +89,16 @@ impl fmt::Display for JoinConstraint {
 
 // Parse binary comparison operators
 pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
-    alt((map(tag_no_case("join"), |_| JoinOperator::Join),
+    alt((
+        map(tag_no_case("join"), |_| JoinOperator::Join),
         map(tag_no_case("left join"), |_| JoinOperator::LeftJoin),
-        map(tag_no_case("left outer join"), |_| JoinOperator::LeftOuterJoin),
+        map(tag_no_case("left outer join"), |_| {
+            JoinOperator::LeftOuterJoin
+        }),
         map(tag_no_case("inner join"), |_| JoinOperator::InnerJoin),
         map(tag_no_case("cross join"), |_| JoinOperator::CrossJoin),
-        map(tag_no_case("straight_join"), |_| JoinOperator::StraightJoin)))(i)
+        map(tag_no_case("straight_join"), |_| JoinOperator::StraightJoin),
+    ))(i)
 }
 
 #[cfg(test)]

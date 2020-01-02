@@ -3,24 +3,23 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use create_table_options::table_options;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
-    column_identifier_no_alias, parse_comment, sql_identifier,
-    statement_terminator, table_reference, type_identifier, Literal, Real, SqlType,
-    TableKey,
+    column_identifier_no_alias, parse_comment, sql_identifier, statement_terminator,
+    table_reference, type_identifier, Literal, Real, SqlType, TableKey,
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
+use create_table_options::table_options;
 use keywords::escape_if_keyword;
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case, take_until};
+use nom::combinator::{map, opt};
+use nom::multi::{many0, many1};
+use nom::sequence::{delimited, preceded, terminated, tuple};
+use nom::IResult;
 use order::{order_type, OrderType};
 use select::{nested_selection, SelectStatement};
 use table::Table;
-use nom::IResult;
-use nom::sequence::{tuple, terminated, delimited, preceded};
-use nom::combinator::{opt, map};
-use nom::bytes::complete::{tag, tag_no_case, take_until};
-use nom::multi::{many0, many1};
-use nom::branch::alt;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -101,10 +100,11 @@ impl fmt::Display for CreateViewStatement {
 
 // MySQL grammar element for index column definition (§13.1.18, index_col_name)
 pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
-    let (remaining_input, (column, len_u8, order)) =
-        tuple((terminated(column_identifier_no_alias, multispace0),
-                opt(delimited(tag("("), digit1, tag("("))),
-                opt(order_type)))(i)?;
+    let (remaining_input, (column, len_u8, order)) = tuple((
+        terminated(column_identifier_no_alias, multispace0),
+        opt(delimited(tag("("), digit1, tag("("))),
+        opt(order_type),
+    ))(i)?;
     let len = len_u8.map(|l| u16::from_str(str::from_utf8(l).unwrap()).unwrap());
 
     Ok((remaining_input, (column, len, order)))
@@ -112,12 +112,14 @@ pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<O
 
 // Helper for list of index columns
 pub fn index_col_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
-    many0(map(terminated(index_col_name,
-                         opt(delimited(multispace0,
-                                       tag(","),
-                                       multispace0))),
+    many0(map(
+        terminated(
+            index_col_name,
+            opt(delimited(multispace0, tag(","), multispace0)),
+        ),
         // XXX(malte): ignores length and order
-        |e| e.0))(i)
+        |e| e.0,
+    ))(i)
 }
 
 // Parse rule for an individual key specification.
@@ -126,106 +128,121 @@ pub fn key_specification(i: &[u8]) -> IResult<&[u8], TableKey> {
 }
 
 fn full_text_key(i: &[u8]) -> IResult<&[u8], TableKey> {
-    let (remaining_input, (_, _, _, _, name, _, columns)) =
-        tuple((tag_no_case("fulltext"),
-               multispace1, alt((tag_no_case("key"),
-                                 tag_no_case("index"))),
-               multispace1, opt(sql_identifier), multispace0,
-               delimited(tag("("),
-                         delimited(multispace0,
-                                   index_col_list,
-                                   multispace0),
-                         tag(")"))))(i)?;
+    let (remaining_input, (_, _, _, _, name, _, columns)) = tuple((
+        tag_no_case("fulltext"),
+        multispace1,
+        alt((tag_no_case("key"), tag_no_case("index"))),
+        multispace1,
+        opt(sql_identifier),
+        multispace0,
+        delimited(
+            tag("("),
+            delimited(multispace0, index_col_list, multispace0),
+            tag(")"),
+        ),
+    ))(i)?;
 
     match name {
         Some(name) => {
             let n = String::from_utf8(name.to_vec()).unwrap();
             Ok((remaining_input, TableKey::FulltextKey(Some(n), columns)))
-        },
-        None => Ok((remaining_input, TableKey::FulltextKey(None, columns)))
+        }
+        None => Ok((remaining_input, TableKey::FulltextKey(None, columns))),
     }
 }
 
 fn primary_key(i: &[u8]) -> IResult<&[u8], TableKey> {
-    let (remaining_input, (_, _, columns, _)) =
-        tuple((tag_no_case("primary key"),
-               multispace1,
-               delimited(tag("("),
-                         delimited(multispace0,
-                                   index_col_list,
-                                   multispace0),
-                         tag(")")),
-                opt(map(preceded(multispace1, tag_no_case("auto_increment")),
-                        |_| ()))))(i)?;
+    let (remaining_input, (_, _, columns, _)) = tuple((
+        tag_no_case("primary key"),
+        multispace1,
+        delimited(
+            tag("("),
+            delimited(multispace0, index_col_list, multispace0),
+            tag(")"),
+        ),
+        opt(map(
+            preceded(multispace1, tag_no_case("auto_increment")),
+            |_| (),
+        )),
+    ))(i)?;
 
     Ok((remaining_input, TableKey::PrimaryKey(columns)))
 }
 
 fn unique(i: &[u8]) -> IResult<&[u8], TableKey> {
     // TODO: add branching to correctly parse whitespace after `unique`
-    let (remaining_input, (_, _, _, name, _, columns)) =
-        tuple((tag_no_case("unique"),
-            opt(preceded(multispace1,
-                         alt((tag_no_case("key"), tag_no_case("index"))))),
-            multispace0,
-            opt(sql_identifier),
-            multispace0,
-            delimited(tag("("),
-                     delimited(multispace0,
-                               index_col_list,
-                               multispace0),
-                     tag(")"))))(i)?;
+    let (remaining_input, (_, _, _, name, _, columns)) = tuple((
+        tag_no_case("unique"),
+        opt(preceded(
+            multispace1,
+            alt((tag_no_case("key"), tag_no_case("index"))),
+        )),
+        multispace0,
+        opt(sql_identifier),
+        multispace0,
+        delimited(
+            tag("("),
+            delimited(multispace0, index_col_list, multispace0),
+            tag(")"),
+        ),
+    ))(i)?;
 
     match name {
         Some(name) => {
             let n = String::from_utf8(name.to_vec()).unwrap();
             Ok((remaining_input, TableKey::UniqueKey(Some(n), columns)))
-        },
-        None => Ok((remaining_input, TableKey::UniqueKey(None, columns)))
+        }
+        None => Ok((remaining_input, TableKey::UniqueKey(None, columns))),
     }
 }
 
 fn key_or_index(i: &[u8]) -> IResult<&[u8], TableKey> {
-    let (remaining_input, (_, _, name, _, columns)) =
-        tuple((alt((tag_no_case("key"), tag_no_case("index"))),
-            multispace0,
-            sql_identifier,
-            multispace0,
-            delimited(tag("("),
-                      delimited(multispace0,
-                                index_col_list,
-                                multispace0),
-                      tag(")"))))(i)?;
+    let (remaining_input, (_, _, name, _, columns)) = tuple((
+        alt((tag_no_case("key"), tag_no_case("index"))),
+        multispace0,
+        sql_identifier,
+        multispace0,
+        delimited(
+            tag("("),
+            delimited(multispace0, index_col_list, multispace0),
+            tag(")"),
+        ),
+    ))(i)?;
 
     let n = String::from_utf8(name.to_vec()).unwrap();
     Ok((remaining_input, TableKey::Key(n, columns)))
-
 }
 
 // Parse rule for a comma-separated list.
 pub fn key_specification_list(i: &[u8]) -> IResult<&[u8], Vec<TableKey>> {
-    many1(terminated(key_specification,
-                     opt(delimited(multispace0, tag(","), multispace0))))(i)
+    many1(terminated(
+        key_specification,
+        opt(delimited(multispace0, tag(","), multispace0)),
+    ))(i)
 }
 
 fn field_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
-    let (remaining_input, (column, field_type, constraints, comment, _)) =
-        tuple((column_identifier_no_alias,
-              opt(delimited(multispace1, type_identifier, multispace0)),
-              many0(column_constraint),
-              opt(parse_comment),
-              opt(delimited(multispace0, tag(","), multispace0))))(i)?;
+    let (remaining_input, (column, field_type, constraints, comment, _)) = tuple((
+        column_identifier_no_alias,
+        opt(delimited(multispace1, type_identifier, multispace0)),
+        many0(column_constraint),
+        opt(parse_comment),
+        opt(delimited(multispace0, tag(","), multispace0)),
+    ))(i)?;
 
     let sql_type = match field_type {
         None => SqlType::Text,
         Some(ref t) => t.clone(),
     };
-    Ok((remaining_input, ColumnSpecification {
-        column,
-        sql_type,
-        constraints: constraints.into_iter().filter_map(|m| m).collect(),
-        comment
-    }))
+    Ok((
+        remaining_input,
+        ColumnSpecification {
+            column,
+            sql_type,
+            constraints: constraints.into_iter().filter_map(|m| m).collect(),
+            comment,
+        },
+    ))
 }
 
 // Parse rule for a comma-separated list.
@@ -235,73 +252,94 @@ pub fn field_specification_list(i: &[u8]) -> IResult<&[u8], Vec<ColumnSpecificat
 
 // Parse rule for a column definition constraint.
 pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
-    let not_null = map(delimited(multispace0,
-                                 tag_no_case("not null"),
-                                 multispace0),
-                        |_| Some(ColumnConstraint::NotNull));
-    let null = map(delimited(multispace0,
-                                 tag_no_case("null"),
-                                 multispace0),
-                       |_| None);
-    let auto_increment = map(delimited(multispace0,
-                             tag_no_case("auto_increment"),
-                             multispace0),
-                   |_| Some(ColumnConstraint::AutoIncrement));
-    let primary_key = map(delimited(multispace0,
-                                tag_no_case("primary key"),
-                                multispace0),
-                      |_| Some(ColumnConstraint::PrimaryKey));
-    let unique = map(delimited(multispace0,
-                                    tag_no_case("unique"),
-                                    multispace0),
-                          |_| Some(ColumnConstraint::Unique));
-    let character_set = map(preceded(delimited(multispace0,
-                               tag_no_case("character set"),
-                               multispace1),
-                                sql_identifier),
-                     |cs| {
-                         let char_set = str::from_utf8(cs).unwrap().to_owned();
-                         Some(ColumnConstraint::CharacterSet(char_set))
-                     });
-    let collate = map(preceded(delimited(multispace0,
-                                               tag_no_case("collate"),
-                                               multispace1),
-                                     sql_identifier),
-                            |c| {
-                                let collation = str::from_utf8(c).unwrap().to_owned();
-                                Some(ColumnConstraint::Collation(collation))
-                            });
+    let not_null = map(
+        delimited(multispace0, tag_no_case("not null"), multispace0),
+        |_| Some(ColumnConstraint::NotNull),
+    );
+    let null = map(
+        delimited(multispace0, tag_no_case("null"), multispace0),
+        |_| None,
+    );
+    let auto_increment = map(
+        delimited(multispace0, tag_no_case("auto_increment"), multispace0),
+        |_| Some(ColumnConstraint::AutoIncrement),
+    );
+    let primary_key = map(
+        delimited(multispace0, tag_no_case("primary key"), multispace0),
+        |_| Some(ColumnConstraint::PrimaryKey),
+    );
+    let unique = map(
+        delimited(multispace0, tag_no_case("unique"), multispace0),
+        |_| Some(ColumnConstraint::Unique),
+    );
+    let character_set = map(
+        preceded(
+            delimited(multispace0, tag_no_case("character set"), multispace1),
+            sql_identifier,
+        ),
+        |cs| {
+            let char_set = str::from_utf8(cs).unwrap().to_owned();
+            Some(ColumnConstraint::CharacterSet(char_set))
+        },
+    );
+    let collate = map(
+        preceded(
+            delimited(multispace0, tag_no_case("collate"), multispace1),
+            sql_identifier,
+        ),
+        |c| {
+            let collation = str::from_utf8(c).unwrap().to_owned();
+            Some(ColumnConstraint::Collation(collation))
+        },
+    );
 
-    alt((not_null, null, auto_increment, default, primary_key, unique, character_set, collate))(i)
+    alt((
+        not_null,
+        null,
+        auto_increment,
+        default,
+        primary_key,
+        unique,
+        character_set,
+        collate,
+    ))(i)
 }
 
 fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let (remaining_input, (i, _, f)) = tuple((digit1, tag("."), digit1))(i)?;
 
-    Ok((remaining_input, Literal::FixedPoint(Real {
-        integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
-        fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap()
-    })))
+    Ok((
+        remaining_input,
+        Literal::FixedPoint(Real {
+            integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
+            fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap(),
+        }),
+    ))
 }
 
 fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
-    let (remaining_input, (_, _, _, def, _)) =
-        tuple((multispace0,
-               tag_no_case("default"),
-               multispace1,
-               alt((map(delimited(tag("'"),
-                        take_until("'"),
-                        tag("'")),
-                    |s: &[u8]| Literal::String(String::from_utf8(s.to_vec()).unwrap())),
-                    fixed_point,
-                    map(digit1, |d| {
-                        let d_i64 = i64::from_str(str::from_utf8(d).unwrap()).unwrap();
-                        Literal::Integer(d_i64)
-                    }),
-                    map(tag("''"), |_| Literal::String(String::from(""))),
-                    map(tag_no_case("null"), |_| Literal::Null),
-                    map(tag_no_case("current_timestamp"), |_| Literal::CurrentTimestamp))),
-                multispace0))(i)?;
+    let (remaining_input, (_, _, _, def, _)) = tuple((
+        multispace0,
+        tag_no_case("default"),
+        multispace1,
+        alt((
+            map(
+                delimited(tag("'"), take_until("'"), tag("'")),
+                |s: &[u8]| Literal::String(String::from_utf8(s.to_vec()).unwrap()),
+            ),
+            fixed_point,
+            map(digit1, |d| {
+                let d_i64 = i64::from_str(str::from_utf8(d).unwrap()).unwrap();
+                Literal::Integer(d_i64)
+            }),
+            map(tag("''"), |_| Literal::String(String::from(""))),
+            map(tag_no_case("null"), |_| Literal::Null),
+            map(tag_no_case("current_timestamp"), |_| {
+                Literal::CurrentTimestamp
+            }),
+        )),
+        multispace0,
+    ))(i)?;
 
     Ok((remaining_input, Some(ColumnConstraint::DefaultValue(def))))
 }
@@ -309,24 +347,25 @@ fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
 // Parse rule for a SQL CREATE TABLE query.
 // TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
 pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
-    let (remaining_input,
-        (_, _, _, _, table, _, _, _, fields_list, _, keys_list, _, _, _, _, _)) =
-            tuple((tag_no_case("create"),
-                   multispace1,
-                   tag_no_case("table"),
-                   multispace1,
-                   table_reference,
-                   multispace0,
-                   tag("("),
-                   multispace0,
-                   field_specification_list,
-                   multispace0,
-                   opt(key_specification_list),
-                   multispace0,
-                   tag(")"),
-                   multispace0,
-                   table_options,
-                   statement_terminator))(i)?;
+    let (remaining_input, (_, _, _, _, table, _, _, _, fields_list, _, keys_list, _, _, _, _, _)) =
+        tuple((
+            tag_no_case("create"),
+            multispace1,
+            tag_no_case("table"),
+            multispace1,
+            table_reference,
+            multispace0,
+            tag("("),
+            multispace0,
+            field_specification_list,
+            multispace0,
+            opt(key_specification_list),
+            multispace0,
+            tag(")"),
+            multispace0,
+            table_options,
+            statement_terminator,
+        ))(i)?;
 
     // "table AS alias" isn't legal in CREATE statements
     assert!(table.alias.is_none());
@@ -368,38 +407,53 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
                         TableKey::FulltextKey(name, columns) => {
                             TableKey::FulltextKey(name, attach_names(columns))
                         }
-                        TableKey::Key(name, columns) => {
-                            TableKey::Key(name, attach_names(columns))
-                        }
+                        TableKey::Key(name, columns) => TableKey::Key(name, attach_names(columns)),
                     }
                 })
                 .collect(),
         )
     });
 
-    Ok((remaining_input, CreateTableStatement { table, fields, keys }))
+    Ok((
+        remaining_input,
+        CreateTableStatement {
+            table,
+            fields,
+            keys,
+        },
+    ))
 }
 
 // Parse rule for a SQL CREATE VIEW query.
 pub fn view_creation(i: &[u8]) -> IResult<&[u8], CreateViewStatement> {
-    let (remaining_input, (_, _, _, _, name_slice, _, _, _, def, _)) =
-        tuple((tag_no_case("create"),
-            multispace1,
-            tag_no_case("view"),
-            multispace1,
-            sql_identifier,
-            multispace1,
-            tag_no_case("as"),
-            multispace1,
-            alt((map(compound_selection, |s| SelectSpecification::Compound(s)),
-                map(nested_selection, |s| SelectSpecification::Simple(s)))),
-            statement_terminator))(i)?;
+    let (remaining_input, (_, _, _, _, name_slice, _, _, _, def, _)) = tuple((
+        tag_no_case("create"),
+        multispace1,
+        tag_no_case("view"),
+        multispace1,
+        sql_identifier,
+        multispace1,
+        tag_no_case("as"),
+        multispace1,
+        alt((
+            map(compound_selection, |s| SelectSpecification::Compound(s)),
+            map(nested_selection, |s| SelectSpecification::Simple(s)),
+        )),
+        statement_terminator,
+    ))(i)?;
 
     let name = String::from_utf8(name_slice.to_vec()).unwrap();
     let fields = vec![]; // TODO(malte): support
     let definition = Box::new(def);
 
-    Ok((remaining_input, CreateViewStatement { name, fields, definition }))
+    Ok((
+        remaining_input,
+        CreateViewStatement {
+            name,
+            fields,
+            definition,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -470,9 +524,10 @@ mod tests {
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("t"),
-                fields: vec![
-                    ColumnSpecification::new(Column::from("t.x"), SqlType::Int(32)),
-                ],
+                fields: vec![ColumnSpecification::new(
+                    Column::from("t.x"),
+                    SqlType::Int(32)
+                ),],
                 ..Default::default()
             }
         );
@@ -603,7 +658,7 @@ mod tests {
                 keys: Some(vec![TableKey::UniqueKey(
                     Some(String::from("id_k")),
                     vec![Column::from("users.id")],
-                ), ]),
+                ),]),
                 ..Default::default()
             }
         );
