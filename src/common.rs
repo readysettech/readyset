@@ -2,7 +2,7 @@ use nom::branch::alt;
 use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
 use nom::combinator::map;
-use nom::IResult;
+use nom::{IResult, InputLength};
 use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
@@ -15,6 +15,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use table::Table;
+use nom::error::{ParseError, ErrorKind};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -750,17 +751,20 @@ named!(pub unsigned_number<&[u8], u64>,
     )
 );
 
+pub fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
+    if input.input_len() == 0 {
+        Ok((input, input))
+    } else {
+        Err(nom::Err::Error(E::from_error_kind(input, ErrorKind::Eof)))
+    }
+}
+
 // Parse a terminator that ends a SQL statement.
-named!(pub statement_terminator<&[u8], ()>,
-    do_parse!(
-        delimited!(
-            multispace0,
-            alt!(tag!(";") | line_ending | eof!()),
-            multispace0
-        ) >>
-        ()
-    )
-);
+pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
+    let (remaining_input, _) = delimited(multispace0, alt((tag(";"), line_ending, eof)), multispace0)(i)?;
+
+    Ok((remaining_input, ()))
+}
 
 // Parse binary comparison operators
 named!(pub binary_comparison_operator<&[u8], Operator>,
