@@ -14,7 +14,6 @@ use nom::sequence::{tuple, preceded, delimited};
 use nom::bytes::complete::{tag_no_case, tag};
 use nom::combinator::opt;
 use nom::multi::many1;
-use common::Operator::In;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -82,8 +81,8 @@ fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>>
 // Parse rule for a SQL insert query.
 // TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
 pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
-    let (remaining_input, (_, ignore_res, _, _, _, table, _, fields, _, _, data, on_duplicate,
-                            statement_terminator)) =
+    let (remaining_input, (_, ignore_res, _, _, _, table, _, fields, _, _, data,
+                            on_duplicate, _)) =
         tuple((tag_no_case("insert"), opt(preceded(multispace1,
                                                    tag_no_case("ignore"))),
                 multispace1, tag_no_case("into"), multispace1, table_reference, multispace1,
