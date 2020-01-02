@@ -4,7 +4,6 @@ use nom::character::is_alphanumeric;
 use nom::combinator::map;
 use nom::IResult;
 use std::fmt::{self, Display};
-use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
@@ -12,9 +11,9 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use nom::bytes::complete::tag_no_case;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
-use nom::sequence::tuple;
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -350,201 +349,241 @@ fn len_as_u16(len: &[u8]) -> u16 {
     }
 }
 
-named!(pub precision<&[u8], (u8, Option<u8>)>,
-    delimited!(tag!("("),
-               do_parse!(
-                   m: digit1 >>
-                   d: opt!(do_parse!(
-                             tag!(",") >>
-                             multispace0 >>
-                             d: digit1 >>
-                             (d)
-                        )) >>
-                   ((m[0], d.map(|r| r[0])))
-               ),
-               tag!(")"))
-);
+fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+    let (remaining_input, (m, d)) = tuple((
+        digit1,
+        opt(preceded(tag(","), preceded(multispace0, digit1))),
+    ))(i)?;
+
+    Ok((remaining_input, (m[0], d.map(|r| r[0]))))
+}
+
+pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+    delimited(tag("("), precision_helper, tag(")"))(i)
+}
+
+fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<&[u8]>> {
+    opt(alt((tag_no_case("unsigned"), tag_no_case("signed"))))(i)
+}
+
+fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    delimited(tag("("), digit1, tag(")"))(i)
+}
+
+// TODO: rather than copy paste these functions, should create a function that returns a parser
+// based on the sql int type, just like nom does
+fn tiny_int(i: &[u8]) -> IResult<&[u8], SqlType> {
+    let (remaining_input, (_, len, _, signed)) = tuple((
+        tag_no_case("tinyint"),
+        opt(delim_digit),
+        multispace0,
+        opt_signed,
+    ))(i)?;
+
+    match signed {
+        Some(sign) => {
+            if str::from_utf8(sign)
+                .unwrap()
+                .eq_ignore_ascii_case("unsigned")
+            {
+                Ok((
+                    remaining_input,
+                    SqlType::UnsignedTinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+                ))
+            } else {
+                Ok((
+                    remaining_input,
+                    SqlType::Tinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+                ))
+            }
+        }
+        None => Ok((
+            remaining_input,
+            SqlType::Tinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+        )),
+    }
+}
+
+// TODO: rather than copy paste these functions, should create a function that returns a parser
+// based on the sql int type, just like nom does
+fn big_int(i: &[u8]) -> IResult<&[u8], SqlType> {
+    let (remaining_input, (_, len, _, signed)) = tuple((
+        tag_no_case("bigint"),
+        opt(delim_digit),
+        multispace0,
+        opt_signed,
+    ))(i)?;
+
+    match signed {
+        Some(sign) => {
+            if str::from_utf8(sign)
+                .unwrap()
+                .eq_ignore_ascii_case("unsigned")
+            {
+                Ok((
+                    remaining_input,
+                    SqlType::UnsignedBigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+                ))
+            } else {
+                Ok((
+                    remaining_input,
+                    SqlType::Bigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+                ))
+            }
+        }
+        None => Ok((
+            remaining_input,
+            SqlType::Bigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
+        )),
+    }
+}
+
+// TODO: rather than copy paste these functions, should create a function that returns a parser
+// based on the sql int type, just like nom does
+fn sql_int_type(i: &[u8]) -> IResult<&[u8], SqlType> {
+    let (remaining_input, (_, len, _, signed)) = tuple((
+        alt((
+            tag_no_case("integer"),
+            tag_no_case("int"),
+            tag_no_case("smallint"),
+        )),
+        opt(delim_digit),
+        multispace0,
+        opt_signed,
+    ))(i)?;
+
+    match signed {
+        Some(sign) => {
+            if str::from_utf8(sign)
+                .unwrap()
+                .eq_ignore_ascii_case("unsigned")
+            {
+                Ok((
+                    remaining_input,
+                    SqlType::UnsignedInt(len.map(|l| len_as_u16(l)).unwrap_or(32)),
+                ))
+            } else {
+                Ok((
+                    remaining_input,
+                    SqlType::Int(len.map(|l| len_as_u16(l)).unwrap_or(32)),
+                ))
+            }
+        }
+        None => Ok((
+            remaining_input,
+            SqlType::Int(len.map(|l| len_as_u16(l)).unwrap_or(32)),
+        )),
+    }
+}
+
+// TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
+// former has "at least" M precision, the latter "exactly".
+// See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
+fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
+    let (remaining_input, precision) = delimited(
+        alt((tag_no_case("decimal"), tag_no_case("numeric"))),
+        opt(precision),
+        multispace0,
+    )(i)?;
+
+    match precision {
+        None => Ok((remaining_input, SqlType::Decimal(32, 0))),
+        Some((m, None)) => Ok((remaining_input, SqlType::Decimal(m, 0))),
+        Some((m, Some(d))) => Ok((remaining_input, SqlType::Decimal(m, d))),
+    }
+}
+
+fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
+    alt((
+        tiny_int,
+        big_int,
+        sql_int_type,
+        map(tag_no_case("bool"), |_| SqlType::Bool),
+        map(
+            tuple((
+                tag_no_case("char"),
+                delim_digit,
+                multispace0,
+                opt(tag_no_case("binary")),
+            )),
+            |t| SqlType::Char(len_as_u16(t.1)),
+        ),
+        map(tag_no_case("date"), |_| SqlType::Date),
+        map(preceded(tag_no_case("datetime"), opt(delim_digit)), |fsp| {
+            SqlType::DateTime(match fsp {
+                Some(fsp) => len_as_u16(fsp),
+                None => 0 as u16,
+            })
+        }),
+        map(
+            tuple((tag_no_case("double"), multispace0, opt_signed)),
+            |_| SqlType::Double,
+        ),
+        map(
+            terminated(
+                preceded(
+                    tag_no_case("enum"),
+                    delimited(tag("("), value_list, tag(")")),
+                ),
+                multispace0,
+            ),
+            |v| SqlType::Enum(v),
+        ),
+        map(
+            tuple((
+                tag_no_case("float"),
+                multispace0,
+                opt(precision),
+                multispace0,
+            )),
+            |_| SqlType::Float,
+        ),
+        map(
+            tuple((tag_no_case("real"), multispace0, opt_signed)),
+            |_| SqlType::Real,
+        ),
+        map(tag_no_case("text"), |_| SqlType::Text),
+        map(
+            tuple((tag_no_case("timestamp"), opt(delim_digit), multispace0)),
+            |_| SqlType::Timestamp,
+        ),
+        map(
+            tuple((
+                tag_no_case("varchar"),
+                delim_digit,
+                multispace0,
+                opt(tag_no_case("binary")),
+            )),
+            |t| SqlType::Varchar(len_as_u16(t.1)),
+        ),
+        decimal_or_numeric,
+    ))(i)
+}
+
+fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
+    alt((
+        map(
+            tuple((tag_no_case("binary"), delim_digit, multispace0)),
+            |t| SqlType::Binary(len_as_u16(t.1)),
+        ),
+        map(tag_no_case("blob"), |_| SqlType::Blob),
+        map(tag_no_case("longblob"), |_| SqlType::Longblob),
+        map(tag_no_case("mediumblob"), |_| SqlType::Mediumblob),
+        map(tag_no_case("mediumtext"), |_| SqlType::Mediumtext),
+        map(tag_no_case("longtext"), |_| SqlType::Longtext),
+        map(tag_no_case("tinyblob"), |_| SqlType::Tinyblob),
+        map(tag_no_case("tinytext"), |_| SqlType::Tinytext),
+        map(
+            tuple((tag_no_case("varbinary"), delim_digit, multispace0)),
+            |t| SqlType::Varbinary(len_as_u16(t.1)),
+        ),
+    ))(i)
+}
 
 // A SQL type specifier.
-named!(pub type_identifier<&[u8], SqlType>,
-    alt!(
-          do_parse!(
-              tag_no_case!("bool") >>
-              (SqlType::Bool)
-          )
-        | do_parse!(
-              tag_no_case!("mediumtext") >>
-              (SqlType::Mediumtext)
-          )
-        | do_parse!(
-              tag_no_case!("timestamp") >>
-              _len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-              multispace0 >>
-              (SqlType::Timestamp)
-          )
-         | do_parse!(
-               tag_no_case!("varbinary") >>
-               len: delimited!(tag!("("), digit1, tag!(")")) >>
-               multispace0 >>
-               (SqlType::Varbinary(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("mediumblob") >>
-               (SqlType::Mediumblob)
-           )
-         | do_parse!(
-               tag_no_case!("longblob") >>
-               (SqlType::Longblob)
-           )
-         | do_parse!(
-               tag_no_case!("tinyblob") >>
-               (SqlType::Tinyblob)
-           )
-         | do_parse!(
-               tag_no_case!("tinytext") >>
-               (SqlType::Tinytext)
-           )
-         | do_parse!(
-               tag_no_case!("varchar") >>
-               len: delimited!(tag!("("), digit1, tag!(")")) >>
-               multispace0 >>
-               _binary: opt!(tag_no_case!("binary")) >>
-               (SqlType::Varchar(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("binary") >>
-               len: delimited!(tag!("("), digit1, tag!(")")) >>
-               multispace0 >>
-               (SqlType::Binary(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("varbinary") >>
-               len: delimited!(tag!("("), digit1, tag!(")")) >>
-               multispace0 >>
-               (SqlType::Varbinary(len_as_u16(len)))
-           )
-         | do_parse!(
-               tag_no_case!("tinyint") >>
-               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               multispace0 >>
-               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (match signed {
-                   Some(ref sign) => {
-                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
-                       if signedness.to_lowercase() == "unsigned" {
-                           SqlType::UnsignedTinyint(len.map(|l|len_as_u16(l)).unwrap_or(1))
-                       } else {
-                           SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1))
-                       }
-                   },
-                    _ => SqlType::Tinyint(len.map(|l|len_as_u16(l)).unwrap_or(1)),
-               })
-           )
-         | do_parse!(
-               tag_no_case!("bigint") >>
-               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               multispace0 >>
-               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (match signed {
-                   Some(ref sign) => {
-                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
-                       if signedness.to_lowercase() == "unsigned" {
-                           SqlType::UnsignedBigint(len.map(|l|len_as_u16(l)).unwrap_or(1))
-                       } else {
-                           SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1))
-                       }
-                   },
-                    _ => SqlType::Bigint(len.map(|l|len_as_u16(l)).unwrap_or(1)),
-               })
-           )
-         | do_parse!(
-               tag_no_case!("double") >>
-               multispace0 >>
-               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Double)
-           )
-         | do_parse!(
-               tag_no_case!("float") >>
-               multispace0 >>
-               _prec: opt!(precision) >>
-               multispace0 >>
-               (SqlType::Float)
-           )
-         | do_parse!(
-               tag_no_case!("blob") >>
-               (SqlType::Blob)
-           )
-         | do_parse!(
-               tag_no_case!("datetime") >>
-               fsp: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               (SqlType::DateTime(match fsp {
-                   Some(fsp) => len_as_u16(fsp),
-                   None => 0 as u16,
-               }))
-           )
-         | do_parse!(
-               tag_no_case!("date") >>
-               (SqlType::Date)
-           )
-         | do_parse!(
-               tag_no_case!("real") >>
-               multispace0 >>
-               _signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (SqlType::Real)
-           )
-         | do_parse!(
-               tag_no_case!("text") >>
-               (SqlType::Text)
-           )
-         | do_parse!(
-               tag_no_case!("longtext") >>
-               (SqlType::Longtext)
-           )
-         | do_parse!(
-               tag_no_case!("char") >>
-               len: delimited!(tag!("("), digit1, tag!(")")) >>
-               multispace0 >>
-               _binary: opt!(tag_no_case!("binary")) >>
-               (SqlType::Char(len_as_u16(len)))
-           )
-         | do_parse!(
-               alt!(tag_no_case!("integer") | tag_no_case!("int") | tag_no_case!("smallint")) >>
-               len: opt!(delimited!(tag!("("), digit1, tag!(")"))) >>
-               multispace0 >>
-               signed: opt!(alt!(tag_no_case!("unsigned") | tag_no_case!("signed"))) >>
-               (match signed {
-                   Some(ref sign) => {
-                       let signedness = String::from_utf8(sign.deref().to_vec()).unwrap();
-                       if signedness.to_lowercase() == "unsigned" {
-                           SqlType::UnsignedInt(len.map(|l|len_as_u16(l)).unwrap_or(32))
-                       } else {
-                           SqlType::Int(len.map(|l|len_as_u16(l)).unwrap_or(32))
-                       }
-                   },
-                   _ => SqlType::Int(len.map(|l|len_as_u16(l)).unwrap_or(32)),
-               })
-           )
-         | do_parse!(
-               tag_no_case!("enum") >>
-               variants: delimited!(tag!("("), value_list, tag!(")")) >>
-               multispace0 >>
-               (SqlType::Enum(variants))
-           )
-         | do_parse!(
-               // TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
-               // former has "at least" M precision, the latter "exactly".
-               // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
-               alt!(tag_no_case!("decimal") | tag_no_case!("numeric")) >>
-               prec: opt!(precision) >>
-               multispace0 >>
-               (match prec {
-                   None => SqlType::Decimal(32, 0),
-                   Some((m, None)) => SqlType::Decimal(m, 0),
-                   Some((m, Some(d))) => SqlType::Decimal(m, d),
-                })
-           )
-       )
-);
+pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
+    alt((type_identifier_first_half, type_identifier_second_half))(i)
+}
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
@@ -558,67 +597,58 @@ pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)>
     Ok((remaining_input, (args, distinct.is_some())))
 }
 
-named!(pub column_function<&[u8], FunctionExpression>,
-    alt!(
-        do_parse!(
-            tag_no_case!("count(*)") >>
-            (FunctionExpression::CountStar)
-        )
-    |   do_parse!(
-            tag_no_case!("count") >>
-            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
-            (FunctionExpression::Count(args.0.clone(), args.1))
-        )
-    |   do_parse!(
-            tag_no_case!("sum") >>
-            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
-            (FunctionExpression::Sum(args.0.clone(), args.1))
-        )
-    |   do_parse!(
-            tag_no_case!("avg") >>
-            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
-            (FunctionExpression::Avg(args.0.clone(), args.1))
-        )
-    |   do_parse!(
-            tag_no_case!("max") >>
-            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
-            (FunctionExpression::Max(args.0.clone()))
-        )
-    |   do_parse!(
-            tag_no_case!("min") >>
-            args: delimited!(tag!("("), function_arguments, tag!(")")) >>
-            (FunctionExpression::Min(args.0.clone()))
-        )
-    |   do_parse!(
-            tag_no_case!("group_concat") >>
-            spec: delimited!(tag!("("),
-                       do_parse!(
-                               column: column_identifier_no_alias >>
-                               seperator: opt!(
-                                   do_parse!(
-                                       multispace0 >>
-                                       tag_no_case!("separator") >>
-                                       sep: delimited!(tag!("'"), opt!(alphanumeric1), tag!("'")) >>
-                                       multispace0 >>
-                                       (sep.unwrap_or(&[]))
-                                   )
-                               ) >>
-                               (column, seperator)
-                       ),
-                       tag!(")")) >>
-            ({
+fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let ws_sep = preceded(multispace0, tag_no_case("separator"));
+    let (remaining_input, sep) = delimited(
+        ws_sep,
+        delimited(tag("'"), opt(alphanumeric1), tag("'")),
+        multispace0,
+    )(i)?;
+
+    Ok((remaining_input, sep.unwrap_or(&[0u8; 0])))
+}
+
+fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<&[u8]>)> {
+    pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
+}
+
+fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)> {
+    delimited(tag("("), function_arguments, tag(")"))(i)
+}
+
+pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
+    let delim_group_concat_fx = delimited(tag("("), group_concat_fx, tag(")"));
+    alt((
+        map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
+        map(preceded(tag_no_case("count"), delim_fx_args), |args| {
+            FunctionExpression::Count(args.0.clone(), args.1)
+        }),
+        map(preceded(tag_no_case("sum"), delim_fx_args), |args| {
+            FunctionExpression::Sum(args.0.clone(), args.1)
+        }),
+        map(preceded(tag_no_case("avg"), delim_fx_args), |args| {
+            FunctionExpression::Avg(args.0.clone(), args.1)
+        }),
+        map(preceded(tag_no_case("max"), delim_fx_args), |args| {
+            FunctionExpression::Max(args.0.clone())
+        }),
+        map(preceded(tag_no_case("min"), delim_fx_args), |args| {
+            FunctionExpression::Min(args.0.clone())
+        }),
+        map(
+            preceded(tag_no_case("group_concat"), delim_group_concat_fx),
+            |spec| {
                 let (ref col, ref sep) = spec;
                 let sep = match *sep {
                     // default separator is a comma, see MySQL manual §5.7
                     None => String::from(","),
                     Some(s) => String::from_utf8(s.to_vec()).unwrap(),
                 };
-
                 FunctionExpression::GroupConcat(FunctionArguments::Column(col.clone()), sep)
-            })
-        )
-    )
-);
+            },
+        ),
+    ))(i)
+}
 
 // Parses a SQL column identifier in the table.column format
 named!(pub column_identifier_no_alias<&[u8], Column>,
