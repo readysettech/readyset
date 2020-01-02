@@ -4,9 +4,9 @@ use column::Column;
 use common::{column_identifier_no_alias, literal, Literal};
 use condition::{condition_expr, ConditionExpression};
 
-use nom::character::complete::{multispace0, multispace1};
+use nom::character::complete::multispace0;
 use nom::IResult;
-use nom::sequence::{tuple, preceded, terminated, delimited};
+use nom::sequence::{tuple, terminated, delimited};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 

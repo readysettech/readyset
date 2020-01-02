@@ -37,10 +37,10 @@ impl ArithmeticExpression {
         alias: Option<String>,
     ) -> Self {
         Self {
-            op: op,
-            left: left,
-            right: right,
-            alias: alias,
+            op,
+            left,
+            right,
+            alias,
         }
     }
 }

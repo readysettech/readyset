@@ -10,7 +10,6 @@ use nom::branch::alt;
 use nom::combinator::{map, opt};
 use nom::sequence::{preceded, tuple, delimited};
 use nom::bytes::complete::{tag_no_case, tag};
-use condition::ConditionExpression::ComparisonOp;
 use nom::multi::many1;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]

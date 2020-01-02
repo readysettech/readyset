@@ -185,24 +185,24 @@ impl fmt::Display for ColumnSpecification {
 }
 
 impl ColumnSpecification {
-    pub fn new(c: Column, t: SqlType) -> ColumnSpecification {
+    pub fn new(column: Column, sql_type: SqlType) -> ColumnSpecification {
         ColumnSpecification {
-            column: c,
-            sql_type: t,
+            column,
+            sql_type,
             constraints: vec![],
             comment: None,
         }
     }
 
     pub fn with_constraints(
-        c: Column,
-        t: SqlType,
-        ccs: Vec<ColumnConstraint>,
+        column: Column,
+        sql_type: SqlType,
+        constraints: Vec<ColumnConstraint>,
     ) -> ColumnSpecification {
         ColumnSpecification {
-            column: c,
-            sql_type: t,
-            constraints: ccs,
+            column,
+            sql_type,
+            constraints,
             comment: None,
         }
     }
@@ -256,5 +256,4 @@ mod tests {
         assert_eq!(format!("{}", c2), "count(*)");
         assert_eq!(format!("{}", c3), "sum(mytab.foo)");
     }
-
 }
