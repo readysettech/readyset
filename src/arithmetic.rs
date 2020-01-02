@@ -2,7 +2,6 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use column::Column;
-use common::FieldValueExpression::Arithmetic;
 use common::{
     as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
 };
