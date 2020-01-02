@@ -5,6 +5,13 @@ use std::str;
 use common::statement_terminator;
 use order::{order_clause, OrderClause};
 use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use nom::IResult;
+use nom::branch::alt;
+use nom::combinator::{map, opt};
+use nom::sequence::{preceded, tuple, delimited};
+use nom::bytes::complete::{tag_no_case, tag};
+use condition::ConditionExpression::ComparisonOp;
+use nom::multi::many1;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -51,64 +58,59 @@ impl fmt::Display for CompoundSelectStatement {
 }
 
 // Parse compound operator
-named!(compound_op<&[u8], CompoundSelectOperator>,
-    alt!(
-          do_parse!(
-              tag_no_case!("union") >>
-              distinct: opt!(
-                  preceded!(multispace1,
-                            alt!(  map!(tag_no_case!("all"), |_| { false })
-                                          | map!(tag_no_case!("distinct"), |_| { true }))
-                            )) >>
-              (match distinct {
-                  // DISTINCT is the default in both MySQL and SQLite
-                  None => CompoundSelectOperator::DistinctUnion,
-                  Some(d) => {
-                      if d {
-                          CompoundSelectOperator::DistinctUnion
-                      } else {
-                          CompoundSelectOperator::Union
-                      }
-                  },
-              })
-          )
-        | map!(tag_no_case!("intersect"), |_| CompoundSelectOperator::Intersect)
-        | map!(tag_no_case!("except"), |_| CompoundSelectOperator::Except)
-    )
-);
+fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
+    alt((map(
+        preceded(tag_no_case("union"),
+                    opt(preceded(multispace1,
+                                 alt((map(tag_no_case("all"), |_| false),
+                                        map(tag_no_case("distinct"), |_| true)))))),
+        |distinct| {
+            match distinct {
+                // DISTINCT is the default in both MySQL and SQLite
+                None => CompoundSelectOperator::DistinctUnion,
+                Some(d) => {
+                    if d {
+                        CompoundSelectOperator::DistinctUnion
+                    } else {
+                        CompoundSelectOperator::Union
+                    }
+                },
+            }
+        }),
+        map(tag_no_case("intersect"), |_| CompoundSelectOperator::Intersect),
+        map(tag_no_case("except"), |_| CompoundSelectOperator::Except)
+    ))(i)
+}
+
+fn other_selects(i: &[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
+    let (remaining_input, (_, op, _, _, _, select, _, _)) =
+        tuple((multispace0,
+            compound_op,
+            multispace1,
+            opt(tag("(")),
+            multispace0,
+            nested_selection,
+            multispace0,
+            opt(tag(")"))))(i)?;
+
+    Ok((remaining_input, (Some(op), select)))
+}
 
 // Parse compound selection
-named!(pub compound_selection<&[u8], CompoundSelectStatement>,
-    do_parse!(
-        first_select: delimited!(opt!(tag!("(")), nested_selection, opt!(tag!(")"))) >>
-        other_selects: many1!(
-            do_parse!(multispace0 >>
-                    op: compound_op >>
-                    multispace1 >>
-                    opt!(tag!("(")) >>
-                    multispace0 >>
-                    select: nested_selection >>
-                    multispace0 >>
-                    opt!(tag!(")")) >>
-                    (Some(op), select)
-            )
-        ) >>
-        multispace0 >>
-        order: opt!(order_clause) >>
-        limit: opt!(limit_clause) >>
-        statement_terminator >>
-        ({
-            let mut v = vec![(None, first_select)];
-            v.extend(other_selects);
+pub fn compound_selection(i: &[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+    let (remaining_input, (first_select, other_selects, _, order, limit, _)) =
+        tuple((delimited(opt(tag("(")), nested_selection, opt(tag(")"))),
+            many1(other_selects),
+            multispace0,
+            opt(order_clause),
+            opt(limit_clause),
+            statement_terminator))(i)?;
 
-            CompoundSelectStatement {
-                selects: v,
-                order: order,
-                limit: limit,
-            }
-        })
-    )
-);
+    let mut selects = vec![(None, first_select)];
+    selects.extend(other_selects);
+
+    Ok((remaining_input, CompoundSelectStatement { selects, order, limit }))
+}
 
 #[cfg(test)]
 mod tests {

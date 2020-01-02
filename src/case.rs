@@ -4,7 +4,11 @@ use column::Column;
 use common::{column_identifier_no_alias, literal, Literal};
 use condition::{condition_expr, ConditionExpression};
 
-use nom::character::complete::multispace0;
+use nom::character::complete::{multispace0, multispace1};
+use nom::IResult;
+use nom::sequence::{tuple, preceded, terminated, delimited};
+use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ColumnOrLiteral {
@@ -39,28 +43,23 @@ impl fmt::Display for CaseWhenExpression {
     }
 }
 
-named!(pub case_when_column<&[u8], CaseWhenExpression>,
-       do_parse!(
-           tag_no_case!("case when") >>
-           multispace0 >>
-           cond: condition_expr >>
-           multispace0 >>
-           tag_no_case!("then") >>
-           multispace0 >>
-           column: column_identifier_no_alias >>
-           multispace0 >>
-           else_value: opt!(do_parse!(
-               tag_no_case!("else") >>
-               multispace0 >>
-               else_val: literal >>
-               multispace0 >>
-               (else_val)
-           )) >>
-           tag_no_case!("end") >>
-           (CaseWhenExpression {
-               condition: cond,
-               then_expr: ColumnOrLiteral::Column(column),
-               else_expr: else_value.map(|v| ColumnOrLiteral::Literal(v)),
-           })
-       )
-);
+pub fn case_when_column(i: &[u8]) -> IResult<&[u8], CaseWhenExpression> {
+    let (remaining_input, (_, _, condition, _, _, _, column, _, else_val, _)) =
+        tuple((tag_no_case("case when"),
+            multispace0,
+            condition_expr,
+            multispace0,
+            tag_no_case("then"),
+            multispace0,
+            column_identifier_no_alias,
+            multispace0,
+            opt(delimited(terminated(tag_no_case("else"), multispace0),
+                literal,
+                multispace0)),
+            tag_no_case("end")))(i)?;
+
+    let then_expr = ColumnOrLiteral::Column(column);
+    let else_expr = else_val.map(|v| ColumnOrLiteral::Literal(v));
+
+    Ok((remaining_input, CaseWhenExpression { condition, then_expr, else_expr }))
+}
