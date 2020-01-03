@@ -11,7 +11,7 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
+use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1, take_until};
 use nom::combinator::opt;
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1};
@@ -951,30 +951,23 @@ pub fn value_list(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
 
 // Parse a reference to a named table, with an optional alias
 // TODO(malte): add support for schema.table notation
-named!(pub table_reference<&[u8], Table>,
-    do_parse!(
-        table: sql_identifier >>
-        alias: opt!(as_alias) >>
-        (Table {
-            name: String::from(str::from_utf8(table).unwrap()),
-            alias: match alias {
-                Some(a) => Some(String::from(a)),
-                None => None,
-            }
-        })
-    )
-);
+pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
+    map(pair(sql_identifier, opt(as_alias)),
+    |tup| Table {
+        name: String::from(str::from_utf8(tup.0).unwrap()),
+        alias: match tup.1 {
+            Some(a) => Some(String::from(a)),
+            None => None,
+        }
+    })(i)
+}
 
 // Parse rule for a comment part.
-named!(pub parse_comment<&[u8], String>,
-    do_parse!(
-        multispace0 >>
-        tag_no_case!("comment") >>
-        multispace1 >>
-        comment: delimited!(tag!("'"), take_until!("'"), tag!("'")) >>
-        (String::from(str::from_utf8(comment).unwrap()))
-    )
-);
+pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
+    map(preceded(delimited(multispace0, tag_no_case("comment"),
+    multispace1), delimited(tag("'"), take_until("'"), tag("'"))),
+    |comment| String::from(str::from_utf8(comment).unwrap()))(i)
+}
 
 #[cfg(test)]
 mod tests {
