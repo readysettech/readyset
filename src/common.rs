@@ -897,17 +897,17 @@ fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<
     )(input)
 }
 
-fn raw_string_singlequoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_string_single_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     raw_string_quoted(i, true)
 }
 
-fn raw_string_doublequoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_string_double_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     raw_string_quoted(i, false)
 }
 
 pub fn string_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     map(
-        alt((raw_string_singlequoted, raw_string_doublequoted)),
+        alt((raw_string_single_quoted, raw_string_double_quoted)),
         |bytes| match String::from_utf8(bytes) {
             Ok(s) => Literal::String(s),
             Err(err) => Literal::Blob(err.into_bytes()),
