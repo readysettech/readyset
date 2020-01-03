@@ -6,7 +6,7 @@ use std::str::FromStr;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
     column_identifier_no_alias, parse_comment, sql_identifier, statement_terminator,
-    table_reference, type_identifier, Literal, Real, SqlType, TableKey, ws_sep_comma
+    table_reference, type_identifier, ws_sep_comma, Literal, Real, SqlType, TableKey,
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create_table_options::table_options;
@@ -113,10 +113,7 @@ pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<O
 // Helper for list of index columns
 pub fn index_col_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
     many0(map(
-        terminated(
-            index_col_name,
-            opt(ws_sep_comma),
-        ),
+        terminated(index_col_name, opt(ws_sep_comma)),
         // XXX(malte): ignores length and order
         |e| e.0,
     ))(i)
@@ -215,10 +212,7 @@ fn key_or_index(i: &[u8]) -> IResult<&[u8], TableKey> {
 
 // Parse rule for a comma-separated list.
 pub fn key_specification_list(i: &[u8]) -> IResult<&[u8], Vec<TableKey>> {
-    many1(terminated(
-        key_specification,
-        opt(ws_sep_comma),
-    ))(i)
+    many1(terminated(key_specification, opt(ws_sep_comma)))(i)
 }
 
 fn field_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
