@@ -5,7 +5,7 @@ use std::str;
 use column::Column;
 use common::{
     assignment_expr_list, field_list, statement_terminator, table_reference, value_list,
-    FieldValueExpression, Literal,
+    FieldValueExpression, Literal, ws_sep_comma,
 };
 use keywords::escape_if_keyword;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -69,7 +69,7 @@ fn data(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
     delimited(
         tag("("),
         value_list,
-        preceded(tag(")"), opt(delimited(multispace0, tag(","), multispace0))),
+        preceded(tag(")"), opt(ws_sep_comma)),
     )(i)
 }
 

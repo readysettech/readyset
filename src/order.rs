@@ -3,13 +3,13 @@ use std::fmt;
 use std::str;
 
 use column::Column;
-use common::column_identifier_no_alias;
+use common::{column_identifier_no_alias, ws_sep_comma};
 use keywords::escape_if_keyword;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{preceded, tuple};
 use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ fn order_expr(i: &[u8]) -> IResult<&[u8], (Column, OrderType)> {
     let (remaining_input, (field_name, ordering, _)) = tuple((
         column_identifier_no_alias,
         opt(preceded(multispace0, order_type)),
-        opt(delimited(multispace0, tag(","), multispace0)),
+        opt(ws_sep_comma),
     ))(i)?;
 
     Ok((
