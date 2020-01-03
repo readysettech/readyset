@@ -1,11 +1,11 @@
 use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
-use common::{integer_literal, sql_identifier, string_literal};
+use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{preceded, tuple};
 use nom::IResult;
 
 pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
@@ -17,7 +17,7 @@ pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
 
 fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
     map(
-        alt((multispace1, delimited(multispace0, tag(","), multispace0))),
+        alt((multispace1, ws_sep_comma)),
         |_| (),
     )(i)
 }

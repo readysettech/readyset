@@ -792,7 +792,7 @@ fn assignment_expr(i: &[u8]) -> IResult<&[u8], (Column, FieldValueExpression)> {
     )(i)
 }
 
-fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
+pub(crate) fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
     delimited(multispace0, tag(","), multispace0)(i)
 }
 

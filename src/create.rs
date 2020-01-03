@@ -6,7 +6,7 @@ use std::str::FromStr;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
     column_identifier_no_alias, parse_comment, sql_identifier, statement_terminator,
-    table_reference, type_identifier, Literal, Real, SqlType, TableKey,
+    table_reference, type_identifier, Literal, Real, SqlType, TableKey, ws_sep_comma
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create_table_options::table_options;
@@ -115,7 +115,7 @@ pub fn index_col_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
     many0(map(
         terminated(
             index_col_name,
-            opt(delimited(multispace0, tag(","), multispace0)),
+            opt(ws_sep_comma),
         ),
         // XXX(malte): ignores length and order
         |e| e.0,
@@ -217,7 +217,7 @@ fn key_or_index(i: &[u8]) -> IResult<&[u8], TableKey> {
 pub fn key_specification_list(i: &[u8]) -> IResult<&[u8], Vec<TableKey>> {
     many1(terminated(
         key_specification,
-        opt(delimited(multispace0, tag(","), multispace0)),
+        opt(ws_sep_comma),
     ))(i)
 }
 
@@ -227,7 +227,7 @@ fn field_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
         opt(delimited(multispace1, type_identifier, multispace0)),
         many0(column_constraint),
         opt(parse_comment),
-        opt(delimited(multispace0, tag(","), multispace0)),
+        opt(ws_sep_comma),
     ))(i)?;
 
     let sql_type = match field_type {
