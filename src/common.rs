@@ -11,7 +11,7 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1, take_until};
+use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::combinator::opt;
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1};
@@ -510,13 +510,13 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             )),
             |t| SqlType::Char(len_as_u16(t.1)),
         ),
-        map(tag_no_case("date"), |_| SqlType::Date),
         map(preceded(tag_no_case("datetime"), opt(delim_digit)), |fsp| {
             SqlType::DateTime(match fsp {
                 Some(fsp) => len_as_u16(fsp),
                 None => 0 as u16,
             })
         }),
+        map(tag_no_case("date"), |_| SqlType::Date),
         map(
             tuple((tag_no_case("double"), multispace0, opt_signed)),
             |_| SqlType::Double,
@@ -865,7 +865,7 @@ fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<
     // TODO: clean up these assignments. lifetimes and temporary values made it difficult
     let quote_slice: &[u8] = if is_single_quote { b"\'" } else { b"\"" };
     let double_quote_slice: &[u8] = if is_single_quote { b"\'\'" } else { b"\"\"" };
-    let backslash_quote: &[u8] = if is_single_quote { b"\\" } else { b"\"" };
+    let backslash_quote: &[u8] = if is_single_quote { b"\\\'" } else { b"\\\"" };
     delimited(
         tag(quote_slice),
         fold_many0(
@@ -952,21 +952,24 @@ pub fn value_list(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
 // Parse a reference to a named table, with an optional alias
 // TODO(malte): add support for schema.table notation
 pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
-    map(pair(sql_identifier, opt(as_alias)),
-    |tup| Table {
+    map(pair(sql_identifier, opt(as_alias)), |tup| Table {
         name: String::from(str::from_utf8(tup.0).unwrap()),
         alias: match tup.1 {
             Some(a) => Some(String::from(a)),
             None => None,
-        }
+        },
     })(i)
 }
 
 // Parse rule for a comment part.
 pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
-    map(preceded(delimited(multispace0, tag_no_case("comment"),
-    multispace1), delimited(tag("'"), take_until("'"), tag("'"))),
-    |comment| String::from(str::from_utf8(comment).unwrap()))(i)
+    map(
+        preceded(
+            delimited(multispace0, tag_no_case("comment"), multispace1),
+            delimited(tag("'"), take_until("'"), tag("'")),
+        ),
+        |comment| String::from(str::from_utf8(comment).unwrap()),
+    )(i)
 }
 
 #[cfg(test)]

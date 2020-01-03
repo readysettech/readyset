@@ -5,7 +5,7 @@ use std::str;
 use column::Column;
 use common::{
     assignment_expr_list, field_list, statement_terminator, table_reference, value_list,
-    FieldValueExpression, Literal, ws_sep_comma,
+    ws_sep_comma, FieldValueExpression, Literal,
 };
 use keywords::escape_if_keyword;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -66,11 +66,7 @@ fn fields(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
 }
 
 fn data(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
-    delimited(
-        tag("("),
-        value_list,
-        preceded(tag(")"), opt(ws_sep_comma)),
-    )(i)
+    delimited(tag("("), value_list, preceded(tag(")"), opt(ws_sep_comma)))(i)
 }
 
 fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {

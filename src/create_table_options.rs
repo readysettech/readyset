@@ -16,10 +16,7 @@ pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
-    map(
-        alt((multispace1, ws_sep_comma)),
-        |_| (),
-    )(i)
+    map(alt((multispace1, ws_sep_comma)), |_| ())(i)
 }
 
 fn create_option(i: &[u8]) -> IResult<&[u8], ()> {
