@@ -11,10 +11,10 @@ use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
 use column::{Column, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
-use nom::bytes::complete::{tag, tag_no_case, take_while1, take, is_not};
+use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
 use nom::combinator::opt;
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{many0, many1, fold_many0};
+use nom::multi::{fold_many0, many0, many1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use table::Table;
 
@@ -863,47 +863,37 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
 /// String literal value
 fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<u8>> {
     // TODO: clean up these assignments. lifetimes and temporary values made it difficult
-    let quote_slice: &[u8] = if is_single_quote {
-        b"\'"
-    } else {
-        b"\""
-    };
-    let double_quote_slice: &[u8] = if is_single_quote {
-        b"\'\'"
-    } else {
-        b"\"\""
-    };
-    let backslash_quote: &[u8] = if is_single_quote {
-        b"\\"
-    } else {
-        b"\""
-    };
+    let quote_slice: &[u8] = if is_single_quote { b"\'" } else { b"\"" };
+    let double_quote_slice: &[u8] = if is_single_quote { b"\'\'" } else { b"\"\"" };
+    let backslash_quote: &[u8] = if is_single_quote { b"\\" } else { b"\"" };
     delimited(
         tag(quote_slice),
         fold_many0(
             alt((
                 is_not(backslash_quote),
-                    map(tag(double_quote_slice), |_| -> &[u8] { if is_single_quote {
+                map(tag(double_quote_slice), |_| -> &[u8] {
+                    if is_single_quote {
                         b"\'"
                     } else {
                         b"\""
-                    }}),
-                    map(tag("\\\\"), |_| &b"\\"[..]),
-                    map(tag("\\b"), |_| &b"\x7f"[..]),
-                    map(tag("\\r"), |_| &b"\r"[..]),
-                    map(tag("\\n"), |_| &b"\n"[..]),
-                    map(tag("\\t"), |_| &b"\t"[..]),
-                    map(tag("\\0"), |_| &b"\0"[..]),
-                    map(tag("\\Z"), |_| &b"\x1A"[..]),
-                    preceded(tag("\\"), take(1usize))
+                    }
+                }),
+                map(tag("\\\\"), |_| &b"\\"[..]),
+                map(tag("\\b"), |_| &b"\x7f"[..]),
+                map(tag("\\r"), |_| &b"\r"[..]),
+                map(tag("\\n"), |_| &b"\n"[..]),
+                map(tag("\\t"), |_| &b"\t"[..]),
+                map(tag("\\0"), |_| &b"\0"[..]),
+                map(tag("\\Z"), |_| &b"\x1A"[..]),
+                preceded(tag("\\"), take(1usize)),
             )),
             Vec::new(),
             |mut acc: Vec<u8>, bytes: &[u8]| {
                 acc.extend(bytes);
                 acc
-            }
+            },
         ),
-        tag(quote_slice)
+        tag(quote_slice),
     )(input)
 }
 
@@ -916,56 +906,48 @@ fn raw_string_doublequoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
 }
 
 pub fn string_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(alt((raw_string_singlequoted, raw_string_doublequoted)),
+    map(
+        alt((raw_string_singlequoted, raw_string_doublequoted)),
         |bytes| match String::from_utf8(bytes) {
             Ok(s) => Literal::String(s),
             Err(err) => Literal::Blob(err.into_bytes()),
-        })(i)
+        },
+    )(i)
 }
 
 // Any literal value.
-named!(pub literal<&[u8], Literal>,
-    alt!(
-          float_literal
-        | integer_literal
-        | string_literal
-        | do_parse!(tag_no_case!("NULL") >> (Literal::Null))
-        | do_parse!(tag_no_case!("CURRENT_TIMESTAMP") >> (Literal::CurrentTimestamp))
-        | do_parse!(tag_no_case!("CURRENT_DATE") >> (Literal::CurrentDate))
-        | do_parse!(tag_no_case!("CURRENT_TIME") >> (Literal::CurrentTime))
-        | do_parse!(tag_no_case!("?") >> (Literal::Placeholder))
-    )
-);
+pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
+    alt((
+        float_literal,
+        integer_literal,
+        string_literal,
+        map(tag_no_case("null"), |_| Literal::Null),
+        map(tag_no_case("current_timestamp"), |_| {
+            Literal::CurrentTimestamp
+        }),
+        map(tag_no_case("current_date"), |_| Literal::CurrentDate),
+        map(tag_no_case("current_time"), |_| Literal::CurrentTime),
+        map(tag("?"), |_| Literal::Placeholder),
+    ))(i)
+}
 
-named!(pub literal_expression<&[u8], LiteralExpression>,
-    do_parse!(
-        literal: delimited!(opt!(tag!("(")), literal, opt!(tag!(")"))) >>
-        alias: opt!(as_alias) >>
-        (LiteralExpression {
-            value: literal,
-            alias: alias.map(|a| a.to_string()),
-        })
-    )
-);
+pub fn literal_expression(i: &[u8]) -> IResult<&[u8], LiteralExpression> {
+    map(
+        pair(
+            delimited(opt(tag("(")), literal, opt(tag(")"))),
+            opt(as_alias),
+        ),
+        |p| LiteralExpression {
+            value: p.0,
+            alias: (p.1).map(|a| a.to_string()),
+        },
+    )(i)
+}
 
 // Parse a list of values (e.g., for INSERT syntax).
-named!(pub value_list<&[u8], Vec<Literal> >,
-       many0!(
-           do_parse!(
-               multispace0 >>
-               val: literal >>
-               opt!(
-                   do_parse!(
-                       multispace0 >>
-                       tag!(",") >>
-                       multispace0 >>
-                       ()
-                   )
-               ) >>
-               (val)
-           )
-       )
-);
+pub fn value_list(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
+    many0(delimited(multispace0, literal, opt(ws_sep_comma)))(i)
+}
 
 // Parse a reference to a named table, with an optional alias
 // TODO(malte): add support for schema.table notation
