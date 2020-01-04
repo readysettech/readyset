@@ -726,7 +726,7 @@ pub fn unsigned_number(i: &[u8]) -> IResult<&[u8], u64> {
     })(i)
 }
 
-pub fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
+pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
     if input.input_len() == 0 {
         Ok((input, input))
     } else {
