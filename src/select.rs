@@ -362,6 +362,8 @@ mod tests {
         use common::Literal;
 
         let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
+        // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
+//        let qstring = "SELECT NULL, 1, \"foo\";";
 
         let res = selection(qstring.as_bytes());
         assert_eq!(
