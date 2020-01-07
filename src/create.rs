@@ -102,7 +102,7 @@ impl fmt::Display for CreateViewStatement {
 pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
     let (remaining_input, (column, len_u8, order)) = tuple((
         terminated(column_identifier_no_alias, multispace0),
-        opt(delimited(tag("("), digit1, tag("("))),
+        opt(delimited(tag("("), digit1, tag(")"))),
         opt(order_type),
     ))(i)?;
     let len = len_u8.map(|l| u16::from_str(str::from_utf8(l).unwrap()).unwrap());
@@ -151,7 +151,7 @@ fn full_text_key(i: &[u8]) -> IResult<&[u8], TableKey> {
 fn primary_key(i: &[u8]) -> IResult<&[u8], TableKey> {
     let (remaining_input, (_, _, columns, _)) = tuple((
         tag_no_case("primary key"),
-        multispace1,
+        multispace0,
         delimited(
             tag("("),
             delimited(multispace0, index_col_list, multispace0),
