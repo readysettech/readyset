@@ -44,6 +44,7 @@ impl Conn {
 
             let mut rt = tokio::runtime::Builder::new()
                 .basic_scheduler()
+                .enable_all()
                 .build()
                 .unwrap();
             while let Some((op, ret)) = rt.block_on(rx.recv()) {

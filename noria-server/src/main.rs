@@ -164,6 +164,8 @@ fn main() {
     }
 
     let mut rt = tokio::runtime::Builder::new();
+    rt.enable_all();
+    rt.threaded_scheduler();
     rt.thread_name("worker");
     if let Some(threads) = None {
         rt.core_threads(threads);

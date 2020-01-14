@@ -97,6 +97,8 @@ where
         finished.clone(),
     );
     let mut rt = tokio::runtime::Builder::new()
+        .enable_all()
+        .threaded_scheduler()
         .thread_name("voter")
         .on_thread_stop(move || {
             SJRN_W
