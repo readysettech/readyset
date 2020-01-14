@@ -356,7 +356,7 @@ fn run_one(args: &clap::ArgMatches, first: bool, nservers: u32, nclients: u32) {
         // TODO: should we worry about the running directory being on an SSD here?
         let base_cmd: Vec<_> = {
             let mut cmd: Vec<Cow<str>> = ["cd", "distributary", "&&"]
-                .into_iter()
+                .iter()
                 .map(|&s| s.into())
                 .collect();
             cmd.extend(vec![

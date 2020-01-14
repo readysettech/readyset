@@ -130,7 +130,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                 let id_zipf = zipf.sample(&mut rand::thread_rng());
                 let id = if skewed { id_zipf } else { id_uniform };
                 read_old.lookup(&[DataType::from(id)], false).await.unwrap();
-                tokio::timer::delay(time::Instant::now() + time::Duration::from_micros(10)).await;
+                tokio::time::delay_for(time::Duration::from_micros(10)).await;
             }
 
             done.wait().await;
@@ -154,7 +154,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
 
     // we now need to wait for migrate_after
     eprintln!("Waiting for migration time...");
-    tokio::timer::delay(time::Instant::now() + migrate_after).await;
+    tokio::time::delay_for(migrate_after).await;
 
     // all right, migration time
     eprintln!("Starting migration");
@@ -227,7 +227,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                     stat.send(("HITF", hits as f64 / count as f64)).unwrap();
                     hits = 0;
                 }
-                tokio::timer::delay(time::Instant::now() + time::Duration::from_millis(10)).await;
+                tokio::time::delay_for(time::Duration::from_millis(10)).await;
             }
 
             done.wait().await;

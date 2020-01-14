@@ -2,6 +2,7 @@ use clap::value_t_or_exit;
 use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
+use std::future::Future;
 use std::io::Write;
 use std::time;
 
@@ -12,6 +13,7 @@ use crate::populate::Populate;
 
 pub struct Backend {
     g: Handle<LocalAuthority>,
+    done: Box<dyn Future<Output = ()> + Unpin>,
 }
 
 #[derive(PartialEq)]
@@ -41,9 +43,10 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        let g = cb.start_local().await.unwrap();
+        let (g, done) = cb.start_local().await.unwrap();
+        let done = Box::new(done);
 
-        Backend { g }
+        Backend { g, done }
     }
 
     pub async fn populate(&mut self, name: &'static str, records: Vec<Vec<DataType>>) -> usize {
@@ -266,10 +269,7 @@ async fn main() {
 
     backend.populate("Role", roles).await;
     println!("Waiting for groups to be constructed...");
-    tokio::timer::delay(
-        time::Instant::now() + time::Duration::from_millis(120 * (nclasses as u64)),
-    )
-    .await;
+    tokio::time::delay_for(time::Duration::from_millis(120 * (nclasses as u64))).await;
 
     backend.populate("User", users).await;
     backend.populate("Class", classes).await;
@@ -277,14 +277,11 @@ async fn main() {
     if populate == PopulateType::Before {
         backend.populate("Post", posts.clone()).await;
         println!("Waiting for posts to propagate...");
-        tokio::timer::delay(
-            time::Instant::now() + time::Duration::from_millis((nposts / 10) as u64),
-        )
-        .await;
+        tokio::time::delay_for(time::Duration::from_millis((nposts / 10) as u64)).await;
     }
 
     println!("Finished writing! Sleeping for 2 seconds...");
-    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(2)).await;
+    tokio::time::delay_for(time::Duration::from_secs(2)).await;
 
     // if partial, read 25% of the keys
     if partial {
@@ -352,4 +349,7 @@ async fn main() {
         let mut gf = File::create(graph_fname).unwrap();
         assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
     }
+
+    drop(backend.g);
+    backend.done.await;
 }

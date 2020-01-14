@@ -14,6 +14,7 @@ use std::time;
 pub struct Backend {
     r: String,
     g: Handle<LocalAuthority>,
+    done: Box<dyn Future<Output = ()> + Unpin>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
@@ -60,7 +61,8 @@ async fn make(
         b.disable_partial();
     }
 
-    let mut g = b.start_local().await.unwrap();
+    let (mut g, done) = b.start_local().await.unwrap();
+    let done = Box::new(done);
 
     let recipe = {
         let mut f = File::open(recipe_location).unwrap();
@@ -102,6 +104,7 @@ async fn make(
     Backend {
         r: recipe,
         g,
+        done,
         parallel_prepop: parallel,
         prepop_counts: HashMap::new(),
         barrier: Arc::new(Barrier::new(9)), // N.B.: # base tables
@@ -330,7 +333,7 @@ async fn main() {
     //println!("{}", backend.g);
 
     println!("Finished writing! Sleeping for 1 second...");
-    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(1)).await;
+    tokio::time::delay_for(time::Duration::from_secs(1)).await;
 
     if single_query {
         use std::fs::File;
@@ -398,4 +401,7 @@ async fn main() {
         "order_line" => populate_order_line(&mut backend, &ploc, write, false).await,
         _ => unreachable!(),
     };
+
+    drop(backend.g);
+    backend.done.await;
 }

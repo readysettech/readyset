@@ -106,7 +106,8 @@ impl Builder {
     pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> impl Future<Output = Result<(Handle<A>, impl Future<Output = ()>), failure::Error>> {
+    ) -> impl Future<Output = Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), failure::Error>>
+    {
         let Builder {
             listen_addr,
             ref config,
@@ -132,8 +133,15 @@ impl Builder {
     #[must_use]
     pub fn start_local(
         &self,
-    ) -> impl Future<Output = Result<(Handle<LocalAuthority>, impl Future<Output = ()>), failure::Error>>
-    {
+    ) -> impl Future<
+        Output = Result<
+            (
+                Handle<LocalAuthority>,
+                impl Future<Output = ()> + Unpin + Send,
+            ),
+            failure::Error,
+        >,
+    > {
         let fut = self.start(Arc::new(LocalAuthority::new()));
         async move {
             #[allow(unused_mut)]

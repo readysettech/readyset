@@ -71,7 +71,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
-) -> Result<(Handle<A>, impl Future<Output = ()>), failure::Error> {
+) -> Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), failure::Error> {
     let (trigger, valve) = Valve::new();
     let (alive, done) = tokio::sync::mpsc::channel(1);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
