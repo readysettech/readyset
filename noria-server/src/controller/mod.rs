@@ -8,8 +8,10 @@ use crate::Config;
 use async_bincode::AsyncBincodeReader;
 use dataflow::payload::ControlReplyPacket;
 use futures_util::{
-    future::FutureExt, sink::SinkExt, stream::StreamExt, try_future::TryFutureExt,
-    try_stream::TryStreamExt,
+    future::FutureExt,
+    future::TryFutureExt,
+    sink::SinkExt,
+    stream::{StreamExt, TryStreamExt},
 };
 use hyper::{self, StatusCode};
 use noria::channel::TcpSender;
@@ -60,11 +62,12 @@ impl Worker {
 type WorkerIdentifier = SocketAddr;
 
 pub(super) async fn main<A: Authority + 'static>(
+    alive: tokio::sync::mpsc::Sender<()>,
     valve: Valve,
     config: Config,
     descriptor: ControllerDescriptor,
     mut ctrl_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
-    cport: tokio::net::tcp::TcpListener,
+    cport: tokio::net::TcpListener,
     log: slog::Logger,
     authority: Arc<A>,
     tx: tokio::sync::mpsc::UnboundedSender<Event>,
@@ -72,6 +75,7 @@ pub(super) async fn main<A: Authority + 'static>(
     let (dtx, drx) = tokio::sync::mpsc::unbounded_channel();
 
     tokio::spawn(listen_domain_replies(
+        alive.clone(),
         valve.clone(),
         log.clone(),
         dtx,
@@ -95,22 +99,21 @@ pub(super) async fn main<A: Authority + 'static>(
                 }
                 CoordinationPayload::CreateUniverse(universe) => {
                     if let Some(ref mut ctrl) = controller {
-                        crate::blocking(|| ctrl.create_universe(universe).unwrap()).await;
+                        tokio::task::block_in_place(|| ctrl.create_universe(universe).unwrap());
                     }
                 }
                 CoordinationPayload::Register { .. } => {
                     if let Some(ref mut ctrl) = controller {
-                        crate::blocking(|| {
+                        tokio::task::block_in_place(|| {
                             if let Err(e) = ctrl.handle_register(msg) {
                                 warn!(log, "worker registered and then immediately left: {:?}", e);
                             }
-                        })
-                        .await;
+                        });
                     }
                 }
                 CoordinationPayload::Heartbeat => {
                     if let Some(ref mut ctrl) = controller {
-                        crate::blocking(|| ctrl.handle_heartbeat(msg).unwrap()).await;
+                        tokio::task::block_in_place(|| ctrl.handle_heartbeat(msg).unwrap());
                     }
                 }
                 _ => unreachable!(),
@@ -118,10 +121,9 @@ pub(super) async fn main<A: Authority + 'static>(
             Event::ExternalRequest(method, path, query, body, reply_tx) => {
                 if let Some(ref mut ctrl) = controller {
                     let authority = &authority;
-                    let reply = crate::blocking(|| {
+                    let reply = tokio::task::block_in_place(|| {
                         ctrl.external_request(method, path, query, body, &authority)
-                    })
-                    .await;
+                    });
 
                     if reply_tx.send(reply).is_err() {
                         warn!(log, "client hung up");
@@ -133,11 +135,10 @@ pub(super) async fn main<A: Authority + 'static>(
             Event::ManualMigration { f, done } => {
                 if let Some(ref mut ctrl) = controller {
                     if !ctrl.workers.is_empty() {
-                        crate::blocking(|| {
+                        tokio::task::block_in_place(|| {
                             ctrl.migrate(move |m| f(m));
                             done.send(()).unwrap();
-                        })
-                        .await;
+                        });
                     }
                 } else {
                     unreachable!("got migration closure before becoming leader");
@@ -156,7 +157,7 @@ pub(super) async fn main<A: Authority + 'static>(
             }
             Event::WonLeaderElection(state) => {
                 let c = campaign.take().unwrap();
-                crate::blocking(move || c.join().unwrap()).await;
+                tokio::task::block_in_place(move || c.join().unwrap());
                 let drx = drx.take().unwrap();
                 controller = Some(ControllerInner::new(log.clone(), state, drx));
             }
@@ -177,10 +178,11 @@ pub(super) async fn main<A: Authority + 'static>(
 }
 
 async fn listen_domain_replies(
+    alive: tokio::sync::mpsc::Sender<()>,
     valve: Valve,
     log: slog::Logger,
     reply_tx: UnboundedSender<ControlReplyPacket>,
-    on: tokio::net::TcpListener,
+    mut on: tokio::net::TcpListener,
 ) {
     let mut incoming = valve.wrap(on.incoming());
     while let Some(sock) = incoming.next().await {
@@ -190,17 +192,20 @@ async fn listen_domain_replies(
                 break;
             }
             Ok(sock) => {
+                let alive = alive.clone();
                 tokio::spawn(
                     valve
                         .wrap(AsyncBincodeReader::from(sock))
                         .map_err(failure::Error::from)
                         .forward(
-                            reply_tx
-                                .clone()
+                            crate::ImplSinkForSender(reply_tx.clone())
                                 .sink_map_err(|_| format_err!("main event loop went away")),
                         )
                         .map_err(|e| panic!("{:?}", e))
-                        .map(|_| ()),
+                        .map(move |_| {
+                            let _ = alive;
+                            ()
+                        }),
                 );
             }
         }
@@ -208,13 +213,13 @@ async fn listen_domain_replies(
 }
 
 fn instance_campaign<A: Authority + 'static>(
-    mut event_tx: UnboundedSender<Event>,
+    event_tx: UnboundedSender<Event>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
     config: Config,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
-    let campaign_inner = move |mut event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
+    let campaign_inner = move |event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
         let payload_to_event = |payload: Vec<u8>| -> Result<Event, failure::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
             let state: ControllerState =
@@ -231,12 +236,12 @@ fn instance_campaign<A: Authority + 'static>(
             if let Some(leader) = authority.try_get_leader()? {
                 epoch = leader.0;
                 event_tx
-                    .try_send(payload_to_event(leader.1)?)
+                    .send(payload_to_event(leader.1)?)
                     .map_err(|_| format_err!("send failed"))?;
                 while let Some(leader) = authority.await_new_epoch(epoch)? {
                     epoch = leader.0;
                     event_tx
-                        .try_send(payload_to_event(leader.1)?)
+                        .send(payload_to_event(leader.1)?)
                         .map_err(|_| format_err!("send failed"))?;
                 }
             }
@@ -280,10 +285,10 @@ fn instance_campaign<A: Authority + 'static>(
             // (and there is nothing that can currently trigger it), so don't bother watching for
             // it.
             event_tx
-                .try_send(Event::WonLeaderElection(state.clone().unwrap()))
+                .send(Event::WonLeaderElection(state.clone().unwrap()))
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
             event_tx
-                .try_send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
+                .send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
                 .map_err(|_| format_err!("failed to announce leader change"))?;
             break Ok(());
         }

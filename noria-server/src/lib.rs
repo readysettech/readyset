@@ -395,18 +395,6 @@ pub mod manual {
 use dataflow::DomainConfig;
 use std::time;
 
-pub(crate) async fn blocking<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    use futures_util::future::poll_fn;
-    use tokio_executor::threadpool::blocking;
-    let mut wrap = Some(f);
-    poll_fn(|_| blocking(|| wrap.take().unwrap()()))
-        .await
-        .unwrap()
-}
-
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub(crate) struct Config {
     pub(crate) sharding: Option<usize>,
@@ -453,4 +441,31 @@ pub fn logger_pls() -> slog::Logger {
     use slog_term::term_full;
     use std::sync::Mutex;
     Logger::root(Mutex::new(term_full()).fuse(), o!())
+}
+
+use futures_util::sink::Sink;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
+
+impl<T> Sink<T> for ImplSinkForSender<T> {
+    type Error = tokio::sync::mpsc::error::SendError<T>;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+        self.0.send(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 }

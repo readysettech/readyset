@@ -9,6 +9,7 @@ use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
+use futures_util::{sink::Sink, stream::Stream};
 use net2;
 use pin_project::{pin_project, project};
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::prelude::*;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Fail)]
 pub enum SendError {

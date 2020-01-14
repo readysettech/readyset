@@ -1,14 +1,12 @@
 use crate::controller::migrate::Migration;
 use crate::startup::Event;
 use dataflow::prelude::*;
-use futures_util::sink::SinkExt;
 use noria::consensus::Authority;
 use noria::prelude::*;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use stream_cancel::Trigger;
-use tokio_io_pool;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct Handle<A: Authority + 'static> {
@@ -16,7 +14,6 @@ pub struct Handle<A: Authority + 'static> {
     #[allow(dead_code)]
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,
-    iopool: Option<tokio_io_pool::Runtime>,
 }
 
 impl<A: Authority> Deref for Handle<A> {
@@ -37,14 +34,12 @@ impl<A: Authority + 'static> Handle<A> {
         authority: Arc<A>,
         event_tx: tokio::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-        io: tokio_io_pool::Runtime,
     ) -> Result<Self, failure::Error> {
         let c = ControllerHandle::make(authority).await?;
         Ok(Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
-            iopool: Some(io),
         })
     }
 
@@ -58,13 +53,12 @@ impl<A: Authority + 'static> Handle<A> {
                 .as_mut()
                 .unwrap()
                 .send(Event::IsReady(tx))
-                .await
                 .unwrap();
             if rx.await.unwrap() {
                 break;
             }
 
-            tokio::timer::delay(time::Instant::now() + time::Duration::from_millis(50)).await;
+            tokio::time::delay_for(time::Duration::from_millis(50)).await;
         }
     }
 
@@ -86,7 +80,6 @@ impl<A: Authority + 'static> Handle<A> {
             .as_mut()
             .unwrap()
             .send(Event::ManualMigration { f: b, done: fin_tx })
-            .await
             .unwrap();
 
         fin_rx.await.unwrap();
@@ -140,11 +133,10 @@ impl<A: Authority + 'static> Handle<A> {
 
     /// Inform the local instance that it should exit.
     pub fn shutdown(&mut self) {
-        if let Some(io) = self.iopool.take() {
+        if let Some(kill) = self.kill.take() {
             drop(self.c.take());
             drop(self.event_tx.take());
-            drop(self.kill.take());
-            io.shutdown_on_idle();
+            drop(kill);
         }
     }
 }

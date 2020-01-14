@@ -164,11 +164,12 @@ fn main() {
     }
 
     let mut rt = tokio::runtime::Builder::new();
-    rt.name_prefix("worker-");
+    rt.thread_name("worker");
     if let Some(threads) = None {
         rt.core_threads(threads);
     }
-    let rt = rt.build().unwrap();
-    let _server = rt.block_on(builder.start(Arc::new(authority))).unwrap();
-    rt.shutdown_on_idle();
+    let mut rt = rt.build().unwrap();
+    let (_server, done) = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+    rt.block_on(done);
+    drop(rt);
 }

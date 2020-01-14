@@ -6,7 +6,7 @@ use crate::ActivationResult;
 #[cfg(debug_assertions)]
 use assert_infrequent;
 use failure::{self, ResultExt};
-use futures_util::{future, try_stream::TryStreamExt};
+use futures_util::future;
 use hyper;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     future::Future,
     task::{Context, Poll},
@@ -59,7 +59,7 @@ impl<A> Service<ControllerRequest> for Controller<A>
 where
     A: 'static + Authority,
 {
-    type Response = hyper::Chunk;
+    type Response = hyper::body::Bytes;
     type Error = failure::Error;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -99,9 +99,7 @@ where
                     .map_err(|he| failure::Error::from(he).context("hyper request failed"))?;
 
                 let status = res.status();
-                let body = res
-                    .into_body()
-                    .try_concat()
+                let body = hyper::body::to_bytes(res.into_body())
                     .await
                     .map_err(|he| failure::Error::from(he).context("hyper response failed"))?;
 
@@ -117,7 +115,7 @@ where
                             url = None;
                         }
 
-                        tokio::timer::delay(Instant::now() + Duration::from_millis(100)).await;
+                        tokio::time::delay_for(Duration::from_millis(100)).await;
                     }
                 }
             }
@@ -180,14 +178,14 @@ type RpcFuture<A, R> = impl Future<Output = Result<R, failure::Error>>;
 
 // Needed b/c of https://github.com/rust-lang/rust/issues/65442
 async fn finalize<R, E>(
-    fut: impl Future<Output = Result<hyper::Chunk, E>>,
+    fut: impl Future<Output = Result<hyper::body::Bytes, E>>,
     err: &'static str,
 ) -> Result<R, failure::Error>
 where
     for<'de> R: Deserialize<'de>,
     E: std::fmt::Display + Send + Sync + 'static,
 {
-    let body: hyper::Chunk = fut.await.map_err(failure::Context::new).context(err)?;
+    let body: hyper::body::Bytes = fut.await.map_err(failure::Context::new).context(err)?;
 
     serde_json::from_slice::<R>(&body)
         .context("failed to response")
@@ -256,7 +254,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .call(ControllerRequest::new("inputs", &()).unwrap());
 
         async move {
-            let body: hyper::Chunk = fut
+            let body: hyper::body::Bytes = fut
                 .await
                 .map_err(failure::Context::new)
                 .context("failed to fetch inputs")?;
@@ -280,7 +278,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .call(ControllerRequest::new("outputs", &()).unwrap());
 
         async move {
-            let body: hyper::Chunk = fut
+            let body: hyper::body::Bytes = fut
                 .await
                 .map_err(failure::Context::new)
                 .context("failed to fetch outputs")?;
@@ -307,7 +305,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .handle
             .call(ControllerRequest::new("view_builder", &name).unwrap());
         async move {
-            let body: hyper::Chunk = fut
+            let body: hyper::body::Bytes = fut
                 .await
                 .map_err(failure::Context::new)
                 .context("failed to fetch view builder")?;
@@ -338,7 +336,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .call(ControllerRequest::new("table_builder", &name).unwrap());
 
         async move {
-            let body: hyper::Chunk = fut
+            let body: hyper::body::Bytes = fut
                 .await
                 .map_err(failure::Context::new)
                 .context("failed to fetch table builder")?;

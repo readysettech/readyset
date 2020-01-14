@@ -14,7 +14,7 @@ use noria::DataType;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{env, thread};
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 200;
@@ -53,7 +53,7 @@ async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<Local
     }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
-    builder.start_local().await.unwrap()
+    builder.start_local().await.unwrap().0
 }
 
 fn get_settle_time() -> Duration {
@@ -68,20 +68,12 @@ fn get_settle_time() -> Duration {
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
 // for the value given through the SETTLE_TIME environment variable.
 async fn sleep() {
-    tokio::timer::delay(Instant::now() + get_settle_time()).await;
+    tokio::time::delay_for(get_settle_time()).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_basic() {
-    // set up graph
-    let mut b = Builder::default();
-    b.set_persistence(PersistenceParameters::new(
-        DurabilityMode::DeleteOnExit,
-        Duration::from_millis(1),
-        Some(String::from("it_works_basic")),
-        1,
-    ));
-    let mut g = b.start_local().await.unwrap();
+    let mut g = start_simple("it_works_basic").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -152,7 +144,63 @@ async fn it_works_basic() {
     //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
+async fn it_completes() {
+    let mut builder = Builder::default();
+    builder.set_sharding(DEFAULT_SHARDING);
+    builder.set_persistence(get_persistence_params("it_completes"));
+    let (g, done) = builder.start_local().await.unwrap();
+
+    {
+        let mut g = g;
+        // do some stuff (== it_works_basic)
+        let _ = g
+            .migrate(|mig| {
+                let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+                let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+
+                let mut emits = HashMap::new();
+                emits.insert(a, vec![0, 1]);
+                emits.insert(b, vec![0, 1]);
+                let u = Union::new(emits);
+                let c = mig.add_ingredient("c", &["a", "b"], u);
+                mig.maintain_anonymous(c, &[0]);
+                (a, b, c)
+            })
+            .await;
+
+        let mut cq = g.view("c").await.unwrap();
+        let mut muta = g.table("a").await.unwrap();
+        let mut mutb = g.table("b").await.unwrap();
+        let id: DataType = 1.into();
+
+        assert_eq!(muta.table_name(), "a");
+        assert_eq!(muta.columns(), &["a", "b"]);
+
+        muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
+        sleep().await;
+        assert_eq!(
+            cq.lookup(&[id.clone()], true).await.unwrap(),
+            vec![vec![1.into(), 2.into()]]
+        );
+        mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
+        sleep().await;
+        let res = cq.lookup(&[id.clone()], true).await.unwrap();
+        assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+        assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+        muta.delete(vec![id.clone()]).await.unwrap();
+        sleep().await;
+        assert_eq!(
+            cq.lookup(&[id.clone()], true).await.unwrap(),
+            vec![vec![1.into(), 4.into()]]
+        );
+    } // ensure that all handles and such are dropped
+
+    // wait for exit
+    done.await;
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn base_mutation() {
     use noria::{Modification, Operation};
 
@@ -233,7 +281,7 @@ async fn base_mutation() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = start_simple("shared_interdomain_ancestor").await;
@@ -286,7 +334,7 @@ async fn shared_interdomain_ancestor() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_w_mat() {
     // set up graph
     let mut g = start_simple("it_works_w_mat").await;
@@ -345,7 +393,7 @@ async fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 6.into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_w_partial_mat() {
     // set up graph
     let mut g = start_simple("it_works_w_partial_mat").await;
@@ -399,7 +447,7 @@ async fn it_works_w_partial_mat() {
     assert_eq!(cq.len().await.unwrap(), 1);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
@@ -446,7 +494,7 @@ async fn it_works_w_partial_mat_below_empty() {
     assert_eq!(cq.len().await.unwrap(), 1);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_deletion() {
     // set up graph
     let mut g = start_simple("it_works_deletion").await;
@@ -497,7 +545,7 @@ async fn it_works_deletion() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_sql_recipe() {
     let mut g = start_simple("it_works_with_sql_recipe").await;
     let sql = "
@@ -526,7 +574,7 @@ async fn it_works_with_sql_recipe() {
     assert_eq!(result[0][0], 2.into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_vote() {
     let mut g = start_simple("it_works_with_vote").await;
     let sql = "
@@ -571,15 +619,9 @@ async fn it_works_with_vote() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_double_query_through() {
-    let mut builder = Builder::default();
-    builder.set_persistence(get_persistence_params("it_works_with_double_query_through"));
-    // TODO: sharding::shard picks the wrong column to shard on, since both aid and bid resolves to
-    // all ancestors (and bid comes first). The reader is on aid though, so the sharder should pick
-    // that as well (and not bid!).
-    builder.set_sharding(None);
-    let mut g = builder.start_local().await.unwrap();
+    let mut g = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "
         # base tables
         CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
@@ -613,7 +655,7 @@ async fn it_works_with_double_query_through() {
     assert_eq!(empty.len(), 0);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_reads_before_writes() {
     let mut g = start_simple("it_works_with_reads_before_writes").await;
     let sql = "
@@ -644,7 +686,7 @@ async fn it_works_with_reads_before_writes() {
     assert_eq!(result[0], vec![aid.into(), uid.into()]);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
@@ -683,7 +725,7 @@ async fn forced_shuffle_despite_same_shard() {
     assert_eq!(result[0][1], price.into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn double_shuffle() {
     let mut g = start_simple("double_shuffle").await;
     let sql = "
@@ -719,7 +761,7 @@ async fn double_shuffle() {
     assert_eq!(result[0][1], price.into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_arithmetic_aliases() {
     let mut g = start_simple("it_works_with_arithmetic_aliases").await;
     let sql = "
@@ -747,7 +789,7 @@ async fn it_works_with_arithmetic_aliases() {
     assert_eq!(result[0][1], (price / 100).into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_recovers_persisted_bases() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
@@ -762,40 +804,48 @@ async fn it_recovers_persisted_bases() {
     {
         let mut g = Builder::default();
         g.set_persistence(persistence_params.clone());
-        let mut g = g.start(authority.clone()).await.unwrap();
+        let (mut g, done) = g.start(authority.clone()).await.unwrap();
 
-        let sql = "
+        {
+            let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
             QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
-        g.install_recipe(sql).await.unwrap();
+            g.install_recipe(sql).await.unwrap();
 
-        let mut mutator = g.table("Car").await.unwrap();
+            let mut mutator = g.table("Car").await.unwrap();
 
-        for i in 1..10 {
-            let price = i * 10;
-            mutator.insert(vec![i.into(), price.into()]).await.unwrap();
+            for i in 1..10 {
+                let price = i * 10;
+                mutator.insert(vec![i.into(), price.into()]).await.unwrap();
+            }
         }
 
         // Let writes propagate:
         sleep().await;
+        drop(g);
+        done.await;
     }
 
     let mut g = Builder::default();
     g.set_persistence(persistence_params);
-    let mut g = g.start(authority.clone()).await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let (mut g, done) = g.start(authority.clone()).await.unwrap();
+    {
+        let mut getter = g.view("CarPrice").await.unwrap();
 
-    // Make sure that the new graph contains the old writes
-    for i in 1..10 {
-        let price = i * 10;
-        let result = getter.lookup(&[i.into()], true).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], price.into());
+        // Make sure that the new graph contains the old writes
+        for i in 1..10 {
+            let price = i * 10;
+            let result = getter.lookup(&[i.into()], true).await.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0][0], price.into());
+        }
     }
+    drop(g);
+    done.await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn mutator_churn() {
     let mut g = start_simple("mutator_churn").await;
     let _ = g
@@ -847,14 +897,14 @@ async fn mutator_churn() {
     }
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn connection_churn() {
     let authority = Arc::new(LocalAuthority::new());
 
     let mut builder = Builder::default();
     builder.set_sharding(DEFAULT_SHARDING);
     builder.set_persistence(get_persistence_params("connection_churn"));
-    let mut g = builder.start(authority.clone()).await.unwrap();
+    let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 
     g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
         .await
@@ -869,7 +919,7 @@ async fn connection_churn() {
             let mut builder = Builder::default();
             builder.set_sharding(DEFAULT_SHARDING);
             builder.set_persistence(get_persistence_params("connection_churn"));
-            let mut g = builder.start(authority.clone()).await.unwrap();
+            let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 
             g.table("A")
                 .await
@@ -879,13 +929,17 @@ async fn connection_churn() {
                 .unwrap();
 
             drop(tx);
+            drop(g);
+            done.await;
         });
     }
     drop(tx);
     let _ = rx.recv().await;
+    drop(g);
+    done.await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
@@ -903,9 +957,10 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     {
         let mut g = Builder::default();
         g.set_persistence(persistence_parameters.clone());
-        let mut g = g.start(authority.clone()).await.unwrap();
+        let (mut g, done) = g.start(authority.clone()).await.unwrap();
 
-        let sql = "
+        {
+            let sql = "
             CREATE TABLE A (id int, PRIMARY KEY(id));
             CREATE TABLE B (id int, PRIMARY KEY(id));
             CREATE TABLE C (id int, PRIMARY KEY(id));
@@ -914,28 +969,33 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
             QUERY BID: SELECT id FROM B WHERE id = ?;
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
-        g.install_recipe(sql).await.unwrap();
-        for (i, table) in tables.iter().enumerate() {
-            let mut mutator = g.table(table).await.unwrap();
-            mutator.insert(vec![i.into()]).await.unwrap();
+            g.install_recipe(sql).await.unwrap();
+            for (i, table) in tables.iter().enumerate() {
+                let mut mutator = g.table(table).await.unwrap();
+                mutator.insert(vec![i.into()]).await.unwrap();
+            }
         }
         sleep().await;
+        drop(g);
+        done.await;
     }
 
     // Create a new controller with the same authority, and make sure that it recovers to the same
     // state that the other one had.
     let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
-    let mut g = g.start(authority.clone()).await.unwrap();
+    let (mut g, done) = g.start(authority.clone()).await.unwrap();
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
+    drop(g);
+    done.await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_simple_arithmetic() {
     let mut g = start_simple("it_works_with_simple_arithmetic").await;
 
@@ -962,7 +1022,7 @@ async fn it_works_with_simple_arithmetic() {
     assert_eq!(result[0][1], 246.into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_multiple_arithmetic_expressions() {
     let mut g = start_simple("it_works_with_multiple_arithmetic_expressions").await;
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -987,7 +1047,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     assert_eq!(result[0][3], 1230.into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_join_arithmetic() {
     let mut g = start_simple("it_works_with_join_arithmetic").await;
     let sql = "
@@ -1030,7 +1090,7 @@ async fn it_works_with_join_arithmetic() {
     assert_eq!(result[0][1], (f64::from(price) * fraction).into());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_function_arithmetic() {
     let mut g = start_simple("it_works_with_function_arithmetic").await;
     let sql = "
@@ -1055,7 +1115,7 @@ async fn it_works_with_function_arithmetic() {
     assert_eq!(result[0][0], DataType::from(max_price * 2));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn votes() {
     // set up graph
     let mut g = start_simple("votes").await;
@@ -1159,7 +1219,7 @@ async fn votes() {
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn empty_migration() {
     // set up graph
     let mut g = start_simple("empty_migration").await;
@@ -1209,7 +1269,7 @@ async fn empty_migration() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn simple_migration() {
     let id: DataType = 1.into();
 
@@ -1263,7 +1323,7 @@ async fn simple_migration() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn add_columns() {
     let id: DataType = "x".into();
 
@@ -1321,7 +1381,7 @@ async fn add_columns() {
     assert!(res.contains(&vec![id.clone(), "a".into(), 10.into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn migrate_added_columns() {
     let id: DataType = "x".into();
 
@@ -1372,7 +1432,7 @@ async fn migrate_added_columns() {
     assert!(res.iter().any(|r| r == &vec![10.into(), id.clone()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn migrate_drop_columns() {
     let id: DataType = "x".into();
 
@@ -1444,7 +1504,7 @@ async fn migrate_drop_columns() {
     assert!(res.contains(&vec![id.clone(), "b".into(), "c".into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn key_on_added() {
     // set up graph
     let mut g = start_simple("key_on_added").await;
@@ -1470,7 +1530,7 @@ async fn key_on_added() {
     assert!(bq.lookup(&[3.into()], true).await.unwrap().is_empty());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn replay_during_replay() {
     // what we're trying to set up here is a case where a join receives a record with a value for
     // the join key that does not exist in the view the record was sent from. since joins only do
@@ -1479,7 +1539,7 @@ async fn replay_during_replay() {
     let mut g = Builder::default();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
-    let mut g = g.start_local().await.unwrap();
+    let mut g = g.start_local().await.unwrap().0;
     let (a, u1, u2) = g
         .migrate(|mig| {
             // we need three bases:
@@ -1579,12 +1639,9 @@ async fn replay_during_replay() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn cascading_replays_with_sharding() {
-    let mut g = Builder::default();
-    g.set_sharding(Some(2));
-    g.set_persistence(get_persistence_params("cascading_replays_with_sharding"));
-    let mut g = g.start_local().await.unwrap();
+    let mut g = start_simple("cascading_replays_with_sharding").await;
 
     // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
     // while v will be sharded by u
@@ -1642,7 +1699,7 @@ async fn cascading_replays_with_sharding() {
     sleep().await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = start_simple("full_aggregation_with_bogokey").await;
@@ -1699,7 +1756,7 @@ async fn full_aggregation_with_bogokey() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn materialization_frontier() {
     // set up graph
     let mut g = start_simple_unsharded("materialization_frontier").await;
@@ -1783,7 +1840,7 @@ async fn materialization_frontier() {
     }
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn crossing_migration() {
     // set up graph
     let mut g = start_simple("crossing_migration").await;
@@ -1832,7 +1889,7 @@ async fn crossing_migration() {
     assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn independent_domain_migration() {
     let id: DataType = 1.into();
 
@@ -1886,7 +1943,7 @@ async fn independent_domain_migration() {
     );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn domain_amend_migration() {
     // set up graph
     let mut g = start_simple("domain_amend_migration").await;
@@ -1934,7 +1991,7 @@ async fn domain_amend_migration() {
     assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn migration_depends_on_unchanged_domain() {
     // here's the case we want to test: before the migration, we have some domain that contains
     // some materialized node n, as well as an egress node. after the migration, we add a domain
@@ -2099,22 +2156,22 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     }
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn full_vote_migration_only_new() {
     do_full_vote_migration(true, false).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn full_vote_migration_new_and_old() {
     do_full_vote_migration(true, true).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn full_vote_migration_new_and_old_unsharded() {
     do_full_vote_migration(false, true).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn live_writes() {
     let mut g = start_simple("live_writes").await;
     let (_vote, vc) = g
@@ -2190,7 +2247,7 @@ async fn live_writes() {
     }
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
@@ -2250,7 +2307,7 @@ async fn state_replay_migration_query() {
     assert!(out.lookup(&[3.into()], true).await.unwrap().is_empty());
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn recipe_activates() {
     let mut g = start_simple("recipe_activates").await;
     g.migrate(|mig| {
@@ -2266,7 +2323,7 @@ async fn recipe_activates() {
     assert_eq!(g.inputs().await.unwrap().len(), 1);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
     let r1_txt = "QUERY qa: SELECT a FROM b;\n
@@ -2284,7 +2341,7 @@ async fn recipe_activates_and_migrates() {
     assert_eq!(g.outputs().await.unwrap().len(), 2);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn recipe_activates_and_migrates_with_join() {
     let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                  CREATE TABLE b (r int, s int);\n";
@@ -2363,7 +2420,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, 
     .await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn finkelstein1982_queries() {
     use std::fs::File;
     use std::io::Read;
@@ -2397,17 +2454,17 @@ async fn finkelstein1982_queries() {
     .await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn tpc_w() {
     test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true, false).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn lobsters() {
     test_queries("lobsters", "tests/lobsters-schema.txt", false, false, false).await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn soupy_lobsters() {
     test_queries(
         "soupy_lobsters",
@@ -2419,17 +2476,9 @@ async fn soupy_lobsters() {
     .await;
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn node_removal() {
-    // set up graph
-    let mut b = Builder::default();
-    b.set_persistence(PersistenceParameters::new(
-        DurabilityMode::DeleteOnExit,
-        Duration::from_millis(1),
-        Some(String::from("domain_removal")),
-        1,
-    ));
-    let mut g = b.start_local().await.unwrap();
+    let mut g = start_simple("domain_removal").await;
     let cid = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
@@ -2490,7 +2539,7 @@ async fn node_removal() {
     // );
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn remove_query() {
     let r_txt = "CREATE TABLE b (a int, c text, x text);\n
                  QUERY qa: SELECT a FROM b;\n
@@ -2499,7 +2548,7 @@ async fn remove_query() {
     let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
                   QUERY qa: SELECT a FROM b;";
 
-    let mut g = Builder::default().start_local().await.unwrap();
+    let mut g = start_simple("remove_query").await;
     g.install_recipe(r_txt).await.unwrap();
     assert_eq!(g.inputs().await.unwrap().len(), 1);
     assert_eq!(g.outputs().await.unwrap().len(), 2);
@@ -2558,13 +2607,9 @@ macro_rules! get {
     }}
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn albums() {
-    let mut b = Builder::default();
-    //b.disable_partial();
-    b.set_sharding(None);
-    //b.log_with(crate::logger_pls());
-    let mut g = b.start_local().await.unwrap();
+    let mut g = start_simple_unsharded("albums").await;
     g.install_recipe(
         "CREATE TABLE friend (usera int, userb int);
                  CREATE TABLE album (a_id text, u_id int, public tinyint(1));
@@ -2651,7 +2696,7 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
     assert_eq!(get!(private, public, 4, "q").len(), 1);
 }
 
-#[tokio::test(threadpool)]
+#[tokio::test(threaded_scheduler)]
 async fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 
@@ -2666,7 +2711,7 @@ async fn correct_nested_view_schema() {
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
     b.set_sharding(None);
-    let mut g = b.start_local().await.unwrap();
+    let mut g = b.start_local().await.unwrap().0;
     g.install_recipe(r_txt).await.unwrap();
 
     let q = g.view("swvc").await.unwrap();

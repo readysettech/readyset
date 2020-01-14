@@ -97,14 +97,6 @@
 //! similar operations as SQL tables, such as [`Table::insert`], [`Table::update`],
 //! [`Table::delete`], and also more esoteric operations like [`Table::insert_or_update`].
 //!
-//! # Synchronous and asynchronous operation
-//!
-//! By default, the Noria client operates with an asynchronous API based on futures. While this
-//! allows great flexibility for clients as to how they schedule concurrent requests, it can be
-//! awkward to work with when writing less performance-sensitive code. Most of the Noria API types
-//! also have a synchronous version with a `Sync` prefix in the name that you can get at by calling
-//! `into_sync` on the asynchronous handle.
-//!
 //! # Alternatives
 //!
 //! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
@@ -146,8 +138,8 @@ use std::pin::Pin;
 pub mod prelude {
     pub use super::ActivationResult;
     pub use super::ControllerHandle;
-    pub use super::{SyncTable, Table};
-    pub use super::{SyncView, View};
+    pub use super::Table;
+    pub use super::View;
 }
 
 /// Noria errors.
@@ -210,8 +202,8 @@ impl<T> From<T> for Tagged<T> {
 
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{DataType, Modification, Operation, TableOperation};
-pub use crate::table::{SyncTable, Table};
-pub use crate::view::{SyncView, View};
+pub use crate::table::Table;
+pub use crate::view::View;
 
 #[doc(hidden)]
 pub use crate::table::Input;

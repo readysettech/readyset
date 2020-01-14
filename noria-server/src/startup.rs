@@ -1,7 +1,12 @@
 use crate::controller::ControllerState;
 use crate::coordination::{CoordinationMessage, CoordinationPayload};
 use async_bincode::AsyncBincodeReader;
-use futures_util::{future::FutureExt, try_future::TryFutureExt, try_stream::TryStreamExt};
+use futures_util::{
+    future::FutureExt,
+    future::TryFutureExt,
+    sink::SinkExt,
+    stream::{StreamExt, TryStreamExt},
+};
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use noria::consensus::Authority;
 use noria::ControllerDescriptor;
@@ -14,10 +19,8 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use stream_cancel::{Valve, Valved};
+use stream_cancel::Valve;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::{self, prelude::*};
-use tokio_io_pool;
 
 use crate::handle::Handle;
 use crate::Config;
@@ -29,7 +32,7 @@ pub(crate) enum Event {
         Method,
         String,
         Option<String>,
-        hyper::Chunk,
+        hyper::body::Bytes,
         tokio::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
     ),
     LeaderChange(ControllerState, ControllerDescriptor),
@@ -68,15 +71,9 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
-) -> Result<Handle<A>, failure::Error> {
-    let mut pool = tokio_io_pool::Builder::default();
-    pool.name_prefix("io-worker-");
-    if let Some(threads) = config.threads {
-        pool.pool_size(threads);
-    }
-    let iopool = pool.build().unwrap();
-
+) -> Result<(Handle<A>, impl Future<Output = ()>), failure::Error> {
     let (trigger, valve) = Valve::new();
+    let (alive, done) = tokio::sync::mpsc::channel(1);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let mut rx = valve.wrap(rx);
 
@@ -103,6 +100,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
 
     // spawn all of those
     tokio::spawn(listen_internal(
+        alive.clone(),
         valve.clone(),
         log.clone(),
         tx.clone(),
@@ -110,17 +108,25 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     ));
     let ext_log = log.clone();
     tokio::spawn(
-        listen_external(tx.clone(), valve.wrap(xport.incoming()), authority.clone())
-            .map_err(move |e| {
-                warn!(ext_log, "external request failed: {:?}", e);
-            })
-            .map(|_| ()),
+        listen_external(
+            alive.clone(),
+            valve.clone(),
+            tx.clone(),
+            xport,
+            authority.clone(),
+        )
+        .map_err(move |e| {
+            warn!(ext_log, "external request failed: {:?}", e);
+        })
+        .map(|_| ()),
     );
 
     // first, a loop that just forwards to the appropriate place
+    let a = alive.clone();
     tokio::spawn(async move {
-        let mut ctx = ctrl_tx;
-        let mut wtx = worker_tx;
+        let _alive = a;
+        let ctx = ctrl_tx;
+        let wtx = worker_tx;
         while let Some(e) = rx.next().await {
             let snd = match e {
                 Event::InternalMessage(ref msg) => match msg.payload {
@@ -141,7 +147,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
                 Event::IsReady(..) => ctx.send(e),
             };
             // needed for https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
-            snd.await.unwrap();
+            snd.unwrap();
         }
     });
 
@@ -152,6 +158,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         nonce: rand::random(),
     };
     tokio::spawn(crate::controller::main(
+        alive.clone(),
         valve,
         config,
         descriptor,
@@ -162,7 +169,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         tx.clone(),
     ));
     tokio::spawn(crate::worker::main(
-        iopool.handle().clone(),
+        alive.clone(),
         worker_rx,
         listen_addr,
         waddr,
@@ -171,14 +178,16 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         log.clone(),
     ));
 
-    Handle::new(authority, tx, trigger, iopool).await
+    let h = Handle::new(authority, tx, trigger).await?;
+    Ok((h, done.into_future().map(|_| {})))
 }
 
 async fn listen_internal(
+    alive: tokio::sync::mpsc::Sender<()>,
     valve: Valve,
     log: slog::Logger,
     event_tx: UnboundedSender<Event>,
-    on: tokio::net::TcpListener,
+    mut on: tokio::net::TcpListener,
 ) {
     let mut rx = valve.wrap(on.incoming());
     while let Some(r) = rx.next().await {
@@ -188,39 +197,47 @@ async fn listen_internal(
                 return;
             }
             Ok(sock) => {
+                let alive = alive.clone();
                 tokio::spawn(
                     valve
                         .wrap(AsyncBincodeReader::from(sock))
                         .map_ok(Event::InternalMessage)
                         .map_err(failure::Error::from)
                         .forward(
-                            event_tx
-                                .clone()
+                            crate::ImplSinkForSender(event_tx.clone())
                                 .sink_map_err(|_| format_err!("main event loop went away")),
                         )
                         .map_err(|e| panic!("{:?}", e))
-                        .map(|_| ()),
+                        .map(move |_| {
+                            let _ = alive;
+                            ()
+                        }),
                 );
             }
         }
     }
 }
 
-struct ExternalServer<A: Authority>(UnboundedSender<Event>, Arc<A>);
-async fn listen_external<A: Authority + 'static, S>(
+struct ExternalServer<A: Authority>(
+    tokio::sync::mpsc::Sender<()>,
+    UnboundedSender<Event>,
+    Arc<A>,
+);
+
+async fn listen_external<A: Authority + 'static>(
+    alive: tokio::sync::mpsc::Sender<()>,
+    valve: Valve,
     event_tx: UnboundedSender<Event>,
-    on: Valved<S>,
+    mut on: tokio::net::TcpListener,
     authority: Arc<A>,
-) -> Result<(), hyper::Error>
-where
-    S: Stream<Item = io::Result<tokio::net::tcp::TcpStream>>,
-{
+) -> Result<(), hyper::Error> {
+    let on = valve.wrap(on.incoming());
     use hyper::{service::make_service_fn, Body, Request, Response};
     use tower::Service;
     impl<A: Authority> Clone for ExternalServer<A> {
         // Needed due to #26925
         fn clone(&self) -> Self {
-            ExternalServer(self.0.clone(), self.1.clone())
+            ExternalServer(self.0.clone(), self.1.clone(), self.2.clone())
         }
     }
 
@@ -234,26 +251,23 @@ where
         }
 
         fn call(&mut self, req: Request<Body>) -> Self::Future {
-            let mut res = Response::builder();
+            let res = Response::builder();
             // disable CORS to allow use as API server
-            res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+            let res = res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
             if let Method::GET = *req.method() {
                 match req.uri().path() {
                     "/graph.html" => {
-                        res.header(CONTENT_TYPE, "text/html");
-                        let res = res.body(hyper::Body::from(include_str!("graph.html")));
+                        let res = res
+                            .header(CONTENT_TYPE, "text/html")
+                            .body(hyper::Body::from(include_str!("graph.html")));
                         return Box::pin(async move { Ok(res.unwrap()) });
                     }
                     path if path.starts_with("/zookeeper/") => {
-                        let res = match self.1.try_read(&format!("/{}", &path[11..])) {
-                            Ok(Some(data)) => {
-                                res.header(CONTENT_TYPE, "application/json");
-                                res.body(hyper::Body::from(data))
-                            }
-                            _ => {
-                                res.status(StatusCode::NOT_FOUND);
-                                res.body(hyper::Body::empty())
-                            }
+                        let res = match self.2.try_read(&format!("/{}", &path[11..])) {
+                            Ok(Some(data)) => res
+                                .header(CONTENT_TYPE, "application/json")
+                                .body(hyper::Body::from(data)),
+                            _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
                         };
                         return Box::pin(async move { Ok(res.unwrap()) });
                     }
@@ -264,42 +278,36 @@ where
             let method = req.method().clone();
             let path = req.uri().path().to_string();
             let query = req.uri().query().map(ToOwned::to_owned);
-            let mut event_tx = self.0.clone();
+            let event_tx = self.1.clone();
 
             Box::pin(async move {
-                let body = req.into_body().try_concat().await?;
+                let body = hyper::body::to_bytes(req.into_body()).await?;
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
-                if let Err(_) = event_tx
-                    .send(Event::ExternalRequest(method, path, query, body, tx))
-                    .await
+                if let Err(_) = event_tx.send(Event::ExternalRequest(method, path, query, body, tx))
                 {
-                    res.status(StatusCode::SERVICE_UNAVAILABLE);
-                    res.header("Content-Type", "text/plain; charset=utf-8");
+                    let res = res
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .header("Content-Type", "text/plain; charset=utf-8");
                     return Ok(res.body(hyper::Body::from("server went away")).unwrap());
                 }
 
                 match rx.await {
                     Ok(reply) => {
                         let res = match reply {
-                            Ok(Ok(reply)) => {
-                                res.header("Content-Type", "application/json; charset=utf-8");
-                                res.body(hyper::Body::from(reply))
-                            }
-                            Ok(Err(reply)) => {
-                                res.status(StatusCode::INTERNAL_SERVER_ERROR);
-                                res.header("Content-Type", "text/plain; charset=utf-8");
-                                res.body(hyper::Body::from(reply))
-                            }
-                            Err(status_code) => {
-                                res.status(status_code);
-                                res.body(hyper::Body::empty())
-                            }
+                            Ok(Ok(reply)) => res
+                                .header("Content-Type", "application/json; charset=utf-8")
+                                .body(hyper::Body::from(reply)),
+                            Ok(Err(reply)) => res
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .header("Content-Type", "text/plain; charset=utf-8")
+                                .body(hyper::Body::from(reply)),
+                            Err(status_code) => res.status(status_code).body(hyper::Body::empty()),
                         };
                         Ok(res.unwrap())
                     }
                     Err(_) => {
-                        res.status(StatusCode::NOT_FOUND);
+                        let res = res.status(StatusCode::NOT_FOUND);
                         Ok(res.body(hyper::Body::empty()).unwrap())
                     }
                 }
@@ -307,7 +315,7 @@ where
         }
     }
 
-    let service = ExternalServer(event_tx, authority);
+    let service = ExternalServer(alive, event_tx, authority);
     hyper::server::Server::builder(hyper::server::accept::from_stream(on))
         .serve(make_service_fn(move |_| {
             let s = service.clone();

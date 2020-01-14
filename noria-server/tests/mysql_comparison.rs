@@ -268,7 +268,7 @@ async fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let mut g = Builder::default().start_local().await.unwrap();
+    let (mut g, done) = Builder::default().start_local().await.unwrap();
     g.install_recipe(&queries.join("\n")).await.unwrap();
 
     for (table_name, table) in tables.iter() {
@@ -284,7 +284,7 @@ async fn check_query(
         }
     }
 
-    tokio::timer::delay(time::Instant::now() + time::Duration::from_millis(300)).await;
+    tokio::time::delay_for(time::Duration::from_millis(300)).await;
 
     let mut getter = g.view(query_name).await.unwrap();
 
@@ -321,6 +321,8 @@ async fn check_query(
             None => {}
         }
     }
+
+    done.await;
     Ok(())
 }
 
@@ -398,7 +400,7 @@ fn mysql_comparison() {
             let panic_state: Arc<Mutex<Option<PanicState>>> = Arc::new(Mutex::new(None));
             set_panic_hook(panic_state.clone());
             let result = panic::catch_unwind(|| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let mut rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(check_query(
                     &schema.tables,
                     query_name,

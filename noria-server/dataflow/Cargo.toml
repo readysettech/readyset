@@ -12,7 +12,7 @@ jemallocator = "0.3"
 bincode = "1.0.0"
 evmap = { version = "7.1.2", features = ["indexed"] }
 fnv = "1.0.5"
-futures-util-preview = "=0.3.0-alpha.19"
+futures-util = "0.3.0"
 itertools = "0.8"
 nom-sql = "0.0.9"
 indexmap = "1.1.0"
@@ -21,8 +21,8 @@ regex = "1"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 slog = "2.4.0"
-stream-cancel = "=0.5.0-alpha.4"
-tokio = "=0.2.0-alpha.6"
+stream-cancel = "0.5.0"
+tokio = { version = "0.2.0" }
 vec_map = { version = "0.8.0", features = ["eders"] }
 tempfile = "3.0.2"
 

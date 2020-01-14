@@ -10,12 +10,15 @@ use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{self, SendError};
 use std::sync::RwLock;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
+use futures_util::sink::{Sink, SinkExt};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tokio::prelude::*;
-use tokio_io::BufWriter;
-use tokio_net::driver::Handle;
+use tokio::io::BufWriter;
 
 pub mod tcp;
 
@@ -30,9 +33,31 @@ pub struct MaybeLocal;
 pub struct DomainConnectionBuilder<D, T> {
     sport: Option<u16>,
     addr: SocketAddr,
-    chan: Option<tokio_sync::mpsc::UnboundedSender<T>>,
+    chan: Option<tokio::sync::mpsc::UnboundedSender<T>>,
     is_for_base: bool,
     _marker: D,
+}
+
+struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
+
+impl<T> Sink<T> for ImplSinkForSender<T> {
+    type Error = tokio::sync::mpsc::error::SendError<T>;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+        self.0.send(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl<T> DomainConnectionBuilder<Remote, T> {
@@ -71,7 +96,7 @@ where
         // synchronous read upon accepting a connection.
         let s = self.build_sync()?.into_inner().into_inner()?;
 
-        tokio::net::TcpStream::from_std(s, &Handle::default())
+        tokio::net::TcpStream::from_std(s)
             .map(BufWriter::new)
             .map(AsyncBincodeWriter::from)
             .map(AsyncBincodeWriter::for_async)
@@ -99,11 +124,11 @@ pub trait Sender {
     fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError>;
 }
 
-impl<T> Sender for tokio_sync::mpsc::UnboundedSender<T> {
+impl<T> Sender for tokio::sync::mpsc::UnboundedSender<T> {
     type Item = T;
 
     fn send(&mut self, t: Self::Item) -> Result<(), tcp::SendError> {
-        self.try_send(t).map_err(|_| {
+        tokio::sync::mpsc::UnboundedSender::send(self, t).map_err(|_| {
             tcp::SendError::IoError(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local peer went away",
@@ -120,10 +145,10 @@ where
         self,
     ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
-            Ok(
-                Box::new(chan.sink_map_err(|_| serde::de::Error::custom("failed to do local send")))
-                    as Box<_>,
-            )
+            Ok(Box::new(
+                ImplSinkForSender(chan)
+                    .sink_map_err(|_| serde::de::Error::custom("failed to do local send")),
+            ) as Box<_>)
         } else {
             DomainConnectionBuilder {
                 sport: self.sport,
@@ -235,7 +260,7 @@ struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
     /// Map from key to remote address.
     addrs: HashMap<K, SocketAddr>,
     /// Map from key to channel sender for local connections.
-    locals: HashMap<K, tokio_sync::mpsc::UnboundedSender<T>>,
+    locals: HashMap<K, tokio::sync::mpsc::UnboundedSender<T>>,
 }
 
 pub struct ChannelCoordinator<K: Eq + Hash + Clone, T> {
@@ -263,7 +288,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         inner.addrs.insert(key, addr);
     }
 
-    pub fn insert_local(&self, key: K, chan: tokio_sync::mpsc::UnboundedSender<T>) {
+    pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
         let mut inner = self.inner.write().unwrap();
         inner.locals.insert(key, chan);
     }

@@ -13,7 +13,10 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
-use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::{
+    sink::Sink,
+    stream::{futures_unordered::FuturesUnordered, Stream},
+};
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
@@ -29,19 +32,15 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use stream_cancel::{Valve, Valved};
+use stream_cancel::Valve;
 use streamunordered::{StreamUnordered, StreamYield};
-use tokio::prelude::*;
-use tokio_io::{BufReader, BufStream, BufWriter};
+use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
 // https://github.com/rust-lang/rust/issues/64445
-type Incoming =
-    Box<dyn Stream<Item = Result<tokio::net::tcp::TcpStream, tokio::io::Error>> + Unpin + Send>;
-type FirstByte = Pin<
-    Box<dyn Future<Output = Result<(tokio::net::tcp::TcpStream, u8), tokio::io::Error>> + Send>,
->;
+type FirstByte =
+    Pin<Box<dyn Future<Output = Result<(tokio::net::TcpStream, u8), tokio::io::Error>> + Send>>;
 
 #[pin_project]
 pub(super) struct Replica {
@@ -53,12 +52,15 @@ pub(super) struct Replica {
     retry: Option<Box<Packet>>,
 
     #[pin]
-    incoming: Valved<Incoming>,
+    valve: Valve,
+
+    #[pin]
+    incoming: tokio::net::TcpListener,
 
     #[pin]
     first_byte: FuturesUnordered<FirstByte>,
 
-    locals: tokio_sync::mpsc::UnboundedReceiver<Box<Packet>>,
+    locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
 
     #[pin]
     inputs: StreamUnordered<
@@ -102,7 +104,8 @@ impl Replica {
             coord: cc,
             domain,
             retry: None,
-            incoming: valve.wrap(Box::new(on.incoming())),
+            valve: valve.clone(),
+            incoming: on,
             first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
@@ -312,22 +315,19 @@ impl Replica {
     fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
         let mut this = self.project();
 
-        while let Poll::Ready(stream) = this.incoming.as_mut().poll_next(cx)? {
-            match stream {
-                Some(mut stream) => {
-                    // we know that any new connection to a domain will first send a one-byte
-                    // token to indicate whether the connection is from a base or not.
-                    debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-                    this.first_byte.push(Box::pin(async move {
-                        let mut byte = [0; 1];
-                        let n = stream.read_exact(&mut byte[..]).await?;
-                        assert_eq!(n, 1);
-                        Ok((stream, byte[0]))
-                    }));
-                }
-                None => {
-                    return Ok(false);
-                }
+        if let Poll::Ready(true) = this.valve.poll_closed(cx) {
+            return Ok(false);
+        } else {
+            while let Poll::Ready((mut stream, _)) = this.incoming.as_mut().poll_accept(cx)? {
+                // we know that any new connection to a domain will first send a one-byte
+                // token to indicate whether the connection is from a base or not.
+                debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
+                this.first_byte.push(Box::pin(async move {
+                    let mut byte = [0; 1];
+                    let n = stream.read_exact(&mut byte[..]).await?;
+                    assert_eq!(n, 1);
+                    Ok((stream, byte[0]))
+                }));
             }
         }
 
@@ -357,7 +357,7 @@ impl Replica {
             }
             let tcp = if is_base {
                 DualTcpStream::upgrade(
-                    tokio_io::BufStream::new(stream),
+                    tokio::io::BufStream::new(stream),
                     move |Tagged { v: input, tag }| {
                         Box::new(Packet::Input {
                             inner: input,
@@ -367,7 +367,7 @@ impl Replica {
                     },
                 )
             } else {
-                tokio_io::BufStream::from(BufReader::with_capacity(
+                tokio::io::BufStream::from(BufReader::with_capacity(
                     2 * 1024 * 1024,
                     BufWriter::with_capacity(4 * 1024, stream),
                 ))
@@ -392,17 +392,10 @@ impl Replica {
 
         if *this.timed_out {
             *this.timed_out = false;
-            let try_block = tokio_executor::threadpool::blocking(|| {
+            tokio::task::block_in_place(|| {
                 this.domain.on_event(this.out, PollEvent::Timeout);
                 processed = true;
             });
-            if let Poll::Pending = try_block {
-                // this is a little awkward. we failed to block, so we failed to notify about
-                // the timeout expiry. we'll need to make sure we get back to the code above to
-                // try again. note that we are already scheduled for a wake-up since blocking
-                // returned Pending.
-                *this.timed_out = true;
-            }
         }
 
         processed
@@ -507,7 +500,7 @@ impl Executor for Outboxes {
 
     fn create_universe(&mut self, universe: HashMap<String, DataType>) {
         self.ctrl_tx
-            .try_send(CoordinationPayload::CreateUniverse(universe))
+            .send(CoordinationPayload::CreateUniverse(universe))
             .expect("asked to send to controller, but controller has gone away");
     }
 
@@ -557,7 +550,7 @@ impl Future for Replica {
             let mut local_done = false;
             let mut remote_done = false;
             let mut check_local = true;
-            let readiness = 'ready: loop {
+            let readiness = loop {
                 let mut this = self.as_mut().project();
                 let d = this.domain;
                 let out = this.out;
@@ -566,7 +559,7 @@ impl Future for Replica {
                     ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
                         $retry = Some($p);
                         let retry = &mut $retry;
-                        match tokio_executor::threadpool::blocking(|| {
+                        if let ProcessResult::StopPolling = tokio::task::block_in_place(|| {
                             let packet = retry.take().unwrap();
                             if let Packet::Input {
                                 src: Some(SourceChannelIdentifier { token, epoch, .. }),
@@ -577,19 +570,9 @@ impl Future for Replica {
                             }
                             $pp(packet)
                         }) {
-                            Poll::Ready(Ok(ProcessResult::StopPolling)) => {
-                                // domain got a message to quit
-                                // TODO: should we finish up remaining work?
-                                return Poll::Ready(Ok(()));
-                            }
-                            Poll::Ready(Ok(_)) => {}
-                            Poll::Pending => {
-                                // NOTE: the packet is still left in $retry, so we'll try again
-                                break 'ready Poll::Pending;
-                            }
-                            Poll::Ready(Err(e)) => {
-                                unreachable!("trying to block without tokio runtime: {:?}", e)
-                            }
+                            // domain got a message to quit
+                            // TODO: should we finish up remaining work?
+                            return Poll::Ready(Ok(()));
                         }
                     }};
                 }
@@ -683,7 +666,7 @@ impl Future for Replica {
 
             // check if we now need to set a timeout
             self.out.dirty = false;
-            'resume_polling: loop {
+            loop {
                 let mut this = self.as_mut().project();
                 match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     ProcessResult::KeepPolling(timeout) => {

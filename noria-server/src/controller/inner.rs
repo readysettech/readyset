@@ -78,7 +78,7 @@ pub(in crate::controller) struct DomainReplies(
 
 impl DomainReplies {
     async fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
-        let crps: Vec<_> = (&mut self.0).take(n as u64).collect().await;
+        let crps: Vec<_> = (&mut self.0).take(n).collect().await;
 
         if crps.len() != n {
             unreachable!(
@@ -193,7 +193,7 @@ impl ControllerInner {
         method: hyper::Method,
         path: String,
         query: Option<String>,
-        body: hyper::Chunk,
+        body: hyper::body::Bytes,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {
         use serde_json as json;
@@ -1276,7 +1276,7 @@ impl ControllerInner {
                 Err(e) => match e {
                     SendError::IoError(ref ioe) => {
                         if ioe.kind() == io::ErrorKind::BrokenPipe
-                            && ioe.get_ref().unwrap().description() == "worker failed"
+                            && ioe.get_ref().unwrap().to_string() == "worker failed"
                         {
                             // message would have gone to a failed worker, so ignore error
                         } else {

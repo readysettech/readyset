@@ -10,7 +10,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use stream_cancel::Trigger;
 use tokio::prelude::*;
-use tokio_io_pool;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct Handle<A: Authority + 'static> {
@@ -18,7 +17,6 @@ pub struct Handle<A: Authority + 'static> {
     #[allow(dead_code)]
     event_tx: Option<futures::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,
-    iopool: Option<tokio_io_pool::Runtime>,
 }
 
 impl<A: Authority> Deref for Handle<A> {
@@ -39,13 +37,11 @@ impl<A: Authority + 'static> Handle<A> {
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-        io: tokio_io_pool::Runtime,
     ) -> impl Future<Item = Self, Error = failure::Error> {
         ControllerHandle::make(authority).map(move |c| Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
-            iopool: Some(io),
         })
     }
 
@@ -147,11 +143,10 @@ impl<A: Authority + 'static> Handle<A> {
 
     /// Inform the local instance that it should exit.
     fn shutdown(&mut self) {
-        if let Some(io) = self.iopool.take() {
+        if let Some(kill) = self.kill.take() {
             drop(self.c.take());
             drop(self.event_tx.take());
-            drop(self.kill.take());
-            io.shutdown_on_idle();
+            drop(kill);
         }
     }
 }
