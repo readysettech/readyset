@@ -10,4 +10,4 @@ members = [
 debug=true
 
 [patch.crates-io]
-# tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
