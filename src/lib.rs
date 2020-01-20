@@ -458,13 +458,9 @@ where
             self.curr = &self.curr.as_ref().unwrap().left;
         }
 
-        if !self.to_visit.is_empty() {
-            let visited = self.to_visit.pop();
-            self.curr = &visited.as_ref().unwrap().right;
-            Some(&visited.unwrap().key)
-        } else {
-            None
-        }
+        let visited = self.to_visit.pop();
+        self.curr = &visited.as_ref().unwrap().right;
+        Some(&visited.unwrap().key)
     }
 }
 
