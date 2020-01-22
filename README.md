@@ -49,5 +49,6 @@ let diff = tree.get_interval_difference(
 
 * Add another `IntervalTree` constructor (other than the default one).
 * Allow to remove intervals from the tree (started in the `delete` branch).
+  * I have added a `remove_random_leaf` method to the API. Removing leaves is significantly simpler with this data structure, hence I started by tackling this problem.
 * Keep the tree balanced, by rotating during insertions/deletions
 * Assert that the start bound of an interval is smaller or equal to the end bound of the same interval.
