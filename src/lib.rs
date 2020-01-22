@@ -11,6 +11,7 @@ use std::cmp::Ordering;
 use std::cmp::Ordering::*;
 use std::ops::Bound;
 use std::ops::Bound::*;
+use std::fmt;
 
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
@@ -24,6 +25,18 @@ pub struct IntervalTree<Q: Ord + Clone> {
 pub struct IntervalTreeIter<'a, Q: Ord + Clone> {
     to_visit: Vec<&'a Box<Node<Q>>>,
     curr: &'a Option<Box<Node<Q>>>,
+}
+
+impl<Q> fmt::Display for IntervalTree<Q>
+where
+    Q: Ord + Clone + fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.root {
+            Some(ref root) => write!(f, "{}", root),
+            None => write!(f, "Empty tree"),
+        }
+    }
 }
 
 impl<Q> Default for IntervalTree<Q>
@@ -470,6 +483,39 @@ struct Node<Q: Ord + Clone> {
     value: Bound<Q>, // Max end-point.
     left: Option<Box<Node<Q>>>,
     right: Option<Box<Node<Q>>>,
+}
+
+impl<Q> fmt::Display for Node<Q>
+where
+    Q: Ord + Clone + fmt::Display
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let start = match self.key.0 {
+            Included(ref x) => format!("[{}", x),
+            Excluded(ref x) => format!("]{}", x),
+            Unbounded => String::from("]-∞"),
+        };
+        let end = match self.key.1 {
+            Included(ref x) => format!("{}]", x),
+            Excluded(ref x) => format!("{}[", x),
+            Unbounded => format!("∞["),
+        };
+        let value = match self.value {
+            Included(ref x) => format!("{}]", x),
+            Excluded(ref x) => format!("{}[", x),
+            Unbounded => String::from("∞"),
+        };
+
+        if self.left.is_none() && self.right.is_none() {
+            write!(f, " {{ {},{} ({}) }} ", start, end, value)
+        } else if self.left.is_none() {
+            write!(f, " {{ {},{} ({}) right:{}}} ", start, end, value, self.right.as_ref().unwrap())
+        } else if self.right.is_none() {
+            write!(f, " {{ {},{} ({}) left:{}}} ", start, end, value, self.left.as_ref().unwrap())
+        } else {
+            write!(f, " {{ {},{} ({}) left:{}right:{}}} ", start, end, value, self.left.as_ref().unwrap(), self.right.as_ref().unwrap())
+        }
+    }
 }
 
 impl<Q> Node<Q>
