@@ -10,7 +10,7 @@ members = [
 debug=true
 
 [patch.crates-io]
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-tokio-macros = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", rev = "8570c332127c93fdebf2bf9014f2a78034ffb009" }
+tokio-macros = { git = "https://github.com/tokio-rs/tokio.git", rev = "930679587ae42e4df3113159ccf33fb5923dd73a" }
 # https://github.com/hyperium/hyper/pull/2001
 hyper = { git = "https://github.com/hyperium/hyper.git", rev = "e6027bc02db92d1137c54a26eef2e1cb4d810e25" }
