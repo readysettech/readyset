@@ -8,3 +8,6 @@ description = "An interval tree working with inclusive/exclusive bounds, as well
 
 repository = "https://github.com/jonathanGB/unbounded-interval-tree"
 keywords = ["interval", "tree", "bound", "exclusive", "difference"]
+
+[dependencies]
+rand = "0.7"

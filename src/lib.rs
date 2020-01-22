@@ -5,7 +5,7 @@
 //! for "stabbing queries" (as in "is point `p` or an interval `i` contained in any intervals
 //! in the tree of intervals?"), as well as helpers to get the difference between a queried
 //! interval and the database (in order to find subsegments not covered), and the list of
-//! intervals in the database overlapping a queried interval. 
+//! intervals in the database overlapping a queried interval.
 
 use std::cmp::Ordering;
 use std::cmp::Ordering::*;
@@ -16,7 +16,7 @@ use std::fmt;
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
 /// The interval tree storing all the underlying intervals.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
 }
@@ -453,6 +453,156 @@ where
         // Search right subtree.
         Self::get_interval_overlaps_rec(&node.right, q, acc);
     }
+
+    /// Removes a random leaf from the tree,
+    /// and returns the range stored in the said node.
+    /// The returned value will be `None` if the tree is empty.
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert((Included(5), Excluded(9)));
+    /// tree.insert((Unbounded, Included(10)));
+    /// 
+    /// assert!(tree.contains_point(10));
+    /// assert!(tree.contains_point(6));
+    /// 
+    /// let deleted = tree.remove_random_leaf();
+    /// assert!(deleted.is_some());
+    /// assert!(!tree.contains_point(10));
+    /// assert!(tree.contains_point(6));
+    /// 
+    /// let deleted = tree.remove_random_leaf();
+    /// assert!(deleted.is_some());
+    /// assert!(!tree.contains_point(6));
+    /// 
+    /// let deleted = tree.remove_random_leaf();
+    /// assert!(deleted.is_none());
+    /// ```
+    pub fn remove_random_leaf(&mut self) -> Option<Range<Q>> {
+        use std::mem;
+        use rand::random;
+
+        // If interval tree is empty, just return None.
+        if self.root.is_none() {
+            return None;
+        }
+
+        let mut curr = self.root.as_mut().unwrap();
+
+        // If we only have one node, delete it right away.
+        if curr.left.is_none() && curr.right.is_none() {
+            let root = mem::replace(&mut self.root, None).unwrap();
+            return Some(root.key);
+        }
+
+        // Keep track of visited nodes, because we will need to walk up
+        // the tree after deleting the leaf in order to possibly update
+        // their value stored.
+        // The first element of the tuple is a &mut to the value of the node,
+        // whilst the second element is the new potential value to store, based
+        // on the non-visited path (recall that this is a BST). It
+        // is very much possible that both elements are equal: that would imply that the
+        // current value depends solely on the non-visited path, hence the deleted
+        // node will have no impact up the tree, at least from the current point. 
+        let mut path : Vec<(_, _)> = Vec::new();
+
+        // Used to keep track of the direction taken from a node.
+        enum Direction {
+            LEFT,
+            RIGHT,
+        }
+
+        // Traverse the tree until we find a leaf.
+        let (deleted, new_max) = loop {
+            // Note that at this point in the loop, `curr` can't be a leaf.
+            // Indeed, we traverse the tree such that `curr` is always an
+            // internal node, so that it is easy to replace a leaf from `curr`.
+            let direction = if curr.left.is_none() { Direction::RIGHT }
+                else if curr.right.is_none() { Direction::LEFT }
+                else if random() { Direction::LEFT }
+                else { Direction::RIGHT };
+            // End-bound of the current node.
+            let curr_end = &curr.key.1;
+
+            // LEFT and RIGHT paths are somewhat repetitive, but this way
+            // was the only way to satisfy the borrowchecker...
+            match direction {
+                Direction::LEFT => {
+                    // If we go left and the right path is `None`,
+                    // then the right path has no impact towards
+                    // the value stored by the current node.
+                    // Otherwise, the current node's value might change
+                    // to the other branch's max value once we remove the
+                    // leaf, so let's keep track of that.
+                    let max_other = if curr.right.is_none() {
+                        curr_end
+                    } else {
+                        let other_value = &curr.right.as_ref().unwrap().value;
+                        match cmp_endbound(curr_end, other_value) {
+                            Greater | Equal => curr_end,
+                            Less => other_value,
+                        }
+                    };
+
+                    // Check if the next node is a leaf. If it is, then we want to
+                    // stop traversing, and remove the leaf.
+                    let next = curr.left.as_ref().unwrap();
+                    if next.is_leaf() {
+                        curr.value = max_other.clone();
+                        break (mem::replace(&mut curr.left, None).unwrap(), max_other);
+                    }
+
+                    // If the next node is *not* a leaf, then we can update the visited path
+                    // with the current values, and move on to the next node.
+                    path.push((&mut curr.value, max_other));
+                    curr = curr.left.as_mut().unwrap();
+                }
+                Direction::RIGHT => {
+                    let max_other = if curr.left.is_none() {
+                        curr_end
+                    } else {
+                        let other_value = &curr.left.as_ref().unwrap().value;
+                        match cmp_endbound(curr_end, other_value) {
+                            Greater | Equal => curr_end,
+                            Less => other_value,
+                        }
+                    };
+
+                    let next = curr.right.as_ref().unwrap();
+                    if next.is_leaf() {
+                        curr.value = max_other.clone();
+                        break (mem::replace(&mut curr.right, None).unwrap(), max_other);
+                    }
+
+                    path.push((&mut curr.value, max_other));
+                    curr = curr.right.as_mut().unwrap();
+                }
+            };
+        };
+
+        // We have removed the leaf. Now, we bubble-up the visited path.
+        // If the removed node's value impacted its ancestors, then we update
+        // the ancestors' value so that they store the new max value in their
+        // respective subtree.
+        while let Some((value, max_other)) = path.pop() {
+            if cmp_endbound(value, max_other) == Equal {
+                break;
+            }
+
+            match cmp_endbound(value, new_max) {
+                Equal => break,
+                Greater => *value = new_max.clone(),
+                Less => unreachable!("Can't have a new max that is bigger"),
+            };
+        }
+
+        Some(deleted.key.clone())
+    }
 }
 
 impl<'a, Q> Iterator for IntervalTreeIter<'a, Q>
@@ -477,7 +627,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct Node<Q: Ord + Clone> {
     key: Range<Q>,
     value: Bound<Q>, // Max end-point.
@@ -531,6 +681,10 @@ where
             left: None,
             right: None,
         }
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        self.left.is_none() && self.right.is_none()
     }
 
     pub fn maybe_update_value(&mut self, inserted_max: &Bound<Q>) {
@@ -594,21 +748,30 @@ where
         }
     };
 
-    // Both left-bounds are equal, we have to compare the right-bounds as a tie-breaker.
-    // Note that we have inversed the 2nd value in the tuple, as the Included/Excluded rules
-    // are flipped for the upper bound.
-    let r1_max = match &r1.1 {
+    // Both left-bounds are equal, we have to 
+    // compare the right-bounds as a tie-breaker.
+    cmp_endbound(&r1.1, &r2.1)
+}
+
+fn cmp_endbound<Q>(e1: &Bound<Q>, e2: &Bound<Q>) -> Ordering
+where
+    Q: Ord,
+{
+    // Based on the encoding idea used in `cmp`.
+    // Note that we have inversed the 2nd value in the tuple,
+    // as the Included/Excluded rules are flipped for the upper bound.
+    let e1 = match e1 {
         Included(x) => Some((x, 2)),
         Excluded(x) => Some((x, 1)),
         Unbounded => None,
     };
-    let r2_max = match &r2.1 {
+    let e2 = match e2 {
         Included(x) => Some((x, 2)),
         Excluded(x) => Some((x, 1)),
         Unbounded => None,
     };
 
-    match (r1_max, r2_max) {
+    match (e1, e2) {
         (None, None) => Equal,
         (None, Some(_)) => Greater,
         (Some(_), None) => Less,
@@ -975,5 +1138,104 @@ mod tests {
         }
 
         assert_eq!(tree.iter().count(), inorder.len());
+    }
+
+    #[test]
+    fn remove_random_leaf_empty_tree_works_as_expected() {
+        let mut tree : IntervalTree<i32> = IntervalTree::default();
+
+        assert_eq!(tree.remove_random_leaf(), None);
+    }
+
+    #[test]
+    fn remove_random_leaf_one_node_tree_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(10), Excluded(20));
+        tree.insert(key1.clone());
+
+        let deleted = tree.remove_random_leaf();
+        assert!(deleted.is_some());
+        assert_eq!(deleted.unwrap(), key1);
+
+        assert!(tree.remove_random_leaf().is_none());
+    }
+
+    #[test]
+    fn remove_random_leaf_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        let key1 = (Included(16), Unbounded);
+        let key2 = (Included(8), Excluded(9));
+        let key3 = (Included(5), Excluded(8));
+        let key4 = (Excluded(15), Included(23));
+        let key5 = (Included(0), Included(3));
+        let key6 = (Included(13), Excluded(26));
+
+        tree.insert(key1.clone());
+        tree.insert(key2.clone());
+        tree.insert(key3.clone());
+        tree.insert(key4.clone());
+        tree.insert(key5.clone());
+        tree.insert(key6.clone());
+
+        let mut tree_deleted_key5 = IntervalTree::default();
+
+        let key1_deleted5 = (Included(16), Unbounded);
+        let key2_deleted5 = (Included(8), Excluded(9));
+        let key3_deleted5 = (Included(5), Excluded(8));
+        let key4_deleted5 = (Excluded(15), Included(23));
+        let key6_deleted5 = (Included(13), Excluded(26));
+
+        tree_deleted_key5.insert(key1_deleted5.clone());
+        tree_deleted_key5.insert(key2_deleted5.clone());
+        tree_deleted_key5.insert(key3_deleted5.clone());
+        tree_deleted_key5.insert(key4_deleted5.clone());
+        tree_deleted_key5.insert(key6_deleted5.clone());
+
+        let mut tree_deleted_key6 = IntervalTree::default();
+
+        let key1_deleted6 = (Included(16), Unbounded);
+        let key2_deleted6 = (Included(8), Excluded(9));
+        let key3_deleted6 = (Included(5), Excluded(8));
+        let key4_deleted6 = (Excluded(15), Included(23));
+        let key5_deleted6 = (Included(0), Included(3));
+
+        tree_deleted_key6.insert(key1_deleted6.clone());
+        tree_deleted_key6.insert(key2_deleted6.clone());
+        tree_deleted_key6.insert(key3_deleted6.clone());
+        tree_deleted_key6.insert(key4_deleted6.clone());
+        tree_deleted_key6.insert(key5_deleted6.clone());
+
+
+        use std::collections::HashSet;
+        let mut all_deleted = HashSet::new();
+        let num_of_leaves = 2; // Key5 & Key6
+
+        // This loop makes sure that the deletion is random.
+        // We delete and reinsert leaves until we have deleted
+        // all possible leaves in the tree.
+        while all_deleted.len() < num_of_leaves {
+            let deleted = tree.remove_random_leaf();
+            assert!(deleted.is_some());
+            let deleted = deleted.unwrap();
+
+            // Check that the new tree has the right shape,
+            // and that the value stored in the various nodes are
+            // correctly updated following the removal of a leaf.
+            if deleted == key5 {
+                assert_eq!(tree, tree_deleted_key5);
+            } else if deleted == key6 {
+                assert_eq!(tree, tree_deleted_key6);
+            } else {
+                unreachable!();
+            }
+
+            // Keep track of deleted nodes, and reinsert the 
+            // deleted node in the tree so we come back to
+            // the initial state every iteration.
+            all_deleted.insert(deleted.clone());
+            tree.insert(deleted);
+        }
     }
 }
