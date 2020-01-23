@@ -12,6 +12,7 @@ use std::cmp::Ordering::*;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::fmt;
+use std::mem;
 
 type Range<Q> = (Bound<Q>, Bound<Q>);
 
@@ -19,6 +20,7 @@ type Range<Q> = (Bound<Q>, Bound<Q>);
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
+    size: usize,
 }
 
 /// An inorder interator through the interval tree.
@@ -44,7 +46,7 @@ where
     Q: Ord + Clone,
 {
     fn default() -> IntervalTree<Q> {
-        IntervalTree { root: None }
+        IntervalTree { root: None, size: 0 }
     }
 }
 
@@ -97,6 +99,8 @@ where
     /// str_tree.insert((Included("Noria"), Unbounded));
     /// ```
     pub fn insert(&mut self, range: Range<Q>) {
+        self.size += 1;
+
         // If the tree is empty, put new node at the root.
         if self.root.is_none() {
             self.root = Some(Box::new(Node::new(range)));
@@ -484,13 +488,14 @@ where
     /// assert!(deleted.is_none());
     /// ```
     pub fn remove_random_leaf(&mut self) -> Option<Range<Q>> {
-        use std::mem;
         use rand::random;
 
         // If interval tree is empty, just return None.
         if self.root.is_none() {
             return None;
         }
+
+        self.size -= 1;
 
         let mut curr = self.root.as_mut().unwrap();
 
@@ -602,6 +607,45 @@ where
         }
 
         Some(deleted.key.clone())
+    }
+
+    /// Returns the number of ranges stored in the interval tree.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    /// 
+    /// assert_eq!(tree.len(), 0);
+    ///
+    /// tree.insert((Included(5), Excluded(9)));
+    /// tree.insert((Unbounded, Included(10)));
+    /// 
+    /// assert_eq!(tree.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    /// Returns `true` if the map contains no element.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    /// 
+    /// assert!(tree.is_empty());
+    ///
+    /// tree.insert((Included(5), Excluded(9)));
+    /// 
+    /// assert!(!tree.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -1237,5 +1281,36 @@ mod tests {
             all_deleted.insert(deleted.clone());
             tree.insert(deleted);
         }
+    }
+
+    #[test]
+    fn len_and_is_empty_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        assert_eq!(tree.len(), 0);
+        assert!(tree.is_empty());
+
+        let key1 = (Included(16), Unbounded);
+        let key2 = (Included(8), Excluded(9));
+
+        tree.insert(key1);
+
+        assert_eq!(tree.len(), 1);
+        assert!(!tree.is_empty());
+
+        tree.insert(key2);
+
+        assert_eq!(tree.len(), 2);
+        assert!(!tree.is_empty());
+
+        tree.remove_random_leaf();
+
+        assert_eq!(tree.len(), 1);
+        assert!(!tree.is_empty());
+
+        tree.remove_random_leaf();
+
+        assert_eq!(tree.len(), 0);
+        assert!(tree.is_empty());
     }
 }
