@@ -647,6 +647,25 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Clear the interval tree, removing all values stored.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    /// 
+    /// tree.insert((Included(5), Unbounded));
+    /// tree.clear();
+    /// 
+    /// assert!(tree.is_empty());
+    /// ```
+    pub fn clear(&mut self) {
+        mem::replace(&mut self.root, None);
+        self.size = 0;
+    }
 }
 
 impl<'a, Q> Iterator for IntervalTreeIter<'a, Q>
@@ -1312,5 +1331,25 @@ mod tests {
 
         assert_eq!(tree.len(), 0);
         assert!(tree.is_empty());
+    }
+
+    #[test]
+    fn clear_works_as_expected() {
+        let mut tree = IntervalTree::default();
+
+        tree.clear();
+
+        let key1 = (Included(16), Unbounded);
+        let key2 = (Included(8), Excluded(9));
+
+        tree.insert(key1.clone());
+        tree.insert(key2.clone());
+
+        assert_eq!(tree.len(), 2);
+
+        tree.clear();
+
+        assert!(tree.is_empty());
+        assert_eq!(tree.root, None);
     }
 }
