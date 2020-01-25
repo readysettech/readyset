@@ -39,8 +39,17 @@ use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
 // https://github.com/rust-lang/rust/issues/64445
-type FirstByte =
-    Pin<Box<dyn Future<Output = Result<(tokio::net::TcpStream, u8), tokio::io::Error>> + Send>>;
+type FirstByte = impl Future<Output = Result<(tokio::net::TcpStream, u8), tokio::io::Error>> + Send;
+
+/// Read the first byte of a stream.
+fn read_first_byte(mut stream: tokio::net::TcpStream) -> FirstByte {
+    async move {
+        let mut byte = [0; 1];
+        let n = stream.read_exact(&mut byte[..]).await?;
+        assert_eq!(n, 1);
+        Ok((stream, byte[0]))
+    }
+}
 
 #[pin_project]
 pub(super) struct Replica {
@@ -318,16 +327,11 @@ impl Replica {
         if let Poll::Ready(true) = this.valve.poll_closed(cx) {
             return Ok(false);
         } else {
-            while let Poll::Ready((mut stream, _)) = this.incoming.as_mut().poll_accept(cx)? {
+            while let Poll::Ready((stream, _)) = this.incoming.as_mut().poll_accept(cx)? {
                 // we know that any new connection to a domain will first send a one-byte
                 // token to indicate whether the connection is from a base or not.
                 debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-                this.first_byte.push(Box::pin(async move {
-                    let mut byte = [0; 1];
-                    let n = stream.read_exact(&mut byte[..]).await?;
-                    assert_eq!(n, 1);
-                    Ok((stream, byte[0]))
-                }));
+                this.first_byte.push(read_first_byte(stream));
             }
         }
 
