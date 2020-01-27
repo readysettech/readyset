@@ -19,7 +19,7 @@ pub(crate) fn new_partial<F>(
     trigger: F,
 ) -> (SingleReadHandle, WriteHandle)
 where
-    F: Fn(&[DataType]) -> bool + 'static + Send + Sync,
+    F: Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + 'static + Send + Sync,
 {
     new_inner(cols, key, Some(Arc::new(trigger)))
 }
@@ -27,7 +27,7 @@ where
 fn new_inner(
     cols: usize,
     key: &[usize],
-    trigger: Option<Arc<dyn Fn(&[DataType]) -> bool + Send + Sync>>,
+    trigger: Option<Arc<dyn Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + Send + Sync>>,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -295,20 +295,25 @@ impl SizeOf for WriteHandle {
 #[derive(Clone)]
 pub struct SingleReadHandle {
     handle: multir::Handle,
-    trigger: Option<Arc<dyn Fn(&[DataType]) -> bool + Send + Sync>>,
+    trigger: Option<Arc<dyn Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + Send + Sync>>,
     key: Vec<usize>,
 }
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger(&self, key: &[DataType]) -> bool {
+    pub fn trigger<'a, I>(&self, keys: I) -> bool
+    where
+        I: Iterator<Item = &'a [DataType]>,
+    {
         assert!(
             self.trigger.is_some(),
             "tried to trigger a replay for a fully materialized view"
         );
 
+        let mut it = keys;
+
         // trigger a replay to populate
-        (*self.trigger.as_ref().unwrap())(key)
+        (*self.trigger.as_ref().unwrap())(&mut it)
     }
 
     /// Find all entries that matched the given conditions.
