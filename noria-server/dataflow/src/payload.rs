@@ -194,18 +194,18 @@ pub enum Packet {
         trigger: TriggerEndpoint,
     },
 
-    /// Ask domain (nicely) to replay a particular key.
+    /// Ask domain (nicely) to replay a particular set of keys.
     RequestPartialReplay {
         tag: Tag,
-        key: Vec<DataType>,
+        keys: Vec<Vec<DataType>>,
         unishard: bool,
     },
 
-    /// Ask domain (nicely) to replay a particular key into a Reader.
+    /// Ask domain (nicely) to replay a particular set of keys into a Reader.
     RequestReaderReplay {
         node: LocalNodeIndex,
         cols: Vec<usize>,
-        key: Vec<DataType>,
+        keys: Vec<Vec<DataType>>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
@@ -377,8 +377,8 @@ impl fmt::Debug for Packet {
         match *self {
             Packet::Input { .. } => write!(f, "Packet::Input"),
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::RequestReaderReplay { ref key, .. } => {
-                write!(f, "Packet::RequestReaderReplay({:?})", key)
+            Packet::RequestReaderReplay { ref keys, .. } => {
+                write!(f, "Packet::RequestReaderReplay({:?})", keys)
             }
             Packet::RequestPartialReplay { ref tag, .. } => {
                 write!(f, "Packet::RequestPartialReplay({:?})", tag)

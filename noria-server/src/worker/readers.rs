@@ -170,11 +170,7 @@ fn handle_message(
                 }
 
                 // trigger backfills for all the keys we missed on for later
-                for key in &keys {
-                    if !key.is_empty() {
-                        reader.trigger(key);
-                    }
-                }
+                reader.trigger(keys.iter().filter(|key| !key.is_empty()).map(Vec::as_slice));
 
                 Err((keys, ret))
             });
@@ -258,36 +254,50 @@ impl Future for BlockingRead {
 
                 let mut triggered = false;
                 let mut missing = false;
+                let mut ended = false;
                 let now = time::Instant::now();
-                for (i, key) in this.keys.iter_mut().enumerate() {
+                let read = &mut this.read;
+                let next_trigger = *this.next_trigger;
+                let still_missing = this.keys.iter_mut().enumerate().filter_map(|(i, key)| {
                     if key.is_empty() {
                         // already have this value
+                        None
                     } else {
                         // note that this *does* mean we'll trigger replay multiple times for things
                         // that miss and aren't replayed in time, which is a little sad. but at the
                         // same time, that replay trigger will just be ignored by the target domain.
                         match reader.try_find_and(key, dup).map(|r| r.0) {
                             Ok(Some(rs)) => {
-                                this.read[i] = rs;
+                                read[i] = rs;
                                 key.clear();
+                                None
                             }
                             Err(()) => {
                                 // map has been deleted, so server is shutting down
-                                return Err(());
+                                ended = true;
+                                None
                             }
                             Ok(None) => {
-                                if now > *this.next_trigger {
-                                    // maybe the key was filled but then evicted, and we missed it?
-                                    if !reader.trigger(key) {
-                                        // server is shutting down and won't do the backfill
-                                        return Err(());
-                                    }
-                                    triggered = true;
-                                }
                                 missing = true;
+                                if now > next_trigger {
+                                    // maybe the key was filled but then evicted, and we missed it?
+                                    triggered = true;
+                                    Some(&key[..])
+                                } else {
+                                    None
+                                }
                             }
                         }
                     }
+                });
+
+                if !reader.trigger(still_missing) {
+                    // server is shutting down and won't do the backfill
+                    return Err(());
+                }
+
+                if ended {
+                    return Err(());
                 }
 
                 if triggered {

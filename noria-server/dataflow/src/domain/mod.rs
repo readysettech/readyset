@@ -236,7 +236,7 @@ pub struct Domain {
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
-    replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
+    replay_request_queue: VecDeque<(Tag, Vec<Vec<DataType>>)>,
 
     shutdown_valve: Valve,
     readers: Readers,
@@ -265,7 +265,7 @@ pub struct Domain {
 impl Domain {
     fn find_tags_and_replay(
         &mut self,
-        miss_key: Vec<DataType>,
+        miss_keys: Vec<Vec<DataType>>,
         miss_columns: &[usize],
         miss_in: LocalNodeIndex,
     ) {
@@ -281,7 +281,7 @@ impl Domain {
         for &tag in &tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            let key = miss_key.clone(); // :(
+            let keys = miss_keys.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 // *in theory* we could just call self.seed_replay, and everything would be good.
                 // however, then we start recursing, which could get us into sad situations where
@@ -305,7 +305,7 @@ impl Domain {
                 self.delayed_for_self
                     .push_back(Box::new(Packet::RequestPartialReplay {
                         tag,
-                        key,
+                        keys,
                         unishard: true, // local replays are necessarily single-shard
                     }));
                 continue;
@@ -314,13 +314,13 @@ impl Domain {
             // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
-            self.request_partial_replay(tag, key);
+            self.request_partial_replay(tag, keys);
         }
 
         if tags.is_empty() {
             unreachable!(format!(
                 "no tag found to fill missing value {:?} in {}.{:?}",
-                miss_key, miss_in, miss_columns
+                miss_keys, miss_in, miss_columns
             ));
         }
     }
@@ -372,10 +372,10 @@ impl Domain {
             return;
         }
 
-        self.find_tags_and_replay(miss_key, miss_columns, miss_in);
+        self.find_tags_and_replay(vec![miss_key], miss_columns, miss_in);
     }
 
-    fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
+    fn send_partial_replay_request(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         if let TriggerEndpoint::End {
             source,
@@ -399,7 +399,7 @@ impl Domain {
                 self.concurrent_replays += 1;
                 trace!(self.log, "sending shuffled shard replay request";
                 "tag" => ?tag,
-                "key" => ?key,
+                "keys" => ?keys,
                 "buffered" => self.replay_request_queue.len(),
                 "concurrent" => self.concurrent_replays,
                 );
@@ -408,8 +408,8 @@ impl Domain {
                     if trigger
                         .send(Box::new(Packet::RequestPartialReplay {
                             tag,
-                            unishard: false,  // ask_all is true, so replay is sharded
-                            key: key.clone(), // sad to clone here
+                            unishard: false, // ask_all is true, so replay is sharded
+                            keys: keys.clone(), // sad to clone here
                         }))
                         .is_err()
                     {
@@ -419,47 +419,63 @@ impl Domain {
                 return;
             }
 
-            let shard = if options.len() == 1 {
-                0
+            self.concurrent_replays += 1;
+            trace!(self.log, "sending replay request";
+                "tag" => ?tag,
+                "keys" => ?keys,
+                "buffered" => self.replay_request_queue.len(),
+                "concurrent" => self.concurrent_replays,
+            );
+
+            if options.len() == 1 {
+                if options[0]
+                    .send(Box::new(Packet::RequestPartialReplay {
+                        tag,
+                        keys,
+                        unishard: true, // only one option, so only one path
+                    }))
+                    .is_err()
+                {
+                    // we're shutting down -- it's fine.
+                }
             } else if let Some(key_shard_i) = ask_shard_by_key_i {
-                crate::shard_by(&key[key_shard_i], options.len())
+                let mut shards = HashMap::new();
+                for key in keys {
+                    let shard = crate::shard_by(&key[key_shard_i], options.len());
+                    shards.entry(shard).or_insert_with(Vec::new).push(key);
+                }
+                for (shard, keys) in shards {
+                    if options[shard]
+                        .send(Box::new(Packet::RequestPartialReplay {
+                            tag,
+                            keys,
+                            unishard: true, // !ask_all, so only one path
+                        }))
+                        .is_err()
+                    {
+                        // we're shutting down -- it's fine.
+                    }
+                }
             } else {
                 // would have hit the if further up
                 unreachable!();
             };
-            self.concurrent_replays += 1;
-            trace!(self.log, "sending replay request";
-            "tag" => ?tag,
-            "key" => ?key,
-            "buffered" => self.replay_request_queue.len(),
-            "concurrent" => self.concurrent_replays,
-            );
-            if options[shard]
-                .send(Box::new(Packet::RequestPartialReplay {
-                    tag,
-                    key,
-                    unishard: true, // only one option / !ask_all, so only one path
-                }))
-                .is_err()
-            {
-                // we're shutting down -- it's fine.
-            }
         } else {
             unreachable!("asked to replay along non-existing path")
         }
     }
 
-    fn request_partial_replay(&mut self, tag: Tag, key: Vec<DataType>) {
+    fn request_partial_replay(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
         if self.concurrent_replays < self.max_concurrent_replays {
             assert_eq!(self.replay_request_queue.len(), 0);
-            self.send_partial_replay_request(tag, key);
+            self.send_partial_replay_request(tag, keys);
         } else {
             trace!(self.log, "buffering replay request";
-            "tag" => ?tag,
-            "key" => ?key,
-            "buffered" => self.replay_request_queue.len(),
+                "tag" => ?tag,
+                "keys" => ?keys,
+                "buffered" => self.replay_request_queue.len(),
             );
-            self.replay_request_queue.push_back((tag, key));
+            self.replay_request_queue.push_back((tag, keys));
         }
     }
 
@@ -502,18 +518,26 @@ impl Domain {
                 "ongoing" => self.concurrent_replays,
                 );
                 debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+                let mut per_tag = HashMap::new();
                 while self.concurrent_replays < self.max_concurrent_replays {
-                    if let Some((tag, key)) = self.replay_request_queue.pop_front() {
-                        trace!(self.log, "releasing replay request";
+                    if let Some((tag, mut keys)) = self.replay_request_queue.pop_front() {
+                        per_tag
+                            .entry(tag)
+                            .or_insert_with(Vec::new)
+                            .append(&mut keys);
+                    } else {
+                        break;
+                    }
+                }
+
+                for (tag, keys) in per_tag {
+                    trace!(self.log, "releasing replay request";
                         "tag" => ?tag,
-                        "key" => ?key,
+                        "keys" => ?keys,
                         "left" => self.replay_request_queue.len(),
                         "ongoing" => self.concurrent_replays,
-                        );
-                        self.send_partial_replay_request(tag, key);
-                    } else {
-                        return;
-                    }
+                    );
+                    self.send_partial_replay_request(tag, keys);
                 }
             }
             TriggerEndpoint::Local(..) => {
@@ -881,9 +905,9 @@ impl Domain {
                                         tokio::spawn(
                                             self.shutdown_valve
                                                 .wrap(rx)
-                                                .map(move |miss| {
+                                                .map(move |misses| {
                                                     Box::new(Packet::RequestReaderReplay {
-                                                        key: miss,
+                                                        keys: misses,
                                                         cols: key.clone(),
                                                         node,
                                                     })
@@ -903,18 +927,38 @@ impl Domain {
                                         tx
                                     })
                                     .collect::<Vec<_>>();
-                                let (r_part, w_part) =
-                                    backlog::new_partial(cols, &k[..], move |miss| {
+                                let (r_part, w_part) = backlog::new_partial(
+                                    cols,
+                                    &k[..],
+                                    move |misses: &mut dyn Iterator<Item = &[DataType]>| {
                                         let n = txs.len();
-                                        let tx = if n == 1 {
-                                            &txs[0]
+                                        if n == 1 {
+                                            use std::iter::FromIterator;
+                                            let misses = Vec::from_iter(misses.map(Vec::from));
+                                            if misses.is_empty() {
+                                                return true;
+                                            }
+                                            txs[0].send(misses).is_ok()
                                         } else {
                                             // TODO: compound reader
-                                            assert_eq!(miss.len(), 1);
-                                            &txs[crate::shard_by(&miss[0], n)]
-                                        };
-                                        tx.send(Vec::from(miss)).is_ok()
-                                    });
+                                            let mut per_shard = HashMap::new();
+                                            for miss in misses {
+                                                assert_eq!(miss.len(), 1);
+                                                let shard = crate::shard_by(&miss[0], n);
+                                                per_shard
+                                                    .entry(shard)
+                                                    .or_insert_with(Vec::new)
+                                                    .push(Vec::from(miss));
+                                            }
+                                            if per_shard.is_empty() {
+                                                return true;
+                                            }
+                                            per_shard
+                                                .into_iter()
+                                                .all(|(shard, keys)| txs[shard].send(keys).is_ok())
+                                        }
+                                    },
+                                );
 
                                 let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -1025,12 +1069,16 @@ impl Domain {
                             },
                         );
                     }
-                    Packet::RequestReaderReplay { key, cols, node } => {
+                    Packet::RequestReaderReplay {
+                        mut keys,
+                        cols,
+                        node,
+                    } => {
                         self.total_replay_time.start();
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
-                        let still_miss = self.nodes[node]
+                        self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
                                 let w = r
@@ -1038,35 +1086,51 @@ impl Domain {
                                     .expect("reader replay requested for non-materialized reader");
                                 // ensure that all writes have been applied
                                 w.swap();
-                                w.with_key(&key[..])
-                                    .try_find_and(|_| ())
-                                    .expect("reader replay requested for non-ready reader")
-                                    .0
-                                    .is_none()
                             })
                             .expect("reader replay requested for non-reader node");
 
+                        self.nodes[node]
+                            .borrow_mut()
+                            .with_reader_mut(|r| {
+                                let w = r
+                                    .writer_mut()
+                                    .expect("reader replay requested for non-materialized reader");
+
+                                keys.retain(|key| {
+                                    w.with_key(&key[..])
+                                        .try_find_and(|_| ())
+                                        .expect("reader replay requested for non-ready reader")
+                                        .0
+                                        .is_none()
+                                });
+                            })
+                            .unwrap();
+
                         // ensure that we haven't already requested a replay of this key
-                        if still_miss
-                            && self
-                                .reader_triggered
+                        keys.retain(|key| {
+                            self.reader_triggered
                                 .entry(node)
                                 .or_default()
                                 .insert(key.clone())
-                        {
-                            self.find_tags_and_replay(key, &cols[..], node);
-                        }
+                        });
+                        self.find_tags_and_replay(keys, &cols[..], node);
                         self.total_replay_time.stop();
                     }
-                    Packet::RequestPartialReplay { tag, key, unishard } => {
+                    Packet::RequestPartialReplay {
+                        tag,
+                        keys,
+                        unishard,
+                    } => {
                         trace!(
                             self.log,
                            "got replay request";
                            "tag" => tag.id(),
-                           "key" => format!("{:?}", key)
+                           "keys" => format!("{:?}", keys)
                         );
                         self.total_replay_time.start();
-                        self.seed_replay(tag, &key[..], unishard, executor);
+                        for key in keys {
+                            self.seed_replay(tag, Cow::Owned(key), unishard, executor);
+                        }
                         self.total_replay_time.stop();
                     }
                     Packet::StartReplay { tag, from } => {
@@ -1551,7 +1615,7 @@ impl Domain {
     fn seed_replay(
         &mut self,
         tag: Tag,
-        key: &[DataType],
+        key: Cow<[DataType]>,
         single_shard: bool,
         ex: &mut dyn Executor,
     ) {
@@ -1567,7 +1631,7 @@ impl Domain {
             // maybe delay this seed request so that we can batch respond later?
             // TODO
             use std::collections::hash_map::Entry;
-            let key = Vec::from(key);
+            let key = key.into_owned();
             match self.buffered_replay_requests.entry(tag) {
                 Entry::Occupied(o) => {
                     assert!(!o.get().1.is_empty());
@@ -1604,7 +1668,7 @@ impl Domain {
                     .lookup(&cols[..], &KeyType::from(&key[..]));
 
                 let mut k = HashSet::new();
-                k.insert(Vec::from(key));
+                k.insert(key.clone().into_owned());
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let data = Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
@@ -1630,18 +1694,18 @@ impl Domain {
         if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(
-                source,
-                &cols[..],
-                Vec::from(key),
-                Vec::from(key),
-                single_shard,
-                tag,
-            );
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
                    "key" => ?key);
+            self.on_replay_miss(
+                source,
+                &cols[..],
+                key.clone().into_owned(),
+                key.into_owned(),
+                single_shard,
+                tag,
+            );
         } else {
             trace!(self.log,
                    "satisfied replay request";
@@ -2357,7 +2421,7 @@ impl Domain {
                             .push_back(Box::new(Packet::RequestPartialReplay {
                                 tag,
                                 unishard,
-                                key: replay_key,
+                                keys: vec![replay_key],
                             }));
                     }
                 }
