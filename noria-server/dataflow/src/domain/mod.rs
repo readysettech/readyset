@@ -1430,73 +1430,80 @@ impl Domain {
             }
         }
 
-        if !self.buffered_replay_requests.is_empty() {
-            self.total_replay_time.start();
-            let now = time::Instant::now();
-            let to = self.replay_batch_timeout;
-            let elapsed_replays: Vec<_> = {
-                self.buffered_replay_requests
-                    .iter_mut()
-                    .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
-                        if !keys.is_empty() && now.duration_since(first) > to {
-                            // will be removed by retain below
-                            Some((tag, mem::replace(keys, HashSet::new()), single_shard))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            };
-            self.buffered_replay_requests
-                .retain(|_, (_, ref keys, _)| !keys.is_empty());
-            for (tag, keys, single_shard) in elapsed_replays {
-                self.seed_all(tag, keys, single_shard, executor);
-            }
-            self.total_replay_time.stop();
-        }
-
-        let mut swap = HashSet::new();
-        while let Some(tp) = self.timed_purges.front() {
-            let now = time::Instant::now();
-            if tp.time <= now {
-                let tp = self.timed_purges.pop_front().unwrap();
-                let mut node = self.nodes[tp.view].borrow_mut();
-                trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
-                node.with_reader_mut(|r| {
-                    if let Some(wh) = r.writer_mut() {
-                        for key in tp.keys {
-                            wh.mut_with_key(&key[..]).mark_hole();
-                        }
-                        swap.insert(tp.view);
-                    }
-                })
-                .unwrap();
-            } else {
-                break;
-            }
-        }
-        for n in swap {
-            self.nodes[n]
-                .borrow_mut()
-                .with_reader_mut(|r| {
-                    if let Some(wh) = r.writer_mut() {
-                        wh.swap();
-                    }
-                })
-                .unwrap();
-        }
-
         if top {
-            while let Some(m) = self.delayed_for_self.pop_front() {
-                trace!(self.log, "handling local transmission");
-                // we really want this to just use tail recursion.
-                // but alas, the compiler doesn't seem to want to do that.
-                // instead, we ensure that only the topmost call to handle() walks delayed_for_self
+            loop {
+                while let Some(m) = self.delayed_for_self.pop_front() {
+                    trace!(self.log, "handling local transmission");
+                    // we really want this to just use tail recursion.
+                    // but alas, the compiler doesn't seem to want to do that.
+                    // instead, we ensure that only the topmost call to handle() walks delayed_for_self
 
-                // WO for https://github.com/rust-lang/rfcs/issues/1403
-                self.handle(m, executor, false);
+                    // WO for https://github.com/rust-lang/rfcs/issues/1403
+                    self.handle(m, executor, false);
+                }
+
+                if !self.buffered_replay_requests.is_empty() {
+                    self.total_replay_time.start();
+                    let now = time::Instant::now();
+                    let to = self.replay_batch_timeout;
+                    let elapsed_replays: Vec<_> = {
+                        self.buffered_replay_requests
+                            .iter_mut()
+                            .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
+                                if !keys.is_empty() && now.duration_since(first) > to {
+                                    // will be removed by retain below
+                                    Some((tag, mem::replace(keys, HashSet::new()), single_shard))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
+                    };
+                    self.buffered_replay_requests
+                        .retain(|_, (_, ref keys, _)| !keys.is_empty());
+                    for (tag, keys, single_shard) in elapsed_replays {
+                        self.seed_all(tag, keys, single_shard, executor);
+                    }
+                    self.total_replay_time.stop();
+                }
+
+                let mut swap = HashSet::new();
+                while let Some(tp) = self.timed_purges.front() {
+                    let now = time::Instant::now();
+                    if tp.time <= now {
+                        let tp = self.timed_purges.pop_front().unwrap();
+                        let mut node = self.nodes[tp.view].borrow_mut();
+                        trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                        node.with_reader_mut(|r| {
+                            if let Some(wh) = r.writer_mut() {
+                                for key in tp.keys {
+                                    wh.mut_with_key(&key[..]).mark_hole();
+                                }
+                                swap.insert(tp.view);
+                            }
+                        })
+                        .unwrap();
+                    } else {
+                        break;
+                    }
+                }
+                for n in swap {
+                    self.nodes[n]
+                        .borrow_mut()
+                        .with_reader_mut(|r| {
+                            if let Some(wh) = r.writer_mut() {
+                                wh.swap();
+                            }
+                        })
+                        .unwrap();
+                }
+
+                if self.delayed_for_self.is_empty() {
+                    break;
+                }
             }
         }
+
         if !self.wait_time.is_running() {
             self.wait_time.start();
         }
