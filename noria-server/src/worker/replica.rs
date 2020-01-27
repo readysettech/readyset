@@ -1,5 +1,5 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
-const FORCE_INPUT_YIELD_EVERY: usize = 64;
+const FORCE_INPUT_YIELD_EVERY: usize = 32;
 
 use super::ChannelCoordinator;
 use crate::coordination::CoordinationPayload;
@@ -557,7 +557,7 @@ impl Future for Replica {
             let mut local_done = false;
             let mut remote_done = false;
             let mut check_local = true;
-            let readiness = 'ready: loop {
+            'ready: loop {
                 let mut this = self.as_mut().project();
                 let d = this.domain;
                 let out = this.out;
@@ -585,7 +585,7 @@ impl Future for Replica {
                             Poll::Ready(Ok(_)) => {}
                             Poll::Pending => {
                                 // NOTE: the packet is still left in $retry, so we'll try again
-                                break 'ready Poll::Pending;
+                                break 'ready;
                             }
                             Poll::Ready(Err(e)) => {
                                 unreachable!("trying to block without tokio runtime: {:?}", e)
@@ -594,14 +594,13 @@ impl Future for Replica {
                     }};
                 }
 
-                let mut interrupted = false;
                 if let Some(p) = this.retry.take() {
                     // first try the thing we failed to process last time again
                     process!(*this.retry, out, p, |p| d
                         .on_event(out, PollEvent::Process(p),));
                 }
 
-                for i in 0..FORCE_INPUT_YIELD_EVERY {
+                for _ in 0..FORCE_INPUT_YIELD_EVERY {
                     if !local_done && (check_local || remote_done) {
                         match this.locals.poll_recv(cx) {
                             Poll::Ready(Some(packet)) => {
@@ -653,16 +652,6 @@ impl Future for Replica {
 
                     // alternate between input sources
                     check_local = !check_local;
-
-                    // nothing more to do -- wait to be polled again
-                    if local_done && remote_done {
-                        break;
-                    }
-
-                    if i == FORCE_INPUT_YIELD_EVERY - 1 {
-                        // we could keep processing inputs, but make sure we send some ACKs too!
-                        interrupted = true;
-                    }
                 }
 
                 // send to downstream
@@ -674,12 +663,13 @@ impl Future for Replica {
                 // send acks
                 self.as_mut().try_acks(cx)?;
 
-                if interrupted {
-                    // resume reading from our non-depleted inputs
-                    continue;
+                if local_done && remote_done {
+                    // we're yielding voluntarily to not block the executor and must ensure we wake
+                    // up again
+                    cx.waker().wake_by_ref();
                 }
-                break Poll::Pending;
-            };
+                break;
+            }
 
             // check if we now need to set a timeout
             self.out.dirty = false;
@@ -723,7 +713,7 @@ impl Future for Replica {
                 break;
             }
 
-            break readiness;
+            break Poll::Pending;
         }
     }
 }
