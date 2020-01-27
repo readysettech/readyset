@@ -51,7 +51,7 @@ impl GithubNotifier {
             .execute::<serde_json::Value>();
 
         match result {
-            Ok((_, StatusCode::Created, Some(_))) => Ok(()),
+            Ok((_, StatusCode::CREATED, Some(_))) => Ok(()),
             Ok((_, status_code, Some(response))) => serde_json::from_value::<GithubError>(response)
                 .map_err(|err| {
                     format!("Failed to parse error response ({}): {}", status_code, err)
