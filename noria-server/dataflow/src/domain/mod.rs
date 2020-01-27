@@ -1113,7 +1113,9 @@ impl Domain {
                                 .or_default()
                                 .insert(key.clone())
                         });
-                        self.find_tags_and_replay(keys, &cols[..], node);
+                        if !keys.is_empty() {
+                            self.find_tags_and_replay(keys, &cols[..], node);
+                        }
                         self.total_replay_time.stop();
                     }
                     Packet::RequestPartialReplay {
