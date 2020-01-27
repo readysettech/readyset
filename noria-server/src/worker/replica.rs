@@ -1,5 +1,5 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
-const FORCE_INPUT_YIELD_EVERY: usize = 64;
+const FORCE_INPUT_YIELD_EVERY: usize = 32;
 
 use super::ChannelCoordinator;
 use crate::coordination::CoordinationPayload;
@@ -554,119 +554,106 @@ impl Future for Replica {
             let mut local_done = false;
             let mut remote_done = false;
             let mut check_local = true;
-            let readiness = loop {
-                let mut this = self.as_mut().project();
-                let d = this.domain;
-                let out = this.out;
+            let mut this = self.as_mut().project();
+            let d = this.domain;
+            let out = this.out;
 
-                macro_rules! process {
-                    ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
-                        $retry = Some($p);
-                        let retry = &mut $retry;
-                        if let ProcessResult::StopPolling = tokio::task::block_in_place(|| {
-                            let packet = retry.take().unwrap();
-                            if let Packet::Input {
-                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
-                                ..
-                            } = *packet
-                            {
-                                $outbox.saw_input(token, epoch);
-                            }
-                            $pp(packet)
-                        }) {
-                            // domain got a message to quit
+            macro_rules! process {
+                ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
+                    $retry = Some($p);
+                    let retry = &mut $retry;
+                    if let ProcessResult::StopPolling = tokio::task::block_in_place(|| {
+                        let packet = retry.take().unwrap();
+                        if let Packet::Input {
+                            src: Some(SourceChannelIdentifier { token, epoch, .. }),
+                            ..
+                        } = *packet
+                        {
+                            $outbox.saw_input(token, epoch);
+                        }
+                        $pp(packet)
+                    }) {
+                        // domain got a message to quit
+                        // TODO: should we finish up remaining work?
+                        return Poll::Ready(Ok(()));
+                    }
+                }};
+            }
+
+            if let Some(p) = this.retry.take() {
+                // first try the thing we failed to process last time again
+                process!(*this.retry, out, p, |p| d
+                    .on_event(out, PollEvent::Process(p),));
+            }
+
+            for _ in 0..FORCE_INPUT_YIELD_EVERY {
+                if !local_done && (check_local || remote_done) {
+                    match this.locals.poll_recv(cx) {
+                        Poll::Ready(Some(packet)) => {
+                            process!(*this.retry, out, packet, |p| d
+                                .on_event(out, PollEvent::Process(p),));
+                        }
+                        Poll::Ready(None) => {
+                            // local input stream finished
                             // TODO: should we finish up remaining work?
+                            warn!(this.log, "local input stream ended");
                             return Poll::Ready(Ok(()));
                         }
-                    }};
-                }
-
-                let mut interrupted = false;
-                if let Some(p) = this.retry.take() {
-                    // first try the thing we failed to process last time again
-                    process!(*this.retry, out, p, |p| d
-                        .on_event(out, PollEvent::Process(p),));
-                }
-
-                for i in 0..FORCE_INPUT_YIELD_EVERY {
-                    if !local_done && (check_local || remote_done) {
-                        match this.locals.poll_recv(cx) {
-                            Poll::Ready(Some(packet)) => {
-                                process!(*this.retry, out, packet, |p| d
-                                    .on_event(out, PollEvent::Process(p),));
-                            }
-                            Poll::Ready(None) => {
-                                // local input stream finished
-                                // TODO: should we finish up remaining work?
-                                warn!(this.log, "local input stream ended");
-                                return Poll::Ready(Ok(()));
-                            }
-                            Poll::Pending => {
-                                local_done = true;
-                            }
+                        Poll::Pending => {
+                            local_done = true;
                         }
                     }
+                }
 
-                    if !remote_done && (!check_local || local_done) {
-                        match this.inputs.as_mut().poll_next(cx) {
-                            Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
-                                process!(*this.retry, out, packet, |p| d
-                                    .on_event(out, PollEvent::Process(p),));
-                            }
-                            Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
-                                if out.try_retire(streami) {
-                                    f.remove(this.inputs.as_mut());
-                                } else {
-                                    // We still have responses to send, even though there are no
-                                    // more requests. Keep the stream around for now. We'll clean
-                                    // it up when the sends have finished.
-                                    f.keep();
-                                }
-                            }
-                            Poll::Ready(None) => {
-                                // we probably haven't booted yet
-                                remote_done = true;
-                            }
-                            Poll::Pending => {
-                                remote_done = true;
-                            }
-                            Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
-                                error!(this.log, "input stream failed: {:?}", e);
-                                remote_done = true;
-                                break;
+                if !remote_done && (!check_local || local_done) {
+                    match this.inputs.as_mut().poll_next(cx) {
+                        Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
+                            process!(*this.retry, out, packet, |p| d
+                                .on_event(out, PollEvent::Process(p),));
+                        }
+                        Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
+                            if out.try_retire(streami) {
+                                f.remove(this.inputs.as_mut());
+                            } else {
+                                // We still have responses to send, even though there are no
+                                // more requests. Keep the stream around for now. We'll clean
+                                // it up when the sends have finished.
+                                f.keep();
                             }
                         }
-                    }
-
-                    // alternate between input sources
-                    check_local = !check_local;
-
-                    // nothing more to do -- wait to be polled again
-                    if local_done && remote_done {
-                        break;
-                    }
-
-                    if i == FORCE_INPUT_YIELD_EVERY - 1 {
-                        // we could keep processing inputs, but make sure we send some ACKs too!
-                        interrupted = true;
+                        Poll::Ready(None) => {
+                            // we probably haven't booted yet
+                            remote_done = true;
+                        }
+                        Poll::Pending => {
+                            remote_done = true;
+                        }
+                        Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
+                            error!(this.log, "input stream failed: {:?}", e);
+                            remote_done = true;
+                            break;
+                        }
                     }
                 }
 
-                // send to downstream
-                // TODO: send fail == exiting?
-                self.as_mut()
-                    .try_flush(cx)
-                    .context("downstream flush (after)")?;
+                // alternate between input sources
+                check_local = !check_local;
+            }
 
-                // send acks
-                self.as_mut().try_acks(cx)?;
+            // send to downstream
+            // TODO: send fail == exiting?
+            self.as_mut()
+                .try_flush(cx)
+                .context("downstream flush (after)")?;
 
-                if interrupted {
-                    // resume reading from our non-depleted inputs
-                    continue;
-                }
-                break Poll::Pending;
-            };
+            // send acks
+            self.as_mut().try_acks(cx)?;
+
+            if local_done && remote_done {
+                // we're yielding voluntarily to not block the executor and must ensure we wake
+                // up again
+                cx.waker().wake_by_ref();
+            }
 
             // check if we now need to set a timeout
             self.out.dirty = false;
@@ -710,7 +697,7 @@ impl Future for Replica {
                 break;
             }
 
-            break readiness;
+            break Poll::Pending;
         }
     }
 }
