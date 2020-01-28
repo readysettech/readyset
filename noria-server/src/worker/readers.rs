@@ -198,6 +198,7 @@ fn handle_message(
                             retry: async_timer::interval(retry),
                             trigger_timeout: trigger,
                             next_trigger: now,
+                            first: now,
                         }))
                     }
                 }
@@ -235,6 +236,7 @@ struct BlockingRead {
 
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
+    first: time::Instant,
 }
 
 impl Future for BlockingRead {
@@ -300,6 +302,18 @@ impl Future for BlockingRead {
 
                 if ended {
                     return Err(());
+                }
+
+                if missing {
+                    let now = time::Instant::now();
+                    let waited = now - *this.first;
+                    *this.first = now;
+                    if waited > time::Duration::from_secs(7) {
+                        eprintln!(
+                            "warning: read has been stuck waiting on {:?} for {:?}",
+                            this.keys, waited
+                        );
+                    }
                 }
 
                 if triggered {
