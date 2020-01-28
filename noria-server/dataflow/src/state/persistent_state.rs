@@ -181,7 +181,7 @@ impl State for PersistentState {
             .unwrap()
             .unwrap() as usize;
 
-        (total_keys / self.indices.len())
+        total_keys / self.indices.len()
     }
 
     fn is_useful(&self) -> bool {
