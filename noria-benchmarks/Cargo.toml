@@ -41,7 +41,7 @@ hdrhistogram = "7"
 # mysql
 mysql_async = "0.21.0"
 # memcached
-memcached-rs = "0.4"
+memcached-rs = "0.4.2"
 # mio
 mio = "0.6.9"
 # futures
