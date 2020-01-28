@@ -26,12 +26,12 @@ use tokio_tower::multiplex::server;
 use tower::service_fn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT_US: u64 = 200;
+const RETRY_TIMEOUT_US: u64 = 1000;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const TRIGGER_TIMEOUT_US: u64 = 50_000;
+const TRIGGER_TIMEOUT_US: u64 = 10_000;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -196,6 +196,7 @@ fn handle_message(
                             retry: async_timer::interval(retry),
                             trigger_timeout: trigger,
                             next_trigger: now,
+                            first: now,
                         }))
                     }
                 }
@@ -233,6 +234,7 @@ struct BlockingRead {
 
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
+    first: time::Instant,
 }
 
 impl Future for BlockingRead {
@@ -298,6 +300,18 @@ impl Future for BlockingRead {
 
                 if ended {
                     return Err(());
+                }
+
+                if missing {
+                    let now = time::Instant::now();
+                    let waited = now - *this.first;
+                    *this.first = now;
+                    if waited > time::Duration::from_secs(7) {
+                        eprintln!(
+                            "warning: read has been stuck waiting on {:?} for {:?}",
+                            this.keys, waited
+                        );
+                    }
                 }
 
                 if triggered {
