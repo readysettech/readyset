@@ -256,7 +256,7 @@ impl PersistentState {
             ::std::thread::sleep(::std::time::Duration::from_millis(50));
             db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
         }
-        let db = db.unwrap();
+        let mut db = db.unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices: Vec<PersistentIndex> = meta
             .indices

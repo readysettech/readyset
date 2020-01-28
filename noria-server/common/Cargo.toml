@@ -11,4 +11,4 @@ noria = { path = "../../noria" }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde_derive = "1.0.8"
 serde = { version = "1.0.8", features = ["rc"] }
-petgraph = { version = "0.4.11", features = ["serde-1"] }
+petgraph = { version = "0.5", features = ["serde-1"] }
