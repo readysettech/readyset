@@ -10,4 +10,11 @@ members = [
 debug=true
 
 [patch.crates-io]
+# https://github.com/tower-rs/tokio-tower/pull/6
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
+# https://github.com/tokio-rs/tokio/pull/2160
+tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
+# https://github.com/rust-lang/futures-rs/pull/2049#issuecomment-579022335
+futures-util = { git = "https://github.com/rust-lang/futures-rs.git" }
+futures-core = { git = "https://github.com/rust-lang/futures-rs.git" }
+futures-sink = { git = "https://github.com/rust-lang/futures-rs.git" }
