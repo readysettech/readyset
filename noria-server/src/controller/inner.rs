@@ -1276,7 +1276,7 @@ impl ControllerInner {
                 Err(e) => match e {
                     SendError::IoError(ref ioe) => {
                         if ioe.kind() == io::ErrorKind::BrokenPipe
-                            && ioe.get_ref().unwrap().description() == "worker failed"
+                            && ioe.get_ref().unwrap().to_string() == "worker failed"
                         {
                             // message would have gone to a failed worker, so ignore error
                         } else {

@@ -672,7 +672,7 @@ impl Future for Replica {
 
             // check if we now need to set a timeout
             self.out.dirty = false;
-            'resume_polling: loop {
+            loop {
                 let mut this = self.as_mut().project();
                 match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     ProcessResult::KeepPolling(timeout) => {
