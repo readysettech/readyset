@@ -644,7 +644,6 @@ impl Future for Replica {
                             }
                             Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
                                 error!(this.log, "input stream failed: {:?}", e);
-                                remote_done = true;
                                 break;
                             }
                         }
