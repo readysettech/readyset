@@ -42,7 +42,11 @@ impl Conn {
         let jh = std::thread::spawn(move || {
             let mut c = memcached::Client::connect(&[(&connstr, 1)], ProtoType::Binary).unwrap();
 
-            let mut rt = tokio::runtime::current_thread::Runtime::new().unwrap();
+            let mut rt = tokio::runtime::Builder::new()
+                .basic_scheduler()
+                .enable_all()
+                .build()
+                .unwrap();
             while let Some((op, ret)) = rt.block_on(rx.recv()) {
                 let res = match op {
                     Req::Populate(articles) => {
@@ -143,7 +147,10 @@ impl VoteClient for Conn {
                         .collect();
 
                     let (tx, rx) = oneshot::channel();
-                    conn.c.send((Req::Populate(articles), tx)).await.unwrap();
+                    conn.c
+                        .send((Req::Populate(articles), tx))
+                        .await
+                        .unwrap_or_else(|_| panic!("SendError"));
                     rx.await.unwrap().unwrap();
 
                     aid += bs;

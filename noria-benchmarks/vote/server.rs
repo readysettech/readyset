@@ -325,10 +325,8 @@ pub(crate) fn start<'a>(
             // TODO: should we worry about the running directory being on an SSD here?
             let shards = format!("{}", shards.unwrap_or(0));
             let w = {
-                let mut cmd: Vec<Cow<str>> = ["cd", "noria", "&&"]
-                    .into_iter()
-                    .map(|&s| s.into())
-                    .collect();
+                let mut cmd: Vec<Cow<str>> =
+                    ["cd", "noria", "&&"].iter().map(|&s| s.into()).collect();
                 cmd.extend(vec![
                     "/home/ubuntu/target/release/noria-server".into(),
                     "--durability".into(),

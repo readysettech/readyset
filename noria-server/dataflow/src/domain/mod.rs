@@ -938,7 +938,7 @@ impl Domain {
                                             if misses.is_empty() {
                                                 return true;
                                             }
-                                            txs[0].clone().try_send(misses).is_ok()
+                                            txs[0].send(misses).is_ok()
                                         } else {
                                             // TODO: compound reader
                                             let mut per_shard = HashMap::new();
@@ -953,9 +953,9 @@ impl Domain {
                                             if per_shard.is_empty() {
                                                 return true;
                                             }
-                                            per_shard.into_iter().all(|(shard, keys)| {
-                                                txs[shard].clone().try_send(keys).is_ok()
-                                            })
+                                            per_shard
+                                                .into_iter()
+                                                .all(|(shard, keys)| txs[shard].send(keys).is_ok())
                                         }
                                     },
                                 );

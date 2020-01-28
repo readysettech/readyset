@@ -4,8 +4,11 @@ use dataflow::prelude::*;
 use dataflow::Readers;
 use dataflow::SingleReadHandle;
 use futures_util::{
-    future, future::Either, future::FutureExt, ready, try_future::TryFutureExt,
-    try_stream::TryStreamExt,
+    future,
+    future::Either,
+    future::{FutureExt, TryFutureExt},
+    ready,
+    stream::{Stream, StreamExt, TryStreamExt},
 };
 use noria::{ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
@@ -19,7 +22,6 @@ use std::{
     task::{Context, Poll},
 };
 use stream_cancel::Valve;
-use tokio::prelude::*;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
 
@@ -38,58 +40,54 @@ thread_local! {
     >> = Default::default();
 }
 
-pub(super) fn listen(
-    valve: &Valve,
-    ioh: &tokio_io_pool::Handle,
-    on: tokio::net::TcpListener,
+pub(super) async fn listen(
+    alive: tokio::sync::mpsc::Sender<()>,
+    valve: Valve,
+    mut on: tokio::net::TcpListener,
     readers: Readers,
-) -> impl Future<Output = ()> {
-    ioh.spawn_all(
-        valve
-            .wrap(on.incoming())
-            .into_stream()
-            .filter_map(|c| {
-                // io error from client: just ignore it
-                async move { c.ok() }
-            })
-            .map(Ok)
-            .map_ok(move |stream| {
-                let readers = readers.clone();
-                stream.set_nodelay(true).expect("could not set TCP_NODELAY");
-                server::Server::new(
-                    AsyncBincodeStream::from(stream).for_async(),
-                    service_fn(move |req| handle_message(req, &readers)),
-                )
-                .map_err(|e| {
-                    match e {
-                        server::Error::Service(()) => {
-                            // server is shutting down -- no need to report this error
-                            return;
-                        }
-                        server::Error::BrokenTransportRecv(ref e)
-                        | server::Error::BrokenTransportSend(ref e) => {
-                            if let bincode::ErrorKind::Io(ref e) = **e {
-                                if e.kind() == std::io::ErrorKind::BrokenPipe
-                                    || e.kind() == std::io::ErrorKind::ConnectionReset
-                                {
-                                    // client went away
-                                    return;
-                                }
+) {
+    let mut stream = valve.wrap(on.incoming()).into_stream();
+    while let Some(stream) = stream.next().await {
+        if let Err(_) = stream {
+            // io error from client: just ignore it
+            continue;
+        }
+
+        let stream = stream.unwrap();
+        let readers = readers.clone();
+        stream.set_nodelay(true).expect("could not set TCP_NODELAY");
+        let alive = alive.clone();
+        tokio::spawn(
+            server::Server::new(
+                AsyncBincodeStream::from(stream).for_async(),
+                service_fn(move |req| handle_message(req, &readers)),
+            )
+            .map_err(|e| {
+                match e {
+                    server::Error::Service(()) => {
+                        // server is shutting down -- no need to report this error
+                        return;
+                    }
+                    server::Error::BrokenTransportRecv(ref e)
+                    | server::Error::BrokenTransportSend(ref e) => {
+                        if let bincode::ErrorKind::Io(ref e) = **e {
+                            if e.kind() == std::io::ErrorKind::BrokenPipe
+                                || e.kind() == std::io::ErrorKind::ConnectionReset
+                            {
+                                // client went away
+                                return;
                             }
                         }
                     }
-                    eprintln!("!!! reader client protocol error: {:?}", e);
-                })
-                .map(|_| ())
+                }
+                eprintln!("!!! reader client protocol error: {:?}", e);
+            })
+            .map(move |r| {
+                let _ = alive;
+                r
             }),
-    )
-    .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
-        eprintln!(
-            "io pool is shutting down, so can't handle more reads: {:?}",
-            e
         );
-    })
-    .map(|_| ())
+    }
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {

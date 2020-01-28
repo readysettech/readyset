@@ -2,10 +2,7 @@
 
 use clap::value_t_or_exit;
 use failure::ResultExt;
-use futures_util::{
-    future::{Either, FutureExt},
-    try_future::TryFutureExt,
-};
+use futures_util::future::{Either, FutureExt, TryFutureExt};
 use hdrhistogram::Histogram;
 use rand::prelude::*;
 use rand_distr::Exp;
@@ -36,7 +33,7 @@ use self::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 
 fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
 where
-    C: VoteClient + 'static,
+    C: VoteClient + Unpin + 'static,
     C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
     C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
     <C as Service<ReadRequest>>::Future: Send,
@@ -99,9 +96,11 @@ where
         rmt_r_t.clone(),
         finished.clone(),
     );
-    let rt = tokio::runtime::Builder::new()
-        .name_prefix("vote-")
-        .before_stop(move || {
+    let mut rt = tokio::runtime::Builder::new()
+        .enable_all()
+        .threaded_scheduler()
+        .thread_name("voter")
+        .on_thread_stop(move || {
             SJRN_W
                 .with(|h| ts.0.lock().unwrap().add(&*h.borrow()))
                 .unwrap();
@@ -128,7 +127,7 @@ where
     let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
     let generators: Vec<_> = (0..ngen)
         .map(|geni| {
-            let ex = rt.executor();
+            let ex = rt.handle().clone();
             let handle = handle.clone();
             let global_args = global_args.clone();
 
@@ -170,7 +169,7 @@ where
         wops += completed;
     }
     drop(handle);
-    rt.shutdown_now();
+    drop(rt);
 
     // all done!
     println!("# generated ops/s: {:.2}", ops);
@@ -242,15 +241,15 @@ where
 }
 
 fn run_generator<C, R>(
-    mut handle: C,
+    handle: C,
     errd: &'static atomic::AtomicBool,
-    ex: tokio::runtime::TaskExecutor,
+    ex: tokio::runtime::Handle,
     id_rng: R,
     target: f64,
     global_args: clap::ArgMatches,
 ) -> (f64, f64)
 where
-    C: VoteClient + 'static,
+    C: VoteClient + Unpin + 'static,
     R: rand::distributions::Distribution<usize>,
     C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
     C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
@@ -283,7 +282,7 @@ where
     let mut queued_r_keys = Vec::new();
 
     let mut rng = rand::thread_rng();
-    let mut task = tokio_test::task::MockTask::new();
+    let mut handle = tokio_test::task::spawn(handle);
 
     // we *could* use a rayon::scope here to safely access stack variables from inside each job,
     // but that would *also* force us to place the load generators *on* the thread pool (because of
@@ -301,75 +300,76 @@ where
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
     // .split_off in calls to enqueue.
-    let enqueue = move |client: &mut C, queued: Vec<_>, mut keys: Vec<_>, write| {
-        let n = keys.len();
-        let sent = time::Instant::now();
-        let fut = if write {
-            nwrite.fetch_add(1, atomic::Ordering::AcqRel);
-            Either::Left(
-                client
-                    .call(WriteRequest(keys))
-                    .map(|r| r.context("failed to handle writes")),
-            )
-        } else {
-            nread.fetch_add(1, atomic::Ordering::AcqRel);
-            // deduplicate requested keys, because not doing so would be silly
-            keys.sort_unstable();
-            keys.dedup();
-            Either::Right(
-                client
-                    .call(ReadRequest(keys))
-                    .map(|r| r.context("failed to handle reads")),
-            )
-        }
-        .map_ok(move |_| {
-            let done = time::Instant::now();
-            ndone.fetch_add(n, atomic::Ordering::AcqRel);
-            if write {
-                nwrite.fetch_sub(1, atomic::Ordering::AcqRel);
+    let enqueue =
+        move |client: &mut tokio_test::task::Spawn<C>, queued: Vec<_>, mut keys: Vec<_>, write| {
+            let n = keys.len();
+            let sent = time::Instant::now();
+            let fut = if write {
+                nwrite.fetch_add(1, atomic::Ordering::AcqRel);
+                Either::Left(
+                    client
+                        .call(WriteRequest(keys))
+                        .map(|r| r.context("failed to handle writes")),
+                )
             } else {
-                nread.fetch_sub(1, atomic::Ordering::AcqRel);
+                nread.fetch_add(1, atomic::Ordering::AcqRel);
+                // deduplicate requested keys, because not doing so would be silly
+                keys.sort_unstable();
+                keys.dedup();
+                Either::Right(
+                    client
+                        .call(ReadRequest(keys))
+                        .map(|r| r.context("failed to handle reads")),
+                )
             }
+            .map_ok(move |_| {
+                let done = time::Instant::now();
+                ndone.fetch_add(n, atomic::Ordering::AcqRel);
+                if write {
+                    nwrite.fetch_sub(1, atomic::Ordering::AcqRel);
+                } else {
+                    nread.fetch_sub(1, atomic::Ordering::AcqRel);
+                }
 
-            if sent.duration_since(start) > warmup {
-                let remote_t = done.duration_since(sent);
-                let rmt = if write { &RMT_W } else { &RMT_R };
-                let us =
-                    remote_t.as_secs() * 1_000_000 + u64::from(remote_t.subsec_nanos()) / 1_000;
-                rmt.with(|h| {
-                    let mut h = h.borrow_mut();
-                    if h.record(us).is_err() {
-                        let m = h.high();
-                        h.record(m).unwrap();
-                    }
-                });
-
-                let sjrn = if write { &SJRN_W } else { &SJRN_R };
-                for started in queued {
-                    let sjrn_t = done.duration_since(started);
+                if sent.duration_since(start) > warmup {
+                    let remote_t = done.duration_since(sent);
+                    let rmt = if write { &RMT_W } else { &RMT_R };
                     let us =
-                        sjrn_t.as_secs() * 1_000_000 + u64::from(sjrn_t.subsec_nanos()) / 1_000;
-                    sjrn.with(|h| {
+                        remote_t.as_secs() * 1_000_000 + u64::from(remote_t.subsec_nanos()) / 1_000;
+                    rmt.with(|h| {
                         let mut h = h.borrow_mut();
                         if h.record(us).is_err() {
                             let m = h.high();
                             h.record(m).unwrap();
                         }
                     });
-                }
-            }
-        });
 
-        ex.spawn(async move {
-            if let Err(e) = fut.await {
-                if time::Instant::now() < (end - time::Duration::from_secs(1))
-                    && !errd.swap(true, atomic::Ordering::SeqCst)
-                {
-                    eprintln!("failed to enqueue request: {:?}", e)
+                    let sjrn = if write { &SJRN_W } else { &SJRN_R };
+                    for started in queued {
+                        let sjrn_t = done.duration_since(started);
+                        let us =
+                            sjrn_t.as_secs() * 1_000_000 + u64::from(sjrn_t.subsec_nanos()) / 1_000;
+                        sjrn.with(|h| {
+                            let mut h = h.borrow_mut();
+                            if h.record(us).is_err() {
+                                let m = h.high();
+                                h.record(m).unwrap();
+                            }
+                        });
+                    }
                 }
-            }
-        });
-    };
+            });
+
+            ex.spawn(async move {
+                if let Err(e) = fut.await {
+                    if time::Instant::now() < (end - time::Duration::from_secs(1))
+                        && !errd.swap(true, atomic::Ordering::SeqCst)
+                    {
+                        eprintln!("failed to enqueue request: {:?}", e)
+                    }
+                }
+            });
+        };
 
     let mut worker_ops = None;
     'outer: while next < end {
@@ -404,9 +404,9 @@ where
             if f <= now {
                 // time to send at least one batch
                 if !queued_w.is_empty() && now.duration_since(queued_w[0]) >= max_batch_time {
-                    if let Poll::Ready(r) =
-                        task.enter(|cx| Service::<WriteRequest>::poll_ready(&mut handle, cx))
-                    {
+                    if let Poll::Ready(r) = handle.enter(|cx, mut handle| {
+                        Service::<WriteRequest>::poll_ready(&mut *handle, cx)
+                    }) {
                         r.unwrap();
                         ops += queued_w.len();
                         enqueue(
@@ -421,9 +421,9 @@ where
                 }
 
                 if !queued_r.is_empty() && now.duration_since(queued_r[0]) >= max_batch_time {
-                    if let Poll::Ready(r) =
-                        task.enter(|cx| Service::<ReadRequest>::poll_ready(&mut handle, cx))
-                    {
+                    if let Poll::Ready(r) = handle.enter(|cx, mut handle| {
+                        Service::<ReadRequest>::poll_ready(&mut *handle, cx)
+                    }) {
                         r.unwrap();
                         ops += queued_r.len();
                         enqueue(

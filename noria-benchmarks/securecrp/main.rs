@@ -30,7 +30,7 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let g = cb.start_local().await.unwrap();
+        let (g, _done) = cb.start_local().await.unwrap();
 
         Backend { g }
     }
@@ -166,7 +166,7 @@ async fn main() {
         test_populate::create_users(&mut backend).await;
     }
 
-    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(2)).await;
+    tokio::time::delay_for(time::Duration::from_secs(2)).await;
     let _ = backend.login(make_user(user)).await.is_ok();
 
     if args.is_present("populate") {
@@ -183,5 +183,5 @@ async fn main() {
     }
 
     // sleep "forever"
-    tokio::timer::delay(time::Instant::now() + time::Duration::from_secs(200_000)).await;
+    tokio::time::delay_for(time::Duration::from_secs(200_000)).await;
 }

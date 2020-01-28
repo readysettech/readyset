@@ -3,12 +3,14 @@ mod populate;
 use clap::value_t_or_exit;
 use noria::{Builder, Handle, LocalAuthority};
 use slog::info;
+use std::future::Future;
 
 pub struct Backend {
     blacklist: Vec<String>,
     r: String,
     log: slog::Logger,
     g: Handle<LocalAuthority>,
+    done: Box<dyn Future<Output = ()> + Unpin>,
 }
 
 async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
@@ -37,7 +39,7 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     if !partial {
         b.disable_partial();
     }
-    let g = b.start_local().await.unwrap();
+    let (g, done) = b.start_local().await.unwrap();
 
     //recipe.enable_reuse(reuse);
     Box::new(Backend {
@@ -45,6 +47,7 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
         r: String::new(),
         log,
         g,
+        done: Box::new(done),
     })
 }
 
@@ -302,4 +305,7 @@ async fn main() {
                 .unwrap();
         }
     }
+
+    drop(backend.g);
+    backend.done.await;
 }

@@ -1,5 +1,5 @@
 use noria_server::Builder;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +31,7 @@ async fn main() {
     builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);
 
-    let mut blender = builder.start_local().await.unwrap();
+    let (mut blender, done) = builder.start_local().await.unwrap();
     blender.install_recipe(sql).await.unwrap();
     println!("{}", blender.graphviz().await.unwrap());
 
@@ -65,8 +65,10 @@ async fn main() {
     vote.insert(vec![aid.into(), uid.into()]).await.unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    tokio::timer::delay(Instant::now() + Duration::from_secs(1)).await;
+    tokio::time::delay_for(Duration::from_secs(1)).await;
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&[aid.into()], true).await)
+    println!("{:#?}", awvc.lookup(&[aid.into()], true).await);
+
+    done.await;
 }

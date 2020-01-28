@@ -100,11 +100,14 @@ impl Builder {
     }
 
     /// Start a server instance and return a handle to it.
+    ///
+    /// The second item of the returned tuple is a future that resolves when Noria is idle.
     #[must_use]
     pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> impl Future<Output = Result<Handle<A>, failure::Error>> {
+    ) -> impl Future<Output = Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), failure::Error>>
+    {
         let Builder {
             listen_addr,
             ref config,
@@ -130,14 +133,22 @@ impl Builder {
     #[must_use]
     pub fn start_local(
         &self,
-    ) -> impl Future<Output = Result<Handle<LocalAuthority>, failure::Error>> {
+    ) -> impl Future<
+        Output = Result<
+            (
+                Handle<LocalAuthority>,
+                impl Future<Output = ()> + Unpin + Send,
+            ),
+            failure::Error,
+        >,
+    > {
         let fut = self.start(Arc::new(LocalAuthority::new()));
         async move {
             #[allow(unused_mut)]
-            let mut wh = fut.await?;
+            let (mut wh, done) = fut.await?;
             #[cfg(test)]
             wh.backend_ready().await;
-            Ok(wh)
+            Ok((wh, done))
         }
     }
 }

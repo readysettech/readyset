@@ -2,25 +2,25 @@ use crate::data::*;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
-    future, ready, stream::futures_unordered::FuturesUnordered, try_future::TryFutureExt,
-    try_stream::TryStreamExt,
+    future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
+    stream::StreamExt, stream::TryStreamExt,
 };
 use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use tokio::prelude::*;
 use tokio_tower::multiplex;
 use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
 
 type Transport = AsyncBincodeStream<
-    tokio::net::tcp::TcpStream,
+    tokio::net::TcpStream,
     Tagged<ReadReply>,
     Tagged<ReadQuery>,
     AsyncDestination,
@@ -232,13 +232,11 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                 self.shards[0]
                     .call(request)
                     .map_err(ViewError::from)
-                    .and_then(|reply| {
-                        async move {
-                            match reply.v {
-                                ReadReply::Normal(Ok(rows)) => Ok(rows),
-                                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                                _ => unreachable!(),
-                            }
+                    .and_then(|reply| async move {
+                        match reply.v {
+                            ReadReply::Normal(Ok(rows)) => Ok(rows),
+                            ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                            _ => unreachable!(),
                         }
                     }),
             );
@@ -291,13 +289,11 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                     shard
                         .call(request)
                         .map_err(ViewError::from)
-                        .and_then(|reply| {
-                            async move {
-                                match reply.v {
-                                    ReadReply::Normal(Ok(rows)) => Ok(rows),
-                                    ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
-                                    _ => unreachable!(),
-                                }
+                        .and_then(|reply| async move {
+                            match reply.v {
+                                ReadReply::Normal(Ok(rows)) => Ok(rows),
+                                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                                _ => unreachable!(),
                             }
                         })
                 })
@@ -373,64 +369,5 @@ impl View {
         // TODO: Optimized version of this function?
         let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
         Ok(rs.into_iter().next().unwrap())
-    }
-
-    /// Switch to a synchronous interface for this view.
-    pub fn into_sync(self) -> SyncView {
-        SyncView(self)
-    }
-}
-
-/// A synchronous wrapper around [`View`] where all methods block (using `wait`) for the operation
-/// to complete before returning.
-#[derive(Clone, Debug)]
-pub struct SyncView(View);
-
-macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {{
-        let view = &mut $self.0;
-        let tracer = std::mem::replace(&mut view.tracer, tracing::Dispatch::none());
-        let res = tracing::dispatcher::with_default(&tracer, || {
-            tokio_executor::current_thread::block_on_all(view.$method($($args),*))
-        });
-        std::mem::replace(&mut view.tracer, tracer);
-        res
-    }};
-}
-
-#[allow(clippy::len_without_is_empty)]
-impl SyncView {
-    /// Get the list of columns in this view.
-    pub fn columns(&self) -> &[String] {
-        self.0.columns()
-    }
-
-    /// Get the schema definition of this view.
-    pub fn schema(&self) -> Option<&[ColumnSpecification]> {
-        self.0.schema()
-    }
-
-    /// See [`View::len`].
-    pub fn len(&mut self) -> Result<usize, ViewError> {
-        sync!(self.len())
-    }
-
-    /// See [`View::multi_lookup`].
-    pub fn multi_lookup(
-        &mut self,
-        keys: Vec<Vec<DataType>>,
-        block: bool,
-    ) -> Result<Vec<Datas>, ViewError> {
-        sync!(self.multi_lookup(keys, block))
-    }
-
-    /// See [`View::lookup`].
-    pub fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
-        sync!(self.lookup(key, block))
-    }
-
-    /// Switch back to an asynchronous interface for this view.
-    pub fn into_async(self) -> View {
-        self.0
     }
 }

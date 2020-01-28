@@ -3,7 +3,7 @@ use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescri
 use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
-use futures_util::{future::FutureExt, sink::SinkExt, stream::StreamExt, try_future::TryFutureExt};
+use futures_util::{future::FutureExt, future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use noria::channel::{self, TcpSender};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
@@ -12,7 +12,6 @@ use replica::ReplicaAddr;
 use slog;
 use std::collections::HashMap;
 use std::fs;
-use std::future::Future;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{
@@ -23,7 +22,6 @@ use std::time::{self, Duration};
 use stream_cancel::{Trigger, Valve};
 use tokio;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_io_pool;
 
 mod readers;
 mod replica;
@@ -45,7 +43,7 @@ impl InstanceState {
     }
 }
 pub(super) async fn main(
-    ioh: tokio_io_pool::Handle,
+    alive: tokio::sync::mpsc::Sender<()>,
     mut worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,
     waddr: SocketAddr,
@@ -72,7 +70,7 @@ pub(super) async fn main(
                     } = worker_state
                     {
                         if epoch == msg.epoch {
-                            add_domain.send(d).await.unwrap_or_else(|d| {
+                            add_domain.send(d).unwrap_or_else(|d| {
                                 panic!("could not add new domain {:?}", d);
                             });
                         }
@@ -135,8 +133,8 @@ pub(super) async fn main(
                 // TODO: memory stuff should probably also be in config?
                 let (rep_tx, rep_rx) = tokio::sync::mpsc::unbounded_channel();
                 let ctrl = listen_df(
+                    alive.clone(),
                     valve,
-                    &ioh,
                     log.clone(),
                     (memory_limit, memory_check_frequency),
                     &state,
@@ -173,9 +171,9 @@ pub(super) async fn main(
     // TODO: maybe flush things or something?
 }
 
-fn listen_df<'a>(
+async fn listen_df<'a>(
+    alive: tokio::sync::mpsc::Sender<()>,
     valve: Valve,
-    ioh: &'a tokio_io_pool::Handle,
     log: slog::Logger,
     (memory_limit, evict_every): (Option<usize>, Option<Duration>),
     state: &'a ControllerState,
@@ -184,174 +182,182 @@ fn listen_df<'a>(
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
     mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
-) -> impl Future<Output = Result<(), failure::Error>> + 'a {
-    async move {
-        // first, try to connect to controller
-        let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
-        let ctrl_addr = ctrl.local_addr()?;
-        info!(log, "connected to controller"; "src" => ?ctrl_addr);
+) -> Result<(), failure::Error> {
+    // first, try to connect to controller
+    let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
+    let ctrl_addr = ctrl.local_addr()?;
+    info!(log, "connected to controller"; "src" => ?ctrl_addr);
 
-        let log_prefix = state.config.persistence.log_prefix.clone();
-        let prefix = format!("{}-log-", log_prefix);
-        let log_files: Vec<String> = fs::read_dir(".")
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
-            .map(|e| e.path().to_string_lossy().into_owned())
-            .filter(|path| path.starts_with(&prefix))
-            .collect();
+    let log_prefix = state.config.persistence.log_prefix.clone();
+    let prefix = format!("{}-log-", log_prefix);
+    let log_files: Vec<String> = fs::read_dir(".")
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
+        .map(|e| e.path().to_string_lossy().into_owned())
+        .filter(|path| path.starts_with(&prefix))
+        .collect();
 
-        // extract important things from state config
-        let epoch = state.epoch;
-        let heartbeat_every = state.config.heartbeat_every;
+    // extract important things from state config
+    let epoch = state.epoch;
+    let heartbeat_every = state.config.heartbeat_every;
 
-        let (mut ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // reader setup
-        let readers = Arc::new(Mutex::new(HashMap::new()));
-        let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-        let raddr = rport.local_addr()?;
-        info!(log, "listening for reads"; "on" => ?raddr);
+    // reader setup
+    let readers = Arc::new(Mutex::new(HashMap::new()));
+    let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
+    let raddr = rport.local_addr()?;
+    info!(log, "listening for reads"; "on" => ?raddr);
 
-        // start controller message handler
-        let mut ctrl = AsyncBincodeWriter::from(ctrl).for_async();
-        tokio::spawn(async move {
-            while let Some(cm) = ctrl_rx.next().await {
-                if let Err(e) = ctrl
-                    .send(CoordinationMessage {
-                        source: ctrl_addr,
-                        payload: cm,
-                        epoch,
-                    })
-                    .await
-                {
-                    // if the controller goes away, another will be elected, and the worker will be
-                    // restarted, so there's no reason to do anything too drastic here.
-                    eprintln!("controller went away: {:?}", e);
-                }
-            }
-        });
-
-        // also start readers
-        tokio::spawn(readers::listen(&valve, ioh, rport, readers.clone()));
-
-        // and tell the controller about us
-        let mut timer = valve.wrap(tokio::timer::Interval::new(
-            time::Instant::now() + heartbeat_every,
-            heartbeat_every,
-        ));
-        let mut ctx = ctrl_tx.clone();
-        tokio::spawn(async move {
-            let _ = ctx
-                .send(CoordinationPayload::Register {
-                    addr: waddr,
-                    read_listen_addr: raddr,
-                    log_files,
+    // start controller message handler
+    let mut ctrl = AsyncBincodeWriter::from(ctrl).for_async();
+    let a = alive.clone();
+    tokio::spawn(async move {
+        let _alive = a;
+        while let Some(cm) = ctrl_rx.next().await {
+            if let Err(e) = ctrl
+                .send(CoordinationMessage {
+                    source: ctrl_addr,
+                    payload: cm,
+                    epoch,
                 })
-                .await;
-
-            // start sending heartbeats
-            while let Some(_) = timer.next().await {
-                if let Err(_) = ctx.send(CoordinationPayload::Heartbeat).await {
-                    // if we error we're probably just shutting down
-                    break;
-                }
+                .await
+            {
+                // if the controller goes away, another will be elected, and the worker will be
+                // restarted, so there's no reason to do anything too drastic here.
+                eprintln!("controller went away: {:?}", e);
             }
+        }
+    });
+
+    // also start readers
+    tokio::spawn(readers::listen(
+        alive.clone(),
+        valve.clone(),
+        rport,
+        readers.clone(),
+    ));
+
+    // and tell the controller about us
+    let mut timer = valve.wrap(tokio::time::interval_at(
+        tokio::time::Instant::now() + heartbeat_every,
+        heartbeat_every,
+    ));
+    let a = alive.clone();
+    let ctx = ctrl_tx.clone();
+    tokio::spawn(async move {
+        let _alive = a;
+        let _ = ctx.send(CoordinationPayload::Register {
+            addr: waddr,
+            read_listen_addr: raddr,
+            log_files,
         });
 
-        let state_sizes = Arc::new(Mutex::new(HashMap::new()));
-        if let Some(evict_every) = evict_every {
-            let log = log.clone();
-            let mut domain_senders = HashMap::new();
-            let state_sizes = state_sizes.clone();
-            let mut timer = valve.wrap(tokio::timer::Interval::new(
-                time::Instant::now() + evict_every,
-                evict_every,
-            ));
-            tokio::spawn(async move {
-                while let Some(_) = timer.next().await {
-                    do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes).await;
-                }
-            });
-        }
-
-        // Now we're ready to accept new domains.
-        let dcaddr = desc.domain_addr;
-        tokio::spawn(
-            async move {
-                while let Some(d) = replicas.next().await {
-                    let idx = d.index;
-                    let shard = d.shard.unwrap_or(0);
-
-                    let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-                    let addr = on.local_addr()?;
-
-                    let state_size = Arc::new(AtomicUsize::new(0));
-                    let d = d.build(
-                        log.clone(),
-                        readers.clone(),
-                        coord.clone(),
-                        dcaddr,
-                        &valve,
-                        state_size.clone(),
-                    );
-
-                    let (tx, rx) = tokio_sync::mpsc::unbounded_channel();
-
-                    // need to register the domain with the local channel coordinator.
-                    // local first to ensure that we don't unnecessarily give away remote for a
-                    // local thing if there's a race
-                    coord.insert_local((idx, shard), tx);
-                    coord.insert_remote((idx, shard), addr);
-
-                    crate::blocking(|| {
-                        state_sizes.lock().unwrap().insert((idx, shard), state_size)
-                    })
-                    .await;
-
-                    let replica = replica::Replica::new(
-                        &valve,
-                        d,
-                        on,
-                        rx,
-                        ctrl_tx.clone(),
-                        log.clone(),
-                        coord.clone(),
-                    );
-                    tokio::spawn(async move {
-                        let log = replica.log.clone();
-                        if let Err(e) = replica.await {
-                            crit!(log, "replica failure: {:?}", e);
-                        }
-                    });
-
-                    info!(
-                        log,
-                        "informed controller that domain {}.{} is at {:?}",
-                        idx.index(),
-                        shard,
-                        addr
-                    );
-
-                    ctrl_tx
-                        .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
-                            idx, shard, addr,
-                        )))
-                        .await
-                        .map_err(|_| {
-                            // controller went away -- exit?
-                            io::Error::new(io::ErrorKind::Other, "controller went away")
-                        })?;
-                }
-
-                Ok(())
+        // start sending heartbeats
+        while let Some(_) = timer.next().await {
+            if let Err(_) = ctx.send(CoordinationPayload::Heartbeat) {
+                // if we error we're probably just shutting down
+                break;
             }
-            .map_err(|e: io::Error| panic!("{:?}", e))
-            .map(|_| ()),
-        );
+        }
+    });
 
-        Ok(())
+    let state_sizes = Arc::new(Mutex::new(HashMap::new()));
+    if let Some(evict_every) = evict_every {
+        let log = log.clone();
+        let mut domain_senders = HashMap::new();
+        let state_sizes = state_sizes.clone();
+        let mut timer = valve.wrap(tokio::time::interval_at(
+            tokio::time::Instant::now() + evict_every,
+            evict_every,
+        ));
+        let a = alive.clone();
+        tokio::spawn(async move {
+            let _alive = a;
+            while let Some(_) = timer.next().await {
+                do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes).await;
+            }
+        });
     }
+
+    // Now we're ready to accept new domains.
+    let dcaddr = desc.domain_addr;
+    tokio::spawn(
+        async move {
+            let alive = alive;
+            while let Some(d) = replicas.next().await {
+                let idx = d.index;
+                let shard = d.shard.unwrap_or(0);
+
+                let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
+                let addr = on.local_addr()?;
+
+                let state_size = Arc::new(AtomicUsize::new(0));
+                let d = d.build(
+                    log.clone(),
+                    readers.clone(),
+                    coord.clone(),
+                    dcaddr,
+                    &valve,
+                    state_size.clone(),
+                );
+
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+                // need to register the domain with the local channel coordinator.
+                // local first to ensure that we don't unnecessarily give away remote for a
+                // local thing if there's a race
+                coord.insert_local((idx, shard), tx);
+                coord.insert_remote((idx, shard), addr);
+
+                tokio::task::block_in_place(|| {
+                    state_sizes.lock().unwrap().insert((idx, shard), state_size)
+                });
+
+                let replica = replica::Replica::new(
+                    &valve,
+                    d,
+                    on,
+                    rx,
+                    ctrl_tx.clone(),
+                    log.clone(),
+                    coord.clone(),
+                );
+                let a = alive.clone();
+                tokio::spawn(async move {
+                    let _alive = a;
+                    let log = replica.log.clone();
+                    if let Err(e) = replica.await {
+                        crit!(log, "replica failure: {:?}", e);
+                    }
+                });
+
+                info!(
+                    log,
+                    "informed controller that domain {}.{} is at {:?}",
+                    idx.index(),
+                    shard,
+                    addr
+                );
+
+                ctrl_tx
+                    .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
+                        idx, shard, addr,
+                    )))
+                    .map_err(|_| {
+                        // controller went away -- exit?
+                        io::Error::new(io::ErrorKind::Other, "controller went away")
+                    })?;
+            }
+
+            Ok(())
+        }
+        .map_err(|e: io::Error| panic!("{:?}", e))
+        .map(|_| ()),
+    );
+
+    Ok(())
 }
 
 #[allow(clippy::type_complexity)]
@@ -365,7 +371,7 @@ async fn do_eviction(
 
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
-    let sizes: Vec<((DomainIndex, usize), usize)> = crate::blocking(|| {
+    let sizes: Vec<((DomainIndex, usize), usize)> = tokio::task::block_in_place(|| {
         let state_sizes = state_sizes.lock().unwrap();
         state_sizes
             .iter()
@@ -381,8 +387,7 @@ async fn do_eviction(
                 (*ds, size)
             })
             .collect()
-    })
-    .await;
+    });
 
     // 3. are we above the limit?
     let total: usize = sizes.iter().map(|&(_, s)| s).sum();
@@ -401,14 +406,13 @@ async fn do_eviction(
                     );
 
                 let tx = domain_senders.get_mut(&largest.0).unwrap();
-                crate::blocking(|| {
+                tokio::task::block_in_place(|| {
                     tx.send(Box::new(Packet::Evict {
                         node: None,
                         num_bytes: cmp::min(largest.1, total - limit),
                     }))
                     .unwrap()
-                })
-                .await;
+                });
             }
         }
     }

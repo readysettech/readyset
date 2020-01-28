@@ -10,8 +10,7 @@ macro_rules! format {
 
 use clap::value_t_or_exit;
 use clap::{App, Arg};
-use futures_util::future::{ready, Either};
-use futures_util::try_future::TryFutureExt;
+use futures_util::future::{ready, Either, TryFutureExt};
 use my::prelude::*;
 use std::collections::HashMap;
 use std::future::Future;

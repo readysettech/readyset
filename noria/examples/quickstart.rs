@@ -1,5 +1,5 @@
 use noria::ControllerHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
 async fn main() {
@@ -53,7 +53,7 @@ async fn main() {
     vote.insert(vec![aid.into(), uid.into()]).await.unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    tokio::timer::delay(Instant::now() + Duration::from_millis(1000)).await;
+    tokio::time::delay_for(Duration::from_millis(1000)).await;
 
     println!("Reading...");
     let article = awvc.lookup(&[aid.into()], true).await.unwrap();

@@ -81,66 +81,70 @@ async fn main() {
         _ => unreachable!(),
     }
 
-    let mut g = builder.start_local().await.unwrap();
-    g.ready().await.unwrap();
-    g.install_recipe(RECIPE).await.unwrap();
+    let (mut g, done) = builder.start_local().await.unwrap();
+    {
+        g.ready().await.unwrap();
+        g.install_recipe(RECIPE).await.unwrap();
 
-    let mut a = g.table("Article").await.unwrap();
-    let mut v = g.table("Vote").await.unwrap();
-    let mut r = g.view("ArticleWithVoteCount").await.unwrap();
+        let mut a = g.table("Article").await.unwrap();
+        let mut v = g.table("Vote").await.unwrap();
+        let mut r = g.view("ArticleWithVoteCount").await.unwrap();
 
-    // seed articles
-    a.insert(vec![1.into(), "Hello world #1".into()])
-        .await
-        .unwrap();
-    a.insert(vec![2.into(), "Hello world #2".into()])
-        .await
-        .unwrap();
+        // seed articles
+        a.insert(vec![1.into(), "Hello world #1".into()])
+            .await
+            .unwrap();
+        a.insert(vec![2.into(), "Hello world #2".into()])
+            .await
+            .unwrap();
 
-    // seed votes
-    v.insert(vec![1.into(), "a".into()]).await.unwrap();
-    v.insert(vec![2.into(), "a".into()]).await.unwrap();
-    v.insert(vec![1.into(), "b".into()]).await.unwrap();
-    v.insert(vec![2.into(), "c".into()]).await.unwrap();
-    v.insert(vec![2.into(), "d".into()]).await.unwrap();
+        // seed votes
+        v.insert(vec![1.into(), "a".into()]).await.unwrap();
+        v.insert(vec![2.into(), "a".into()]).await.unwrap();
+        v.insert(vec![1.into(), "b".into()]).await.unwrap();
+        v.insert(vec![2.into(), "c".into()]).await.unwrap();
+        v.insert(vec![2.into(), "d".into()]).await.unwrap();
 
-    // now for the benchmark itself.
-    // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
-    // we first "warm up" by reading both to ensure all other necessary state is present.
-    let one = 1.into();
-    let two = 2.into();
-    assert_eq!(
-        r.lookup(&[one], true).await.unwrap(),
-        vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
-    );
-    assert_eq!(
-        r.lookup(&[two], true).await.unwrap(),
-        vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
-    );
+        // now for the benchmark itself.
+        // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
+        // we first "warm up" by reading both to ensure all other necessary state is present.
+        let one = 1.into();
+        let two = 2.into();
+        assert_eq!(
+            r.lookup(&[one], true).await.unwrap(),
+            vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
+        );
+        assert_eq!(
+            r.lookup(&[two], true).await.unwrap(),
+            vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
+        );
 
-    // now time to alternate and measure
-    let mut n = 0;
-    let start = Instant::now();
-    let mut stats = Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap();
-    while start.elapsed() < Duration::from_secs(runtime) {
-        for &id in &[1, 2] {
-            let start = Instant::now();
-            r.lookup(&[id.into()], true).await.unwrap();
-            stats.saturating_record(start.elapsed().as_micros() as u64);
-            n += 1;
-            // ensure that entry gets evicted
-            std::thread::sleep(Duration::from_millis(50));
+        // now time to alternate and measure
+        let mut n = 0;
+        let start = Instant::now();
+        let mut stats = Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap();
+        while start.elapsed() < Duration::from_secs(runtime) {
+            for &id in &[1, 2] {
+                let start = Instant::now();
+                r.lookup(&[id.into()], true).await.unwrap();
+                stats.saturating_record(start.elapsed().as_micros() as u64);
+                n += 1;
+                // ensure that entry gets evicted
+                std::thread::sleep(Duration::from_millis(50));
+            }
         }
-    }
 
-    println!("# purge mode: {}", args.value_of("purge").unwrap());
-    println!(
-        "# replays/s: {:.2}",
-        f64::from(n) / start.elapsed().as_secs_f64()
-    );
-    println!("# op\tpct\ttime");
-    println!("replay\t50\t{:.2}\tµs", stats.value_at_quantile(0.5));
-    println!("replay\t95\t{:.2}\tµs", stats.value_at_quantile(0.95));
-    println!("replay\t99\t{:.2}\tµs", stats.value_at_quantile(0.99));
-    println!("replay\t100\t{:.2}\tµs", stats.max());
+        println!("# purge mode: {}", args.value_of("purge").unwrap());
+        println!(
+            "# replays/s: {:.2}",
+            f64::from(n) / start.elapsed().as_secs_f64()
+        );
+        println!("# op\tpct\ttime");
+        println!("replay\t50\t{:.2}\tµs", stats.value_at_quantile(0.5));
+        println!("replay\t95\t{:.2}\tµs", stats.value_at_quantile(0.95));
+        println!("replay\t99\t{:.2}\tµs", stats.value_at_quantile(0.99));
+        println!("replay\t100\t{:.2}\tµs", stats.max());
+    }
+    drop(g);
+    done.await;
 }

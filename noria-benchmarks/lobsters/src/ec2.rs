@@ -1,8 +1,5 @@
 #![feature(try_blocks)]
 
-#[macro_use]
-extern crate clap;
-
 use clap::{App, Arg};
 use rusoto_core::Region;
 use std::collections::HashMap;

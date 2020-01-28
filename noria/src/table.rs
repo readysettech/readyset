@@ -6,17 +6,18 @@ use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
-    future, ready, stream::futures_unordered::FuturesUnordered, try_future::TryFutureExt,
-    try_stream::TryStreamExt,
+    future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
+    stream::TryStreamExt,
 };
 use nom_sql::CreateTableStatement;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::{fmt, io};
-use tokio::prelude::*;
+use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
@@ -24,7 +25,7 @@ use tower_service::Service;
 use vec_map::VecMap;
 
 type Transport = AsyncBincodeStream<
-    tokio::net::tcp::TcpStream,
+    tokio::net::TcpStream,
     Tagged<()>,
     Tagged<LocalOrNot<Input>>,
     AsyncDestination,
@@ -291,7 +292,7 @@ impl Service<Input> for Table {
                 shard_writes[shard].push(r);
             }
 
-            let mut wait_for = FuturesUnordered::new();
+            let wait_for = FuturesUnordered::new();
             for (s, rs) in shard_writes.drain(..).enumerate() {
                 if !rs.is_empty() {
                     let p = if self.dst_is_local {
@@ -592,93 +593,5 @@ impl Table {
     /// Traced events are sent on the debug channel, and are tagged with the given `tag`.
     pub fn trace_next(&mut self, tag: u64) {
         self.tracer = Some((tag, None));
-    }
-
-    /// Switch to a synchronous interface for this table.
-    pub fn into_sync(self) -> SyncTable {
-        SyncTable(self)
-    }
-}
-
-/// A synchronous wrapper around [`Table`] where all methods block (using `wait`) for the operation
-/// to complete before returning.
-#[derive(Clone, Debug)]
-pub struct SyncTable(Table);
-
-macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {{
-        let table = &mut $self.0;
-        let tracer = std::mem::replace(&mut table.dispatch, tracing::Dispatch::none());
-        let res = tracing::dispatcher::with_default(&tracer, || {
-            tokio_executor::current_thread::block_on_all(table.$method($($args),*))
-        });
-        std::mem::replace(&mut table.dispatch, tracer);
-        res
-    }};
-}
-
-use std::ops::{Deref, DerefMut};
-impl Deref for SyncTable {
-    type Target = Table;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for SyncTable {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl SyncTable {
-    /// See [`Table::insert`].
-    pub fn insert<V>(&mut self, u: V) -> Result<(), TableError>
-    where
-        V: Into<Vec<DataType>>,
-    {
-        sync!(self.insert(u))
-    }
-
-    /// See [`Table::perform_all`].
-    pub fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
-    where
-        I: IntoIterator<Item = V>,
-        V: Into<TableOperation>,
-    {
-        sync!(self.perform_all(i))
-    }
-
-    /// See [`Table::delete`].
-    pub fn delete<I>(&mut self, key: I) -> Result<(), TableError>
-    where
-        I: Into<Vec<DataType>>,
-    {
-        sync!(self.delete(key))
-    }
-
-    /// See [`Table::update`].
-    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
-    where
-        V: IntoIterator<Item = (usize, Modification)>,
-    {
-        sync!(self.update(key, u))
-    }
-
-    /// See [`Table::insert_or_update`].
-    pub fn insert_or_update<V>(
-        &mut self,
-        insert: Vec<DataType>,
-        update: V,
-    ) -> Result<(), TableError>
-    where
-        V: IntoIterator<Item = (usize, Modification)>,
-    {
-        sync!(self.insert_or_update(insert, update))
-    }
-
-    /// Switch back to an asynchronous interface for this table.
-    pub fn into_async(self) -> Table {
-        self.0
     }
 }
