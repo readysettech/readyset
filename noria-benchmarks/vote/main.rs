@@ -295,6 +295,8 @@ where
     // this may change with https://github.com/rayon-rs/rayon/issues/544, but that's what we have
     // to do for now.
     let ndone: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
+    let nwrite: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
+    let nread: &'static _ = &*Box::leak(Box::new(atomic::AtomicUsize::new(0)));
 
     // when https://github.com/rust-lang/rust/issues/56556 is fixed, take &[i32] instead, make
     // Request hold &'a [i32] (then need for<'a> C: Service<Request<'a>>). then we no longer need
@@ -303,12 +305,14 @@ where
         let n = keys.len();
         let sent = time::Instant::now();
         let fut = if write {
+            nwrite.fetch_add(1, atomic::Ordering::AcqRel);
             Either::Left(
                 client
                     .call(WriteRequest(keys))
                     .map(|r| r.context("failed to handle writes")),
             )
         } else {
+            nread.fetch_add(1, atomic::Ordering::AcqRel);
             // deduplicate requested keys, because not doing so would be silly
             keys.sort_unstable();
             keys.dedup();
@@ -321,6 +325,11 @@ where
         .map_ok(move |_| {
             let done = time::Instant::now();
             ndone.fetch_add(n, atomic::Ordering::AcqRel);
+            if write {
+                nwrite.fetch_sub(1, atomic::Ordering::AcqRel);
+            } else {
+                nread.fetch_sub(1, atomic::Ordering::AcqRel);
+            }
 
             if sent.duration_since(start) > warmup {
                 let remote_t = done.duration_since(sent);
@@ -488,6 +497,12 @@ where
             measured.elapsed(),
         )
     });
+
+    println!(
+        "pending at exit: {} writes, {} reads",
+        nwrite.load(atomic::Ordering::Acquire),
+        nread.load(atomic::Ordering::Acquire)
+    );
 
     // need to drop the pool before waiting so that workers will exit
     // and thus hit the barrier
