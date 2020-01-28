@@ -24,12 +24,12 @@ use tokio_tower::multiplex::server;
 use tower::service_fn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT_US: u64 = 200;
+const RETRY_TIMEOUT_US: u64 = 1000;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const TRIGGER_TIMEOUT_US: u64 = 50_000;
+const TRIGGER_TIMEOUT_US: u64 = 10_000;
 
 thread_local! {
     static READERS: RefCell<HashMap<
