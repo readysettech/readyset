@@ -23,8 +23,6 @@ zookeeper = { git = "https://github.com/jonhoo/rust-zookeeper.git", branch = "bu
 # https://github.com/crossbeam-rs/crossbeam/pull/460#issuecomment-573145406
 crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
 crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
-# https://github.com/slog-rs/term/pull/28#issuecomment-579352146
-slog-term = { git = "https://github.com/slog-rs/term.git" }
 # https://github.com/Detegr/rust-ctrlc/pull/64
 ctrlc = { git = "https://github.com/kornelski/rust-ctrlc.git", branch = "nix" }
 # https://github.com/sfackler/rust-openssl/pull/1219
