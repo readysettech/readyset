@@ -90,7 +90,7 @@ pub(super) struct Replica {
     >,
 
     #[pin]
-    timeout: Option<async_timer::oneshot::Timer>,
+    timeout: async_timer::oneshot::Timer,
     timed_out: bool,
 
     out: Outboxes,
@@ -121,7 +121,7 @@ impl Replica {
             inputs: Default::default(),
             outputs: Default::default(),
             out: Outboxes::new(ctrl_tx),
-            timeout: None,
+            timeout: async_timer::oneshot::Timer::new(time::Duration::from_secs(3600)),
             timed_out: false,
         }
     }
@@ -387,9 +387,8 @@ impl Replica {
         let mut processed = false;
         let mut this = self.project();
 
-        if let Some(to) = this.timeout.as_mut().as_pin_mut() {
-            if let Poll::Ready(()) = to.poll(cx) {
-                this.timeout.set(None);
+        if !this.timeout.is_expired() {
+            if let Poll::Ready(()) = this.timeout.as_mut().poll(cx) {
                 *this.timed_out = true;
             }
         }
@@ -662,12 +661,9 @@ impl Future for Replica {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
                             if timeout == time::Duration::new(0, 0) {
-                                this.timeout.set(None);
                                 *this.timed_out = true;
                             } else {
-                                // TODO: how about we don't create a new timer each time?
-                                this.timeout
-                                    .set(Some(async_timer::oneshot::Timer::new(timeout)));
+                                this.timeout.restart(timeout, cx.waker());
                             }
 
                             // we need to poll the timer to ensure we'll get woken up
