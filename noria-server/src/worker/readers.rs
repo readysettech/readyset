@@ -26,12 +26,12 @@ use tokio_tower::multiplex::server;
 use tower::service_fn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT_US: u64 = 1000;
+const RETRY_TIMEOUT_MS: u64 = 1;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const TRIGGER_TIMEOUT_US: u64 = 10_000;
+const TRIGGER_TIMEOUT_MS: u64 = 10;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -184,8 +184,8 @@ fn handle_message(
                             v: ReadReply::Normal(Ok(ret)),
                         }))))
                     } else {
-                        let trigger = time::Duration::from_micros(TRIGGER_TIMEOUT_US);
-                        let retry = time::Duration::from_micros(RETRY_TIMEOUT_US);
+                        let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
+                        let retry = time::Duration::from_millis(RETRY_TIMEOUT_MS);
                         let now = time::Instant::now();
                         Either::Left(Either::Right(BlockingRead {
                             tag,
@@ -193,7 +193,10 @@ fn handle_message(
                             keys,
                             read: ret,
                             truth: s.clone(),
-                            retry: async_timer::interval(retry),
+                            retry: tokio::time::interval_at(
+                                tokio::time::Instant::from_std(now + retry),
+                                retry,
+                            ),
                             trigger_timeout: trigger,
                             next_trigger: now,
                             first: now,
@@ -230,7 +233,7 @@ struct BlockingRead {
     truth: Readers,
 
     #[pin]
-    retry: async_timer::Interval<async_timer::oneshot::Timer>,
+    retry: tokio::time::Interval,
 
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
