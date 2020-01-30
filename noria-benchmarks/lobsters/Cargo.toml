@@ -9,7 +9,7 @@ orchestration = ["tsunami", "rusoto_core", "rusoto_sts", "failure", "ssh2", "she
 default = []
 
 [dependencies]
-trawler = "0.7.0"
+trawler = "0.7.2"
 mysql_async = "0.21.0"
 tokio = { version = "0.2.0", features = ["full"] }
 clap = "2.31"
