@@ -10,7 +10,7 @@ jemallocator = "0.3"
 
 [dependencies]
 bincode = "1.0.0"
-evmap = { version = "7.1.2", features = ["indexed"] }
+evmap = { version = "8", features = ["indexed"] }
 fnv = "1.0.5"
 futures-util = "0.3.0"
 itertools = "0.8"
