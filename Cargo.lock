@@ -312,7 +312,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.3.0"
-source = "git+https://github.com/mit-pdos/noria.git#074bcbaa10d6857d1516a143e0e24d464f53deb6"
+source = "git+https://github.com/mit-pdos/noria.git#fd59666d87734b1f31661d56a575c7b3291f39d7"
 dependencies = [
  "arccstr 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -414,7 +414,7 @@ dependencies = [
 [[package]]
 name = "dataflow"
 version = "0.3.0"
-source = "git+https://github.com/mit-pdos/noria.git#074bcbaa10d6857d1516a143e0e24d464f53deb6"
+source = "git+https://github.com/mit-pdos/noria.git#fd59666d87734b1f31661d56a575c7b3291f39d7"
 dependencies = [
  "backtrace 0.3.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1075,7 +1075,7 @@ dependencies = [
 [[package]]
 name = "mir"
 version = "0.3.0"
-source = "git+https://github.com/mit-pdos/noria.git#074bcbaa10d6857d1516a143e0e24d464f53deb6"
+source = "git+https://github.com/mit-pdos/noria.git#fd59666d87734b1f31661d56a575c7b3291f39d7"
 dependencies = [
  "common 0.3.0 (git+https://github.com/mit-pdos/noria.git)",
  "dataflow 0.3.0 (git+https://github.com/mit-pdos/noria.git)",
@@ -1243,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "noria"
 version = "0.3.0"
-source = "git+https://github.com/mit-pdos/noria.git#074bcbaa10d6857d1516a143e0e24d464f53deb6"
+source = "git+https://github.com/mit-pdos/noria.git#fd59666d87734b1f31661d56a575c7b3291f39d7"
 dependencies = [
  "arccstr 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "assert_infrequent 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "noria-server"
 version = "0.3.0"
-source = "git+https://github.com/mit-pdos/noria.git#074bcbaa10d6857d1516a143e0e24d464f53deb6"
+source = "git+https://github.com/mit-pdos/noria.git#fd59666d87734b1f31661d56a575c7b3291f39d7"
 dependencies = [
  "async-bincode 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-timer 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
