@@ -19,6 +19,7 @@ mod schema;
 mod utils;
 
 use crate::backend::NoriaBackend;
+use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
@@ -116,10 +117,11 @@ fn main() {
 
     use tracing_subscriber::Layer;
     let filter = tracing_subscriber::EnvFilter::from_default_env();
-    let registry = tracing_subscriber::registry::Registry::default();
+    let registry = tracing_subscriber::Registry::default();
     let tracer = if histograms {
         use tracing_timing::{Builder, Histogram};
-        let s = Builder::default().layer(|| Histogram::new_with_bounds(1_000, 100_000_000, 3).unwrap());
+        let s =
+            Builder::default().layer(|| Histogram::new_with_bounds(1_000, 100_000_000, 3).unwrap());
         tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
     } else {
         use tracing_subscriber::fmt;
@@ -128,12 +130,13 @@ fn main() {
         tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
     };
     tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
-    let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+    let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
 
-    let listener = rt
-        .block_on(tokio::net::tcp::TcpListener::bind(
-            &std::net::SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), port),
-        ))
+    let mut listener = rt
+        .block_on(tokio::net::TcpListener::bind(&std::net::SocketAddr::new(
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            port,
+        )))
         .unwrap();
 
     let log = logger_pls();
@@ -149,11 +152,19 @@ fn main() {
     let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     slog::debug!(log, "Connected!");
 
-    let ctrlc = rt.block_on(async { tokio::net::signal::ctrl_c() }).unwrap();
-    let mut listener = futures_util::stream::select(
+    let ctrlc = tokio::signal::ctrl_c();
+    let mut listener = Box::pin(futures_util::stream::select(
         listener.incoming(),
-        ctrlc.map(|()| Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))),
-    );
+        ctrlc
+            .map(|r| {
+                if let Err(e) = r {
+                    Err(e)
+                } else {
+                    Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
+                }
+            })
+            .into_stream(),
+    ));
     let primed = Arc::new(atomic::AtomicBool::new(false));
     let ops = Arc::new(atomic::AtomicUsize::new(0));
 
@@ -182,7 +193,7 @@ fn main() {
         let (auto_increments, query_cache, primed) =
             (auto_increments.clone(), query_cache.clone(), primed.clone());
 
-        let ex = rt.executor();
+        let ex = rt.handle().clone();
         let ch = ch.clone();
         let ops = ops.clone();
 
@@ -235,7 +246,7 @@ fn main() {
             .unwrap();
     }
 
-    rt.shutdown_on_idle();
+    drop(rt);
 
     if let Some(timing) = tracer.downcast_ref::<tracing_timing::TimingLayer>() {
         timing.force_synchronize();

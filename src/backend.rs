@@ -45,8 +45,8 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
-struct NoriaBackendInner<E> {
-    executor: E,
+struct NoriaBackendInner {
+    executor: tokio::runtime::Handle,
     noria: ControllerHandle<ZookeeperAuthority>,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
@@ -57,20 +57,12 @@ macro_rules! block_on {
         let noria = &mut $self.noria;
         futures_executor::block_on(futures_util::future::poll_fn(|cx| noria.poll_ready(cx)))
             .unwrap();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let fut = $fut;
-        $self
-            .executor
-            .spawn(Box::pin(async move {
-                tx.send(fut.await).unwrap();
-            }))
-            .unwrap();
-        futures_executor::block_on(rx).unwrap()
+        futures_executor::block_on($self.executor.spawn($fut)).unwrap()
     }};
 }
 
-impl<E> NoriaBackendInner<E> {
-    async fn new(ex: E, mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
+impl NoriaBackendInner {
+    async fn new(ex: tokio::runtime::Handle, mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
         ch.ready().await.unwrap();
         let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
         let mut i = BTreeMap::new();
@@ -96,10 +88,7 @@ impl<E> NoriaBackendInner<E> {
     }
 }
 
-impl<E> NoriaBackendInner<E>
-where
-    E: tokio::executor::Executor,
-{
+impl NoriaBackendInner {
     fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
         self.get_or_make_mutator(table)
             .expect(&format!("no table named '{}'!", table))
@@ -133,8 +122,8 @@ where
     }
 }
 
-pub struct NoriaBackend<E> {
-    inner: NoriaBackendInner<E>,
+pub struct NoriaBackend {
+    inner: NoriaBackendInner,
     ops: Arc<atomic::AtomicUsize>,
     trace_every: Option<usize>,
 
@@ -158,12 +147,9 @@ pub struct NoriaBackend<E> {
     static_responses: bool,
 }
 
-impl<E> NoriaBackend<E>
-where
-    E: tokio::executor::Executor,
-{
+impl NoriaBackend {
     pub async fn new(
-        ex: E,
+        ex: tokio::runtime::Handle,
         ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
@@ -368,10 +354,9 @@ where
                     // maybe ER_SYNTAX_ERROR ?
                     // would be good to narrow these down
                     // TODO: why are the actual error contents never printed?
-                    use std::error::Error;
                     return results.error(
                         msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                        e.description().as_bytes(),
+                        e.to_string().as_bytes(),
                     );
                 } else {
                     return Err(e);
@@ -1007,10 +992,7 @@ where
     }
 }
 
-impl<W: io::Write, E> MysqlShim<W> for &mut NoriaBackend<E>
-where
-    E: tokio::executor::Executor,
-{
+impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
     type Error = io::Error;
 
     fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {

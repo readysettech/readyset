@@ -82,7 +82,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let mut builder = Builder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
         let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
@@ -103,7 +103,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     zk_auth.log_with(logger.clone());
 
     debug!(logger, "Connecting to Noria...",);
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
     let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     debug!(logger, "Connected!");
 
@@ -114,7 +114,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let stats = (Arc::new(AtomicUsize::new(0)), None);
         let primed = Arc::new(AtomicBool::new(false));
         let b = NoriaBackend::new(
-            rt.executor(),
+            rt.handle().clone(),
             ch,
             auto_increments,
             query_cache,
@@ -123,12 +123,11 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
             false,
             true,
             true,
-            logger,
         );
         let mut b = rt.block_on(b);
 
         MysqlIntermediary::run_on_tcp(&mut b, s).unwrap();
-        rt.shutdown_on_idle();
+        drop(rt);
     });
 
     let mut builder = mysql::OptsBuilder::default();
