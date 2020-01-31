@@ -1,5 +1,5 @@
-use noria::{self, FrontierStrategy, LocalAuthority, NodeIndex, PersistenceParameters, SyncHandle};
-use tokio::prelude::*;
+use noria::{self, FrontierStrategy, Handle, LocalAuthority, NodeIndex, PersistenceParameters};
+use std::future::Future;
 
 pub(crate) const RECIPE: &str = "# base tables
 CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
@@ -19,7 +19,8 @@ pub struct Graph {
     pub vote: NodeIndex,
     pub article: NodeIndex,
     pub end: NodeIndex,
-    pub graph: SyncHandle<LocalAuthority>,
+    pub graph: Handle<LocalAuthority>,
+    pub done: Box<dyn Future<Output = ()> + Unpin + Send>,
 }
 
 pub struct Builder {
@@ -46,22 +47,10 @@ impl Default for Builder {
 
 impl Builder {
     #[allow(unused)]
-    pub fn start_sync(
+    pub async fn start(
         &self,
         persistence_params: PersistenceParameters,
     ) -> Result<Graph, failure::Error> {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let mut g = rt.block_on(self.start(rt.executor(), persistence_params))?;
-        g.graph.wrap_rt(rt);
-        Ok(g)
-    }
-
-    #[allow(unused)]
-    pub fn start(
-        &self,
-        ex: tokio::runtime::TaskExecutor,
-        persistence_params: PersistenceParameters,
-    ) -> impl Future<Item = Graph, Error = failure::Error> {
         // XXX: why isn't PersistenceParameters inside self?
         let mut g = noria::Builder::default();
         if !self.partial {
@@ -88,32 +77,33 @@ impl Builder {
 
         let logging = self.logging;
         let stupid = self.stupid;
-        g.start_local()
-            .and_then(|wh| wh.ready())
-            .and_then(|mut wh| wh.install_recipe(RECIPE).map(move |_| wh))
-            .and_then(|wh| wh.ready())
-            .and_then(|mut wh| wh.inputs().map(move |x| (wh, x)))
-            .and_then(|(wh, x)| wh.ready().map(move |wh| (wh, x)))
-            .and_then(|(mut wh, inputs)| wh.outputs().map(move |x| (wh, inputs, x)))
-            .inspect(move |(_, inputs, outputs)| {
-                if logging {
-                    println!("inputs {:?}", inputs);
-                    println!("outputs {:?}", outputs);
-                }
-            })
-            .map(move |(wh, inputs, outputs)| Graph {
-                vote: inputs["Vote"],
-                article: inputs["Article"],
-                end: outputs["ArticleWithVoteCount"],
-                stupid,
-                graph: SyncHandle::from_executor(ex, wh),
-            })
+        let (mut wh, done) = g.start_local().await?;
+        wh.ready().await?;
+        wh.install_recipe(RECIPE).await?;
+        wh.ready().await?;
+        let inputs = wh.inputs().await?;
+        wh.ready().await?;
+        let outputs = wh.outputs().await?;
+
+        if logging {
+            println!("inputs {:?}", inputs);
+            println!("outputs {:?}", outputs);
+        }
+
+        Ok(Graph {
+            vote: inputs["Vote"],
+            article: inputs["Article"],
+            end: outputs["ArticleWithVoteCount"],
+            stupid,
+            graph: wh,
+            done: Box::new(done),
+        })
     }
 }
 
 impl Graph {
     #[allow(dead_code)]
-    pub fn transition(&mut self) {
+    pub async fn transition(&mut self) {
         let stupid_recipe = "# base tables
                CREATE TABLE Rating (article_id int, user int, stars int);
 
@@ -138,9 +128,9 @@ impl Graph {
                             WHERE Article.id = ?;";
 
         if self.stupid {
-            self.graph.extend_recipe(stupid_recipe).unwrap();
+            self.graph.extend_recipe(stupid_recipe).await.unwrap();
         } else {
-            self.graph.extend_recipe(smart_recipe).unwrap();
+            self.graph.extend_recipe(smart_recipe).await.unwrap();
         }
     }
 }

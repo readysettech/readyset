@@ -1,11 +1,12 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
-use clap;
+use clap::{self, value_t_or_exit};
 use failure::ResultExt;
 use noria::{self, TableOperation};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time;
-use tokio::prelude::*;
 use tower_service::Service;
 
 pub(crate) mod graph;
@@ -24,12 +25,8 @@ pub(crate) struct LocalNoria {
 unsafe impl Send for LocalNoria {}
 
 impl VoteClient for LocalNoria {
-    type Future = Box<dyn Future<Item = Self, Error = failure::Error> + Send>;
-    fn new(
-        ex: tokio::runtime::TaskExecutor,
-        params: Parameters,
-        args: clap::ArgMatches,
-    ) -> <Self as VoteClient>::Future {
+    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future {
         use noria::{DurabilityMode, PersistenceParameters};
 
         assert!(params.prime);
@@ -65,78 +62,64 @@ impl VoteClient for LocalNoria {
         s.stupid = args.is_present("stupid");
         let purge = args.value_of("purge").unwrap().to_string();
         s.purge = purge.clone();
-        let g = s.start(ex, persistence);
 
-        // prepopulate
-        if verbose {
-            println!("Prepopulating with {} articles", params.articles);
+        async move {
+            let mut g = s.start(persistence).await?;
+
+            // prepopulate
+            if verbose {
+                println!("Prepopulating with {} articles", params.articles);
+            }
+
+            let mut a = g.graph.table("Article").await?;
+
+            if fudge {
+                a.i_promise_dst_is_same_process();
+            }
+
+            a.perform_all((0..params.articles).map(|i| {
+                vec![
+                    ((i + 1) as i32).into(),
+                    format!("Article #{}", i + 1).into(),
+                ]
+            }))
+            .await
+            .context("failed to do article prepopulation")?;
+
+            if verbose {
+                println!("Done with prepopulation");
+            }
+
+            // TODO: allow writes to propagate
+
+            let r = g.graph.view("ArticleWithVoteCount").await?;
+
+            let mut w = g.graph.table("Vote").await?;
+
+            if fudge {
+                // fudge write rpcs by sending just the pointer over tcp
+                w.i_promise_dst_is_same_process();
+            }
+
+            Ok(LocalNoria {
+                _g: Arc::new(g),
+                r: Some(r),
+                w: Some(w),
+            })
         }
-
-        Box::new(
-            g.and_then(|mut g| {
-                g.graph
-                    .handle()
-                    .unwrap()
-                    .table("Article")
-                    .map(move |a| (g, a))
-            })
-            .and_then(move |(g, mut a)| {
-                if fudge {
-                    a.i_promise_dst_is_same_process();
-                }
-
-                a.perform_all((0..params.articles).map(|i| {
-                    vec![
-                        ((i + 1) as i32).into(),
-                        format!("Article #{}", i + 1).into(),
-                    ]
-                }))
-                .map(move |_| g)
-                .map_err(|e| e.error)
-                .then(|r| {
-                    r.context("failed to do article prepopulation")
-                        .map_err(failure::Error::from)
-                })
-            })
-            .and_then(move |mut g| {
-                if verbose {
-                    println!("Done with prepopulation");
-                }
-
-                // TODO: allow writes to propagate
-
-                g.graph
-                    .handle()
-                    .unwrap()
-                    .view("ArticleWithVoteCount")
-                    .and_then(move |r| {
-                        g.graph.handle().unwrap().table("Vote").map(move |mut w| {
-                            if fudge {
-                                // fudge write rpcs by sending just the pointer over tcp
-                                w.i_promise_dst_is_same_process();
-                            }
-                            LocalNoria {
-                                _g: Arc::new(g),
-                                r: Some(r),
-                                w: Some(w),
-                            }
-                        })
-                    })
-            }),
-        )
     }
 }
 
 impl Service<ReadRequest> for LocalNoria {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
+    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.r
             .as_mut()
             .unwrap()
-            .poll_ready()
+            .poll_ready(cx)
             .map_err(failure::Error::from)
     }
 
@@ -148,27 +131,23 @@ impl Service<ReadRequest> for LocalNoria {
             .map(|article_id| vec![(article_id as usize).into()])
             .collect();
 
-        Box::new(
-            self.r
-                .as_mut()
-                .unwrap()
-                .call((arg, true))
-                .map(move |rows| {
-                    // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
-                    assert_eq!(rows.len(), len);
-                })
-                .map_err(failure::Error::from),
-        )
+        let fut = self.r.as_mut().unwrap().call((arg, true));
+        async move {
+            let rows = fut.await?;
+            // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
+            assert_eq!(rows.len(), len);
+            Ok(())
+        }
     }
 }
 
 impl Service<WriteRequest> for LocalNoria {
     type Response = ();
     type Error = failure::Error;
-    type Future = Box<dyn Future<Item = (), Error = failure::Error> + Send>;
+    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap())
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap(), cx)
             .map_err(failure::Error::from)
     }
 
@@ -179,14 +158,11 @@ impl Service<WriteRequest> for LocalNoria {
             .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
             .collect();
 
-        Box::new(
-            self.w
-                .as_mut()
-                .unwrap()
-                .call(data)
-                .map(|_| ())
-                .map_err(failure::Error::from),
-        )
+        let fut = self.w.as_mut().unwrap().call(data);
+        async move {
+            fut.await?;
+            Ok(())
+        }
     }
 }
 

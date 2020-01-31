@@ -1,6 +1,6 @@
 [package]
 name = "mir"
-version = "0.1.0"
+version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 publish = false
 
@@ -8,7 +8,7 @@ publish = false
 nom-sql = "0.0.10"
 regex = "1.0.0"
 slog = "2.4.0"
-petgraph = { version = "0.4.11", features = ["serde-1"] }
+petgraph = { version = "0.5", features = ["serde-1"] }
 
 # local deps
 common = { path = "../common" }

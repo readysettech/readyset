@@ -1,11 +1,11 @@
 /// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
-const FORCE_INPUT_YIELD_EVERY: usize = 64;
+const FORCE_INPUT_YIELD_EVERY: usize = 32;
 
 use super::ChannelCoordinator;
 use crate::coordination::CoordinationPayload;
 use async_bincode::AsyncDestination;
+use async_timer::Oneshot;
 use bincode;
-use bufstream::BufStream;
 use dataflow::{
     payload::SourceChannelIdentifier,
     prelude::{DataType, Executor},
@@ -13,33 +13,65 @@ use dataflow::{
 };
 use failure::{self, ResultExt};
 use fnv::{FnvHashMap, FnvHashSet};
-use futures::stream::futures_unordered::FuturesUnordered;
-use futures::{self, Future, Sink, Stream};
+use futures_util::{
+    sink::Sink,
+    stream::{futures_unordered::FuturesUnordered, Stream},
+};
 use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
 use noria::{Input, Tagged};
+use pin_project::pin_project;
 use slog;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
-use stream_cancel::{Valve, Valved};
+use std::time;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+use stream_cancel::Valve;
 use streamunordered::{StreamUnordered, StreamYield};
-use tokio;
-use tokio::prelude::*;
+use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 
-pub(super) type ReplicaIndex = (DomainIndex, usize);
+pub(super) type ReplicaAddr = (DomainIndex, usize);
 
+// https://github.com/rust-lang/rust/issues/64445
+type FirstByte = impl Future<Output = Result<(tokio::net::TcpStream, u8), tokio::io::Error>> + Send;
+
+/// Read the first byte of a stream.
+fn read_first_byte(mut stream: tokio::net::TcpStream) -> FirstByte {
+    async move {
+        let mut byte = [0; 1];
+        let n = stream.read_exact(&mut byte[..]).await?;
+        assert_eq!(n, 1);
+        Ok((stream, byte[0]))
+    }
+}
+
+#[pin_project]
 pub(super) struct Replica {
     domain: Domain,
-    log: slog::Logger,
+    pub(super) log: slog::Logger,
 
     coord: Arc<ChannelCoordinator>,
 
     retry: Option<Box<Packet>>,
-    incoming: Valved<tokio::net::tcp::Incoming>,
-    first_byte: FuturesUnordered<tokio::io::ReadExact<tokio::net::tcp::TcpStream, Vec<u8>>>,
-    locals: tokio_sync::mpsc::UnboundedReceiver<Box<Packet>>,
+
+    #[pin]
+    valve: Valve,
+
+    #[pin]
+    incoming: tokio::net::TcpListener,
+
+    #[pin]
+    first_byte: FuturesUnordered<FirstByte>,
+
+    locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+
+    #[pin]
     inputs: StreamUnordered<
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
@@ -48,17 +80,20 @@ pub(super) struct Replica {
             AsyncDestination,
         >,
     >,
+
     outputs: FnvHashMap<
-        ReplicaIndex,
+        ReplicaAddr,
         (
-            Box<dyn Sink<SinkItem = Box<Packet>, SinkError = bincode::Error> + Send>,
+            Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>,
             bool,
         ),
     >,
 
-    outbox: FnvHashMap<ReplicaIndex, VecDeque<Box<Packet>>>,
-    timeout: Option<tokio_os_timer::Delay>,
-    oob: OutOfBand,
+    #[pin]
+    timeout: async_timer::oneshot::Timer,
+    timed_out: bool,
+
+    out: Outboxes,
 }
 
 impl Replica {
@@ -66,8 +101,8 @@ impl Replica {
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
-        locals: tokio_sync::mpsc::UnboundedReceiver<Box<Packet>>,
-        ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>,
+        locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+        ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
@@ -78,79 +113,123 @@ impl Replica {
             coord: cc,
             domain,
             retry: None,
-            incoming: valve.wrap(on.incoming()),
+            valve: valve.clone(),
+            incoming: on,
             first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
-            outbox: Default::default(),
-            oob: OutOfBand::new(ctrl_tx),
-            timeout: None,
+            out: Outboxes::new(ctrl_tx),
+            timeout: async_timer::oneshot::Timer::new(time::Duration::from_secs(3600)),
+            timed_out: false,
         }
     }
 
-    fn try_oob(&mut self) -> Result<(), failure::Error> {
-        let inputs = &mut self.inputs;
-        let pending = &mut self.oob.pending;
+    fn try_acks(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+        let this = self.project();
+
+        let mut inputs = this.inputs;
+        let conns = &mut this.out.connections;
+        let pending = &mut this.out.pending;
 
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        self.oob.back.retain(|&streami, tags| {
-            let stream = &mut inputs[streami];
+        for &streami in &*pending {
+            let conn = &mut conns[streami];
+            let mut stream = Pin::new(&mut inputs[streami]);
+            let mut sent = 0;
 
-            let had = tags.len();
-            tags.retain(|&tag| {
-                match stream.start_send(Tagged { tag, v: () }) {
-                    Ok(AsyncSink::Ready) => false,
-                    Ok(AsyncSink::NotReady(_)) => {
-                        // TODO: also break?
-                        true
-                    }
-                    Err(e) => {
-                        // start_send shouldn't generally error
+            for &tag in &conn.tag_acks {
+                match stream.as_mut().poll_ready(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Pending => break,
+                    Poll::Ready(Err(e)) => {
                         err.push(e.into());
-                        true
+                        break;
                     }
                 }
-            });
 
-            if had != tags.len() {
-                pending.insert(streami);
+                if let Err(e) = stream.as_mut().start_send(Tagged { tag, v: () }) {
+                    // start_send shouldn't generally error
+                    err.push(e.into());
+                    break;
+                }
+
+                sent += 1;
             }
 
-            !tags.is_empty()
-        });
+            let _ = conn.tag_acks.drain(0..sent).count();
+
+            if sent > 0 {
+                conn.pending_flush = true;
+            }
+        }
 
         if !err.is_empty() {
             return Err(err.swap_remove(0));
         }
 
         // then, try to send on any streams we may be able to
+        let mut close = Vec::new();
         pending.retain(|&streami| {
+            let conn = &mut conns[streami];
+            if !conn.pending_flush {
+                // there better be unwritten tags, otherwise why is the stream in pending?
+                assert!(!conn.tag_acks.is_empty());
+                return true;
+            }
+
             let stream = &mut inputs[streami];
-            match stream.poll_complete() {
-                Ok(Async::Ready(())) => false,
-                Ok(Async::NotReady) => true,
-                Err(box bincode::ErrorKind::Io(e)) => {
-                    match e.kind() {
-                        io::ErrorKind::BrokenPipe
-                        | io::ErrorKind::NotConnected
-                        | io::ErrorKind::UnexpectedEof
-                        | io::ErrorKind::ConnectionAborted
-                        | io::ErrorKind::ConnectionReset => {
-                            // connection went away, no need to try more
-                            false
-                        }
-                        _ => {
-                            err.push(e.into());
-                            true
+            match Pin::new(stream).poll_flush(cx) {
+                Poll::Pending => true,
+                Poll::Ready(Ok(())) => {
+                    conn.pending_flush = false;
+                    if inputs.is_finished(streami).unwrap()
+                        && conn.unacked == 0
+                        && conn.tag_acks.is_empty()
+                    {
+                        // no more inputs on this stream, and nothing more to flush!
+                        close.push(streami);
+                    }
+
+                    // there may stil be more tags to write out
+                    !conn.tag_acks.is_empty()
+                }
+                Poll::Ready(Err(e)) => {
+                    let mut e = Some(e);
+                    if let bincode::ErrorKind::Io(ref ioe) = **e.as_ref().unwrap() {
+                        match ioe.kind() {
+                            io::ErrorKind::BrokenPipe
+                            | io::ErrorKind::NotConnected
+                            | io::ErrorKind::UnexpectedEof
+                            | io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionReset => {
+                                // connection went away, let's not bother the user with it
+                                let _ = e.take();
+                            }
+                            _ => {}
                         }
                     }
-                }
-                Err(e) => {
-                    err.push(e.into());
-                    true
+
+                    // there's no point in trying to write more things, so:
+                    conn.pending_flush = false;
+                    conn.unacked = 0;
+                    conn.tag_acks.clear();
+                    if inputs.is_finished(streami).unwrap() {
+                        close.push(streami);
+                    } else {
+                        // the read side of this stream will probably error soon too. when it does,
+                        // try_retire will likely succeed, and it will remove the connection. if an
+                        // ack comes in after that, we'll just hit if again, though then take the
+                        // branch above.
+                    }
+
+                    if let Some(e) = e {
+                        err.push(e.into());
+                    }
+
+                    false
                 }
             }
         });
@@ -159,17 +238,27 @@ impl Replica {
             return Err(err.swap_remove(0));
         }
 
+        for streami in close {
+            if this.out.try_retire(streami) {
+                // this stream has no more inputs and no more outputs
+                assert!(inputs.as_mut().is_finished(streami).unwrap());
+                inputs.as_mut().remove(streami);
+            }
+        }
+
         Ok(())
     }
 
-    fn try_flush(&mut self) -> Result<(), failure::Error> {
-        let cc = &self.coord;
-        let outputs = &mut self.outputs;
+    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+        let this = self.project();
 
-        // just like in try_oob:
+        let cc = this.coord;
+        let outputs = this.outputs;
+
+        // just like in try_acks:
         // first, queue up any additional writes we have to do
         let mut err = Vec::new();
-        for (&ri, ms) in &mut self.outbox {
+        for (&ri, ms) in &mut this.out.domains {
             if ms.is_empty() {
                 continue;
             }
@@ -180,17 +269,23 @@ impl Replica {
                 (tx, true)
             });
 
-            while let Some(m) = ms.pop_front() {
-                match tx.start_send(m) {
-                    Ok(AsyncSink::Ready) => {
+            let mut tx = Pin::new(tx);
+
+            while !ms.is_empty() {
+                match tx.as_mut().poll_ready(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Pending => break,
+                    Poll::Ready(Err(e)) => {
+                        err.push(e);
+                        break;
+                    }
+                }
+
+                let m = ms.pop_front().expect("!is_empty");
+                match tx.as_mut().start_send(m) {
+                    Ok(()) => {
                         // we queued something, so we'll need to send!
                         *pending = true;
-                    }
-                    Ok(AsyncSink::NotReady(m)) => {
-                        // put back the m we tried to send
-                        ms.push_front(m);
-                        // there's also no use in trying to enqueue more packets
-                        break;
                     }
                     Err(e) => {
                         err.push(e);
@@ -210,12 +305,12 @@ impl Replica {
                 continue;
             }
 
-            match tx.poll_complete() {
-                Ok(Async::Ready(())) => {
+            match Pin::new(tx).poll_flush(cx) {
+                Poll::Ready(Ok(())) => {
                     *pending = false;
                 }
-                Ok(Async::NotReady) => {}
-                Err(e) => err.push(e),
+                Poll::Pending => {}
+                Poll::Ready(Err(e)) => err.push(e),
             }
         }
 
@@ -226,273 +321,367 @@ impl Replica {
         Ok(())
     }
 
-    fn try_new(&mut self) -> io::Result<bool> {
-        while let Async::Ready(stream) = self.incoming.poll()? {
-            match stream {
-                Some(stream) => {
-                    // we know that any new connection to a domain will first send a one-byte
-                    // token to indicate whether the connection is from a base or not.
-                    debug!(self.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-                    self.first_byte
-                        .push(tokio::io::read_exact(stream, vec![0; 1]));
-                }
-                None => {
-                    return Ok(false);
-                }
+    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
+        let mut this = self.project();
+
+        if let Poll::Ready(true) = this.valve.poll_closed(cx) {
+            return Ok(false);
+        } else {
+            while let Poll::Ready((stream, _)) = this.incoming.as_mut().poll_accept(cx)? {
+                // we know that any new connection to a domain will first send a one-byte
+                // token to indicate whether the connection is from a base or not.
+                debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
+                this.first_byte.push(read_first_byte(stream));
             }
         }
 
-        while let Async::Ready(Some((stream, tag))) = self.first_byte.poll()? {
-            let is_base = tag[0] == CONNECTION_FROM_BASE;
+        while let Poll::Ready(Some((stream, tag))) = this.first_byte.as_mut().poll_next(cx)? {
+            let is_base = tag == CONNECTION_FROM_BASE;
 
-            debug!(self.log, "established new connection"; "base" => ?is_base);
-            let slot = self.inputs.stream_slot();
+            debug!(this.log, "established new connection"; "base" => ?is_base);
+            let slot = this.inputs.stream_entry();
             let token = slot.token();
+            let epoch = if let Some(e) = this.out.connections.get_mut(token) {
+                e.epoch
+            } else {
+                let epoch = 1;
+                let t = this.out.connections.insert(ConnState {
+                    unacked: 0,
+                    tag_acks: Vec::new(),
+                    epoch,
+                    pending_flush: false,
+                });
+                assert_eq!(t, token);
+                epoch
+            };
             if let Err(e) = stream.set_nodelay(true) {
-                warn!(self.log,
+                warn!(this.log,
                       "failed to set TCP_NODELAY for new connection: {:?}", e;
                       "from" => ?stream.peer_addr().unwrap());
             }
             let tcp = if is_base {
-                DualTcpStream::upgrade(BufStream::new(stream), move |Tagged { v: input, tag }| {
-                    Box::new(Packet::Input {
-                        inner: input,
-                        src: Some(SourceChannelIdentifier { token, tag }),
-                        senders: Vec::new(),
-                    })
-                })
+                DualTcpStream::upgrade(
+                    tokio::io::BufStream::new(stream),
+                    move |Tagged { v: input, tag }| {
+                        Box::new(Packet::Input {
+                            inner: input,
+                            src: Some(SourceChannelIdentifier { token, tag, epoch }),
+                            senders: Vec::new(),
+                        })
+                    },
+                )
             } else {
-                BufStream::with_capacities(2 * 1024 * 1024, 4 * 1024, stream).into()
+                tokio::io::BufStream::from(BufReader::with_capacity(
+                    2 * 1024 * 1024,
+                    BufWriter::with_capacity(4 * 1024, stream),
+                ))
+                .into()
             };
             slot.insert(tcp);
         }
         Ok(true)
     }
 
-    fn try_timeout(&mut self) -> Poll<(), io::Error> {
-        if let Some(mut to) = self.timeout.take() {
-            if let Async::Ready(()) = to.poll()? {
-                crate::block_on(|| {
-                    self.domain
-                        .on_event(&mut self.oob, PollEvent::Timeout, &mut self.outbox)
-                });
-                return Ok(Async::Ready(()));
-            } else {
-                self.timeout = Some(to);
+    // returns true if on_event(Timeout) was called
+    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> bool {
+        let mut processed = false;
+        let mut this = self.project();
+
+        if !this.timeout.is_expired() {
+            if let Poll::Ready(()) = this.timeout.as_mut().poll(cx) {
+                *this.timed_out = true;
             }
         }
-        Ok(Async::NotReady)
+
+        if *this.timed_out {
+            *this.timed_out = false;
+            tokio::task::block_in_place(|| {
+                this.domain.on_event(this.out, PollEvent::Timeout);
+                processed = true;
+            });
+        }
+
+        processed
     }
 }
 
-struct OutOfBand {
-    // map from inputi to number of (empty) ACKs
-    back: FnvHashMap<usize, Vec<u32>>,
+struct ConnState {
+    // number of unacked inputs
+    unacked: usize,
+
+    // unsent acks (value is the tag)
+    tag_acks: Vec<u32>,
+
+    // epoch counter for each stream index (since they're re-used)
+    epoch: usize,
+
+    // do we have stuff to flush
+    pending_flush: bool,
+}
+
+struct Outboxes {
+    // anything new to send?
+    dirty: bool,
+
+    // messages for other domains
+    domains: FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+
+    // connection state for each stream
+    connections: slab::Slab<ConnState>,
+
+    // which connections have pending writes
     pending: FnvHashSet<usize>,
 
     // for sending messages to the controller
-    ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>,
+    ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
 }
 
-impl OutOfBand {
-    fn new(ctrl_tx: futures::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
-        OutOfBand {
-            back: Default::default(),
+impl Outboxes {
+    fn new(ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
+        let mut connections = slab::Slab::new();
+
+        // index 0 is reserved
+        connections.insert(ConnState {
+            unacked: 0,
+            tag_acks: Vec::new(),
+            epoch: 0,
+            pending_flush: false,
+        });
+
+        Outboxes {
+            domains: Default::default(),
+            connections,
             pending: Default::default(),
             ctrl_tx,
+            dirty: false,
+        }
+    }
+
+    fn saw_input(&mut self, token: usize, epoch: usize) {
+        let mut c = &mut self.connections[token];
+        if c.epoch == epoch {
+            c.unacked += 1;
+        }
+    }
+
+    fn try_retire(&mut self, streami: usize) -> bool {
+        let mut c = &mut self.connections[streami];
+        if c.unacked == 0 && c.tag_acks.is_empty() && !c.pending_flush {
+            // nothing more to send back on this connection -- fine to retire!
+            // increment the epoch to detect stale acks
+            c.epoch += 1;
+
+            // no unwritten tags and not pending flush, so we shouldn't be in pending
+            assert!(!self.pending.contains(&streami));
+
+            // NOTE: the ConnState will be re-used for another connection
+            true
+        } else {
+            false
         }
     }
 }
 
-impl Executor for OutOfBand {
+impl Executor for Outboxes {
     fn ack(&mut self, id: SourceChannelIdentifier) {
-        self.back.entry(id.token).or_default().push(id.tag);
+        self.dirty = true;
+        let mut c = &mut self.connections[id.token];
+        if id.epoch == c.epoch {
+            // if the epoch doesn't match, the stream was closed and a new one has been established
+            // note that this only matters for connections that do not wait for all acks!
+            c.tag_acks.push(id.tag);
+
+            // NOTE: it's a little sad we can't crash on underflow here.
+            // it is because if a send fails, we set c.unacked = 0, and should the domain _then_
+            // produce an ack, a checked underflow would fail.
+            c.unacked = c.unacked.saturating_sub(1);
+
+            // we now have stuff to send for this connection
+            self.pending.insert(id.token);
+        }
     }
 
     fn create_universe(&mut self, universe: HashMap<String, DataType>) {
         self.ctrl_tx
-            .unbounded_send(CoordinationPayload::CreateUniverse(universe))
+            .send(CoordinationPayload::CreateUniverse(universe))
             .expect("asked to send to controller, but controller has gone away");
+    }
+
+    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
+        self.dirty = true;
+        self.domains.entry(dest).or_default().push_back(m);
     }
 }
 
 impl Future for Replica {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-        let r: Result<Async<Self::Item>, failure::Error> = try {
-            loop {
-                // FIXME: check if we should call update_state_sizes (every evict_every)
+    type Output = Result<(), failure::Error>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        'process: loop {
+            // FIXME: check if we should call update_state_sizes (every evict_every)
 
-                // are there are any new connections?
-                if !self.try_new().context("check for new connections")? {
-                    // incoming socket closed -- no more clients will arrive
-                    return Ok(Async::Ready(()));
+            // are there are any new connections?
+            if !self
+                .as_mut()
+                .try_new(cx)
+                .context("check for new connections")?
+            {
+                // incoming socket closed -- no more clients will arrive
+                return Poll::Ready(Ok(()));
+            }
+
+            // have any of our timers expired?
+            self.as_mut().try_timeout(cx);
+
+            // we have three logical input sources: receives from local domains, receives from
+            // remote domains, and remote mutators. we want to achieve some kind of fairness among
+            // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
+            // operations) to accepting new work. however, this is complicated by two facts:
+            //
+            //  - we cannot (currently) differentiate between receives from remote domains and
+            //    receives from mutators. they are all remote tcp channels. we *could*
+            //    differentiate them using `is_base` in `try_new` to store them separately, but
+            //    it's also unclear how that would change the receive heuristic.
+            //  - domain operations are not all "completing starting work". in many cases, traffic
+            //    from domains will be replay-related, in which case favoring domains would favor
+            //    writes over reads. while we do in general want reads to be fast, we don't want
+            //    them to fully starve writes.
+            //
+            // the current stategy is therefore that we alternate reading once from the local
+            // channel and once from the set of remote channels. this biases slightly in favor of
+            // local sends, without starving either. we also stop alternating once either source is
+            // depleted.
+            let mut local_done = false;
+            let mut remote_done = false;
+            let mut check_local = true;
+            let mut this = self.as_mut().project();
+            let d = this.domain;
+            let out = this.out;
+
+            macro_rules! process {
+                ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
+                    $retry = Some($p);
+                    let retry = &mut $retry;
+                    if let ProcessResult::StopPolling = tokio::task::block_in_place(|| {
+                        let packet = retry.take().unwrap();
+                        if let Packet::Input {
+                            src: Some(SourceChannelIdentifier { token, epoch, .. }),
+                            ..
+                        } = *packet
+                        {
+                            $outbox.saw_input(token, epoch);
+                        }
+                        $pp(packet)
+                    }) {
+                        // domain got a message to quit
+                        // TODO: should we finish up remaining work?
+                        return Poll::Ready(Ok(()));
+                    }
+                }};
+            }
+
+            if let Some(p) = this.retry.take() {
+                // first try the thing we failed to process last time again
+                process!(*this.retry, out, p, |p| d
+                    .on_event(out, PollEvent::Process(p),));
+            }
+
+            for _ in 0..FORCE_INPUT_YIELD_EVERY {
+                if !local_done && (check_local || remote_done) {
+                    match this.locals.poll_recv(cx) {
+                        Poll::Ready(Some(packet)) => {
+                            process!(*this.retry, out, packet, |p| d
+                                .on_event(out, PollEvent::Process(p),));
+                        }
+                        Poll::Ready(None) => {
+                            // local input stream finished
+                            // TODO: should we finish up remaining work?
+                            warn!(this.log, "local input stream ended");
+                            return Poll::Ready(Ok(()));
+                        }
+                        Poll::Pending => {
+                            local_done = true;
+                        }
+                    }
                 }
 
-                // have any of our timers expired?
-                self.try_timeout().context("check timeout")?;
-
-                // we have three logical input sources: receives from local domains, receives from
-                // remote domains, and remote mutators. we want to achieve some kind of fairness among
-                // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
-                // operations) to accepting new work. however, this is complicated by two facts:
-                //
-                //  - we cannot (currently) differentiate between receives from remote domains and
-                //    receives from mutators. they are all remote tcp channels. we *could*
-                //    differentiate them using `is_base` in `try_new` to store them separately, but
-                //    it's also unclear how that would change the receive heuristic.
-                //  - domain operations are not all "completing starting work". in many cases, traffic
-                //    from domains will be replay-related, in which case favoring domains would favor
-                //    writes over reads. while we do in general want reads to be fast, we don't want
-                //    them to fully starve writes.
-                //
-                // the current stategy is therefore that we alternate reading once from the local
-                // channel and once from the set of remote channels. this biases slightly in favor of
-                // local sends, without starving either. we also stop alternating once either source is
-                // depleted.
-                let mut local_done = false;
-                let mut remote_done = false;
-                let mut check_local = true;
-                let readiness = 'ready: loop {
-                    let d = &mut self.domain;
-                    let oob = &mut self.oob;
-                    let ob = &mut self.outbox;
-
-                    macro_rules! process {
-                        ($retry:expr, $p:expr, $pp:expr) => {{
-                            $retry = Some($p);
-                            let retry = &mut $retry;
-                            match tokio_threadpool::blocking(|| $pp(retry.take().unwrap())) {
-                                Ok(Async::Ready(ProcessResult::StopPolling)) => {
-                                    // domain got a message to quit
-                                    // TODO: should we finish up remaining work?
-                                    return Ok(Async::Ready(()));
-                                }
-                                Ok(Async::Ready(_)) => {}
-                                Ok(Async::NotReady) => {
-                                    // NOTE: the packet is still left in $retry, so we'll try again
-                                    break 'ready Async::NotReady;
-                                }
-                                Err(e) => {
-                                    unreachable!("trying to block without tokio runtime: {:?}", e)
-                                }
-                            }
-                        }};
-                    }
-
-                    let mut interrupted = false;
-                    if let Some(p) = self.retry.take() {
-                        // first try the thing we failed to process last time again
-                        process!(self.retry, p, |p| d.on_event(
-                            oob,
-                            PollEvent::Process(p),
-                            ob
-                        ));
-                    }
-
-                    for i in 0..FORCE_INPUT_YIELD_EVERY {
-                        if !local_done && (check_local || remote_done) {
-                            match self.locals.poll() {
-                                Ok(Async::Ready(Some(packet))) => process!(
-                                    self.retry,
-                                    packet,
-                                    |p| d.on_event(oob, PollEvent::Process(p), ob)
-                                ),
-                                Ok(Async::Ready(None)) => {
-                                    // local input stream finished?
-                                    // TODO: should we finish up remaining work?
-                                    return Ok(Async::Ready(()));
-                                }
-                                Ok(Async::NotReady) => {
-                                    local_done = true;
-                                }
-                                Err(e) => {
-                                    error!(self.log, "local input stream failed: {:?}", e);
-                                    local_done = true;
-                                    break;
-                                }
+                if !remote_done && (!check_local || local_done) {
+                    match this.inputs.as_mut().poll_next(cx) {
+                        Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
+                            process!(*this.retry, out, packet, |p| d
+                                .on_event(out, PollEvent::Process(p),));
+                        }
+                        Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
+                            if out.try_retire(streami) {
+                                f.remove(this.inputs.as_mut());
+                            } else {
+                                // We still have responses to send, even though there are no
+                                // more requests. Keep the stream around for now. We'll clean
+                                // it up when the sends have finished.
+                                f.keep();
                             }
                         }
-
-                        if !remote_done && (!check_local || local_done) {
-                            match self.inputs.poll() {
-                                Ok(Async::Ready(Some((StreamYield::Item(packet), _)))) => process!(
-                                    self.retry,
-                                    packet,
-                                    |p| d.on_event(oob, PollEvent::Process(p), ob)
-                                ),
-                                Ok(Async::Ready(Some((
-                                    StreamYield::Finished(_stream),
-                                    streami,
-                                )))) => {
-                                    oob.back.remove(&streami);
-                                    oob.pending.remove(&streami);
-                                    // FIXME: what about if a later flush flushes to this stream?
-                                }
-                                Ok(Async::Ready(None)) => {
-                                    // we probably haven't booted yet
-                                    remote_done = true;
-                                }
-                                Ok(Async::NotReady) => {
-                                    remote_done = true;
-                                }
-                                Err(e) => {
-                                    error!(self.log, "input stream failed: {:?}", e);
-                                    remote_done = true;
-                                    break;
-                                }
-                            }
+                        Poll::Ready(None) => {
+                            // we probably haven't booted yet
+                            remote_done = true;
                         }
-
-                        // alternate between input sources
-                        check_local = !check_local;
-
-                        // nothing more to do -- wait to be polled again
-                        if local_done && remote_done {
+                        Poll::Pending => {
+                            remote_done = true;
+                        }
+                        Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
+                            error!(this.log, "input stream failed: {:?}", e);
                             break;
                         }
-
-                        if i == FORCE_INPUT_YIELD_EVERY - 1 {
-                            // we could keep processing inputs, but make sure we send some ACKs too!
-                            interrupted = true;
-                        }
                     }
+                }
 
-                    // send to downstream
-                    // TODO: send fail == exiting?
-                    self.try_flush().context("downstream flush (after)")?;
+                // alternate between input sources
+                check_local = !check_local;
+            }
 
-                    // send acks
-                    self.try_oob()?;
+            // send to downstream
+            // TODO: send fail == exiting?
+            self.as_mut()
+                .try_flush(cx)
+                .context("downstream flush (after)")?;
 
-                    if interrupted {
-                        // resume reading from our non-depleted inputs
-                        continue;
-                    }
-                    break Async::NotReady;
-                };
+            // send acks
+            self.as_mut().try_acks(cx)?;
 
-                // check if we now need to set a timeout
-                match self.domain.on_event(
-                    &mut self.oob,
-                    PollEvent::ResumePolling,
-                    &mut self.outbox,
-                ) {
+            if local_done && remote_done {
+                // we're yielding voluntarily to not block the executor and must ensure we wake
+                // up again
+                cx.waker().wake_by_ref();
+            }
+
+            // check if we now need to set a timeout
+            self.out.dirty = false;
+            loop {
+                let mut this = self.as_mut().project();
+                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
-                            // tokio-timer has a resolution of 1ms, so we can't use it :'(
-                            // TODO: how about we don't create a new timer each time?
-                            self.timeout = Some(tokio_os_timer::Delay::new(timeout).unwrap());
+                            if timeout == time::Duration::new(0, 0) {
+                                *this.timed_out = true;
+                            } else {
+                                this.timeout.restart(timeout, cx.waker());
+                            }
 
                             // we need to poll the timer to ensure we'll get woken up
-                            if let Async::Ready(()) =
-                                self.try_timeout().context("check timeout after setting")?
-                            {
-                                // the timer expired and we did some stuff
-                                // make sure we don't return while there's more work to do
-                                task::current().notify();
+                            if self.as_mut().try_timeout(cx) {
+                                // a timeout occurred, so we may have to set a new timer
+                                if self.out.dirty {
+                                    // if we're already dirty, we'll re-do processing anyway
+                                } else {
+                                    // try to resume polling again
+                                    continue;
+                                }
                             }
+                        }
+
+                        if self.out.dirty {
+                            // more stuff appeared in our outboxes
+                            // can't yield yet -- we need to try to send it
+                            continue 'process;
                         }
                     }
                     pr => {
@@ -500,17 +689,10 @@ impl Future for Replica {
                         unreachable!("unexpected ResumePolling result {:?}", pr)
                     }
                 }
-
-                break readiness;
+                break;
             }
-        };
 
-        match r {
-            Ok(k) => Ok(k),
-            Err(e) => {
-                crit!(self.log, "replica failure: {:?}", e);
-                Err(())
-            }
+            break Poll::Pending;
         }
     }
 }

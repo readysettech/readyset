@@ -4,9 +4,9 @@ use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde;
 use tempfile::{tempdir, TempDir};
 
+use crate::prelude::*;
+use crate::state::{RecordResult, State};
 use common::SizeOf;
-use prelude::*;
-use state::{RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -181,7 +181,7 @@ impl State for PersistentState {
             .unwrap()
             .unwrap() as usize;
 
-        (total_keys / self.indices.len())
+        total_keys / self.indices.len()
     }
 
     fn is_useful(&self) -> bool {
@@ -256,7 +256,7 @@ impl PersistentState {
             ::std::thread::sleep(::std::time::Duration::from_millis(50));
             db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
         }
-        let db = db.unwrap();
+        let mut db = db.unwrap();
         let meta = Self::retrieve_and_update_meta(&db);
         let indices: Vec<PersistentIndex> = meta
             .indices
@@ -1065,6 +1065,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn persistent_state_drop() {
         let path = {
             let state = PersistentState::new(

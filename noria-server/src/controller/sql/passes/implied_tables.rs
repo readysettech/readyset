@@ -43,12 +43,12 @@ where
         }
         LogicalOp(ConditionTree {
             operator,
-            box left,
-            box right,
+            left,
+            right,
         }) => LogicalOp(ConditionTree {
             operator,
-            left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
-            right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+            left: Box::new(rewrite_conditional(expand_columns, *left, avail_tables)),
+            right: Box::new(rewrite_conditional(expand_columns, *right, avail_tables)),
         }),
         x => x,
     }

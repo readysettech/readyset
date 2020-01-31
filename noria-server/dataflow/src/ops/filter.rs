@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::sync;
 
+use crate::prelude::*;
 pub use nom_sql::Operator;
-use prelude::*;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,7 +221,7 @@ impl Ingredient for Filter {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(
         materialized: bool,

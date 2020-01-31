@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
-use prelude::*;
+use crate::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectExpressionBase {
@@ -311,7 +311,7 @@ impl Ingredient for Project {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_all() {
-        let state = box MemoryState::default();
+        let state = Box::new(MemoryState::default());
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
@@ -560,11 +560,11 @@ mod tests {
 
     #[test]
     fn it_queries_through_all_persistent() {
-        let state = box PersistentState::new(
+        let state = Box::new(PersistentState::new(
             String::from("it_queries_through_all_persistent"),
             None,
             &PersistenceParameters::default(),
-        );
+        ));
 
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_some() {
-        let state = box MemoryState::default();
+        let state = Box::new(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DataType> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -581,11 +581,11 @@ mod tests {
 
     #[test]
     fn it_queries_through_some_persistent() {
-        let state = box PersistentState::new(
+        let state = Box::new(PersistentState::new(
             String::from("it_queries_through_some_persistent"),
             None,
             &PersistenceParameters::default(),
-        );
+        ));
 
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DataType> = vec![2.into()];
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn it_queries_through_w_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let state = box MemoryState::default();
+        let state = Box::new(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DataType> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -604,11 +604,11 @@ mod tests {
     #[test]
     fn it_queries_through_w_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let state = box PersistentState::new(
+        let state = Box::new(PersistentState::new(
             String::from("it_queries_through_w_literals"),
             None,
             &PersistenceParameters::default(),
-        );
+        ));
 
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DataType> = vec![2.into(), 42.into()];
@@ -624,7 +624,7 @@ mod tests {
             op: ArithmeticOperator::Add,
         }]);
 
-        let state = box MemoryState::default();
+        let state = Box::new(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -639,11 +639,11 @@ mod tests {
             op: ArithmeticOperator::Add,
         }]);
 
-        let state = box PersistentState::new(
+        let state = Box::new(PersistentState::new(
             String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
             None,
             &PersistenceParameters::default(),
-        );
+        ));
 
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];

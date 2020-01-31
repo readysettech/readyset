@@ -9,18 +9,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
-use futures;
-use group_commit::GroupCommitQueueSet;
+use crate::group_commit::GroupCommitQueueSet;
+use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
+use crate::prelude::*;
+use futures_util::{future::FutureExt, stream::StreamExt};
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
-use payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
-use prelude::*;
 use slog::Logger;
 use stream_cancel::Valve;
 
+use crate::Readers;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use tokio::{self, prelude::*};
-use Readers;
+use tokio;
 
 #[derive(Debug)]
 pub enum PollEvent {
@@ -236,7 +236,7 @@ pub struct Domain {
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
-    replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
+    replay_request_queue: VecDeque<(Tag, Vec<Vec<DataType>>)>,
 
     shutdown_valve: Valve,
     readers: Readers,
@@ -265,7 +265,7 @@ pub struct Domain {
 impl Domain {
     fn find_tags_and_replay(
         &mut self,
-        miss_key: Vec<DataType>,
+        miss_keys: Vec<Vec<DataType>>,
         miss_columns: &[usize],
         miss_in: LocalNodeIndex,
     ) {
@@ -281,7 +281,7 @@ impl Domain {
         for &tag in &tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            let key = miss_key.clone(); // :(
+            let keys = miss_keys.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 // *in theory* we could just call self.seed_replay, and everything would be good.
                 // however, then we start recursing, which could get us into sad situations where
@@ -303,24 +303,24 @@ impl Domain {
                 // and then get back to it after all processing has finished (at the bottom of
                 // `Self::handle()`)
                 self.delayed_for_self
-                    .push_back(box Packet::RequestPartialReplay {
+                    .push_back(Box::new(Packet::RequestPartialReplay {
                         tag,
-                        key,
+                        keys,
                         unishard: true, // local replays are necessarily single-shard
-                    });
+                    }));
                 continue;
             }
 
             // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
-            self.request_partial_replay(tag, key);
+            self.request_partial_replay(tag, keys);
         }
 
         if tags.is_empty() {
             unreachable!(format!(
                 "no tag found to fill missing value {:?} in {}.{:?}",
-                miss_key, miss_in, miss_columns
+                miss_keys, miss_in, miss_columns
             ));
         }
     }
@@ -372,10 +372,10 @@ impl Domain {
             return;
         }
 
-        self.find_tags_and_replay(miss_key, miss_columns, miss_in);
+        self.find_tags_and_replay(vec![miss_key], miss_columns, miss_in);
     }
 
-    fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
+    fn send_partial_replay_request(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         if let TriggerEndpoint::End {
             source,
@@ -399,18 +399,18 @@ impl Domain {
                 self.concurrent_replays += 1;
                 trace!(self.log, "sending shuffled shard replay request";
                 "tag" => ?tag,
-                "key" => ?key,
+                "keys" => ?keys,
                 "buffered" => self.replay_request_queue.len(),
                 "concurrent" => self.concurrent_replays,
                 );
 
                 for trigger in options {
                     if trigger
-                        .send(box Packet::RequestPartialReplay {
+                        .send(Box::new(Packet::RequestPartialReplay {
                             tag,
-                            unishard: false,  // ask_all is true, so replay is sharded
-                            key: key.clone(), // sad to clone here
-                        })
+                            unishard: false, // ask_all is true, so replay is sharded
+                            keys: keys.clone(), // sad to clone here
+                        }))
                         .is_err()
                     {
                         // we're shutting down -- it's fine.
@@ -419,47 +419,63 @@ impl Domain {
                 return;
             }
 
-            let shard = if options.len() == 1 {
-                0
+            self.concurrent_replays += 1;
+            trace!(self.log, "sending replay request";
+                "tag" => ?tag,
+                "keys" => ?keys,
+                "buffered" => self.replay_request_queue.len(),
+                "concurrent" => self.concurrent_replays,
+            );
+
+            if options.len() == 1 {
+                if options[0]
+                    .send(Box::new(Packet::RequestPartialReplay {
+                        tag,
+                        keys,
+                        unishard: true, // only one option, so only one path
+                    }))
+                    .is_err()
+                {
+                    // we're shutting down -- it's fine.
+                }
             } else if let Some(key_shard_i) = ask_shard_by_key_i {
-                ::shard_by(&key[key_shard_i], options.len())
+                let mut shards = HashMap::new();
+                for key in keys {
+                    let shard = crate::shard_by(&key[key_shard_i], options.len());
+                    shards.entry(shard).or_insert_with(Vec::new).push(key);
+                }
+                for (shard, keys) in shards {
+                    if options[shard]
+                        .send(Box::new(Packet::RequestPartialReplay {
+                            tag,
+                            keys,
+                            unishard: true, // !ask_all, so only one path
+                        }))
+                        .is_err()
+                    {
+                        // we're shutting down -- it's fine.
+                    }
+                }
             } else {
                 // would have hit the if further up
                 unreachable!();
             };
-            self.concurrent_replays += 1;
-            trace!(self.log, "sending replay request";
-            "tag" => ?tag,
-            "key" => ?key,
-            "buffered" => self.replay_request_queue.len(),
-            "concurrent" => self.concurrent_replays,
-            );
-            if options[shard]
-                .send(box Packet::RequestPartialReplay {
-                    tag,
-                    key,
-                    unishard: true, // only one option / !ask_all, so only one path
-                })
-                .is_err()
-            {
-                // we're shutting down -- it's fine.
-            }
         } else {
             unreachable!("asked to replay along non-existing path")
         }
     }
 
-    fn request_partial_replay(&mut self, tag: Tag, key: Vec<DataType>) {
+    fn request_partial_replay(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
         if self.concurrent_replays < self.max_concurrent_replays {
             assert_eq!(self.replay_request_queue.len(), 0);
-            self.send_partial_replay_request(tag, key);
+            self.send_partial_replay_request(tag, keys);
         } else {
             trace!(self.log, "buffering replay request";
-            "tag" => ?tag,
-            "key" => ?key,
-            "buffered" => self.replay_request_queue.len(),
+                "tag" => ?tag,
+                "keys" => ?keys,
+                "buffered" => self.replay_request_queue.len(),
             );
-            self.replay_request_queue.push_back((tag, key));
+            self.replay_request_queue.push_back((tag, keys));
         }
     }
 
@@ -502,18 +518,26 @@ impl Domain {
                 "ongoing" => self.concurrent_replays,
                 );
                 debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+                let mut per_tag = HashMap::new();
                 while self.concurrent_replays < self.max_concurrent_replays {
-                    if let Some((tag, key)) = self.replay_request_queue.pop_front() {
-                        trace!(self.log, "releasing replay request";
+                    if let Some((tag, mut keys)) = self.replay_request_queue.pop_front() {
+                        per_tag
+                            .entry(tag)
+                            .or_insert_with(Vec::new)
+                            .append(&mut keys);
+                    } else {
+                        break;
+                    }
+                }
+
+                for (tag, keys) in per_tag {
+                    trace!(self.log, "releasing replay request";
                         "tag" => ?tag,
-                        "key" => ?key,
+                        "keys" => ?keys,
                         "left" => self.replay_request_queue.len(),
                         "ongoing" => self.concurrent_replays,
-                        );
-                        self.send_partial_replay_request(tag, key);
-                    } else {
-                        return;
-                    }
+                    );
+                    self.send_partial_replay_request(tag, keys);
                 }
             }
             TriggerEndpoint::Local(..) => {
@@ -525,7 +549,7 @@ impl Domain {
         }
     }
 
-    fn dispatch(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, executor: &mut dyn Executor) {
+    fn dispatch(&mut self, m: Box<Packet>, executor: &mut dyn Executor) {
         let src = m.src();
         let me = m.dst();
 
@@ -558,7 +582,6 @@ impl Domain {
                 &self.nodes,
                 self.shard,
                 true,
-                sends,
                 executor,
             );
             assert_eq!(captured.len(), 0);
@@ -671,21 +694,21 @@ impl Domain {
                         link: Link::new(src, me),
                         tag,
                     }),
-                    sends,
+                    executor,
                 );
             }
         }
 
-        match m.as_ref().unwrap() {
-            m @ &box Packet::Message { .. } if m.is_empty() => {
+        match &**m.as_ref().unwrap() {
+            m @ &Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
                 return;
             }
-            &box Packet::Message { .. } => {}
-            &box Packet::ReplayPiece { .. } => {
+            &Packet::Message { .. } => {}
+            &Packet::ReplayPiece { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
-            ref m => unreachable!("dispatch process got {:?}", m),
+            m => unreachable!("dispatch process got {:?}", m),
         }
 
         // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
@@ -695,7 +718,7 @@ impl Domain {
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
             } else {
-                m.as_ref().map(|m| box m.clone_data()).unwrap()
+                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
             let childi = self.nodes[me].borrow().children()[i];
@@ -712,18 +735,12 @@ impl Domain {
             }
             m.link_mut().dst = childi;
 
-            self.dispatch(m, sends, executor);
+            self.dispatch(m, executor);
         }
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle(
-        &mut self,
-        m: Box<Packet>,
-        sends: &mut EnqueuedSends,
-        executor: &mut dyn Executor,
-        top: bool,
-    ) {
+    fn handle(&mut self, m: Box<Packet>, executor: &mut dyn Executor, top: bool) {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
@@ -733,16 +750,16 @@ impl Domain {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 self.total_forward_time.start();
-                self.dispatch(m, sends, executor);
+                self.dispatch(m, executor);
                 self.total_forward_time.stop();
             }
             Packet::ReplayPiece { .. } => {
                 self.total_replay_time.start();
-                self.handle_replay(m, sends, executor);
+                self.handle_replay(m, executor);
                 self.total_replay_time.stop();
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
-                self.handle_eviction(m, sends);
+                self.handle_eviction(m, executor);
             }
             consumed => {
                 match consumed {
@@ -841,11 +858,11 @@ impl Domain {
                             .unwrap();
                     }
                     Packet::PrepareState { node, state } => {
-                        use payload::InitialState;
+                        use crate::payload::InitialState;
                         match state {
                             InitialState::PartialLocal(index) => {
                                 if !self.state.contains_key(node) {
-                                    self.state.insert(node, box MemoryState::default());
+                                    self.state.insert(node, Box::new(MemoryState::default()));
                                 }
                                 let state = self.state.get_mut(node).unwrap();
                                 for (key, tags) in index {
@@ -857,7 +874,7 @@ impl Domain {
                             }
                             InitialState::IndexedLocal(index) => {
                                 if !self.state.contains_key(node) {
-                                    self.state.insert(node, box MemoryState::default());
+                                    self.state.insert(node, Box::new(MemoryState::default()));
                                 }
                                 let state = self.state.get_mut(node).unwrap();
                                 for idx in index {
@@ -872,12 +889,12 @@ impl Domain {
                                 key,
                                 trigger_domain: (trigger_domain, shards),
                             } => {
-                                use backlog;
+                                use crate::backlog;
                                 let k = key.clone(); // ugh
                                 let txs = (0..shards)
                                     .map(|shard| {
                                         let key = key.clone();
-                                        let (tx, rx) = futures::sync::mpsc::unbounded();
+                                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                         let sender = self
                                             .channel_coordinator
                                             .builder_for(&(trigger_domain, shard))
@@ -888,37 +905,60 @@ impl Domain {
                                         tokio::spawn(
                                             self.shutdown_valve
                                                 .wrap(rx)
-                                                .map(move |miss| box Packet::RequestReaderReplay {
-                                                    key: miss,
-                                                    cols: key.clone(),
-                                                    node,
+                                                .map(move |misses| {
+                                                    Box::new(Packet::RequestReaderReplay {
+                                                        keys: misses,
+                                                        cols: key.clone(),
+                                                        node,
+                                                    })
                                                 })
-                                                .fold(sender, move |sender, m| {
-                                                    sender.send(m).map_err(|e| {
+                                                .map(Ok)
+                                                .forward(sender)
+                                                .map(|r| {
+                                                    if let Err(e) = r {
                                                         // domain went away?
                                                         eprintln!(
                                                             "replay source went away: {:?}",
                                                             e
                                                         );
-                                                    })
-                                                })
-                                                .map(|_| ()),
+                                                    }
+                                                }),
                                         );
                                         tx
                                     })
                                     .collect::<Vec<_>>();
-                                let (r_part, w_part) =
-                                    backlog::new_partial(cols, &k[..], move |miss| {
+                                let (r_part, w_part) = backlog::new_partial(
+                                    cols,
+                                    &k[..],
+                                    move |misses: &mut dyn Iterator<Item = &[DataType]>| {
                                         let n = txs.len();
-                                        let tx = if n == 1 {
-                                            &txs[0]
+                                        if n == 1 {
+                                            use std::iter::FromIterator;
+                                            let misses = Vec::from_iter(misses.map(Vec::from));
+                                            if misses.is_empty() {
+                                                return true;
+                                            }
+                                            txs[0].send(misses).is_ok()
                                         } else {
                                             // TODO: compound reader
-                                            assert_eq!(miss.len(), 1);
-                                            &txs[::shard_by(&miss[0], n)]
-                                        };
-                                        tx.unbounded_send(Vec::from(miss)).is_ok()
-                                    });
+                                            let mut per_shard = HashMap::new();
+                                            for miss in misses {
+                                                assert_eq!(miss.len(), 1);
+                                                let shard = crate::shard_by(&miss[0], n);
+                                                per_shard
+                                                    .entry(shard)
+                                                    .or_insert_with(Vec::new)
+                                                    .push(Vec::from(miss));
+                                            }
+                                            if per_shard.is_empty() {
+                                                return true;
+                                            }
+                                            per_shard
+                                                .into_iter()
+                                                .all(|(shard, keys)| txs[shard].send(keys).is_ok())
+                                        }
+                                    },
+                                );
 
                                 let mut n = self.nodes[node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -935,7 +975,7 @@ impl Domain {
                                 .unwrap();
                             }
                             InitialState::Global { gid, cols, key } => {
-                                use backlog;
+                                use crate::backlog;
                                 let (r_part, w_part) = backlog::new(cols, &key[..]);
 
                                 let mut n = self.nodes[node].borrow_mut();
@@ -978,7 +1018,7 @@ impl Domain {
                             info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                         }
 
-                        use payload;
+                        use crate::payload;
                         let trigger = match trigger {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
@@ -1029,12 +1069,16 @@ impl Domain {
                             },
                         );
                     }
-                    Packet::RequestReaderReplay { key, cols, node } => {
+                    Packet::RequestReaderReplay {
+                        mut keys,
+                        cols,
+                        node,
+                    } => {
                         self.total_replay_time.start();
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
-                        let still_miss = self.nodes[node]
+                        self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
                                 let w = r
@@ -1042,35 +1086,53 @@ impl Domain {
                                     .expect("reader replay requested for non-materialized reader");
                                 // ensure that all writes have been applied
                                 w.swap();
-                                w.with_key(&key[..])
-                                    .try_find_and(|_| ())
-                                    .expect("reader replay requested for non-ready reader")
-                                    .0
-                                    .is_none()
                             })
                             .expect("reader replay requested for non-reader node");
 
+                        self.nodes[node]
+                            .borrow_mut()
+                            .with_reader_mut(|r| {
+                                let w = r
+                                    .writer_mut()
+                                    .expect("reader replay requested for non-materialized reader");
+
+                                keys.retain(|key| {
+                                    w.with_key(&key[..])
+                                        .try_find_and(|_| ())
+                                        .expect("reader replay requested for non-ready reader")
+                                        .0
+                                        .is_none()
+                                });
+                            })
+                            .unwrap();
+
                         // ensure that we haven't already requested a replay of this key
-                        if still_miss
-                            && self
-                                .reader_triggered
+                        keys.retain(|key| {
+                            self.reader_triggered
                                 .entry(node)
                                 .or_default()
                                 .insert(key.clone())
-                        {
-                            self.find_tags_and_replay(key, &cols[..], node);
+                        });
+                        if !keys.is_empty() {
+                            self.find_tags_and_replay(keys, &cols[..], node);
                         }
                         self.total_replay_time.stop();
                     }
-                    Packet::RequestPartialReplay { tag, key, unishard } => {
+                    Packet::RequestPartialReplay {
+                        tag,
+                        keys,
+                        unishard,
+                    } => {
                         trace!(
                             self.log,
                            "got replay request";
                            "tag" => tag.id(),
-                           "key" => format!("{:?}", key)
+                           "keys" => format!("{:?}", keys)
                         );
                         self.total_replay_time.start();
-                        self.seed_replay(tag, &key[..], unishard, sends, executor);
+                        for key in keys {
+                            self.seed_replay(tag, Cow::Owned(key), unishard, executor);
+                        }
                         self.total_replay_time.stop();
                     }
                     Packet::StartReplay { tag, from } => {
@@ -1109,14 +1171,14 @@ impl Domain {
                         // do that inside the thread, because by the time that thread is scheduled,
                         // we may already have processed some other messages that are not yet a
                         // part of state.
-                        let p = box Packet::ReplayPiece {
+                        let p = Box::new(Packet::ReplayPiece {
                             tag,
                             link,
                             context: ReplayPieceContext::Regular {
                                 last: state.is_empty(),
                             },
                             data: Vec::<Record>::new().into(),
-                        };
+                        });
 
                         if !state.is_empty() {
                             let log = self.log.new(o!());
@@ -1180,12 +1242,12 @@ impl Domain {
                                         let chunk = Records::from_iter(chunk.map(&fix));
                                         let len = chunk.len();
                                         let last = iter.peek().is_none();
-                                        let p = box Packet::ReplayPiece {
+                                        let p = Box::new(Packet::ReplayPiece {
                                             tag,
                                             link, // to is overwritten by receiver
                                             context: ReplayPieceContext::Regular { last },
                                             data: chunk,
-                                        };
+                                        });
 
                                         trace!(log, "sending batch"; "#" => i, "[]" => len);
                                         if chunked_replay_tx.send(p).is_err() {
@@ -1202,13 +1264,13 @@ impl Domain {
                                 })
                                 .unwrap();
                         }
-                        self.handle_replay(p, sends, executor);
+                        self.handle_replay(p, executor);
 
                         self.total_replay_time.stop();
                     }
                     Packet::Finish(tag, ni) => {
                         self.total_replay_time.start();
-                        self.finish_replay(tag, ni, sends, executor);
+                        self.finish_replay(tag, ni, executor);
                         self.total_replay_time.stop();
                     }
                     Packet::Ready { node, purge, index } => {
@@ -1230,9 +1292,13 @@ impl Domain {
                                             self.shard.unwrap_or(0),
                                         );
 
-                                        box PersistentState::new(base_name, base.key(), &params)
+                                        Box::new(PersistentState::new(
+                                            base_name,
+                                            base.key(),
+                                            &params,
+                                        ))
                                     }
-                                    _ => box MemoryState::default(),
+                                    _ => Box::new(MemoryState::default()),
                                 }
                             };
                             for idx in index {
@@ -1364,73 +1430,80 @@ impl Domain {
             }
         }
 
-        if !self.buffered_replay_requests.is_empty() {
-            self.total_replay_time.start();
-            let now = time::Instant::now();
-            let to = self.replay_batch_timeout;
-            let elapsed_replays: Vec<_> = {
-                self.buffered_replay_requests
-                    .iter_mut()
-                    .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
-                        if !keys.is_empty() && now.duration_since(first) > to {
-                            // will be removed by retain below
-                            Some((tag, mem::replace(keys, HashSet::new()), single_shard))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            };
-            self.buffered_replay_requests
-                .retain(|_, (_, ref keys, _)| !keys.is_empty());
-            for (tag, keys, single_shard) in elapsed_replays {
-                self.seed_all(tag, keys, single_shard, sends, executor);
-            }
-            self.total_replay_time.stop();
-        }
-
-        let mut swap = HashSet::new();
-        while let Some(tp) = self.timed_purges.front() {
-            let now = time::Instant::now();
-            if tp.time <= now {
-                let tp = self.timed_purges.pop_front().unwrap();
-                let mut node = self.nodes[tp.view].borrow_mut();
-                trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
-                node.with_reader_mut(|r| {
-                    if let Some(wh) = r.writer_mut() {
-                        for key in tp.keys {
-                            wh.mut_with_key(&key[..]).mark_hole();
-                        }
-                        swap.insert(tp.view);
-                    }
-                })
-                .unwrap();
-            } else {
-                break;
-            }
-        }
-        for n in swap {
-            self.nodes[n]
-                .borrow_mut()
-                .with_reader_mut(|r| {
-                    if let Some(wh) = r.writer_mut() {
-                        wh.swap();
-                    }
-                })
-                .unwrap();
-        }
-
         if top {
-            while let Some(m) = self.delayed_for_self.pop_front() {
-                trace!(self.log, "handling local transmission");
-                // we really want this to just use tail recursion.
-                // but alas, the compiler doesn't seem to want to do that.
-                // instead, we ensure that only the topmost call to handle() walks delayed_for_self
+            loop {
+                while let Some(m) = self.delayed_for_self.pop_front() {
+                    trace!(self.log, "handling local transmission");
+                    // we really want this to just use tail recursion.
+                    // but alas, the compiler doesn't seem to want to do that.
+                    // instead, we ensure that only the topmost call to handle() walks delayed_for_self
 
-                // WO for https://github.com/rust-lang/rfcs/issues/1403
-                self.handle(m, sends, executor, false);
+                    // WO for https://github.com/rust-lang/rfcs/issues/1403
+                    self.handle(m, executor, false);
+                }
+
+                if !self.buffered_replay_requests.is_empty() {
+                    self.total_replay_time.start();
+                    let now = time::Instant::now();
+                    let to = self.replay_batch_timeout;
+                    let elapsed_replays: Vec<_> = {
+                        self.buffered_replay_requests
+                            .iter_mut()
+                            .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
+                                if !keys.is_empty() && now.duration_since(first) > to {
+                                    // will be removed by retain below
+                                    Some((tag, mem::replace(keys, HashSet::new()), single_shard))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
+                    };
+                    self.buffered_replay_requests
+                        .retain(|_, (_, ref keys, _)| !keys.is_empty());
+                    for (tag, keys, single_shard) in elapsed_replays {
+                        self.seed_all(tag, keys, single_shard, executor);
+                    }
+                    self.total_replay_time.stop();
+                }
+
+                let mut swap = HashSet::new();
+                while let Some(tp) = self.timed_purges.front() {
+                    let now = time::Instant::now();
+                    if tp.time <= now {
+                        let tp = self.timed_purges.pop_front().unwrap();
+                        let mut node = self.nodes[tp.view].borrow_mut();
+                        trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                        node.with_reader_mut(|r| {
+                            if let Some(wh) = r.writer_mut() {
+                                for key in tp.keys {
+                                    wh.mut_with_key(&key[..]).mark_hole();
+                                }
+                                swap.insert(tp.view);
+                            }
+                        })
+                        .unwrap();
+                    } else {
+                        break;
+                    }
+                }
+                for n in swap {
+                    self.nodes[n]
+                        .borrow_mut()
+                        .with_reader_mut(|r| {
+                            if let Some(wh) = r.writer_mut() {
+                                wh.swap();
+                            }
+                        })
+                        .unwrap();
+                }
+
+                if self.delayed_for_self.is_empty() {
+                    break;
+                }
             }
         }
+
         if !self.wait_time.is_running() {
             self.wait_time.start();
         }
@@ -1459,7 +1532,6 @@ impl Domain {
         tag: Tag,
         keys: HashSet<Vec<DataType>>,
         single_shard: bool,
-        sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
@@ -1492,7 +1564,7 @@ impl Domain {
                 });
 
                 let m = if !keys.is_empty() {
-                    Some(box Packet::ReplayPiece {
+                    Some(Box::new(Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag,
                         context: ReplayPieceContext::Partial {
@@ -1501,7 +1573,7 @@ impl Domain {
                             ignore: false,
                         },
                         data: rs.into(),
-                    })
+                    }))
                 } else {
                     None
                 };
@@ -1530,10 +1602,10 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            if let box Packet::ReplayPiece {
+            if let Packet::ReplayPiece {
                 context: ReplayPieceContext::Partial { ref for_keys, .. },
                 ..
-            } = m
+            } = *m
             {
                 trace!(self.log,
                        "satisfied replay request";
@@ -1545,16 +1617,15 @@ impl Domain {
                 unreachable!();
             }
 
-            self.handle_replay(m, sends, ex);
+            self.handle_replay(m, ex);
         }
     }
 
     fn seed_replay(
         &mut self,
         tag: Tag,
-        key: &[DataType],
+        key: Cow<[DataType]>,
         single_shard: bool,
-        sends: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) {
         if let ReplayPath {
@@ -1569,7 +1640,7 @@ impl Domain {
             // maybe delay this seed request so that we can batch respond later?
             // TODO
             use std::collections::hash_map::Entry;
-            let key = Vec::from(key);
+            let key = key.into_owned();
             match self.buffered_replay_requests.entry(tag) {
                 Entry::Occupied(o) => {
                     assert!(!o.get().1.is_empty());
@@ -1582,7 +1653,7 @@ impl Domain {
                 }
             }
 
-            // TODO: if timer has expired, call seed_all(tag, _, sends) immediately
+            // TODO: if timer has expired, call seed_all(tag, _, executor) immediately
             return;
         }
 
@@ -1606,12 +1677,12 @@ impl Domain {
                     .lookup(&cols[..], &KeyType::from(&key[..]));
 
                 let mut k = HashSet::new();
-                k.insert(Vec::from(key));
+                k.insert(key.clone().into_owned());
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let data = Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
 
-                    let m = Some(box Packet::ReplayPiece {
+                    let m = Some(Box::new(Packet::ReplayPiece {
                         link: Link::new(source, path[0].node),
                         tag,
                         context: ReplayPieceContext::Partial {
@@ -1620,7 +1691,7 @@ impl Domain {
                             ignore: false,
                         },
                         data,
-                    });
+                    }));
                     (m, source, None)
                 } else {
                     (None, source, Some(cols.clone()))
@@ -1632,18 +1703,18 @@ impl Domain {
         if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(
-                source,
-                &cols[..],
-                Vec::from(key),
-                Vec::from(key),
-                single_shard,
-                tag,
-            );
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
                    "key" => ?key);
+            self.on_replay_miss(
+                source,
+                &cols[..],
+                key.clone().into_owned(),
+                key.into_owned(),
+                single_shard,
+                tag,
+            );
         } else {
             trace!(self.log,
                    "satisfied replay request";
@@ -1654,12 +1725,12 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            self.handle_replay(m, sends, ex);
+            self.handle_replay(m, ex);
         }
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends, ex: &mut dyn Executor) {
+    fn handle_replay(&mut self, m: Box<Packet>, ex: &mut dyn Executor) {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
@@ -1777,12 +1848,12 @@ impl Domain {
                     }
 
                     // forward the current message through all local nodes.
-                    let m = box Packet::ReplayPiece {
+                    let m = Box::new(Packet::ReplayPiece {
                         link,
                         tag,
                         data,
                         context: context.clone(),
-                    };
+                    });
                     let mut m = Some(m);
 
                     for (i, segment) in path.iter().enumerate() {
@@ -1846,7 +1917,6 @@ impl Domain {
                             &self.nodes,
                             self.shard,
                             false,
-                            sends,
                             ex,
                         );
 
@@ -1962,13 +2032,13 @@ impl Domain {
                         }
 
                         // only continue with the keys that weren't captured
-                        if let box Packet::ReplayPiece {
+                        if let Packet::ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
                                     ref mut for_keys, ..
                                 },
                             ..
-                        } = m.as_mut().unwrap()
+                        } = **m.as_mut().unwrap()
                         {
                             backfill_keys
                                 .as_mut()
@@ -1978,12 +2048,12 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let single_shard = if let box Packet::ReplayPiece {
+                            let single_shard = if let Packet::ReplayPiece {
                                 context: ReplayPieceContext::Partial { unishard, .. },
                                 ..
-                            } = m.as_mut().unwrap()
+                            } = **m.as_mut().unwrap()
                             {
-                                *unishard
+                                unishard
                             } else {
                                 unreachable!("backfill_keys.is_some() implies Context::Partial");
                             };
@@ -2198,24 +2268,24 @@ impl Domain {
                         }
 
                         // preserve whatever `last` flag that may have been set during processing
-                        if let Some(box Packet::ReplayPiece {
+                        if let Some(Packet::ReplayPiece {
                             context: ReplayPieceContext::Regular { last },
                             ..
-                        }) = m
+                        }) = m.as_ref().map(|m| &**m)
                         {
                             if let ReplayPieceContext::Regular {
                                 last: ref mut old_last,
                             } = context
                             {
-                                *old_last = last;
+                                *old_last = *last;
                             }
                         }
 
                         // feed forward any changes to the context (e.g., backfill_keys)
-                        if let Some(box Packet::ReplayPiece {
+                        if let Some(Packet::ReplayPiece {
                             context: ref mut mcontext,
                             ..
-                        }) = m
+                        }) = m.as_mut().map(|m| &mut **m)
                         {
                             *mcontext = context.clone();
                         }
@@ -2357,11 +2427,11 @@ impl Domain {
                     } in replay
                     {
                         self.delayed_for_self
-                            .push_back(box Packet::RequestPartialReplay {
+                            .push_back(Box::new(Packet::RequestPartialReplay {
                                 tag,
                                 unishard,
-                                key: replay_key,
-                            });
+                                keys: vec![replay_key],
+                            }));
                     }
                 }
 
@@ -2384,18 +2454,13 @@ impl Domain {
                 // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
                 // this allows finish_replay to dispatch into the node by overriding replaying_to.
                 self.not_ready.remove(&ni);
-                self.delayed_for_self.push_back(box Packet::Finish(tag, ni));
+                self.delayed_for_self
+                    .push_back(Box::new(Packet::Finish(tag, ni)));
             }
         }
     }
 
-    fn finish_replay(
-        &mut self,
-        tag: Tag,
-        node: LocalNodeIndex,
-        sends: &mut EnqueuedSends,
-        ex: &mut dyn Executor,
-    ) {
+    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, ex: &mut dyn Executor) {
         let mut was = mem::replace(&mut self.mode, DomainMode::Forwarding);
         let finished = if let DomainMode::Replaying {
             ref to,
@@ -2422,11 +2487,11 @@ impl Domain {
                 // completely block the domain data channel, so we only process a few backlogged
                 // updates before yielding to the main loop (which might buffer more things).
 
-                if let m @ box Packet::Message { .. } = m {
+                if let Packet::Message { .. } = *m {
                     // NOTE: we specifically need to override the buffering behavior that our
                     // self.replaying_to = Some above would initiate.
                     self.mode = DomainMode::Forwarding;
-                    self.dispatch(m, sends, ex);
+                    self.dispatch(m, ex);
                 } else {
                     unreachable!();
                 }
@@ -2473,18 +2538,18 @@ impl Domain {
         } else {
             // we're not done -- inject a request to continue handling buffered things
             self.delayed_for_self
-                .push_back(box Packet::Finish(tag, node));
+                .push_back(Box::new(Packet::Finish(tag, node)));
         }
     }
 
-    pub fn handle_eviction(&mut self, m: Box<Packet>, sends: &mut EnqueuedSends) {
+    pub fn handle_eviction(&mut self, m: Box<Packet>, ex: &mut dyn Executor) {
         #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
             log: &Logger,
             key_columns: &[usize],
             keys: &[Vec<DataType>],
             node: LocalNodeIndex,
-            sends: &mut EnqueuedSends,
+            ex: &mut dyn Executor,
             not_ready: &HashSet<LocalNodeIndex>,
             replay_paths: &HashMap<Tag, ReplayPath>,
             shard: Option<usize>,
@@ -2506,7 +2571,7 @@ impl Domain {
                     };
 
                     let mut keys = Vec::from(keys);
-                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, sends);
+                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, ex);
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         let target = replay_paths[&tag].path.last().unwrap();
@@ -2529,7 +2594,7 @@ impl Domain {
                             &target.partial_key.as_ref().unwrap()[..],
                             &keys[..],
                             target.node,
-                            sends,
+                            ex,
                             not_ready,
                             replay_paths,
                             shard,
@@ -2547,7 +2612,7 @@ impl Domain {
             tag: Tag,
             shard: Option<usize>,
             nodes: &mut DomainNodes,
-            sends: &mut EnqueuedSends,
+            executor: &mut dyn Executor,
         ) {
             let mut from = path[0].node;
             for segment in path {
@@ -2557,7 +2622,7 @@ impl Domain {
                     keys,
                     tag,
                     shard,
-                    sends,
+                    executor,
                 );
                 from = segment.node;
             }
@@ -2626,7 +2691,7 @@ impl Domain {
                                 &key_columns[..],
                                 &keys[..],
                                 node,
-                                sends,
+                                ex,
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
@@ -2658,14 +2723,7 @@ impl Domain {
                     .iter()
                     .position(|ps| ps.node == dst)
                     .expect("got eviction for non-local node");
-                walk_path(
-                    &path[i..],
-                    &mut keys,
-                    tag,
-                    self.shard,
-                    &mut self.nodes,
-                    sends,
-                );
+                walk_path(&path[i..], &mut keys, tag, self.shard, &mut self.nodes, ex);
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
@@ -2687,7 +2745,7 @@ impl Domain {
                                 &key_columns[..],
                                 &keys[..],
                                 target,
-                                sends,
+                                ex,
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
@@ -2747,12 +2805,7 @@ impl Domain {
         // no response sent, as worker will read the atomic
     }
 
-    pub fn on_event(
-        &mut self,
-        executor: &mut dyn Executor,
-        event: PollEvent,
-        sends: &mut EnqueuedSends,
-    ) -> ProcessResult {
+    pub fn on_event(&mut self, executor: &mut dyn Executor, event: PollEvent) -> ProcessResult {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
@@ -2800,25 +2853,25 @@ impl Domain {
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
                     packet.trace(PacketEvent::ExitInputChannel);
                     if let Some(packet) = self.group_commit_queues.append(packet) {
-                        self.handle(packet, sends, executor, true);
+                        self.handle(packet, executor, true);
                     }
                 } else {
-                    self.handle(packet, sends, executor, true);
+                    self.handle(packet, executor, true);
                 }
 
                 while let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, executor, true);
+                    self.handle(m, executor, true);
                 }
 
                 ProcessResult::Processed
             }
             PollEvent::Timeout => {
                 while let Some(m) = self.group_commit_queues.flush_if_necessary() {
-                    self.handle(m, sends, executor, true);
+                    self.handle(m, executor, true);
                 }
 
                 if !self.buffered_replay_requests.is_empty() || !self.timed_purges.is_empty() {
-                    self.handle(box Packet::Spin, sends, executor, true);
+                    self.handle(Box::new(Packet::Spin), executor, true);
                 }
 
                 ProcessResult::Processed

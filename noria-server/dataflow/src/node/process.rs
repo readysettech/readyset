@@ -1,13 +1,12 @@
-use fnv::FnvHashMap;
-use node::NodeType;
-use payload;
-use prelude::*;
-use std::collections::{HashSet, VecDeque};
+use crate::node::NodeType;
+use crate::payload;
+use crate::prelude::*;
+use std::collections::HashSet;
 use std::mem;
 
 impl Node {
     #[allow(clippy::too_many_arguments)]
-    crate fn process(
+    pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<&Vec<usize>>,
@@ -15,7 +14,6 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
-        output: &mut EnqueuedSends,
         ex: &mut dyn Executor,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         m.as_mut().unwrap().trace(PacketEvent::Process);
@@ -31,8 +29,8 @@ impl Node {
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
-                match m.take() {
-                    Some(box Packet::Input {
+                match m.take().map(|p| *p) {
+                    Some(Packet::Input {
                         inner, mut senders, ..
                     }) => {
                         let Input { dst, data, tracer } = unsafe { inner.take() };
@@ -71,10 +69,10 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard.unwrap_or(0), output);
+                e.process(m, on_shard.unwrap_or(0), ex);
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, addr, on_shard.is_some(), output);
+                s.process(m, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
@@ -226,14 +224,14 @@ impl Node {
         Default::default()
     }
 
-    crate fn process_eviction(
+    pub(crate) fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
         key_columns: &[usize],
         keys: &mut Vec<Vec<DataType>>,
         tag: Tag,
         on_shard: Option<usize>,
-        output: &mut FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+        ex: &mut dyn Executor,
     ) {
         let addr = self.local_addr();
         match self.inner {
@@ -249,11 +247,11 @@ impl Node {
                         keys: keys.to_vec(),
                     })),
                     on_shard.unwrap_or(0),
-                    output,
+                    ex,
                 );
             }
             NodeType::Sharder(ref mut s) => {
-                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), output);
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, key_columns, keys);
@@ -307,7 +305,11 @@ fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
 
 #[allow(clippy::borrowed_box)]
 // crate visibility due to use by tests
-crate fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut Box<dyn State>>) {
+pub(crate) fn materialize(
+    rs: &mut Records,
+    partial: Option<Tag>,
+    state: Option<&mut Box<dyn State>>,
+) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope

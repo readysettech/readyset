@@ -1,6 +1,6 @@
-use backlog;
+use crate::backlog;
+use crate::prelude::*;
 use noria::channel;
-use prelude::*;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
 #[derive(Clone, Debug, PartialEq)]
@@ -71,7 +71,7 @@ impl Reader {
         self.writer.as_ref()
     }
 
-    crate fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
+    pub(crate) fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
         self.writer.as_mut()
     }
 
@@ -85,7 +85,7 @@ impl Reader {
         }
     }
 
-    crate fn add_streamer(
+    pub(crate) fn add_streamer(
         &mut self,
         new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
     ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
@@ -97,14 +97,14 @@ impl Reader {
         self.state.is_some()
     }
 
-    crate fn is_partial(&self) -> bool {
+    pub(crate) fn is_partial(&self) -> bool {
         match self.writer {
             None => false,
             Some(ref state) => state.is_partial(),
         }
     }
 
-    crate fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
+    pub(crate) fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
         assert!(self.writer.is_none());
         self.writer = Some(wh);
     }
@@ -121,14 +121,14 @@ impl Reader {
         }
     }
 
-    crate fn state_size(&self) -> Option<u64> {
+    pub(crate) fn state_size(&self) -> Option<u64> {
         self.writer.as_ref().map(SizeOf::deep_size_of)
     }
 
     /// Evict a randomly selected key, returning the number of bytes evicted.
     /// Note that due to how `evmap` applies the evictions asynchronously, we can only evict a
     /// single key at a time here.
-    crate fn evict_random_key(&mut self) -> u64 {
+    pub(crate) fn evict_random_key(&mut self) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
             let mut rng = rand::thread_rng();

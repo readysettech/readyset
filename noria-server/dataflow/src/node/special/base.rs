@@ -1,5 +1,5 @@
+use crate::prelude::*;
 use noria::{Modification, Operation, TableOperation};
-use prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -72,7 +72,7 @@ impl Base {
             .collect()
     }
 
-    crate fn fix(&self, row: &mut Vec<DataType>) {
+    pub(crate) fn fix(&self, row: &mut Vec<DataType>) {
         if self.unmodified {
             return;
         }
@@ -308,8 +308,8 @@ mod tests {
     }
 
     fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
-        use node;
-        use prelude::*;
+        use crate::node;
+        use crate::prelude::*;
 
         // most of this is from MockGraph
         let mut graph = Graph::new();
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn lots_of_changes_in_same_batch() {
         let state = MemoryState::default();
-        test_lots_of_changes_in_same_batch(box state);
+        test_lots_of_changes_in_same_batch(Box::new(state));
     }
 
     #[test]
@@ -415,6 +415,6 @@ mod tests {
             &PersistenceParameters::default(),
         );
 
-        test_lots_of_changes_in_same_batch(box state);
+        test_lots_of_changes_in_same_batch(Box::new(state));
     }
 }

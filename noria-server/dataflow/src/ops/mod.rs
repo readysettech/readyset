@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use prelude::*;
+use crate::prelude::*;
 
 pub mod distinct;
 pub mod filter;
@@ -236,8 +236,8 @@ pub mod test {
     use std::cell;
     use std::collections::HashMap;
 
-    use node;
-    use prelude::*;
+    use crate::node;
+    use crate::prelude::*;
 
     use petgraph::graph::NodeIndex;
 
@@ -279,7 +279,7 @@ pub mod test {
             fields: &[&str],
             defaults: Vec<DataType>,
         ) -> IndexPair {
-            use node::special::Base;
+            use crate::node::special::Base;
             let i = Base::new(defaults);
             let global = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, global, ());
@@ -296,7 +296,7 @@ pub mod test {
                 .node_weight_mut(global)
                 .unwrap()
                 .on_commit(&remap);
-            self.states.insert(local, box MemoryState::default());
+            self.states.insert(local, Box::new(MemoryState::default()));
             self.remap.insert(global, ip);
             ip
         }
@@ -315,7 +315,7 @@ pub mod test {
             let global = self.graph.add_node(Node::new(name, fields, i));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
-                self.states.insert(local, box MemoryState::default());
+                self.states.insert(local, Box::new(MemoryState::default()));
             }
             for parent in parents {
                 self.graph.add_edge(parent, global, ());
@@ -415,7 +415,7 @@ pub mod test {
                 }
             }
 
-            self.states.insert(*base, box state);
+            self.states.insert(*base, Box::new(state));
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {
@@ -427,6 +427,7 @@ pub mod test {
             impl Executor for Ex {
                 fn ack(&mut self, _: SourceChannelIdentifier) {}
                 fn create_universe(&mut self, _: HashMap<String, DataType>) {}
+                fn send(&mut self, _: ReplicaAddr, _: Box<Packet>) {}
             }
 
             let mut u = {

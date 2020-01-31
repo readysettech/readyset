@@ -1,6 +1,6 @@
 [package]
 name = "noria-benchmarks"
-version = "0.0.1"
+version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
 publish = false
@@ -11,6 +11,8 @@ orchestration = ["rusoto_core", "rusoto_sts", "tsunami"]
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 noria = { path = "../noria-server", package = "noria-server" }
+futures-util = "0.3.0"
+futures-core = "0.3.0"
 nom-sql = "0.0.10"
 regex = "1.0.0"
 itertools = "0.8"
@@ -19,7 +21,7 @@ slog = "2.4.0"
 slog-term = "2.4.0"
 vec_map = { version = "0.8.0" }
 rayon = "1.0"
-ssh2 = "0.3"
+ssh2 = "0.7"
 shellwords = "1"
 zookeeper = "0.5.3"
 
@@ -31,29 +33,31 @@ rand = "0.7"
 rand_distr = "0.2"
 zipf = "6"
 # sampling
-hdrhistogram = "6.1"
+hdrhistogram = "7"
 # mssql
-futures-state-stream = "0.1"
-tiberius = "0.3.1"
+# disabled due to lack of async/await support
+# futures-state-stream = "0.1"
+# tiberius = "0.3.1"
 # mysql
-mysql = "16.0.0"
+mysql_async = "0.21.0"
 # memcached
-memcached-rs = "0.4"
+memcached-rs = "0.4.2"
 # mio
 mio = "0.6.9"
 # futures
-futures = "0.1.14"
-futures-cpupool = "0.1.8"
-tokio = "0.1"
+#futures = "0.1.14"
+#futures-cpupool = "0.1.8"
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-test = "0.2.0"
 # ec2
-rusoto_core = { optional = true, version = "0.40" }
-rusoto_sts = { optional = true, version = "0.40" }
-tsunami = { optional = true, version = "0.9" }
-timeout-readwrite = "0.2"
+rusoto_core = { optional = true, version = "0.42" }
+rusoto_sts = { optional = true, version = "0.42" }
+tsunami = { optional = true, version = "0.10" }
+timeout-readwrite = "0.3"
 ctrlc = "3.1"
 failure = "0.1"
-tower-service = "0.2"
-tokio-mock-task = "0.1"
+tower-service = "0.3.0"
+#tokio-mock-task = "0.1"
 
 [[bin]]
 name = "vote"

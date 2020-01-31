@@ -815,10 +815,10 @@ impl Materializations {
                     .get_mut(&n.domain())
                     .unwrap()
                     .send_to_healthy(
-                        box Packet::PrepareState {
+                        Box::new(Packet::PrepareState {
                             node: n.local_addr(),
                             state: InitialState::IndexedLocal(index_on),
-                        },
+                        }),
                         workers,
                     )
                     .unwrap();
@@ -850,15 +850,15 @@ impl Materializations {
             let domain = domains.get_mut(&n.domain()).unwrap();
             domain
                 .send_to_healthy(
-                    box Packet::Ready {
+                    Box::new(Packet::Ready {
                         node: n.local_addr(),
                         purge: n.purge,
                         index: index_on,
-                    },
+                    }),
                     workers,
                 )
                 .unwrap();
-            replies.wait_for_acks(&domain);
+            futures_executor::block_on(replies.wait_for_acks(&domain));
             trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
@@ -976,10 +976,10 @@ impl Materializations {
                     .get_mut(&pending.source_domain)
                     .unwrap()
                     .send_to_healthy(
-                        box Packet::StartReplay {
+                        Box::new(Packet::StartReplay {
                             tag: pending.tag,
                             from: pending.source,
-                        },
+                        }),
                         workers,
                     )
                     .unwrap();
@@ -992,7 +992,7 @@ impl Materializations {
                "domain" => target.index(),
             );
 
-            replies.wait_for_acks(&domains[&target]);
+            futures_executor::block_on(replies.wait_for_acks(&domains[&target]));
         }
     }
 }

@@ -3,26 +3,35 @@ use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use dataflow::SingleReadHandle;
-use futures::future::{self, Either};
-use futures::try_ready;
-use futures::{self, Future, Stream};
+use futures_util::{
+    future,
+    future::Either,
+    future::{FutureExt, TryFutureExt},
+    ready,
+    stream::{Stream, StreamExt, TryStreamExt},
+};
 use noria::{ReadQuery, ReadReply, Tagged};
+use pin_project::pin_project;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
 use std::time;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use stream_cancel::Valve;
-use tokio::prelude::*;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT_US: u64 = 200;
+const RETRY_TIMEOUT_MS: u64 = 1;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const TRIGGER_TIMEOUT_US: u64 = 50_000;
+const TRIGGER_TIMEOUT_MS: u64 = 10;
 
 thread_local! {
     static READERS: RefCell<HashMap<
@@ -31,43 +40,54 @@ thread_local! {
     >> = Default::default();
 }
 
-pub(super) fn listen(
-    valve: &Valve,
-    ioh: &tokio_io_pool::Handle,
-    on: tokio::net::TcpListener,
+pub(super) async fn listen(
+    alive: tokio::sync::mpsc::Sender<()>,
+    valve: Valve,
+    mut on: tokio::net::TcpListener,
     readers: Readers,
-) -> impl Future<Item = (), Error = ()> {
-    ioh.spawn_all(
-        valve
-            .wrap(on.incoming())
-            .map(Some)
-            .or_else(|_| {
-                // io error from client: just ignore it
-                Ok(None)
-            })
-            .filter_map(|c| c)
-            .map(move |stream| {
-                let readers = readers.clone();
-                stream.set_nodelay(true).expect("could not set TCP_NODELAY");
-                server::Server::new(
-                    AsyncBincodeStream::from(stream).for_async(),
-                    service_fn(move |req| handle_message(req, &readers)),
-                )
-                .map_err(|e| {
-                    if let server::Error::Service(()) = e {
+) {
+    let mut stream = valve.wrap(on.incoming()).into_stream();
+    while let Some(stream) = stream.next().await {
+        if let Err(_) = stream {
+            // io error from client: just ignore it
+            continue;
+        }
+
+        let stream = stream.unwrap();
+        let readers = readers.clone();
+        stream.set_nodelay(true).expect("could not set TCP_NODELAY");
+        let alive = alive.clone();
+        tokio::spawn(
+            server::Server::new(
+                AsyncBincodeStream::from(stream).for_async(),
+                service_fn(move |req| handle_message(req, &readers)),
+            )
+            .map_err(|e| {
+                match e {
+                    server::Error::Service(()) => {
                         // server is shutting down -- no need to report this error
-                    } else {
-                        eprintln!("!!! reader client protocol error: {:?}", e);
+                        return;
                     }
-                })
+                    server::Error::BrokenTransportRecv(ref e)
+                    | server::Error::BrokenTransportSend(ref e) => {
+                        if let bincode::ErrorKind::Io(ref e) = **e {
+                            if e.kind() == std::io::ErrorKind::BrokenPipe
+                                || e.kind() == std::io::ErrorKind::ConnectionReset
+                            {
+                                // client went away
+                                return;
+                            }
+                        }
+                    }
+                }
+                eprintln!("!!! reader client protocol error: {:?}", e);
+            })
+            .map(move |r| {
+                let _ = alive;
+                r
             }),
-    )
-    .map_err(|e: tokio_io_pool::StreamSpawnError<()>| {
-        eprintln!(
-            "io pool is shutting down, so can't handle more reads: {:?}",
-            e
         );
-    })
+    }
 }
 
 fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
@@ -85,7 +105,7 @@ fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
 fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
-) -> impl Future<Item = Tagged<ReadReply>, Error = ()> + Send {
+) -> impl Future<Output = Result<Tagged<ReadReply>, ()>> + Send {
     let tag = m.tag;
     match m.v {
         ReadQuery::Normal {
@@ -150,36 +170,36 @@ fn handle_message(
                 }
 
                 // trigger backfills for all the keys we missed on for later
-                for key in &keys {
-                    if !key.is_empty() {
-                        reader.trigger(key);
-                    }
-                }
+                reader.trigger(keys.iter().filter(|key| !key.is_empty()).map(Vec::as_slice));
 
                 Err((keys, ret))
             });
 
             match immediate {
-                Ok(reply) => Either::A(Either::A(future::ok(reply))),
+                Ok(reply) => Either::Left(Either::Left(future::ready(Ok(reply)))),
                 Err((keys, ret)) => {
                     if !block {
-                        Either::A(Either::A(future::ok(Tagged {
+                        Either::Left(Either::Left(future::ready(Ok(Tagged {
                             tag,
                             v: ReadReply::Normal(Ok(ret)),
-                        })))
+                        }))))
                     } else {
-                        let trigger = time::Duration::from_micros(TRIGGER_TIMEOUT_US);
-                        let retry = time::Duration::from_micros(RETRY_TIMEOUT_US);
+                        let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
+                        let retry = time::Duration::from_millis(RETRY_TIMEOUT_MS);
                         let now = time::Instant::now();
-                        Either::A(Either::B(BlockingRead {
+                        Either::Left(Either::Right(BlockingRead {
                             tag,
                             target,
                             keys,
                             read: ret,
                             truth: s.clone(),
-                            retry: tokio_os_timer::Interval::new(retry).unwrap(),
+                            retry: tokio::time::interval_at(
+                                tokio::time::Instant::from_std(now + retry),
+                                retry,
+                            ),
                             trigger_timeout: trigger,
                             next_trigger: now,
+                            first: now,
                         }))
                     }
                 }
@@ -196,90 +216,119 @@ fn handle_message(
                 reader.len()
             });
 
-            Either::B(future::ok(Tagged {
+            Either::Right(future::ready(Ok(Tagged {
                 tag,
                 v: ReadReply::Size(size),
-            }))
+            })))
         }
     }
 }
 
+#[pin_project]
 struct BlockingRead {
     tag: u32,
     read: Vec<Vec<Vec<DataType>>>,
     target: (NodeIndex, usize),
     keys: Vec<Vec<DataType>>,
     truth: Readers,
-    retry: tokio_os_timer::Interval,
+
+    #[pin]
+    retry: tokio::time::Interval,
+
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
+    first: time::Instant,
 }
 
 impl Future for BlockingRead {
-    type Item = Tagged<ReadReply>;
-    type Error = ();
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+    type Output = Result<Tagged<ReadReply>, ()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
         loop {
-            let _ = try_ready!(self.retry.poll().map_err(|e| {
-                unreachable!("timer failure: {:?}", e);
-            }))
-            .expect("interval stopped yielding");
+            ready!(this.retry.as_mut().poll_next(cx));
 
             let missing = READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
-                let s = &self.truth;
-                let target = &self.target;
-                let reader = readers_cache.entry(self.target).or_insert_with(|| {
+                let s = &this.truth;
+                let target = &this.target;
+                let reader = readers_cache.entry(*this.target).or_insert_with(|| {
                     let readers = s.lock().unwrap();
                     readers.get(target).unwrap().clone()
                 });
 
                 let mut triggered = false;
                 let mut missing = false;
+                let mut ended = false;
                 let now = time::Instant::now();
-                for (i, key) in self.keys.iter_mut().enumerate() {
+                let read = &mut this.read;
+                let next_trigger = *this.next_trigger;
+                let still_missing = this.keys.iter_mut().enumerate().filter_map(|(i, key)| {
                     if key.is_empty() {
                         // already have this value
+                        None
                     } else {
                         // note that this *does* mean we'll trigger replay multiple times for things
                         // that miss and aren't replayed in time, which is a little sad. but at the
                         // same time, that replay trigger will just be ignored by the target domain.
                         match reader.try_find_and(key, dup).map(|r| r.0) {
                             Ok(Some(rs)) => {
-                                self.read[i] = rs;
+                                read[i] = rs;
                                 key.clear();
+                                None
                             }
                             Err(()) => {
                                 // map has been deleted, so server is shutting down
-                                return Err(());
+                                ended = true;
+                                None
                             }
                             Ok(None) => {
-                                if now > self.next_trigger {
-                                    // maybe the key was filled but then evicted, and we missed it?
-                                    if !reader.trigger(key) {
-                                        // server is shutting down and won't do the backfill
-                                        return Err(());
-                                    }
-                                    triggered = true;
-                                }
                                 missing = true;
+                                if now > next_trigger {
+                                    // maybe the key was filled but then evicted, and we missed it?
+                                    triggered = true;
+                                    Some(&key[..])
+                                } else {
+                                    None
+                                }
                             }
                         }
+                    }
+                });
+
+                if !reader.trigger(still_missing) {
+                    // server is shutting down and won't do the backfill
+                    return Err(());
+                }
+
+                if ended {
+                    return Err(());
+                }
+
+                if missing {
+                    let now = time::Instant::now();
+                    let waited = now - *this.first;
+                    *this.first = now;
+                    if waited > time::Duration::from_secs(7) {
+                        eprintln!(
+                            "warning: read has been stuck waiting on {:?} for {:?}",
+                            this.keys, waited
+                        );
                     }
                 }
 
                 if triggered {
-                    self.trigger_timeout *= 2;
-                    self.next_trigger = now + self.trigger_timeout;
+                    *this.trigger_timeout *= 2;
+                    *this.next_trigger = now + *this.trigger_timeout;
                 }
 
                 Ok(missing)
             })?;
 
             if !missing {
-                return Ok(Async::Ready(Tagged {
-                    tag: self.tag,
-                    v: ReadReply::Normal(Ok(mem::replace(&mut self.read, Vec::new()))),
+                return Poll::Ready(Ok(Tagged {
+                    tag: *this.tag,
+                    v: ReadReply::Normal(Ok(mem::replace(&mut this.read, Vec::new()))),
                 }));
             }
         }

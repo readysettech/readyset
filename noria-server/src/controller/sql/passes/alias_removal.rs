@@ -33,10 +33,10 @@ fn rewrite_conditional(
     };
 
     let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
-        let new_ce = match bce {
-            box ConditionExpression::Base(ConditionBase::Field(f)) => translate_column(f),
-            box ConditionExpression::Base(b) => ConditionExpression::Base(b),
-            box x => rewrite_conditional(table_aliases, x),
+        let new_ce = match *bce {
+            ConditionExpression::Base(ConditionBase::Field(f)) => translate_column(f),
+            ConditionExpression::Base(b) => ConditionExpression::Base(b),
+            x => rewrite_conditional(table_aliases, x),
         };
         Box::new(new_ce)
     };
@@ -52,13 +52,13 @@ fn rewrite_conditional(
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator,
-            box left,
-            box right,
+            left,
+            right,
         }) => {
             let rewritten_ct = ConditionTree {
                 operator,
-                left: Box::new(rewrite_conditional(table_aliases, left)),
-                right: Box::new(rewrite_conditional(table_aliases, right)),
+                left: Box::new(rewrite_conditional(table_aliases, *left)),
+                right: Box::new(rewrite_conditional(table_aliases, *right)),
             };
             ConditionExpression::LogicalOp(rewritten_ct)
         }

@@ -7,6 +7,7 @@ use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
+use futures_util::stream::StreamExt;
 use hyper::{self, Method, StatusCode};
 use mio::net::TcpListener;
 use nom_sql::ColumnSpecification;
@@ -22,8 +23,7 @@ use std::mem;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{cell, io, thread, time};
-use tokio::prelude::*;
+use std::{cell, io, time};
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -73,37 +73,25 @@ pub(super) struct ControllerInner {
 }
 
 pub(in crate::controller) struct DomainReplies(
-    futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+    tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
 );
 
 impl DomainReplies {
-    fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
-        let mut crps = Vec::with_capacity(n);
+    async fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
+        let crps: Vec<_> = (&mut self.0).take(n).collect().await;
 
-        // TODO
-        // TODO: it's so stupid to spin here now...
-        // TODO
-        loop {
-            match self.0.poll() {
-                Ok(Async::NotReady) => thread::yield_now(),
-                Ok(Async::Ready(Some(crp))) => {
-                    crps.push(crp);
-                    if crps.len() == n {
-                        return crps;
-                    }
-                }
-                Ok(Async::Ready(None)) => {
-                    unreachable!("got unexpected EOF from domain reply channel");
-                }
-                Err(e) => {
-                    unimplemented!("failed to read control reply packet: {:?}", e);
-                }
-            }
+        if crps.len() != n {
+            unreachable!(
+                "got unexpected EOF from domain reply channel after {} replies",
+                crps.len()
+            );
         }
+
+        crps
     }
 
-    pub(in crate::controller) fn wait_for_acks(&mut self, d: &DomainHandle) {
-        for r in self.read_n_domain_replies(d.shards()) {
+    pub(in crate::controller) async fn wait_for_acks(&mut self, d: &DomainHandle) {
+        for r in self.read_n_domain_replies(d.shards()).await {
             match r {
                 ControlReplyPacket::Ack(_) => {}
                 r => unreachable!("got unexpected non-ack control reply: {:?}", r),
@@ -111,12 +99,12 @@ impl DomainReplies {
         }
     }
 
-    fn wait_for_statistics(
+    async fn wait_for_statistics(
         &mut self,
         d: &DomainHandle,
     ) -> Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)> {
         let mut stats = Vec::with_capacity(d.shards());
-        for r in self.read_n_domain_replies(d.shards()) {
+        for r in self.read_n_domain_replies(d.shards()).await {
             match r {
                 ControlReplyPacket::Statistics(d, s) => stats.push((d, s)),
                 r => unreachable!("got unexpected non-stats control reply: {:?}", r),
@@ -205,7 +193,7 @@ impl ControllerInner {
         method: hyper::Method,
         path: String,
         query: Option<String>,
-        body: Vec<u8>,
+        body: hyper::body::Bytes,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {
         use serde_json as json;
@@ -313,18 +301,24 @@ impl ControllerInner {
         }
     }
 
-    pub(super) fn handle_register(
-        &mut self,
-        msg: &CoordinationMessage,
-        remote: &SocketAddr,
-        read_listen_addr: SocketAddr,
-    ) -> Result<(), io::Error> {
+    pub(super) fn handle_register(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
+        let (remote, read_listen_addr) = if let CoordinationPayload::Register {
+            addr: remote,
+            read_listen_addr,
+            ..
+        } = msg.payload
+        {
+            (remote, read_listen_addr)
+        } else {
+            unreachable!();
+        };
+
         info!(
             self.log,
             "new worker registered from {:?}, which listens on {:?}", msg.source, remote
         );
 
-        let sender = TcpSender::connect(remote)?;
+        let sender = TcpSender::connect(&remote)?;
         let ws = Worker::new(sender);
         self.workers.insert(msg.source, ws);
         self.read_addrs.insert(msg.source, read_listen_addr);
@@ -408,7 +402,7 @@ impl ControllerInner {
             .expect("failed to activate original recipe");
     }
 
-    pub(super) fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
+    pub(super) fn handle_heartbeat(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -428,7 +422,7 @@ impl ControllerInner {
     pub(super) fn new(
         log: slog::Logger,
         state: ControllerState,
-        drx: futures::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
+        drx: tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
     ) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
@@ -596,7 +590,8 @@ impl ControllerInner {
         // Wait for all the domains to acknowledge.
         let mut txs = HashMap::new();
         let mut announce = Vec::new();
-        let replies = self.replies.read_n_domain_replies(num_shards.unwrap_or(1));
+        let fut = self.replies.read_n_domain_replies(num_shards.unwrap_or(1));
+        let replies = futures_executor::block_on(fut);
         for r in replies {
             match r {
                 ControlReplyPacket::Booted(shard, addr) => {
@@ -692,7 +687,7 @@ impl ControllerInner {
 
     /// Perform a new query schema migration.
     // crate viz for tests
-    crate fn migrate<F, T>(&mut self, f: F) -> T
+    pub(crate) fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration) -> T,
     {
@@ -713,7 +708,7 @@ impl ControllerInner {
     }
 
     #[cfg(test)]
-    crate fn graph(&self) -> &Graph {
+    pub(crate) fn graph(&self) -> &Graph {
         &self.ingredients
     }
 
@@ -891,10 +886,9 @@ impl ControllerInner {
             .iter_mut()
             .flat_map(|(&di, s)| {
                 trace!(log, "requesting stats from domain"; "di" => di.index());
-                s.send_to_healthy(box Packet::GetStatistics, workers)
+                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
                     .unwrap();
-                replies
-                    .wait_for_statistics(&s)
+                futures_executor::block_on(replies.wait_for_statistics(&s))
                     .into_iter()
                     .enumerate()
                     .map(move |(i, s)| ((di, i), s))
@@ -920,20 +914,22 @@ impl ControllerInner {
             .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send_to_healthy(box Packet::GetStatistics, workers)
+                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
                     .unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> = replies
-                    .wait_for_statistics(&s)
-                    .into_iter()
-                    .flat_map(move |(_, node_stats)| {
-                        node_stats
-                            .into_iter()
-                            .filter_map(|(ni, ns)| match ns.materialized {
-                                MaterializationStatus::Partial { .. } => Some((ni, ns.mem_size)),
-                                _ => None,
-                            })
-                    })
-                    .collect();
+                let to_evict: Vec<(NodeIndex, u64)> =
+                    futures_executor::block_on(replies.wait_for_statistics(&s))
+                        .into_iter()
+                        .flat_map(move |(_, node_stats)| {
+                            node_stats
+                                .into_iter()
+                                .filter_map(|(ni, ns)| match ns.materialized {
+                                    MaterializationStatus::Partial { .. } => {
+                                        Some((ni, ns.mem_size))
+                                    }
+                                    _ => None,
+                                })
+                        })
+                        .collect();
                 (*di, to_evict)
             })
             .collect();
@@ -946,10 +942,10 @@ impl ControllerInner {
                     .get_mut(&di)
                     .unwrap()
                     .send_to_healthy(
-                        box Packet::Evict {
+                        Box::new(Packet::Evict {
                             node: Some(na),
                             num_bytes: bytes as usize,
-                        },
+                        }),
                         workers,
                     )
                     .expect("failed to send domain flush message");
@@ -986,13 +982,11 @@ impl ControllerInner {
                 // TODO: this should use external APIs through noria::ControllerHandle
                 // TODO: can this move to the client entirely?
                 let rgb: Option<ViewBuilder> = self.view_builder(&g);
-                // TODO: is it even okay to use wait() here?
-                let view = rgb.map(|rgb| rgb.build(x.clone()).wait().unwrap()).unwrap();
-                let my_groups: Vec<DataType> = view
-                    .lookup(uid, true)
-                    .wait()
+                // TODO: using block_on here _only_ works because View::lookup just waits on a
+                // channel, which doesn't use anything except the pure executor
+                let mut view = rgb.map(|rgb| rgb.build(x.clone()).unwrap()).unwrap();
+                let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
                     .unwrap()
-                    .1
                     .iter()
                     .map(|v| v[1].clone())
                     .collect();
@@ -1276,13 +1270,13 @@ impl ControllerInner {
                 .domains
                 .get_mut(&domain)
                 .unwrap()
-                .send_to_healthy(box Packet::RemoveNodes { nodes }, &self.workers)
+                .send_to_healthy(Box::new(Packet::RemoveNodes { nodes }), &self.workers)
             {
                 Ok(_) => (),
                 Err(e) => match e {
                     SendError::IoError(ref ioe) => {
                         if ioe.kind() == io::ErrorKind::BrokenPipe
-                            && ioe.get_ref().unwrap().description() == "worker failed"
+                            && ioe.get_ref().unwrap().to_string() == "worker failed"
                         {
                             // message would have gone to a failed worker, so ignore error
                         } else {
@@ -1357,7 +1351,7 @@ impl Drop for ControllerInner {
             // XXX: this is a terrible ugly hack to ensure that all workers exit
             for _ in 0..100 {
                 // don't unwrap, because given domain may already have terminated
-                drop(d.send_to_healthy(box Packet::Quit, &self.workers));
+                drop(d.send_to_healthy(Box::new(Packet::Quit), &self.workers));
             }
         }
     }

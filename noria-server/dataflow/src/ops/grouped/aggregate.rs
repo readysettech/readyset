@@ -1,7 +1,7 @@
-use ops::grouped::GroupedOperation;
-use ops::grouped::GroupedOperator;
+use crate::ops::grouped::GroupedOperation;
+use crate::ops::grouped::GroupedOperator;
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ impl GroupedOperation for Aggregator {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

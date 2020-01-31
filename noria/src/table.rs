@@ -5,23 +5,27 @@ use crate::internal::*;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use futures::stream::futures_unordered::FuturesUnordered;
+use futures_util::{
+    future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
+    stream::TryStreamExt,
+};
 use nom_sql::CreateTableStatement;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::{fmt, io};
-use tokio::prelude::*;
+use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
-use tower::ServiceExt;
 use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
 use tower_service::Service;
 use vec_map::VecMap;
 
 type Transport = AsyncBincodeStream<
-    tokio::net::tcp::TcpStream,
+    tokio::net::TcpStream,
     Tagged<()>,
     Tagged<LocalOrNot<Input>>,
     AsyncDestination,
@@ -37,28 +41,23 @@ impl Service<()> for TableEndpoint {
     type Error = tokio::io::Error;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     type Future = impl Future<
-        Item = multiplex::MultiplexTransport<Transport, Tagger>,
-        Error = tokio::io::Error,
+        Output = Result<multiplex::MultiplexTransport<Transport, Tagger>, tokio::io::Error>,
     >;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, _: ()) -> Self::Future {
-        tokio::net::TcpStream::connect(&self.0)
-            .and_then(|s| {
-                s.set_nodelay(true)?;
-                Ok(s)
-            })
-            .map(|mut s| {
-                s.write_all(&[CONNECTION_FROM_BASE]).unwrap();
-                s.flush().unwrap();
-                s
-            })
-            .map(AsyncBincodeStream::from)
-            .map(AsyncBincodeStream::for_async)
-            .map(|t| multiplex::MultiplexTransport::new(t, Tagger::default()))
+        let f = tokio::net::TcpStream::connect(self.0);
+        async move {
+            let mut s = f.await?;
+            s.set_nodelay(true)?;
+            s.write_all(&[CONNECTION_FROM_BASE]).await.unwrap();
+            s.flush().await.unwrap();
+            let s = AsyncBincodeStream::from(s).for_async();
+            Ok(multiplex::MultiplexTransport::new(s, Tagger::default()))
+        }
     }
 }
 
@@ -70,33 +69,6 @@ pub(crate) type TableRpc = Buffer<
     >,
     Tagged<LocalOrNot<Input>>,
 >;
-
-/// A failed [`Table`] operation.
-#[derive(Debug)]
-pub struct AsyncTableError {
-    /// The `Table` whose operation failed.
-    ///
-    /// Not available if the underlying transport failed.
-    pub table: Option<Table>,
-
-    /// The error that caused the operation to fail.
-    pub error: TableError,
-}
-
-impl From<TableError> for AsyncTableError {
-    fn from(e: TableError) -> Self {
-        AsyncTableError {
-            table: None,
-            error: e,
-        }
-    }
-}
-
-impl From<Box<dyn std::error::Error + Send + Sync>> for AsyncTableError {
-    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        AsyncTableError::from(TableError::from(e))
-    }
-}
 
 /// A failed [`SyncTable`] operation.
 #[derive(Debug, Fail)]
@@ -163,57 +135,54 @@ impl TableBuilder {
     pub(crate) fn build(
         self,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
-    ) -> impl Future<Item = Table, Error = io::Error> + Send {
-        future::join_all(
-            self.txs
-                .clone()
-                .into_iter()
-                .enumerate()
-                .map(move |(shardi, addr)| {
-                    use std::collections::hash_map::Entry;
+    ) -> Result<Table, io::Error> {
+        let mut addrs = Vec::with_capacity(self.txs.len());
+        let mut conns = Vec::with_capacity(self.txs.len());
+        for (shardi, &addr) in self.txs.iter().enumerate() {
+            use std::collections::hash_map::Entry;
 
-                    // one entry per shard so that we can send sharded requests in parallel even if
-                    // they happen to be targeting the same machine.
-                    let mut rpcs = rpcs.lock().unwrap();
-                    match rpcs.entry((addr, shardi)) {
-                        Entry::Occupied(e) => Ok((addr, e.get().clone())),
-                        Entry::Vacant(h) => {
-                            // TODO: maybe always use the same local port?
-                            let c = Buffer::new(
-                                pool::Builder::new()
-                                    .urgency(0.01)
-                                    .loaded_above(0.2)
-                                    .underutilized_below(0.000000001)
-                                    .max_services(Some(32))
-                                    .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
-                                50,
-                            );
-                            h.insert(c.clone());
-                            Ok((addr, c))
-                        }
-                    }
-                }),
-        )
-        .map(move |shards| {
-            let (addrs, conns) = shards.into_iter().unzip();
-            let dispatch = tracing::dispatcher::get_default(|d| d.clone());
-            Table {
-                ni: self.ni,
-                node: self.addr,
-                key: self.key,
-                key_is_primary: self.key_is_primary,
-                columns: self.columns,
-                dropped: self.dropped,
-                tracer: None,
-                table_name: self.table_name,
-                schema: self.schema,
-                dst_is_local: false,
+            addrs.push(addr);
 
-                shard_addrs: addrs,
-                shards: conns,
+            // one entry per shard so that we can send sharded requests in parallel even if
+            // they happen to be targeting the same machine.
+            let mut rpcs = rpcs.lock().unwrap();
+            let s = match rpcs.entry((addr, shardi)) {
+                Entry::Occupied(e) => e.get().clone(),
+                Entry::Vacant(h) => {
+                    // TODO: maybe always use the same local port?
+                    let c = Buffer::new(
+                        pool::Builder::new()
+                            .urgency(0.01)
+                            .loaded_above(0.2)
+                            .underutilized_below(0.000000001)
+                            .max_services(Some(32))
+                            .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
+                        50,
+                    );
+                    h.insert(c.clone());
+                    c
+                }
+            };
+            conns.push(s);
+        }
 
-                dispatch,
-            }
+        let dispatch = tracing::dispatcher::get_default(|d| d.clone());
+        Ok(Table {
+            ni: self.ni,
+            node: self.addr,
+            key: self.key,
+            key_is_primary: self.key_is_primary,
+            columns: self.columns,
+            dropped: self.dropped,
+            tracer: None,
+            table_name: self.table_name,
+            schema: self.schema,
+            dst_is_local: false,
+
+            shard_addrs: addrs,
+            shards: conns,
+
+            dispatch,
         })
     }
 }
@@ -264,13 +233,13 @@ impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
     // have to repeat types because https://github.com/rust-lang/rust/issues/57807
-    type Future = impl Future<Item = Tagged<()>, Error = TableError>;
+    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
-            try_ready!(s.poll_ready().map_err(TableError::from));
+            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
         }
-        Ok(Async::Ready(()))
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, mut i: Input) -> Self::Future {
@@ -296,7 +265,7 @@ impl Service<Input> for Table {
 
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
-            future::Either::A(self.shards[0].call(request).map_err(TableError::from))
+            future::Either::Left(self.shards[0].call(request).map_err(TableError::from))
         } else {
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -323,7 +292,7 @@ impl Service<Input> for Table {
                 shard_writes[shard].push(r);
             }
 
-            let mut wait_for = FuturesUnordered::new();
+            let wait_for = FuturesUnordered::new();
             for (s, rs) in shard_writes.drain(..).enumerate() {
                 if !rs.is_empty() {
                     let p = if self.dst_is_local {
@@ -361,11 +330,11 @@ impl Service<Input> for Table {
                 }
             }
 
-            future::Either::B(
+            future::Either::Right(
                 wait_for
-                    .for_each(|_| Ok(()))
+                    .try_for_each(|_| async { Ok(()) })
                     .map_err(TableError::from)
-                    .map(Tagged::from),
+                    .map_ok(Tagged::from),
             )
         }
     }
@@ -376,8 +345,8 @@ impl Service<TableOperation> for Table {
     type Response = <Table as Service<Input>>::Response;
     type Future = <Table as Service<Input>>::Future;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        <Table as Service<Input>>::poll_ready(self)
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        <Table as Service<Input>>::poll_ready(self, cx)
     }
 
     fn call(&mut self, op: TableOperation) -> Self::Future {
@@ -391,8 +360,8 @@ impl Service<Vec<TableOperation>> for Table {
     type Response = <Table as Service<Input>>::Response;
     type Future = <Table as Service<Input>>::Future;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        <Table as Service<Input>>::poll_ready(self)
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        <Table as Service<Input>>::poll_ready(self, cx)
     }
 
     fn call(&mut self, ops: Vec<TableOperation>) -> Self::Future {
@@ -507,62 +476,50 @@ impl Table {
         }
     }
 
-    fn quick_n_dirty<Request>(
-        self,
+    async fn quick_n_dirty<Request, R>(
+        &mut self,
         r: Request,
-    ) -> impl Future<Item = Table, Error = AsyncTableError> + Send
+    ) -> Result<R, <Self as Service<Request>>::Error>
     where
         Request: Send + 'static,
-        Self: Service<Request, Error = TableError>,
-        <Self as Service<Request>>::Future: Send,
+        Self: Service<Request, Response = Tagged<R>>,
     {
-        self.ready()
-            .map_err(AsyncTableError::from)
-            .and_then(move |mut svc| {
-                svc.call(r).then(move |r| match r {
-                    Ok(_) => Ok(svc),
-                    Err(e) => Err(AsyncTableError {
-                        table: Some(svc),
-                        error: e,
-                    }),
-                })
-            })
+        future::poll_fn(|cx| self.poll_ready(cx)).await?;
+        Ok(self.call(r).await?.v)
     }
 
     /// Insert a single row of data into this base table.
-    pub fn insert<V>(self, u: V) -> impl Future<Item = Self, Error = AsyncTableError> + Send
+    pub async fn insert<V>(&mut self, u: V) -> Result<(), TableError>
     where
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableOperation::Insert(u.into()))
+        self.quick_n_dirty(TableOperation::Insert(u.into())).await
     }
 
     /// Perform multiple operation on this base table.
-    pub fn perform_all<I, V>(self, i: I) -> impl Future<Item = Self, Error = AsyncTableError> + Send
+    pub async fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
     where
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
     {
         self.quick_n_dirty(i.into_iter().map(Into::into).collect::<Vec<_>>())
+            .await
     }
 
     /// Delete the row with the given key from this base table.
-    pub fn delete<I>(self, key: I) -> impl Future<Item = Self, Error = AsyncTableError> + Send
+    pub async fn delete<I>(&mut self, key: I) -> Result<(), TableError>
     where
         I: Into<Vec<DataType>>,
     {
         self.quick_n_dirty(TableOperation::Delete { key: key.into() })
+            .await
     }
 
     /// Update the row with the given key in this base table.
     ///
     /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
     /// `m` will be applied to column `i` of the record with key `key`.
-    pub fn update<V>(
-        self,
-        key: Vec<DataType>,
-        u: V,
-    ) -> impl Future<Item = Self, Error = AsyncTableError> + Send
+    pub async fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -572,37 +529,30 @@ impl Table {
         );
 
         if key.len() != self.key.len() {
-            let error = TableError::WrongKeyColumnCount(self.key.len(), key.len());
-            return future::Either::A(future::err(AsyncTableError {
-                table: Some(self),
-                error,
-            }));
+            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
-                let error = TableError::WrongColumnCount(self.columns.len(), coli + 1);
-                return future::Either::A(future::err(AsyncTableError {
-                    table: Some(self),
-                    error,
-                }));
+                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
             }
             set[coli] = m;
         }
 
-        future::Either::B(self.quick_n_dirty(TableOperation::Update { key, set }))
+        self.quick_n_dirty(TableOperation::Update { key, set })
+            .await
     }
 
     /// Perform a insert-or-update on this base table.
     ///
     /// If a row already exists for the key in `insert`, the existing row will instead be updated
     /// with the modifications in `u` (as documented in `Table::update`).
-    pub fn insert_or_update<V>(
-        self,
+    pub async fn insert_or_update<V>(
+        &mut self,
         insert: Vec<DataType>,
         update: V,
-    ) -> impl Future<Item = Table, Error = AsyncTableError> + Send
+    ) -> Result<(), TableError>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -612,29 +562,25 @@ impl Table {
         );
 
         if insert.len() != self.columns.len() {
-            let error = TableError::WrongColumnCount(self.columns.len(), insert.len());
-            return future::Either::A(future::err(AsyncTableError {
-                table: Some(self),
-                error,
-            }));
+            return Err(TableError::WrongColumnCount(
+                self.columns.len(),
+                insert.len(),
+            ));
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
-                let error = TableError::WrongColumnCount(self.columns.len(), coli + 1);
-                return future::Either::A(future::err(AsyncTableError {
-                    table: Some(self),
-                    error,
-                }));
+                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
             }
             set[coli] = m;
         }
 
-        future::Either::B(self.quick_n_dirty(TableOperation::InsertOrUpdate {
+        self.quick_n_dirty(TableOperation::InsertOrUpdate {
             row: insert,
             update: set,
-        }))
+        })
+        .await
     }
 
     /// Trace the next modification to this base table.
@@ -647,112 +593,5 @@ impl Table {
     /// Traced events are sent on the debug channel, and are tagged with the given `tag`.
     pub fn trace_next(&mut self, tag: u64) {
         self.tracer = Some((tag, None));
-    }
-
-    /// Switch to a synchronous interface for this table.
-    pub fn into_sync(self) -> SyncTable {
-        SyncTable(Some(self))
-    }
-}
-
-/// A synchronous wrapper around [`Table`] where all methods block (using `wait`) for the operation
-/// to complete before returning.
-#[derive(Clone, Debug)]
-pub struct SyncTable(Option<Table>);
-
-macro_rules! sync {
-    ($self:ident.$method:ident($($args:expr),*)) => {{
-        let mut table = $self
-            .0
-            .take()
-            .expect("tried to use Table after its transport has failed");
-        let tracer = std::mem::replace(&mut table.dispatch, tracing::Dispatch::none());
-        let res = tracing::dispatcher::with_default(&tracer, move || table.$method($($args),*).wait());
-        match res {
-            Ok(mut this) => {
-                std::mem::replace(&mut this.dispatch, tracer);
-                $self.0 = Some(this);
-                Ok(())
-            }
-            Err(mut e) => {
-                if let Some(ref mut table) = e.table {
-                    std::mem::replace(&mut table.dispatch, tracer);
-                }
-                $self.0 = e.table;
-                Err(e.error)
-            },
-        }
-    }};
-}
-
-use std::ops::{Deref, DerefMut};
-impl Deref for SyncTable {
-    type Target = Table;
-    fn deref(&self) -> &Self::Target {
-        self.0
-            .as_ref()
-            .expect("tried to use Table after its transport has failed")
-    }
-}
-
-impl DerefMut for SyncTable {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-            .as_mut()
-            .expect("tried to use Table after its transport has failed")
-    }
-}
-
-impl SyncTable {
-    /// See [`Table::insert`].
-    pub fn insert<V>(&mut self, u: V) -> Result<(), TableError>
-    where
-        V: Into<Vec<DataType>>,
-    {
-        sync!(self.insert(u))
-    }
-
-    /// See [`Table::perform_all`].
-    pub fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
-    where
-        I: IntoIterator<Item = V>,
-        V: Into<TableOperation>,
-    {
-        sync!(self.perform_all(i))
-    }
-
-    /// See [`Table::delete`].
-    pub fn delete<I>(&mut self, key: I) -> Result<(), TableError>
-    where
-        I: Into<Vec<DataType>>,
-    {
-        sync!(self.delete(key))
-    }
-
-    /// See [`Table::update`].
-    pub fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
-    where
-        V: IntoIterator<Item = (usize, Modification)>,
-    {
-        sync!(self.update(key, u))
-    }
-
-    /// See [`Table::insert_or_update`].
-    pub fn insert_or_update<V>(
-        &mut self,
-        insert: Vec<DataType>,
-        update: V,
-    ) -> Result<(), TableError>
-    where
-        V: IntoIterator<Item = (usize, Modification)>,
-    {
-        sync!(self.insert_or_update(insert, update))
-    }
-
-    /// Switch back to an asynchronous interface for this table.
-    pub fn into_async(mut self) -> Table {
-        self.0
-            .take()
-            .expect("tried to use Table after its transport has failed")
     }
 }

@@ -1,20 +1,20 @@
 mod parameters;
 mod populate;
 
-#[macro_use]
-extern crate clap;
-
 use crate::parameters::SampleKeys;
-use noria::{Builder, LocalAuthority, SyncHandle};
+use clap::value_t_or_exit;
+use futures_util::stream::StreamExt;
+use noria::{Builder, Handle, LocalAuthority};
 use rand::prelude::*;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Barrier};
-use std::thread::JoinHandle;
-use std::{thread, time};
+use std::time;
 
 pub struct Backend {
     r: String,
-    g: SyncHandle<LocalAuthority>,
+    g: Handle<LocalAuthority>,
+    done: Box<dyn Future<Output = ()> + Unpin>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
@@ -43,7 +43,7 @@ fn get_queries(recipe_location: &str, random: bool) -> Vec<String> {
     queries
 }
 
-fn make(
+async fn make(
     recipe_location: &str,
     parallel: bool,
     single_query: bool,
@@ -61,7 +61,8 @@ fn make(
         b.disable_partial();
     }
 
-    let mut g = b.start_simple().unwrap();
+    let (mut g, done) = b.start_local().await.unwrap();
+    let done = Box::new(done);
 
     let recipe = {
         let mut f = File::open(recipe_location).unwrap();
@@ -80,7 +81,7 @@ fn make(
         s
     };
 
-    g.install_recipe(&recipe).unwrap();
+    g.install_recipe(&recipe).await.unwrap();
 
     // XXX(malte): fix reuse configuration passthrough
     /*match Recipe::from_str(&s, Some(recipe_log.clone())) {
@@ -103,6 +104,7 @@ fn make(
     Backend {
         r: recipe,
         g,
+        done,
         parallel_prepop: parallel,
         prepop_counts: HashMap::new(),
         barrier: Arc::new(Barrier::new(9)), // N.B.: # base tables
@@ -110,7 +112,7 @@ fn make(
 }
 
 impl Backend {
-    fn extend(mut self, query: &str) -> Backend {
+    async fn extend(&mut self, query: &str) {
         let query_name = query.split(':').next().unwrap();
 
         let mut new_recipe = self.r.clone();
@@ -118,13 +120,12 @@ impl Backend {
         new_recipe.push_str(query);
 
         let start = time::Instant::now();
-        self.g.install_recipe(&new_recipe).unwrap();
+        self.g.install_recipe(&new_recipe).await.unwrap();
 
         let dur = start.elapsed().as_secs_f64();
         println!("Migrate query {}: ({:.2} sec)", query_name, dur,);
 
         self.r = new_recipe;
-        self
     }
 
     #[allow(dead_code)]
@@ -140,30 +141,29 @@ impl Backend {
         }*/
     }
 
-    fn read(
+    async fn read(
         &mut self,
         keys: &mut SampleKeys,
         query_name: &str,
         read_scale: f32,
-        parallel: bool,
-    ) -> Option<JoinHandle<()>> {
+    ) -> impl Future<Output = ()> {
         println!("reading {}", query_name);
         let mut g = self
             .g
             .view(query_name)
-            .unwrap_or_else(|e| panic!("no node for {}: {:?}", query_name, e))
-            .into_sync();
+            .await
+            .unwrap_or_else(|e| panic!("no node for {}: {:?}", query_name, e));
         let query_name = String::from(query_name);
 
         let num = ((keys.keys_size(&query_name) as f32) * read_scale) as usize;
         let params = keys.generate_parameter(&query_name, num);
 
-        let mut read_view = move || {
-            let mut ok = 0;
+        let read_view = async move {
+            let mut ok = 0usize;
 
             let start = time::Instant::now();
             for i in 0..num {
-                match g.lookup(&params[i..=i], true) {
+                match g.lookup(&params[i..=i], true).await {
                     Err(_) => continue,
                     Ok(datas) => {
                         if !datas.is_empty() {
@@ -181,18 +181,12 @@ impl Backend {
             );
         };
 
-        if parallel {
-            Some(thread::spawn(move || {
-                read_view();
-            }))
-        } else {
-            read_view();
-            None
-        }
+        read_view
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     use crate::populate::*;
     use clap::{App, Arg};
 
@@ -297,7 +291,7 @@ fn main() {
     }
 
     println!("Loading TPC-W recipe from {}", rloc);
-    let mut backend = make(&rloc, parallel_prepop, single_query, disable_partial);
+    let mut backend = make(&rloc, parallel_prepop, single_query, disable_partial).await;
 
     println!("Prepopulating from data files in {}", ploc);
     let (item_write, author_write, order_line_write) = match write_to {
@@ -307,40 +301,39 @@ fn main() {
         _ => unreachable!(),
     };
 
-    let num_addr = populate_addresses(&mut backend, &ploc);
+    let num_addr = populate_addresses(&mut backend, &ploc).await;
     backend.prepop_counts.insert("addresses".into(), num_addr);
-    let num_authors = populate_authors(&mut backend, &ploc, author_write, true);
+    let num_authors = populate_authors(&mut backend, &ploc, author_write, true).await;
     backend.prepop_counts.insert("authors".into(), num_authors);
-    let num_countries = populate_countries(&mut backend, &ploc);
+    let num_countries = populate_countries(&mut backend, &ploc).await;
     backend
         .prepop_counts
         .insert("countries".into(), num_countries);
-    let num_customers = populate_customers(&mut backend, &ploc);
+    let num_customers = populate_customers(&mut backend, &ploc).await;
     backend
         .prepop_counts
         .insert("customers".into(), num_customers);
-    let num_items = populate_items(&mut backend, &ploc, item_write, true);
+    let num_items = populate_items(&mut backend, &ploc, item_write, true).await;
     backend.prepop_counts.insert("items".into(), num_items);
-    let num_orders = populate_orders(&mut backend, &ploc);
+    let num_orders = populate_orders(&mut backend, &ploc).await;
     backend.prepop_counts.insert("orders".into(), num_orders);
-    let num_cc_xacts = populate_cc_xacts(&mut backend, &ploc);
+    let num_cc_xacts = populate_cc_xacts(&mut backend, &ploc).await;
     backend
         .prepop_counts
         .insert("cc_xacts".into(), num_cc_xacts);
-    let num_order_line = populate_order_line(&mut backend, &ploc, order_line_write, true);
+    let num_order_line = populate_order_line(&mut backend, &ploc, order_line_write, true).await;
     backend
         .prepop_counts
         .insert("order_line".into(), num_order_line);
 
     if parallel_prepop {
         backend.barrier.wait();
-        backend.barrier.wait();
     }
 
     //println!("{}", backend.g);
 
     println!("Finished writing! Sleeping for 1 second...");
-    thread::sleep(time::Duration::from_millis(1000));
+    tokio::time::delay_for(time::Duration::from_secs(1)).await;
 
     if single_query {
         use std::fs::File;
@@ -350,12 +343,12 @@ fn main() {
         let queries = get_queries(&rloc, random);
 
         for (i, q) in queries.iter().enumerate() {
-            backend = backend.extend(&q);
+            backend.extend(&q).await;
 
             if gloc.is_some() {
                 let graph_fname = format!("{}/tpcw_{}.gv", gloc.unwrap(), i);
                 let mut gf = File::create(graph_fname).unwrap();
-                assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+                write!(gf, "{}", backend.g.graphviz().await.unwrap()).unwrap();
             }
         }
     }
@@ -373,15 +366,16 @@ fn main() {
             "getCart",
             "verifyDBConsistencyItemId",
         ];
-        let mut handles = Vec::new();
-        for nq in item_queries.iter() {
-            handles.push(backend.read(&mut keys, nq, read_scale, parallel_read));
-        }
 
-        for h in handles {
-            match h {
-                Some(jh) => jh.join().unwrap(),
-                None => continue,
+        if parallel_read {
+            let mut wait = futures_util::stream::futures_unordered::FuturesUnordered::new();
+            for nq in item_queries.iter() {
+                wait.push(backend.read(&mut keys, nq, read_scale).await);
+            }
+            while let Some(_) = wait.next().await {}
+        } else {
+            for nq in item_queries.iter() {
+                backend.read(&mut keys, nq, read_scale).await.await;
             }
         }
 
@@ -402,9 +396,12 @@ fn main() {
     }
 
     match write_to {
-        "item" => populate_items(&mut backend, &ploc, write, false),
-        "author" => populate_authors(&mut backend, &ploc, write, false),
-        "order_line" => populate_order_line(&mut backend, &ploc, write, false),
+        "item" => populate_items(&mut backend, &ploc, write, false).await,
+        "author" => populate_authors(&mut backend, &ploc, write, false).await,
+        "order_line" => populate_order_line(&mut backend, &ploc, write, false).await,
         _ => unreachable!(),
     };
+
+    drop(backend.g);
+    backend.done.await;
 }

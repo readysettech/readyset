@@ -12,8 +12,8 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
     match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
             ref mut operator,
-            box ref mut left,
-            box ref mut right,
+            ref mut left,
+            ref mut right,
         }) => {
             if negate {
                 *operator = match *operator {
@@ -28,8 +28,8 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         }
         ConditionExpression::ComparisonOp(ConditionTree {
             ref mut operator,
-            box ref mut left,
-            box ref mut right,
+            ref mut left,
+            ref mut right,
         }) => {
             if negate {
                 *operator = match *operator {
@@ -47,9 +47,9 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(right, false);
         }
         ConditionExpression::NegationOp(_) => {
-            let inner = if let ConditionExpression::NegationOp(box ref mut inner) = *ce {
+            let inner = if let ConditionExpression::NegationOp(ref mut inner) = *ce {
                 mem::replace(
-                    inner,
+                    &mut **inner,
                     ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
                 )
             } else {

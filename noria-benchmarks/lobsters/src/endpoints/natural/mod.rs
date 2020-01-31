@@ -8,26 +8,27 @@ pub(crate) mod story_vote;
 pub(crate) mod submit;
 pub(crate) mod user;
 
-use futures::Future;
 use my;
 use my::prelude::*;
 
-pub(crate) fn notifications(
-    c: my::Conn,
-    uid: u32,
-) -> impl Future<Item = my::Conn, Error = my::error::Error> {
-    c.drop_exec(
-        "SELECT BOUNDARY_notifications.notifications
+pub(crate) async fn notifications(mut c: my::Conn, uid: u32) -> Result<my::Conn, my::error::Error> {
+    c = c
+        .drop_exec(
+            "SELECT BOUNDARY_notifications.notifications
          FROM BOUNDARY_notifications
          WHERE BOUNDARY_notifications.user_id = ?",
-        (uid,),
-    )
-    .and_then(move |c| {
-        c.drop_exec(
+            (uid,),
+        )
+        .await?;
+
+    c = c
+        .drop_exec(
             "SELECT `keystores`.* \
              FROM `keystores` \
              WHERE `keystores`.`key` = ?",
             (format!("user:{}:unread_messages", uid),),
         )
-    })
+        .await?;
+
+    Ok(c)
 }

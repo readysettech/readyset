@@ -1,5 +1,5 @@
+use crate::prelude::*;
 use noria::internal::LocalOrNot;
-use prelude::*;
 use std::time;
 
 pub struct GroupCommitQueueSet {

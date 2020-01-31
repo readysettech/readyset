@@ -1,16 +1,6 @@
-#![feature(slice_concat_ext)]
-
-extern crate backtrace;
-extern crate diff;
-extern crate futures;
-extern crate mysql;
-extern crate noria_server;
-#[macro_use]
-extern crate serde_derive;
-extern crate toml;
-
 use mysql::OptsBuilder;
 use mysql::Params;
+use serde_derive::Deserialize;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as FmtWrite;
@@ -266,7 +256,7 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     Some(output)
 }
 
-fn check_query(
+async fn check_query(
     tables: &BTreeMap<String, Table>,
     query_name: &str,
     query: &Query,
@@ -278,11 +268,11 @@ fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let mut g = Builder::default().start_simple().unwrap();
-    g.install_recipe(&queries.join("\n")).unwrap();
+    let (mut g, done) = Builder::default().start_local().await.unwrap();
+    g.install_recipe(&queries.join("\n")).await.unwrap();
 
     for (table_name, table) in tables.iter() {
-        let mut mutator = g.table(table_name).unwrap().into_sync();
+        let mut mutator = g.table(table_name).await.unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row
@@ -290,17 +280,17 @@ fn check_query(
                 .enumerate()
                 .map(|(i, v)| table.types[i].make_datatype(v))
                 .collect();
-            mutator.insert(row).unwrap();
+            mutator.insert(row).await.unwrap();
         }
     }
 
-    thread::sleep(time::Duration::from_millis(300));
+    tokio::time::delay_for(time::Duration::from_millis(300)).await;
 
-    let mut getter = g.view(query_name).unwrap().into_sync();
+    let mut getter = g.view(query_name).await.unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);
-        let query_results = getter.lookup(&[query_param], true).unwrap();
+        let query_results = getter.lookup(&[query_param], true).await.unwrap();
 
         let target_results = &target[&i.to_string()];
         let query_results: Vec<Vec<String>> = query_results
@@ -331,6 +321,8 @@ fn check_query(
             None => {}
         }
     }
+
+    done.await;
     Ok(())
 }
 
@@ -408,7 +400,13 @@ fn mysql_comparison() {
             let panic_state: Arc<Mutex<Option<PanicState>>> = Arc::new(Mutex::new(None));
             set_panic_hook(panic_state.clone());
             let result = panic::catch_unwind(|| {
-                check_query(&schema.tables, query_name, query, &target_data[query_name])
+                let mut rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(check_query(
+                    &schema.tables,
+                    query_name,
+                    query,
+                    &target_data[query_name],
+                ))
             });
             let _ = panic::take_hook();
             match result {

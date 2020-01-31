@@ -1,8 +1,4 @@
-#[macro_use]
-extern crate clap;
-extern crate noria_server;
-extern crate slog;
-
+use clap::value_t_or_exit;
 use noria_server::{Builder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,12 +164,14 @@ fn main() {
     }
 
     let mut rt = tokio::runtime::Builder::new();
-    rt.name_prefix("worker-");
+    rt.enable_all();
+    rt.threaded_scheduler();
+    rt.thread_name("worker");
     if let Some(threads) = None {
         rt.core_threads(threads);
     }
-    rt.build()
-        .unwrap()
-        .block_on_all(builder.start(Arc::new(authority)))
-        .unwrap();
+    let mut rt = rt.build().unwrap();
+    let (_server, done) = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+    rt.block_on(done);
+    drop(rt);
 }

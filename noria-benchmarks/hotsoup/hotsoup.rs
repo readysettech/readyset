@@ -1,20 +1,19 @@
 mod populate;
 
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate slog;
-
-use noria::{Builder, LocalAuthority, SyncHandle};
+use clap::value_t_or_exit;
+use noria::{Builder, Handle, LocalAuthority};
+use slog::info;
+use std::future::Future;
 
 pub struct Backend {
     blacklist: Vec<String>,
     r: String,
     log: slog::Logger,
-    g: SyncHandle<LocalAuthority>,
+    g: Handle<LocalAuthority>,
+    done: Box<dyn Future<Output = ()> + Unpin>,
 }
 
-fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
+async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     use std::fs::File;
     use std::io::Read;
 
@@ -40,7 +39,7 @@ fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     if !partial {
         b.disable_partial();
     }
-    let g = b.start_simple().unwrap();
+    let (g, done) = b.start_local().await.unwrap();
 
     //recipe.enable_reuse(reuse);
     Box::new(Backend {
@@ -48,11 +47,12 @@ fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
         r: String::new(),
         log,
         g,
+        done: Box::new(done),
     })
 }
 
 impl Backend {
-    fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
+    async fn migrate(&mut self, schema_file: &str, query_file: Option<&str>) -> Result<(), String> {
         use std::fs::File;
         use std::io::Read;
 
@@ -101,7 +101,7 @@ impl Backend {
 
         info!(self.log, "Ignored {} blacklisted queries", blacklisted);
 
-        match self.g.install_recipe(&rs) {
+        match self.g.install_recipe(&rs).await {
             Ok(ar) => {
                 info!(self.log, "{} expressions added", ar.expressions_added);
                 info!(self.log, "{} expressions removed", ar.expressions_removed);
@@ -114,7 +114,8 @@ impl Backend {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::{App, Arg};
     use std::fs::{self, File};
     use std::io::Write;
@@ -224,7 +225,7 @@ fn main() {
     let stop_at_schema = value_t_or_exit!(matches, "stop_at", u64);
     let populate_at_schema = value_t_or_exit!(matches, "populate_at", u64);
 
-    let mut backend = make(blloc, !disable_sharding, !disable_partial);
+    let mut backend = make(blloc, !disable_sharding, !disable_partial).await;
 
     let mut query_files = Vec::new();
     let mut schema_files = Vec::new();
@@ -283,23 +284,28 @@ fn main() {
         } else {
             Some(qf.1.to_str().unwrap())
         };
-        if let Err(e) = backend.migrate(&sf.1.to_str().unwrap(), queries) {
+        if let Err(e) = backend.migrate(&sf.1.to_str().unwrap(), queries).await {
             let graph_fname = format!("{}/failed_hotcrp_{}.gv", gloc.unwrap(), schema_version);
             let mut gf = File::create(graph_fname).unwrap();
-            assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+            assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
             panic!(e)
         }
 
         if gloc.is_some() {
             let graph_fname = format!("{}/hotcrp_{}.gv", gloc.unwrap(), schema_version);
             let mut gf = File::create(graph_fname).unwrap();
-            assert!(write!(gf, "{}", backend.g.graphviz().unwrap()).is_ok());
+            assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
         }
 
         // on the first auto-upgradeable schema, populate with test data
         if schema_version == populate_at_schema {
             info!(backend.log, "Populating database!");
-            populate::populate(&mut backend, dataloc, transactional).unwrap();
+            populate::populate(&mut backend, dataloc, transactional)
+                .await
+                .unwrap();
         }
     }
+
+    drop(backend.g);
+    backend.done.await;
 }

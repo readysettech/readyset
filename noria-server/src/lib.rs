@@ -210,15 +210,12 @@
 //!
 //! ```no_run
 //! # extern crate noria;
-//! # extern crate tokio;
-//! # extern crate futures;
-//! use tokio::prelude::*;
-//! # fn main() {
+//! # #[tokio::main]
+//! # async fn main() {
 //! # let zookeeper_addr = "";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
-//! let mut article = db.table("article").unwrap();
-//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).wait();
+//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! let mut article = db.table("article").await.unwrap();
+//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).await.unwrap();
 //! # }
 //! ```
 //!
@@ -269,15 +266,12 @@
 //!
 //! ```no_run
 //! # extern crate noria;
-//! # extern crate tokio;
-//! # extern crate futures;
-//! use tokio::prelude::*;
-//! # fn main() {
+//! # #[tokio::main]
+//! # async fn main() {
 //! # let zookeeper_addr = "";
-//! let mut rt = tokio::runtime::Runtime::new().unwrap();
-//! let mut db = noria::SyncControllerHandle::from_zk(zookeeper_addr, rt.executor()).unwrap();
-//! let mut vote = db.table("vote").unwrap();
-//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).wait();
+//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! let mut vote = db.table("vote").await.unwrap();
+//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).await.unwrap();
 //! # }
 //! ```
 //!
@@ -348,14 +342,8 @@
 //! - [id=1, title=Hello world, votes=42]
 //! + [id=1, title=Hello world, votes=43]
 //! ```
-#![feature(allow_fail)]
-#![feature(optin_builtin_traits)]
-#![feature(box_patterns)]
-#![feature(box_syntax)]
-#![feature(nll)]
-#![feature(try_blocks)]
+#![feature(type_alias_impl_trait)]
 #![feature(vec_remove_item)]
-#![feature(crate_visibility_modifier)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 //#![deny(unreachable_pub)]
@@ -390,7 +378,7 @@ pub enum ReuseConfigType {
 }
 
 pub use crate::builder::Builder;
-pub use crate::handle::{Handle, SyncHandle};
+pub use crate::handle::Handle;
 pub use controller::migrate::materialization::FrontierStrategy;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
@@ -407,30 +395,18 @@ pub mod manual {
 use dataflow::DomainConfig;
 use std::time;
 
-pub(crate) fn block_on<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    use tokio::prelude::*;
-    use tokio_threadpool::blocking;
-    let mut wrap = Some(f);
-    future::poll_fn(|| blocking(|| wrap.take().unwrap()()))
-        .wait()
-        .unwrap()
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
-crate struct Config {
-    crate sharding: Option<usize>,
-    crate partial_enabled: bool,
-    crate frontier_strategy: FrontierStrategy,
-    crate domain_config: DomainConfig,
-    crate persistence: PersistenceParameters,
-    crate heartbeat_every: time::Duration,
-    crate healthcheck_every: time::Duration,
-    crate quorum: usize,
-    crate reuse: ReuseConfigType,
-    crate threads: Option<usize>,
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+pub(crate) struct Config {
+    pub(crate) sharding: Option<usize>,
+    pub(crate) partial_enabled: bool,
+    pub(crate) frontier_strategy: FrontierStrategy,
+    pub(crate) domain_config: DomainConfig,
+    pub(crate) persistence: PersistenceParameters,
+    pub(crate) heartbeat_every: time::Duration,
+    pub(crate) healthcheck_every: time::Duration,
+    pub(crate) quorum: usize,
+    pub(crate) reuse: ReuseConfigType,
+    pub(crate) threads: Option<usize>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -467,73 +443,29 @@ pub fn logger_pls() -> slog::Logger {
     Logger::root(Mutex::new(term_full()).fuse(), o!())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use noria::consensus::ZookeeperAuthority;
-    use std::{sync::Arc, thread, time};
-    use tokio::prelude::*;
+use futures_util::sink::Sink;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
 
-    // Controller without any domains gets dropped once it leaves the scope.
-    #[test]
-    #[ignore]
-    #[allow_fail]
-    fn it_works_default() {
-        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        let authority = ZookeeperAuthority::new("127.0.0.1:2181/it_works_default").unwrap();
-        {
-            tokio::runtime::current_thread::block_on_all(
-                Builder::default().start(Arc::new(authority)),
-            )
-            .unwrap();
-            thread::sleep(time::Duration::from_millis(100));
-        }
-        thread::sleep(time::Duration::from_millis(100));
+impl<T> Sink<T> for ImplSinkForSender<T> {
+    type Error = tokio::sync::mpsc::error::SendError<T>;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    // Controller with a few domains drops them once it leaves the scope.
-    #[test]
-    #[allow_fail]
-    fn it_works_blender_with_migration() {
-        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
-                     CREATE TABLE b (r int, s int);\n";
-
-        use rand::Rng;
-        let zk = format!(
-            "127.0.0.1:2181/it_works_blender_with_migration_{}",
-            rand::thread_rng()
-                .sample_iter(&rand::distributions::Alphanumeric)
-                .take(8)
-                .collect::<String>()
-        );
-        let authority = ZookeeperAuthority::new(&zk).unwrap();
-        tokio::runtime::current_thread::block_on_all(
-            Builder::default()
-                .start(Arc::new(authority))
-                .and_then(|mut c| c.install_recipe(r_txt)),
-        )
-        .unwrap();
+    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+        self.0.send(item)
     }
 
-    // Controller without any domains gets dropped once it leaves the scope.
-    #[test]
-    #[ignore]
-    fn it_works_default_local() {
-        // Controller gets dropped. It doesn't have Domains, so we don't see any dropped.
-        {
-            let _c = Builder::default().start_simple().unwrap();
-            thread::sleep(time::Duration::from_millis(100));
-        }
-        thread::sleep(time::Duration::from_millis(100));
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    // Controller with a few domains drops them once it leaves the scope.
-    #[test]
-    fn it_works_blender_with_migration_local() {
-        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
-                     CREATE TABLE b (r int, s int);\n";
-
-        let mut c = Builder::default().start_simple().unwrap();
-        assert!(c.install_recipe(r_txt).is_ok());
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 }

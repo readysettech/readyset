@@ -1,11 +1,11 @@
 use std::sync;
 
 pub use nom_sql::{Operator, Literal};
-use ops::grouped::GroupedOperation;
-use ops::grouped::GroupedOperator;
-use ops::filter::{FilterCondition, Value};
+use crate::ops::grouped::GroupedOperation;
+use crate::ops::grouped::GroupedOperator;
+use crate::ops::filter::{FilterCondition, Value};
 
-use prelude::*;
+use crate::prelude::*;
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,7 +197,7 @@ impl GroupedOperation for FilterAggregator {
 mod tests {
     use super::*;
 
-    use ops;
+    use crate::ops;
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

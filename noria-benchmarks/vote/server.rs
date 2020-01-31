@@ -291,6 +291,11 @@ pub(crate) fn start<'a>(
             }
 
             // wipe zookeeper state
+            match server.just_exec(&["sudo", "systemctl", "stop", "zookeeper"]) {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => return Ok(Err(e)),
+                Err(e) => return Err(e),
+            }
             match server.just_exec(&["sudo", "rm", "-rf", "/var/lib/zookeeper/version-2"]) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => return Ok(Err(e)),
@@ -320,10 +325,8 @@ pub(crate) fn start<'a>(
             // TODO: should we worry about the running directory being on an SSD here?
             let shards = format!("{}", shards.unwrap_or(0));
             let w = {
-                let mut cmd: Vec<Cow<str>> = ["cd", "noria", "&&"]
-                    .into_iter()
-                    .map(|&s| s.into())
-                    .collect();
+                let mut cmd: Vec<Cow<str>> =
+                    ["cd", "noria", "&&"].iter().map(|&s| s.into()).collect();
                 cmd.extend(vec![
                     "/home/ubuntu/target/release/noria-server".into(),
                     "--durability".into(),

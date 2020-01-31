@@ -1,4 +1,4 @@
-use noria_server::Builder;
+use noria::ControllerHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
@@ -17,42 +17,30 @@ async fn main() {
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
-
-    let persistence_params = noria_server::PersistenceParameters::new(
-        noria_server::DurabilityMode::Permanent,
-        Duration::from_millis(1),
-        Some(String::from("example")),
-        1,
-    );
-
-    // set up Soup via recipe
-    let mut builder = Builder::default();
-
-    builder.log_with(noria_server::logger_pls());
-    builder.set_persistence(persistence_params);
-
-    let (mut blender, done) = builder.start_local().await.unwrap();
-    blender.install_recipe(sql).await.unwrap();
-    println!("{}", blender.graphviz().await.unwrap());
-
-    // Get mutators and getter.
-    let mut article = blender.table("Article").await.unwrap();
-    let mut vote = blender.table("Vote").await.unwrap();
-    let mut awvc = blender.view("ArticleWithVoteCount").await.unwrap();
-
-    println!("Creating article...");
     let aid = 1;
-    // Make sure the article exists:
-    if awvc.lookup(&[aid.into()], true).await.unwrap().is_empty() {
+
+    let mut srv = ControllerHandle::from_zk("127.0.0.1:2181/quickstart")
+        .await
+        .unwrap();
+    srv.install_recipe(sql).await.unwrap();
+    let g = srv.graphviz().await.unwrap();
+    println!("{}", g);
+
+    let mut awvc = srv.view("ArticleWithVoteCount").await.unwrap();
+    println!("Creating article...");
+    let article = awvc.lookup(&[aid.into()], true).await.unwrap();
+    if article.is_empty() {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
-        article
+        let mut articles = srv.table("Article").await.unwrap();
+        articles
             .insert(vec![aid.into(), title.into(), url.into()])
             .await
             .unwrap();
     }
 
+    let mut vote = srv.table("Vote").await.unwrap();
     // Then create a new vote:
     println!("Casting vote...");
     let uid = SystemTime::now()
@@ -65,10 +53,9 @@ async fn main() {
     vote.insert(vec![aid.into(), uid.into()]).await.unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    tokio::time::delay_for(Duration::from_secs(1)).await;
+    tokio::time::delay_for(Duration::from_millis(1000)).await;
 
     println!("Reading...");
-    println!("{:#?}", awvc.lookup(&[aid.into()], true).await);
-
-    done.await;
+    let article = awvc.lookup(&[aid.into()], true).await.unwrap();
+    println!("{:#?}", article);
 }
