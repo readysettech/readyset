@@ -1019,8 +1019,7 @@ mod tests {
         for c in columns.iter() {
             OutputColumn::Data((*c).clone()).hash(&mut hasher);
         }
-        let temp = hasher.finish();
-        temp
+        hasher.finish()
     }
 
     #[tokio::test(threaded_scheduler)]

@@ -547,6 +547,10 @@ fn make_grouped_node(
             group_by.len()
         )
     );
+    assert!(match kind {
+        GroupedNodeType::FilterAggregation(_) => true,
+        _ => else_on.is_none() && conditions.is_none(),
+    });
 
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);

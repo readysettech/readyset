@@ -246,7 +246,8 @@ impl SqlToMirConverter {
         match columns.iter().rposition(|c| *c.name == l.name) {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
-                // We assume that the column is appended at the end.
+                // We assume that the column is appended at the end, unless we have an aggregation,
+                // in which case it needs to go before the computed column, which is last.
                 match n.borrow().inner {
                     MirNodeType::Aggregation { .. }  => {
                         columns.insert(columns.len()-1, Column::from(l));
@@ -1029,7 +1030,7 @@ impl SqlToMirConverter {
                 ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
-            }), _) => mknode(
+            }), false) => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
@@ -1040,7 +1041,7 @@ impl SqlToMirConverter {
                 ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: None
-            }), _) => mknode(
+            }), false) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
@@ -1067,7 +1068,7 @@ impl SqlToMirConverter {
                 ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
-            }), _) => mknode(
+            }), false) => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
@@ -1078,7 +1079,7 @@ impl SqlToMirConverter {
                 ref condition,
                 then_expr: ColumnOrLiteral::Column(ref col),
                 else_expr: None
-            }), _) => mknode(
+            }), false) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
