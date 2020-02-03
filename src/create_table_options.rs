@@ -1,11 +1,12 @@
 use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
-use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma};
+use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma,
+             ws_sep_equals};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list;
-use nom::sequence::{preceded, tuple};
+use nom::sequence::tuple;
 use nom::IResult;
 
 pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
@@ -35,58 +36,55 @@ fn create_option(i: &[u8]) -> IResult<&[u8], ()> {
     ))(i)
 }
 
+
+/// Helper to parse equals-separated create option pairs.
+/// Throws away the create option and value
+pub fn create_option_equals_pair<'a, I, O1, O2, F, G>(first: F, second: G) -> impl Fn(I) -> IResult<I, ()>
+where
+  F: Fn(I) -> IResult<I, O1>,
+  G: Fn(I) -> IResult<I, O2>,
+  I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+  <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
+{
+    move |i: I| {
+        let (i, _o1) = first(i)?;
+        let (i, _) = ws_sep_equals(i)?;
+        let (i, _o2) = second(i)?;
+        Ok(( i, () ))
+    }
+}
+
 fn create_option_type(i: &[u8]) -> IResult<&[u8], ()> {
-    map(
-        preceded(
-            tag_no_case("type"),
-            preceded(
-                multispace0,
-                preceded(tag("="), preceded(multispace0, alphanumeric1)),
-            ),
-        ),
-        |_| (),
+    create_option_equals_pair(
+        tag_no_case("type"),
+        alphanumeric1
     )(i)
 }
 
 fn create_option_pack_keys(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("pack_keys"),
-        multispace0,
-        tag("="),
-        multispace0,
-        alt((tag("0"), tag("1"))),
-    ))(i)?;
-    Ok((remaining_input, ()))
+        alt((tag("0"), tag("1")))
+    )(i)
 }
 
 fn create_option_engine(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("engine"),
-        multispace0,
-        tag("="),
-        multispace0,
-        opt(alphanumeric1),
-    ))(i)?;
-    Ok((remaining_input, ()))
+        opt(alphanumeric1)
+    )(i)
 }
 
 fn create_option_auto_increment(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("auto_increment"),
-        multispace0,
-        tag("="),
-        multispace0,
         integer_literal,
-    ))(i)?;
-    Ok((remaining_input, ()))
+    )(i)
 }
 
 fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("default charset"),
-        multispace0,
-        tag("="),
-        multispace0,
         alt((
             tag("utf8mb4"),
             tag("utf8"),
@@ -95,54 +93,38 @@ fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], ()> {
             tag("ucs2"),
             tag("latin1"),
         )),
-    ))(i)?;
-    Ok((remaining_input, ()))
+    )(i)
 }
 
 fn create_option_collate(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("collate"),
-        multispace0,
-        tag("="),
-        multispace0,
         // TODO(malte): imprecise hack, should not accept everything
         sql_identifier,
-    ))(i)?;
-    Ok((remaining_input, ()))
+    )(i)
 }
 
 fn create_option_comment(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("comment"),
-        multispace0,
-        tag("="),
-        multispace0,
         string_literal,
-    ))(i)?;
-    Ok((remaining_input, ()))
+    )(i)
 }
 
 fn create_option_max_rows(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("max_rows"),
-        multispace0,
-        opt(tag("=")),
-        multispace0,
-        integer_literal,
-    ))(i)?;
-    Ok((remaining_input, ()))
+        integer_literal
+    )(i)
 }
 
 fn create_option_avg_row_length(i: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining_input, (_, _, _, _, _)) = tuple((
+    create_option_equals_pair(
         tag_no_case("avg_row_length"),
-        multispace0,
-        opt(tag("=")),
-        multispace0,
-        integer_literal,
-    ))(i)?;
-    Ok((remaining_input, ()))
+        integer_literal
+    )(i)
 }
+
 
 fn create_option_row_format(i: &[u8]) -> IResult<&[u8], ()> {
     let (remaining_input, (_, _, _, _, _)) = tuple((

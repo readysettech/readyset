@@ -796,6 +796,16 @@ pub(crate) fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
     delimited(multispace0, tag(","), multispace0)(i)
 }
 
+pub(crate) fn ws_sep_equals<'a, I>(i: I) -> IResult<I, I>
+where
+    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    // Compare required by tag
+    <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
+    // AsChar and Clone required by multispace0
+{
+    delimited(multispace0, tag("="), multispace0)(i)
+}
+
 pub fn assignment_expr_list(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
     many1(terminated(assignment_expr, opt(ws_sep_comma)))(i)
 }
