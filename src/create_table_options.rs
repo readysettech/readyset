@@ -1,7 +1,6 @@
 use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
-use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma,
-             ws_sep_equals};
+use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma, ws_sep_equals};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -10,6 +9,7 @@ use nom::sequence::tuple;
 use nom::IResult;
 
 pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
+    // TODO: make the create options accessible
     map(
         separated_list(table_options_separator, create_option),
         |_| (),
@@ -36,50 +36,40 @@ fn create_option(i: &[u8]) -> IResult<&[u8], ()> {
     ))(i)
 }
 
-
 /// Helper to parse equals-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_equals_pair<'a, I, O1, O2, F, G>(first: F, second: G) -> impl Fn(I) -> IResult<I, ()>
+pub fn create_option_equals_pair<'a, I, O1, O2, F, G>(
+    first: F,
+    second: G,
+) -> impl Fn(I) -> IResult<I, ()>
 where
-  F: Fn(I) -> IResult<I, O1>,
-  G: Fn(I) -> IResult<I, O2>,
-  I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
-  <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
+    F: Fn(I) -> IResult<I, O1>,
+    G: Fn(I) -> IResult<I, O2>,
+    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
     move |i: I| {
         let (i, _o1) = first(i)?;
         let (i, _) = ws_sep_equals(i)?;
         let (i, _o2) = second(i)?;
-        Ok(( i, () ))
+        Ok((i, ()))
     }
 }
 
 fn create_option_type(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("type"),
-        alphanumeric1
-    )(i)
+    create_option_equals_pair(tag_no_case("type"), alphanumeric1)(i)
 }
 
 fn create_option_pack_keys(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("pack_keys"),
-        alt((tag("0"), tag("1")))
-    )(i)
+    create_option_equals_pair(tag_no_case("pack_keys"), alt((tag("0"), tag("1"))))(i)
 }
 
 fn create_option_engine(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("engine"),
-        opt(alphanumeric1)
-    )(i)
+    create_option_equals_pair(tag_no_case("engine"), opt(alphanumeric1))(i)
 }
 
 fn create_option_auto_increment(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("auto_increment"),
-        integer_literal,
-    )(i)
+    create_option_equals_pair(tag_no_case("auto_increment"), integer_literal)(i)
 }
 
 fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], ()> {
@@ -105,26 +95,16 @@ fn create_option_collate(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 fn create_option_comment(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("comment"),
-        string_literal,
-    )(i)
+    create_option_equals_pair(tag_no_case("comment"), string_literal)(i)
 }
 
 fn create_option_max_rows(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("max_rows"),
-        integer_literal
-    )(i)
+    create_option_equals_pair(tag_no_case("max_rows"), integer_literal)(i)
 }
 
 fn create_option_avg_row_length(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("avg_row_length"),
-        integer_literal
-    )(i)
+    create_option_equals_pair(tag_no_case("avg_row_length"), integer_literal)(i)
 }
-
 
 fn create_option_row_format(i: &[u8]) -> IResult<&[u8], ()> {
     let (remaining_input, (_, _, _, _, _)) = tuple((
