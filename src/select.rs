@@ -189,8 +189,6 @@ pub fn limit_clause(i: &[u8]) -> IResult<&[u8], LimitClause> {
 }
 
 fn join_constraint(i: &[u8]) -> IResult<&[u8], JoinConstraint> {
-    // TODO: multispace0 following opt(tag_no_case("natural")) should probably be conditional,
-    // and use multispace1 if natural is there and multispace0 if it's not
     let using_clause = map(
         tuple((
             tag_no_case("using"),
@@ -220,10 +218,9 @@ fn join_constraint(i: &[u8]) -> IResult<&[u8], JoinConstraint> {
 
 // Parse JOIN clause
 fn join_clause(i: &[u8]) -> IResult<&[u8], JoinClause> {
-    let (remaining_input, (_, _natural, _, operator, _, right, _, constraint)) = tuple((
+    let (remaining_input, (_, _natural, operator, _, right, _, constraint)) = tuple((
         multispace0,
-        opt(tag_no_case("natural")),
-        multispace0,
+        opt(terminated(tag_no_case("natural"), multispace1)),
         join_operator,
         multispace1,
         join_rhs,
