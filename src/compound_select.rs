@@ -70,16 +70,14 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
                     )),
                 )),
             ),
-            |distinct| {
-                match distinct {
-                    // DISTINCT is the default in both MySQL and SQLite
-                    None => CompoundSelectOperator::DistinctUnion,
-                    Some(d) => {
-                        if d {
-                            CompoundSelectOperator::DistinctUnion
-                        } else {
-                            CompoundSelectOperator::Union
-                        }
+            |distinct| match distinct {
+                // DISTINCT is the default in both MySQL and SQLite
+                None => CompoundSelectOperator::DistinctUnion,
+                Some(d) => {
+                    if d {
+                        CompoundSelectOperator::DistinctUnion
+                    } else {
+                        CompoundSelectOperator::Union
                     }
                 }
             },
