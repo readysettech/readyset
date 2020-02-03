@@ -5,6 +5,10 @@ use nom::combinator::peek;
 use nom::sequence::terminated;
 use nom::IResult;
 
+// NOTE: Each keyword_$start_letter_to_$end_letter function uses `alt`,
+// which is implemented for tuples sizes up to 21. Because of this constraint
+// on maximum tuple sizes, keywords are aggregated into groups of 20
+
 fn keyword_follow_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
     peek(alt((
         tag(" "),
