@@ -2477,6 +2477,30 @@ async fn soupy_lobsters() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn mergeable_lobsters() {
+    test_queries(
+        "mergeable_lobsters",
+        "tests/mergeable-lobsters-schema.sql",
+        false,
+        false,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn filter_aggregate_lobsters() {
+    test_queries(
+        "filter_aggregate_lobsters",
+        "tests/filter-aggregate-lobsters-schema.sql",
+        false,
+        false,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn node_removal() {
     let mut g = start_simple("domain_removal").await;
     let cid = g

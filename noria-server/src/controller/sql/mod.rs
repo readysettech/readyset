@@ -538,7 +538,11 @@ impl SqlIncorporator {
         );
 
         // run MIR-level optimizations
-        let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
+        let (mut mir, nodes_added) = og_mir.optimize(table_mapping.as_ref(), sec);
+        // update mir_converter with the nodes added. Note (jamb): we never remove the nodes removed
+        // by the optimizations, but they do get disconnected pointer-wise, so I think it's fine.
+        // (If we ever want to fix this, it's also relevant to the place below that calls optimize.)
+        self.mir_converter.add_nodes(nodes_added);
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -691,7 +695,8 @@ impl SqlIncorporator {
             new_query_mir.to_graphviz().unwrap()
         );
 
-        let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
+        let (new_opt_mir, new_nodes) = new_query_mir.optimize(table_mapping.as_ref(), sec);
+        self.mir_converter.add_nodes(new_nodes);
 
         trace!(
             self.log,
@@ -970,8 +975,7 @@ mod tests {
     use crate::controller::Migration;
     use crate::integration;
     use dataflow::prelude::*;
-    use nom_sql::Column;
-    use nom_sql::FunctionExpression;
+    use nom_sql::{CaseWhenExpression, Column, ColumnOrLiteral, FunctionExpression, FunctionArguments, Literal};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -1002,10 +1006,14 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        for r in relations.iter() {
+        let mut r_vec: Vec<&str> = relations.to_vec();
+        r_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        for r in &r_vec {
             r.hash(&mut hasher);
         }
-        for a in attrs.iter() {
+        let mut a_vec: Vec<&Column> = attrs.to_vec();
+        a_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        for a in &a_vec {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
@@ -1171,7 +1179,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                Column::from("votes.userid"),
+                FunctionArguments::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1447,7 +1455,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check project helper node
             let f = Box::new(FunctionExpression::Count(
-                Column::from("votes.userid"),
+                FunctionArguments::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1492,7 +1500,7 @@ mod tests {
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
             assert!(get_node(&inc, mig, "votes").is_base());
-            // Try a simple COUNT function without a GROUP BY clause
+            // Try a simple COUNT function
             let res = inc.add_query(
                 "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
                 None,
@@ -1502,7 +1510,7 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
+            let f = Box::new(FunctionExpression::Count(FunctionArguments::Column(Column::from("votes.aid")), false));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1521,6 +1529,395 @@ mod tests {
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_aggregation_filter_count() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_count").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::Count(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                    ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.aid")),
+                    else_expr: None,
+                }),
+                false
+            ));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid")],
+                &[&Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "count"]);
+            assert_eq!(agg_view.description(true), "|σ(1)| γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_aggregation_filter_sum() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
+                    else_expr: None,
+                }),
+                false
+            ));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_aggregation_filter_sum_else() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE 6 END) AS sum FROM votes GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: ConditionExpression::ComparisonOp(
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
+                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                        }
+                ),
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
+                    else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
+                }),
+                false
+            ));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_merges_filter_and_sum() {
+        // set up graph
+        let mut g = integration::start_simple("it_merges_filter_and_sum").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            let res = inc.add_query(
+                "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
+            let f = Box::new(FunctionExpression::Sum(FunctionArguments::Column(Column::from("votes.sign")), false));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid"), &Column::from("votes.aid")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
+            assert_eq!(agg_view.fields(), &["userid", "aid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[2, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_merges_filter_and_sum_on_filter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_merges_filter_and_sum_on_filter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            let res = inc.add_query(
+                "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            assert_eq!(mig.graph().node_count(), 5);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_doesnt_merge_sum_and_filter_on_sum_result() {
+        // set up graph
+        let mut g = integration::start_simple("it_doesnt_merge_sum_and_filter_on_sum_result").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            let res = inc.add_query(
+                "SELECT SUM(sign) AS sum FROM votes WHERE sum>0 GROUP BY votes.userid;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 6);
+            // check aggregation view
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Column(Column::from("votes.sign")),
+                false));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.userid"), &Column::from("sum")],
+                &[&Column {
+                    name: String::from("sum"),
+                    alias: Some(String::from("sum")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.description(true), "𝛴(2) γ[0]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.description(true), "π[1, lit: 0]");
+        })
+        .await;
+    }
+
+// currently, this test will fail because logical operations are unimplemented
+// (in particular, any complex operation that might involve multiple filter conditions
+// is currently unimplemented for filter-aggregations (TODO (jamb)))
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_aggregation_filter_logical_op() {
+        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        // set up graph
+        let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query("CREATE TABLE votes (story_id int, comment_id int, vote int);", None, mig)
+                .is_ok());
+            // Should have source and "users" base table node
+            assert_eq!(mig.graph().node_count(), 2);
+            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
+            assert_eq!(get_node(&inc, mig, "votes").fields(), &["story_id", "comment_id", "vote"]);
+            assert!(get_node(&inc, mig, "votes").is_base());
+            // Try a simple COUNT function
+            let res = inc.add_query(
+                "SELECT
+                COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) as votes
+                FROM votes
+                GROUP BY votes.comment_id;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            // added the aggregation, a project helper, the edge view, and reader
+            assert_eq!(mig.graph().node_count(), 5);
+            // check aggregation view
+            let filter_cond = ConditionExpression::LogicalOp(ConditionTree {
+                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.story_id")))),
+                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Null))),
+                    operator: Operator::Equal,
+                })),
+                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.vote")))),
+                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(0)))),
+                    operator: Operator::Equal,
+                })),
+                operator: Operator::And,
+            });
+            let f = Box::new(FunctionExpression::Count(
+                FunctionArguments::Conditional(CaseWhenExpression{
+                    condition: filter_cond,
+                    then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
+                    else_expr: None,
+                }),
+                false
+            ));
+            let qid = query_id_hash(
+                &["computed_columns", "votes"],
+                &[&Column::from("votes.comment_id")],
+                &[&Column {
+                    name: String::from("votes"),
+                    alias: Some(String::from("votes")),
+                    table: None,
+                    function: Some(f),
+                }],
+            );
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(agg_view.fields(), &["comment_id", "votes"]);
+            assert_eq!(agg_view.description(true), "|σ(2)| γ[1]");
+            // check edge view -- note that it's not actually currently possible to read from
+            // this for a lack of key (the value would be the key). Hence, the view also has a
+            // bogokey column.
+            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
         .await;

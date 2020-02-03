@@ -67,13 +67,18 @@ impl MirQuery {
         nodes
     }
 
+    // Mutate our MirQuery in order to optimize it, for example by
+    // merging certain nodes together, and return it.
+    // Also return a list of any new nodes created so that the
+    // caller can add them to any other internal representations.
     pub fn optimize(
         mut self,
         table_mapping: Option<&HashMap<(String, Option<String>), String>>,
         sec: bool,
-    ) -> MirQuery {
+    ) -> (MirQuery, Vec<MirNodeRef>) {
         super::rewrite::pull_required_base_columns(&mut self, table_mapping, sec);
-        super::optimize::optimize(self)
+        let nodes_added = super::optimize::optimize(&mut self);
+        (self, nodes_added)
     }
 
     pub fn optimize_post_reuse(mut self) -> MirQuery {

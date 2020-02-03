@@ -9,6 +9,7 @@ use crate::prelude::*;
 pub mod aggregate;
 pub mod concat;
 pub mod extremum;
+pub mod filteraggregate;
 
 /// Trait for implementing operations that collapse a group of records into a single record.
 ///

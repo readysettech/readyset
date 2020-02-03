@@ -10,7 +10,8 @@ use dataflow::ops::join::JoinType;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    ArithmeticExpression, ColumnSpecification, CompoundSelectOperator, ConditionBase,
+    ArithmeticExpression, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
+    CompoundSelectOperator, ConditionBase,
     ConditionExpression, ConditionTree, Literal, Operator, SqlQuery, TableKey,
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
@@ -153,6 +154,39 @@ impl SqlToMirConverter {
             })
     }
 
+    pub fn add_nodes(&mut self, nodes: Vec<MirNodeRef>) {
+        for node in nodes {
+            let node_id = (String::from(node.borrow().name()), self.schema_version);
+            self.nodes.entry(node_id).or_insert_with(|| node.clone());
+            self.current.insert(String::from(node.borrow().name()), self.schema_version);
+        }
+    }
+
+    fn logical_op_to_conditions(
+        &self,
+        ct: &ConditionTree,
+        columns: &mut Vec<Column>,
+        n: &MirNodeRef,
+    ) -> Vec<(usize, FilterCondition)> {
+        match ct.operator {
+            Operator::And => {
+                let mut left_filter = match ct.left.as_ref() {
+                    ConditionExpression::LogicalOp(ref ct2) => self.logical_op_to_conditions(ct2, columns, n),
+                    ConditionExpression::ComparisonOp(ref ct2) => self.to_conditions(ct2, columns, n),
+                    _ => unimplemented!(),
+                };
+                let mut right_filter = match ct.right.as_ref() {
+                    ConditionExpression::LogicalOp(ref ct2) => self.logical_op_to_conditions(ct2, columns, n),
+                    ConditionExpression::ComparisonOp(ref ct2) => self.to_conditions(ct2, columns, n),
+                    _ => unimplemented!(),
+                };
+                left_filter.append(&mut right_filter);
+                left_filter
+            }
+            _ => unimplemented!()
+        }
+    }
+
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
     /// and adds its to a vector of conditions.
     fn to_conditions(
@@ -160,7 +194,7 @@ impl SqlToMirConverter {
         ct: &ConditionTree,
         columns: &mut Vec<Column>,
         n: &MirNodeRef,
-    ) -> Vec<Option<FilterCondition>> {
+    ) -> Vec<(usize, FilterCondition)> {
         use std::cmp::max;
 
         // TODO(malte): we only support one level of condition nesting at this point :(
@@ -169,7 +203,7 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
         use dataflow::ops::filter;
-        let f = Some(match *ct.right.as_ref() {
+        let f = match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
                 FilterCondition::Comparison(
                     ct.operator.clone(),
@@ -199,7 +233,7 @@ impl SqlToMirConverter {
                 FilterCondition::Comparison(ct.operator.clone(), filter::Value::Column(fi))
             }
             _ => unimplemented!(),
-        });
+        };
 
         let absolute_column_ids: Vec<usize> = columns
             .iter()
@@ -207,17 +241,27 @@ impl SqlToMirConverter {
             .collect();
         let max_column_id = *absolute_column_ids.iter().max().unwrap();
         let num_columns = max(columns.len(), max_column_id + 1);
-        let mut filters = vec![None; num_columns];
+        let mut filters = Vec::new();
 
         match columns.iter().rposition(|c| *c.name == l.name) {
             None => {
                 // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
-                // We assume that the column is appended at the end.
-                columns.push(Column::from(l));
-                filters.push(f);
+                // We assume that the column is appended at the end, unless we have an aggregation,
+                // in which case it needs to go before the computed column, which is last.
+                match n.borrow().inner {
+                    MirNodeType::Aggregation { .. }  => {
+                        columns.insert(columns.len()-1, Column::from(l));
+                        filters.push((num_columns-1, f));
+                    }
+                    _ => {
+                        columns.push(Column::from(l));
+                        filters.push((num_columns, f));
+                    }
+                }
             }
             Some(pos) => {
-                filters[absolute_column_ids[pos]] = f;
+                let index = absolute_column_ids[pos];
+                filters.push((index, f));
             }
         }
 
@@ -936,12 +980,14 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
     ) -> Vec<MirNodeRef> {
         use dataflow::ops::grouped::aggregate::Aggregation;
+        use dataflow::ops::grouped::filteraggregate::FilterAggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
+        use nom_sql::FunctionArguments;
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
+        let mknode = |over: &Column, over_else: Option<Literal>, t: GroupedNodeType, distinct: bool, cond: Option<&ConditionExpression>| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
@@ -952,18 +998,20 @@ impl SqlToMirConverter {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (node, &over),
+                    (node, &over, over_else),
                     group_cols,
                     t,
+                    cond,
                 ));
                 out_nodes
             } else {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (parent, &over),
+                    (parent, &over, over_else),
                     group_cols,
                     t,
+                    cond,
                 ));
                 out_nodes
             }
@@ -971,15 +1019,41 @@ impl SqlToMirConverter {
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(ref col, distinct) => mknode(
+            Sum(FunctionArguments::Column(ref col), distinct) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
+                None,
             ),
-            Count(ref col, distinct) => mknode(
+            Sum(FunctionArguments::Conditional(CaseWhenExpression{
+                ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
+            }), false) => mknode(
                 &Column::from(col),
+                Some(else_val.clone()),
+                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                false,
+                Some(condition),
+            ),
+            Sum(FunctionArguments::Conditional(CaseWhenExpression{
+                ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: None
+            }), false) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                false,
+                Some(condition),
+            ),
+            Count(FunctionArguments::Column(ref col), distinct) => mknode(
+                &Column::from(col),
+                None,
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
                 distinct,
+                None,
             ),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
@@ -989,21 +1063,49 @@ impl SqlToMirConverter {
                 // rows including those with NULL values, and we don't have a mechanism to do that
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
-            }
-            Max(ref col) => mknode(
+            },
+            Count(FunctionArguments::Conditional(CaseWhenExpression{
+                ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: Some(ColumnOrLiteral::Literal(ref else_val))
+            }), false) => mknode(
                 &Column::from(col),
+                Some(else_val.clone()),
+                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                false,
+                Some(condition),
+            ),
+            Count(FunctionArguments::Conditional(CaseWhenExpression{
+                ref condition,
+                then_expr: ColumnOrLiteral::Column(ref col),
+                else_expr: None
+            }), false) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                false,
+                Some(condition),
+            ),
+            Max(FunctionArguments::Column(ref col)) => mknode(
+                &Column::from(col),
+                None,
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
+                None,
             ),
-            Min(ref col) => mknode(
+            Min(FunctionArguments::Column(ref col)) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
+                None,
             ),
-            GroupConcat(ref col, ref separator) => mknode(
+            GroupConcat(FunctionArguments::Column(ref col), ref separator) => mknode(
                 &Column::from(col),
+                None,
                 GroupedNodeType::GroupConcat(separator.clone()),
                 false,
+                None,
             ),
             _ => unimplemented!(),
         }
@@ -1013,14 +1115,16 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         computed_col: &Column,
-        over: (MirNodeRef, &Column),
+        over: (MirNodeRef, &Column, Option<Literal>),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
+        condition: Option<&ConditionExpression>
     ) -> MirNodeRef {
         let parent_node = over.0;
 
         // Resolve column IDs in parent
         let over_col = over.1;
+        let else_val = over.2;
 
         // The function node's set of output columns is the group columns plus the function
         // column
@@ -1056,6 +1160,34 @@ impl SqlToMirConverter {
                 vec![parent_node.clone()],
                 vec![],
             ),
+            GroupedNodeType::FilterAggregation(filter_agg) => {
+                use nom_sql::ConditionExpression::*;
+
+                let cond = condition.expect("Filter aggregation must have condition!");
+                let mut fields = parent_node.borrow().columns().to_vec();
+                let filter = match *cond {
+                    LogicalOp(ref ct) => self.logical_op_to_conditions(ct, &mut fields, &parent_node),
+                    ComparisonOp(ref ct) => self.to_conditions(ct, &mut fields, &parent_node),
+                    Bracketed(_) => unimplemented!(),
+                    NegationOp(_) => unreachable!("negation should have been removed earlier"),
+                    Base(_) => unreachable!("dangling base predicate"),
+                    Arithmetic(_) => unimplemented!(),
+                };
+                MirNode::new(
+                    name,
+                    self.schema_version,
+                    combined_columns,
+                    MirNodeType::FilterAggregation {
+                        on: over_col.clone(),
+                        else_on: else_val.clone(),
+                        group_by: group_by.into_iter().cloned().collect(),
+                        kind: filter_agg,
+                        conditions: filter,
+                    },
+                    vec![parent_node.clone()],
+                    vec![],
+                )
+            },
             GroupedNodeType::GroupConcat(sep) => MirNode::new(
                 name,
                 self.schema_version,

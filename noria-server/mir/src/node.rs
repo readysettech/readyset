@@ -1,4 +1,4 @@
-use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType};
+use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType, Literal};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
@@ -8,6 +8,7 @@ use column::Column;
 use common::DataType;
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use {FlowNode, MirNodeRef};
 pub enum GroupedNodeType {
     Aggregation(ops::grouped::aggregate::Aggregation),
     Extremum(ops::grouped::extremum::Extremum),
+    FilterAggregation(ops::grouped::filteraggregate::FilterAggregation),
     GroupConcat(String),
 }
 
@@ -185,7 +187,8 @@ impl MirNode {
     pub fn add_column(&mut self, c: Column) {
         match self.inner {
             // the aggregation column must always be the last column
-            MirNodeType::Aggregation { .. } => {
+            MirNodeType::Aggregation { .. }
+            | MirNodeType::FilterAggregation { .. } => {
                 let pos = self.columns.len() - 1;
                 self.columns.insert(pos, c.clone());
             }
@@ -225,8 +228,8 @@ impl MirNode {
                 .rposition(|cs| Column::from(&cs.0.column) == *c)
             {
                 None => panic!(
-                    "tried to look up non-existent column {:?} in {}",
-                    c, self.name
+                    "tried to look up non-existent column {:?} in {}\ncolumn_specs={:?}",
+                    c, self.name, column_specs
                 ),
                 Some(id) => column_specs[id]
                     .1
@@ -345,6 +348,19 @@ impl MirNode {
                     }
                 }
             }
+            MirNodeType::FilterAggregation { ref on, .. } => {
+                let parent = self.ancestors.iter().next().unwrap();
+                // need all parent columns
+                for c in parent.borrow().columns() {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
+                }
+                // need the "over" columns
+                if !columns.contains(on) {
+                    columns.push(on.clone());
+                }
+            }
             MirNodeType::Project { ref emit, .. } => {
                 for c in emit {
                     if !columns.contains(&c) {
@@ -402,7 +418,15 @@ pub enum MirNodeType {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: Vec<Option<FilterCondition>>,
+        conditions: Vec<(usize, FilterCondition)>,
+    },
+    /// filter condition and grouping
+    FilterAggregation {
+        on: Column,
+        else_on: Option<Literal>,
+        group_by: Vec<Column>,
+        kind: FilterAggregationKind,
+        conditions: Vec<(usize, FilterCondition)>,
     },
     /// over column, separator
     GroupConcat {
@@ -485,8 +509,9 @@ impl MirNodeType {
             } => {
                 group_by.push(c);
             }
-            MirNodeType::Filter { ref mut conditions } => {
-                conditions.push(None);
+            MirNodeType::Filter { .. } => {}
+            MirNodeType::FilterAggregation { ref mut group_by, .. } => {
+                group_by.push(c);
             }
             MirNodeType::Join {
                 ref mut project, ..
@@ -608,6 +633,27 @@ impl MirNodeType {
                 MirNodeType::Filter { ref conditions } => our_conditions == conditions,
                 _ => false,
             },
+            MirNodeType::FilterAggregation {
+                on: ref our_on,
+                else_on: ref our_else_on,
+                group_by: ref our_group_by,
+                kind: ref our_kind,
+                conditions: ref our_conditions,
+            } => {
+                match *other {
+                    MirNodeType::FilterAggregation {
+                        ref on,
+                        ref else_on,
+                        ref group_by,
+                        ref kind,
+                        ref conditions,
+                    } => {
+                        our_on == on && our_else_on == else_on && our_group_by == group_by
+                        && our_kind == kind && our_conditions == conditions
+                    }
+                    _ => false,
+                }
+            }
             MirNodeType::Join {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,
@@ -814,27 +860,41 @@ impl Debug for MirNodeType {
                     "σ[{}]",
                     conditions
                         .iter()
-                        .enumerate()
-                        .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(cond) => match *cond {
-                                FilterCondition::Comparison(ref op, ref x) => {
-                                    Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
-                                }
-                                FilterCondition::In(ref xs) => Some(format!(
-                                    "f{} IN ({})",
-                                    i,
-                                    xs.iter()
-                                        .map(|d| format!("{}", d))
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                )),
-                            },
-                            None => None,
+                        .filter_map(|(i, ref cond)| match *cond {
+                            FilterCondition::Comparison(ref op, ref x) => {
+                                Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
+                            }
+                            FilterCondition::In(ref xs) => Some(format!(
+                                "f{} IN ({})",
+                                i,
+                                xs.iter()
+                                    .map(|d| format!("{}", d))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )),
                         })
                         .collect::<Vec<_>>()
                         .as_slice()
                         .join(", ")
                 )
+            }
+            MirNodeType::FilterAggregation {
+                ref on,
+                else_on: _,
+                ref group_by,
+                ref kind,
+                conditions: _,
+            } => {
+                let op_string = match *kind {
+                    FilterAggregationKind::COUNT => format!("|*|(filter {})", on.name.as_str()),
+                    FilterAggregationKind::SUM => format!("𝛴(filter {})", on.name.as_str()),
+                };
+                let group_cols = group_by
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{} γ[{}]", op_string, group_cols)
             }
             MirNodeType::GroupConcat {
                 ref on,
