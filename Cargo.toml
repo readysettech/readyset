@@ -14,10 +14,6 @@ debug=true
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 # https://github.com/tokio-rs/tokio/pull/2160
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
-# https://github.com/rust-lang/futures-rs/pull/2049#issuecomment-579022335
-futures-util = { git = "https://github.com/rust-lang/futures-rs.git" }
-futures-core = { git = "https://github.com/rust-lang/futures-rs.git" }
-futures-sink = { git = "https://github.com/rust-lang/futures-rs.git" }
 # https://github.com/crossbeam-rs/crossbeam/pull/460#issuecomment-573145406
 crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
 crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
