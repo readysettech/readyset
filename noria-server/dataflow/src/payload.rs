@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::domain;
 use crate::node;
 use crate::prelude::*;
-#[cfg(debug_assertions)]
-use backtrace::Backtrace;
 use noria;
 use noria::channel;
 use noria::internal::LocalOrNot;
@@ -405,9 +403,6 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
-    #[cfg(debug_assertions)]
-    Ack(Backtrace),
-    #[cfg(not(debug_assertions))]
     Ack(()),
     /// (number of rows, size in bytes)
     StateSize(usize, u64),
@@ -419,12 +414,6 @@ pub enum ControlReplyPacket {
 }
 
 impl ControlReplyPacket {
-    #[cfg(debug_assertions)]
-    pub(crate) fn ack() -> ControlReplyPacket {
-        ControlReplyPacket::Ack(Backtrace::new())
-    }
-
-    #[cfg(not(debug_assertions))]
     pub(crate) fn ack() -> ControlReplyPacket {
         ControlReplyPacket::Ack(())
     }
