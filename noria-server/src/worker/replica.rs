@@ -32,6 +32,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use strawpoll::Strawpoll;
 use stream_cancel::Valve;
 use streamunordered::{StreamUnordered, StreamYield};
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -64,7 +65,7 @@ pub(super) struct Replica {
     valve: Valve,
 
     #[pin]
-    incoming: tokio::net::TcpListener,
+    incoming: Strawpoll<tokio::net::TcpListener>,
 
     #[pin]
     first_byte: FuturesUnordered<FirstByte>,
@@ -90,7 +91,7 @@ pub(super) struct Replica {
     >,
 
     #[pin]
-    timeout: async_timer::oneshot::Timer,
+    timeout: Strawpoll<async_timer::oneshot::Timer>,
     timed_out: bool,
 
     out: Outboxes,
@@ -114,14 +115,16 @@ impl Replica {
             domain,
             retry: None,
             valve: valve.clone(),
-            incoming: on,
+            incoming: Strawpoll::from(on),
             first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
             out: Outboxes::new(ctrl_tx),
-            timeout: async_timer::oneshot::Timer::new(time::Duration::from_secs(3600)),
+            timeout: Strawpoll::from(async_timer::oneshot::Timer::new(time::Duration::from_secs(
+                3600,
+            ))),
             timed_out: false,
         }
     }
@@ -327,7 +330,11 @@ impl Replica {
         if let Poll::Ready(true) = this.valve.poll_closed(cx) {
             return Ok(false);
         } else {
-            while let Poll::Ready((stream, _)) = this.incoming.as_mut().poll_accept(cx)? {
+            while let Poll::Ready((stream, _)) = this
+                .incoming
+                .as_mut()
+                .poll_fn(cx, |mut i, cx| i.poll_accept(cx))?
+            {
                 // we know that any new connection to a domain will first send a one-byte
                 // token to indicate whether the connection is from a base or not.
                 debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
