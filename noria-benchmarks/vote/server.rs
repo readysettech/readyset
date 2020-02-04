@@ -7,13 +7,13 @@ use std::io::prelude::*;
 use std::{thread, time};
 use tsunami::Session;
 
-pub(crate) enum ServerHandle<'a> {
-    Netsoup(ssh2::Channel<'a>),
+pub(crate) enum ServerHandle {
+    Netsoup(ssh2::Channel),
     HandledBySystemd,
     Hybrid,
 }
 
-impl<'a> ServerHandle<'a> {
+impl ServerHandle {
     fn end(self, server: &Session, backend: &Backend) -> Result<(), Error> {
         match self {
             ServerHandle::Netsoup(mut w) => {
@@ -96,7 +96,7 @@ pub(crate) struct Server<'a> {
     pub(crate) server: &'a Session,
     listen_addr: &'a str,
 
-    handle: ServerHandle<'a>,
+    handle: ServerHandle,
 }
 
 impl<'a> Server<'a> {

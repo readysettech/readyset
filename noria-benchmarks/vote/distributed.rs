@@ -580,7 +580,7 @@ fn ec2_instance_type_cores(it: &str) -> Option<u16> {
 }
 
 impl ConvenientSession for tsunami::Session {
-    fn exec<'a>(&'a self, cmd: &[&str]) -> Result<ssh2::Channel<'a>, Error> {
+    fn exec(&self, cmd: &[&str]) -> Result<ssh2::Channel, Error> {
         let cmd: Vec<_> = cmd
             .iter()
             .map(|&arg| match arg {
@@ -615,6 +615,6 @@ impl ConvenientSession for tsunami::Session {
 }
 
 trait ConvenientSession {
-    fn exec<'a>(&'a self, cmd: &[&str]) -> Result<ssh2::Channel<'a>, Error>;
+    fn exec(&self, cmd: &[&str]) -> Result<ssh2::Channel, Error>;
     fn just_exec(&self, cmd: &[&str]) -> Result<Result<String, String>, Error>;
 }

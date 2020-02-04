@@ -721,7 +721,7 @@ fn finalize(c: &mut ssh2::Channel) -> Result<Result<String, String>, failure::Er
 }
 
 impl ConvenientSession for tsunami::Session {
-    fn exec<'a>(&'a self, cmd: &[&str], on: &str) -> Result<ssh2::Channel<'a>, failure::Error> {
+    fn exec(&self, cmd: &[&str], on: &str) -> Result<ssh2::Channel, failure::Error> {
         let cmd: Vec<_> = cmd
             .iter()
             .map(|&arg| match arg {
@@ -772,7 +772,7 @@ impl ConvenientSession for tsunami::Session {
 }
 
 trait ConvenientSession {
-    fn exec<'a>(&'a self, cmd: &[&str], on: &str) -> Result<ssh2::Channel<'a>, failure::Error>;
+    fn exec(&self, cmd: &[&str], on: &str) -> Result<ssh2::Channel, failure::Error>;
     fn just_exec(&self, cmd: &[&str], on: &str) -> Result<Result<String, String>, failure::Error>;
     fn exec_print_nonempty(&self, cmd: &[&str], on: &str) -> Result<(), failure::Error>;
 }
