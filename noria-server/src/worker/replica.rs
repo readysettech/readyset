@@ -641,6 +641,10 @@ impl Future for Replica {
                     }
                 }
 
+                if local_done && remote_done {
+                    break;
+                }
+
                 // alternate between input sources
                 check_local = !check_local;
             }
@@ -654,7 +658,7 @@ impl Future for Replica {
             // send acks
             self.as_mut().try_acks(cx)?;
 
-            if local_done && remote_done {
+            if !local_done || !remote_done {
                 // we're yielding voluntarily to not block the executor and must ensure we wake
                 // up again
                 cx.waker().wake_by_ref();
