@@ -39,16 +39,12 @@ tower-discover = "0.3.0"
 tower-buffer = "0.3.0"
 tokio-tower = "0.3.0"
 tracing = "0.1.12"
-tower-util = "0.3.0"
-tower = "0.3.0"
 slab = "0.4"
 pin-project = "0.4.0"
 futures-util = "0.3.0"
 
 # consensus/
 slog = "2.4.0"
-#slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.4.0"
 zookeeper = "0.5.3"
 
 # channel/
