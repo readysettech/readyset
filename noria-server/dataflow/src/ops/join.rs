@@ -716,14 +716,9 @@ mod tests {
         // forward from left with two matching records on right
         j.seed(l, l_a1.clone());
         let rs = j.one_row(l, l_a1.clone(), false);
-        assert_eq!(
-            rs,
-            vec![
-                (vec![1.into(), "a".into(), "x".into()], true),
-                (vec![1.into(), "a".into(), "y".into()], true),
-            ]
-            .into()
-        );
+        assert_eq!(rs.len(), 2);
+        assert!(rs.has_positive(&[1.into(), "a".into(), "x".into()][..]));
+        assert!(rs.has_positive(&[1.into(), "a".into(), "y".into()][..]));
 
         // forward from right with two matching records on left (and one more on right)
         j.seed(r, r_w3.clone());

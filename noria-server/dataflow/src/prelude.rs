@@ -21,7 +21,7 @@ pub(crate) use noria::Input;
 
 // domain local state
 pub(crate) use crate::state::{
-    LookupResult, MemoryState, PersistentState, RecordResult, Row, State,
+    LookupResult, MemoryState, PersistentState, RecordResult, Row, Rows, State,
 };
 pub(crate) type StateMap = Map<Box<dyn State>>;
 pub(crate) type DomainNodes = Map<cell::RefCell<Node>>;

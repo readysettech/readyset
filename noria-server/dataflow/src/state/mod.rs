@@ -7,10 +7,11 @@ mod single_state;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::rc::Rc;
-use std::{slice, vec};
+use std::vec;
 
 use crate::prelude::*;
 use common::SizeOf;
+use hashbag::HashBag;
 
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
@@ -53,8 +54,10 @@ pub(crate) trait State: SizeOf + Send {
     fn clear(&mut self);
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct Row(Rc<Vec<DataType>>);
+
+pub(crate) type Rows = HashBag<Row, fnv::FnvBuildHasher>;
 
 unsafe impl Send for Row {}
 
@@ -94,7 +97,7 @@ impl SizeOf for Row {
 
 /// An std::borrow::Cow-like wrapper around a collection of rows.
 pub(crate) enum RecordResult<'a> {
-    Borrowed(&'a [Row]),
+    Borrowed(&'a HashBag<Row, fnv::FnvBuildHasher>),
     Owned(Vec<Vec<DataType>>),
 }
 
@@ -128,7 +131,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
 
 pub(crate) enum RecordResultIterator<'a> {
     Owned(vec::IntoIter<Vec<DataType>>),
-    Borrowed(slice::Iter<'a, Row>),
+    Borrowed(hashbag::Iter<'a, Row>),
 }
 
 impl<'a> Iterator for RecordResultIterator<'a> {

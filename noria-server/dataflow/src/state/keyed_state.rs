@@ -10,16 +10,16 @@ type FnvHashMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
-    Single(FnvHashMap<DataType, Vec<Row>>),
-    Double(FnvHashMap<(DataType, DataType), Vec<Row>>),
-    Tri(FnvHashMap<(DataType, DataType, DataType), Vec<Row>>),
-    Quad(FnvHashMap<(DataType, DataType, DataType, DataType), Vec<Row>>),
-    Quin(FnvHashMap<(DataType, DataType, DataType, DataType, DataType), Vec<Row>>),
-    Sex(FnvHashMap<(DataType, DataType, DataType, DataType, DataType, DataType), Vec<Row>>),
+    Single(FnvHashMap<DataType, Rows>),
+    Double(FnvHashMap<(DataType, DataType), Rows>),
+    Tri(FnvHashMap<(DataType, DataType, DataType), Rows>),
+    Quad(FnvHashMap<(DataType, DataType, DataType, DataType), Rows>),
+    Quin(FnvHashMap<(DataType, DataType, DataType, DataType, DataType), Rows>),
+    Sex(FnvHashMap<(DataType, DataType, DataType, DataType, DataType, DataType), Rows>),
 }
 
 impl KeyedState {
-    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Vec<Row>> {
+    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Rows> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),

@@ -90,8 +90,9 @@ pub(super) async fn listen(
     }
 }
 
-fn dup(rs: &[Vec<DataType>]) -> Vec<Vec<DataType>> {
-    let mut outer = Vec::with_capacity(rs.len());
+fn dup<'a>(rs: impl IntoIterator<Item = &'a Vec<DataType>>) -> Vec<Vec<DataType>> {
+    let rs = rs.into_iter();
+    let mut outer = Vec::with_capacity(rs.size_hint().0);
     for r in rs {
         let mut inner = Vec::with_capacity(r.len());
         for v in r {
@@ -127,7 +128,7 @@ fn handle_message(
                 let found = keys
                     .iter_mut()
                     .map(|key| {
-                        let rs = reader.try_find_and(key, dup).map(|r| r.0);
+                        let rs = reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0);
                         (key, rs)
                     })
                     .enumerate();
@@ -271,7 +272,7 @@ impl Future for BlockingRead {
                         // note that this *does* mean we'll trigger replay multiple times for things
                         // that miss and aren't replayed in time, which is a little sad. but at the
                         // same time, that replay trigger will just be ignored by the target domain.
-                        match reader.try_find_and(key, dup).map(|r| r.0) {
+                        match reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0) {
                             Ok(Some(rs)) => {
                                 read[i] = rs;
                                 key.clear();

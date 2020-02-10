@@ -153,7 +153,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 impl<'a> WriteHandleEntry<'a> {
     pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Vec<DataType>]) -> T,
+        F: FnMut(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
     {
         self.handle
             .handle
@@ -326,14 +326,14 @@ impl SingleReadHandle {
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Vec<DataType>]) -> T,
+        F: FnMut(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
     {
         self.handle
             .meta_get_and(key, &mut then)
             .ok_or(())
             .map(|(mut records, meta)| {
                 if records.is_none() && self.trigger.is_none() {
-                    records = Some(then(&[]));
+                    records = Some(then(&evmap::Values::default()));
                 }
                 (records, meta)
             })
@@ -359,7 +359,7 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(()));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
 
         w.swap();
 

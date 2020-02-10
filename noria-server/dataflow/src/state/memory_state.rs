@@ -141,7 +141,7 @@ impl State for MemoryState {
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         #[allow(clippy::ptr_arg)]
-        fn fix<'a>(rs: &'a Vec<Row>) -> impl Iterator<Item = Vec<DataType>> + 'a {
+        fn fix<'a>(rs: &'a Rows) -> impl Iterator<Item = Vec<DataType>> + 'a {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 
@@ -258,7 +258,7 @@ mod tests {
         for record in &records[1..3] {
             match state.lookup(&[0], &KeyType::Single(&record[0])) {
                 LookupResult::Some(RecordResult::Borrowed(rows)) => {
-                    assert_eq!(&*rows[0], &**record)
+                    assert_eq!(&**rows.iter().next().unwrap(), &**record)
                 }
                 _ => unreachable!(),
             };
@@ -274,7 +274,9 @@ mod tests {
         state.add_key(&[1], None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
-            LookupResult::Some(RecordResult::Borrowed(rows)) => assert_eq!(&*rows[0], &row),
+            LookupResult::Some(RecordResult::Borrowed(rows)) => {
+                assert_eq!(&**rows.iter().next().unwrap(), &row)
+            }
             _ => unreachable!(),
         };
     }

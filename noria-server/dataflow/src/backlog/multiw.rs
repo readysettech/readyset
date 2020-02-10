@@ -48,7 +48,10 @@ impl Handle {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn empty_at_index(&mut self, index: usize) -> Option<&[Vec<DataType>]> {
+    pub fn empty_at_index(
+        &mut self,
+        index: usize,
+    ) -> Option<&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>> {
         match *self {
             Handle::Single(ref mut h) => h.empty_at_index(index).map(|r| r.1),
             Handle::Double(ref mut h) => h.empty_at_index(index).map(|r| r.1),
@@ -72,12 +75,14 @@ impl Handle {
 
     pub fn meta_get_and<F, T>(&self, key: Key, then: F) -> Option<(Option<T>, i64)>
     where
-        F: FnOnce(&[Vec<DataType>]) -> T,
+        F: FnOnce(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
     {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                h.meta_get_and(&key[0], then)
+                let map = h.read();
+                let v = map.get(&key[0]).map(then);
+                map.meta().cloned().map(move |m| (v, m))
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
@@ -103,11 +108,16 @@ impl Handle {
                         1,
                     );
                     let stack_key = mem::transmute::<_, &(DataType, DataType)>(&stack_key);
-                    let v = h.meta_get_and(&stack_key, then);
-                    v
+                    let map = h.read();
+                    let v = map.get(&stack_key).map(then);
+                    map.meta().cloned().map(move |m| (v, m))
                 }
             }
-            Handle::Many(ref h) => h.meta_get_and(&key[..], then),
+            Handle::Many(ref h) => {
+                let map = h.read();
+                let v = map.get(&key[..]).map(then);
+                map.meta().cloned().map(move |m| (v, m))
+            }
         }
     }
 

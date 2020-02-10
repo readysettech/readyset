@@ -16,9 +16,13 @@ macro_rules! insert_row_match_impl {
     ($self:ident, $r:ident, $map:ident) => {{
         let key = MakeKey::from_row(&$self.key, &*$r);
         match $map.entry(key) {
-            Entry::Occupied(mut rs) => rs.get_mut().push($r),
+            Entry::Occupied(mut rs) => {
+                rs.get_mut().insert($r);
+            }
             Entry::Vacant(..) if $self.partial => return false,
-            rs @ Entry::Vacant(..) => rs.or_default().push($r),
+            rs @ Entry::Vacant(..) => {
+                rs.or_default().insert($r);
+            }
         }
     }};
 }
@@ -55,13 +59,13 @@ impl SingleState {
                 // in the common case of an entry already existing for the given key...
                 if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
                     self.rows += 1;
-                    rs.push(r);
+                    rs.insert(r);
                     return true;
                 } else if self.partial {
                     // trying to insert a record into partial materialization hole!
                     return false;
                 }
-                map.insert(r[self.key[0]].clone(), vec![r]);
+                map.insert(r[self.key[0]].clone(), std::iter::once(r).collect());
             }
             KeyedState::Double(ref mut map) => insert_row_match_impl!(self, r, map),
             KeyedState::Tri(ref mut map) => insert_row_match_impl!(self, r, map),
@@ -76,16 +80,24 @@ impl SingleState {
 
     /// Attempt to remove row `r`.
     pub(super) fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
-        let mut do_remove = |self_rows: &mut usize, rs: &mut Vec<Row>| -> Option<Row> {
+        let mut do_remove = |self_rows: &mut usize, rs: &mut Rows| -> Option<Row> {
             *hit = true;
             let rm = if rs.len() == 1 {
-                // it *should* be impossible to get a negative for a record that we don't have
-                debug_assert_eq!(r, &rs[0][..]);
-                Some(rs.swap_remove(0))
-            } else if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                Some(rs.swap_remove(i))
+                // it *should* be impossible to get a negative for a record that we don't have,
+                // so let's avoid hashing + eqing if we don't need to
+                let left = rs.drain().next().unwrap();
+                debug_assert_eq!(left.1, 1);
+                debug_assert_eq!(&left.0[..], r);
+                Some(left.0)
             } else {
-                None
+                match rs.try_take(r) {
+                    Ok(row) => Some(row),
+                    Err(None) => None,
+                    Err(Some((row, _))) => {
+                        // there are still copies of the row left in rs
+                        Some(row.clone())
+                    }
+                }
             };
 
             if rm.is_some() {
@@ -122,9 +134,9 @@ impl SingleState {
     pub(super) fn mark_filled(&mut self, key: Vec<DataType>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
-            KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Vec::new()),
+            KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
             KeyedState::Double(ref mut map) => {
-                map.insert((key.next().unwrap(), key.next().unwrap()), Vec::new())
+                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
             }
             KeyedState::Tri(ref mut map) => map.insert(
                 (
@@ -132,7 +144,7 @@ impl SingleState {
                     key.next().unwrap(),
                     key.next().unwrap(),
                 ),
-                Vec::new(),
+                Rows::default(),
             ),
             KeyedState::Quad(ref mut map) => map.insert(
                 (
@@ -141,7 +153,7 @@ impl SingleState {
                     key.next().unwrap(),
                     key.next().unwrap(),
                 ),
-                Vec::new(),
+                Rows::default(),
             ),
             KeyedState::Quin(ref mut map) => map.insert(
                 (
@@ -151,7 +163,7 @@ impl SingleState {
                     key.next().unwrap(),
                     key.next().unwrap(),
                 ),
-                Vec::new(),
+                Rows::default(),
             ),
             KeyedState::Sex(ref mut map) => map.insert(
                 (
@@ -162,7 +174,7 @@ impl SingleState {
                     key.next().unwrap(),
                     key.next().unwrap(),
                 ),
-                Vec::new(),
+                Rows::default(),
             ),
         };
         assert!(replaced.is_none());
@@ -233,7 +245,7 @@ impl SingleState {
         keys.iter().map(|k| self.state.evict(k)).sum()
     }
 
-    pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Vec<Row>> + 'a> {
+    pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
         match self.state {
             KeyedState::Single(ref map) => Box::new(map.values()),
             KeyedState::Double(ref map) => Box::new(map.values()),
@@ -254,7 +266,7 @@ impl SingleState {
     }
     pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
-            LookupResult::Some(RecordResult::Borrowed(&rs[..]))
+            LookupResult::Some(RecordResult::Borrowed(rs))
         } else if self.partial() {
             // partially materialized, so this is a hole (empty results would be vec![])
             LookupResult::Missing
