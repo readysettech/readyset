@@ -122,38 +122,38 @@ fn handle_message(
                 });
 
                 let mut ret = Vec::with_capacity(keys.len());
-                ret.resize(keys.len(), Vec::new());
 
                 // first do non-blocking reads for all keys to see if we can return immediately
-                let found = keys
-                    .iter_mut()
-                    .map(|key| {
-                        let rs = reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0);
-                        (key, rs)
-                    })
-                    .enumerate();
-
+                let mut i = -1;
                 let mut ready = true;
-                let mut replaying = false;
-                for (i, (key, v)) in found {
-                    match v {
+                let mut pending = Vec::new();
+                keys.retain(|key| {
+                    i += 1;
+                    if !ready {
+                        ret.push(Vec::new());
+                        return false;
+                    }
+                    let rs = reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0);
+                    match rs {
                         Ok(Some(rs)) => {
                             // immediate hit!
-                            ret[i] = rs;
-                            *key = vec![];
+                            ret.push(rs);
+                            false
                         }
                         Err(()) => {
                             // map not yet ready
                             ready = false;
-                            *key = vec![];
-                            break;
+                            ret.push(Vec::new());
+                            false
                         }
                         Ok(None) => {
-                            // triggered partial replay
-                            replaying = true;
+                            // need to trigger partial replay for this key
+                            pending.push(i as usize);
+                            ret.push(Vec::new());
+                            true
                         }
                     }
-                }
+                });
 
                 if !ready {
                     return Ok(Tagged {
@@ -162,23 +162,24 @@ fn handle_message(
                     });
                 }
 
-                if !replaying {
+                if keys.is_empty() {
                     // we hit on all the keys!
+                    assert!(pending.is_empty());
                     return Ok(Tagged {
                         tag,
                         v: ReadReply::Normal(Ok(ret)),
                     });
                 }
 
-                // trigger backfills for all the keys we missed on for later
-                reader.trigger(keys.iter().filter(|key| !key.is_empty()).map(Vec::as_slice));
+                // trigger backfills for all the keys we missed on
+                reader.trigger(keys.iter().map(Vec::as_slice));
 
-                Err((keys, ret))
+                Err((keys, ret, pending))
             });
 
             match immediate {
                 Ok(reply) => Either::Left(Either::Left(future::ready(Ok(reply)))),
-                Err((keys, ret)) => {
+                Err((keys, ret, pending)) => {
                     if !block {
                         Either::Left(Either::Left(future::ready(Ok(Tagged {
                             tag,
@@ -192,6 +193,7 @@ fn handle_message(
                             tag,
                             target,
                             keys,
+                            pending,
                             read: ret,
                             truth: s.clone(),
                             retry: tokio::time::interval_at(
@@ -228,9 +230,13 @@ fn handle_message(
 #[pin_project]
 struct BlockingRead {
     tag: u32,
-    read: Vec<Vec<Vec<DataType>>>,
     target: (NodeIndex, usize),
+    // records for keys we have already read
+    read: Vec<Vec<Vec<DataType>>>,
+    // keys we have yet to read
     keys: Vec<Vec<DataType>>,
+    // index in self.read that each entyr in keys corresponds to
+    pending: Vec<usize>,
     truth: Readers,
 
     #[pin]
@@ -249,7 +255,7 @@ impl Future for BlockingRead {
         loop {
             ready!(this.retry.as_mut().poll_next(cx));
 
-            let missing = READERS.with(|readers_cache| {
+            READERS.with(|readers_cache| {
                 let mut readers_cache = readers_cache.borrow_mut();
                 let s = &this.truth;
                 let target = &this.target;
@@ -258,56 +264,51 @@ impl Future for BlockingRead {
                     readers.get(target).unwrap().clone()
                 });
 
-                let mut triggered = false;
-                let mut missing = false;
-                let mut ended = false;
                 let now = time::Instant::now();
                 let read = &mut this.read;
                 let next_trigger = *this.next_trigger;
-                let still_missing = this.keys.iter_mut().enumerate().filter_map(|(i, key)| {
-                    if key.is_empty() {
-                        // already have this value
-                        None
-                    } else {
-                        // note that this *does* mean we'll trigger replay multiple times for things
-                        // that miss and aren't replayed in time, which is a little sad. but at the
-                        // same time, that replay trigger will just be ignored by the target domain.
-                        match reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0) {
-                            Ok(Some(rs)) => {
-                                read[i] = rs;
-                                key.clear();
-                                None
-                            }
-                            Err(()) => {
-                                // map has been deleted, so server is shutting down
-                                ended = true;
-                                None
-                            }
-                            Ok(None) => {
-                                missing = true;
-                                if now > next_trigger {
-                                    // maybe the key was filled but then evicted, and we missed it?
-                                    triggered = true;
-                                    Some(&key[..])
-                                } else {
-                                    None
-                                }
-                            }
+
+                // here's the trick we're going to play:
+                // we're going to re-try the lookups starting with the _last_ key.
+                // if it hits, we move on to the second-to-last, and so on.
+                // the moment we miss again, we yield immediately, rather than continue.
+                // this avoids shuffling around self.pending and self.keys, and probably doesn't
+                // really cost us anything -- we couldn't return ready anyway!
+
+                while let Some(read_i) = this.pending.pop() {
+                    let key = this.keys.pop().expect("pending.len() == keys.len()");
+                    match reader.try_find_and(&key, |rs| dup(rs)).map(|r| r.0) {
+                        Ok(Some(rs)) => {
+                            read[read_i] = rs;
+                        }
+                        Err(()) => {
+                            // map has been deleted, so server is shutting down
+                            this.pending.clear();
+                            this.keys.clear();
+                            return Err(());
+                        }
+                        Ok(None) => {
+                            // we still missed! restore key + pending
+                            this.pending.push(read_i);
+                            this.keys.push(key);
+                            break;
                         }
                     }
-                });
+                }
+                debug_assert_eq!(this.pending.len(), this.keys.len());
 
-                if !reader.trigger(still_missing) {
-                    // server is shutting down and won't do the backfill
-                    return Err(());
+                if !this.keys.is_empty() && now > next_trigger {
+                    // maybe the key got filled, then evicted, and we missed it?
+                    if !reader.trigger(this.keys.iter().map(Vec::as_slice)) {
+                        // server is shutting down and won't do the backfill
+                        return Err(());
+                    }
+
+                    *this.trigger_timeout *= 2;
+                    *this.next_trigger = now + *this.trigger_timeout;
                 }
 
-                if ended {
-                    return Err(());
-                }
-
-                if missing {
-                    let now = time::Instant::now();
+                if !this.keys.is_empty() {
                     let waited = now - *this.first;
                     *this.first = now;
                     if waited > time::Duration::from_secs(7) {
@@ -318,15 +319,10 @@ impl Future for BlockingRead {
                     }
                 }
 
-                if triggered {
-                    *this.trigger_timeout *= 2;
-                    *this.next_trigger = now + *this.trigger_timeout;
-                }
-
-                Ok(missing)
+                Ok(())
             })?;
 
-            if !missing {
+            if this.keys.is_empty() {
                 return Poll::Ready(Ok(Tagged {
                     tag: *this.tag,
                     v: ReadReply::Normal(Ok(mem::replace(&mut this.read, Vec::new()))),
