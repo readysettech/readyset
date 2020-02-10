@@ -1,8 +1,9 @@
 use noria::DataType;
+use std::borrow::Borrow;
 use std::ops::{Deref, DerefMut};
 
 /// A record is a single positive or negative data record with an associated time stamp.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum Record {
     Positive(Vec<DataType>),
@@ -106,6 +107,36 @@ impl<'a> IntoIterator for &'a Records {
 
 #[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Records(Vec<Record>);
+
+impl Records {
+    pub fn has<Q: ?Sized>(&self, q: &Q, positive: bool) -> bool
+    where
+        Vec<DataType>: Borrow<Q>,
+        Q: Eq,
+    {
+        self.iter().any(|r| match r {
+            Record::Positive(ref r) if positive => r.borrow() == q,
+            Record::Negative(ref r) if !positive => r.borrow() == q,
+            _ => false,
+        })
+    }
+
+    pub fn has_positive<Q: ?Sized>(&self, q: &Q) -> bool
+    where
+        Vec<DataType>: Borrow<Q>,
+        Q: Eq,
+    {
+        self.has(q, true)
+    }
+
+    pub fn has_negative<Q: ?Sized>(&self, q: &Q) -> bool
+    where
+        Vec<DataType>: Borrow<Q>,
+        Q: Eq,
+    {
+        self.has(q, false)
+    }
+}
 
 impl Deref for Records {
     type Target = Vec<Record>;

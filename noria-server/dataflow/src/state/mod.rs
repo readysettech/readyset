@@ -64,6 +64,18 @@ impl From<Rc<Vec<DataType>>> for Row {
     }
 }
 
+impl AsRef<[DataType]> for Row {
+    fn as_ref(&self) -> &[DataType] {
+        &**self.0
+    }
+}
+
+impl std::borrow::Borrow<[DataType]> for Row {
+    fn borrow(&self) -> &[DataType] {
+        &**self.0
+    }
+}
+
 impl Deref for Row {
     type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
