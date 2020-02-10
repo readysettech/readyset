@@ -46,6 +46,18 @@ pub(super) async fn listen(
     mut on: tokio::net::TcpListener,
     readers: Readers,
 ) {
+    // future that ensures all blocking reads are handled in FIFO order
+    // and avoid hogging the executors with read retries
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
+        BlockingRead,
+        tokio::sync::oneshot::Sender<Result<Tagged<ReadReply>, ()>>,
+    )>();
+    tokio::spawn(async move {
+        while let Some((blocking, ack)) = rx.next().await {
+            ack.send(blocking.await).unwrap();
+        }
+    });
+
     let mut stream = valve.wrap(on.incoming()).into_stream();
     while let Some(stream) = stream.next().await {
         if let Err(_) = stream {
@@ -57,10 +69,11 @@ pub(super) async fn listen(
         let readers = readers.clone();
         stream.set_nodelay(true).expect("could not set TCP_NODELAY");
         let alive = alive.clone();
+        let mut tx = tx.clone();
         tokio::spawn(
             server::Server::new(
                 AsyncBincodeStream::from(stream).for_async(),
-                service_fn(move |req| handle_message(req, &readers)),
+                service_fn(move |req| handle_message(req, &readers, &mut tx)),
             )
             .map_err(|e| {
                 match e {
@@ -106,6 +119,10 @@ fn dup<'a>(rs: impl IntoIterator<Item = &'a Vec<DataType>>) -> Vec<Vec<DataType>
 fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
+    wait: &mut tokio::sync::mpsc::UnboundedSender<(
+        BlockingRead,
+        tokio::sync::oneshot::Sender<Result<Tagged<ReadReply>, ()>>,
+    )>,
 ) -> impl Future<Output = Result<Tagged<ReadReply>, ()>> + Send {
     let tag = m.tag;
     match m.v {
@@ -186,24 +203,36 @@ fn handle_message(
                             v: ReadReply::Normal(Ok(ret)),
                         }))))
                     } else {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
                         let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
                         let retry = time::Duration::from_millis(RETRY_TIMEOUT_MS);
                         let now = time::Instant::now();
-                        Either::Left(Either::Right(BlockingRead {
-                            tag,
-                            target,
-                            keys,
-                            pending,
-                            read: ret,
-                            truth: s.clone(),
-                            retry: tokio::time::interval_at(
-                                tokio::time::Instant::from_std(now + retry),
-                                retry,
-                            ),
-                            trigger_timeout: trigger,
-                            next_trigger: now,
-                            first: now,
-                        }))
+                        let r = wait.send((
+                            BlockingRead {
+                                tag,
+                                target,
+                                keys,
+                                pending,
+                                read: ret,
+                                truth: s.clone(),
+                                retry: tokio::time::interval_at(
+                                    tokio::time::Instant::from_std(now + retry),
+                                    retry,
+                                ),
+                                trigger_timeout: trigger,
+                                next_trigger: now,
+                                first: now,
+                            },
+                            tx,
+                        ));
+                        if r.is_err() {
+                            // we're shutting down
+                            return Either::Left(Either::Left(future::ready(Err(()))));
+                        }
+                        Either::Left(Either::Right(rx.map(|r| match r {
+                            Err(_) => Err(()),
+                            Ok(r) => r,
+                        })))
                     }
                 }
             }
