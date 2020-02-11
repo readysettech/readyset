@@ -80,6 +80,7 @@ impl trawler::LobstersClient for MysqlTrawler {
     type Error = my::error::Error;
     type RequestFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
     type SetupFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
+    type ShutdownFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
 
     fn setup(&mut self) -> Self::SetupFuture {
         let mut opts = if let MaybeConn::None(ref opts) = self.c {
@@ -280,6 +281,15 @@ impl trawler::LobstersClient for MysqlTrawler {
 
             Ok(())
         })
+    }
+
+    fn shutdown(mut self) -> Self::ShutdownFuture {
+        let _ = self.c.pool();
+        if let MaybeConn::Connected(pool) = self.c {
+            Box::pin(pool.disconnect())
+        } else {
+            unreachable!();
+        }
     }
 }
 
