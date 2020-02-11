@@ -262,24 +262,34 @@ impl trawler::LobstersClient for MysqlTrawler {
         let variant = self.variant;
         let simulate_shards = self.simulate_shards;
         Box::pin(async move {
-            let (c, with_notifications) = match variant {
-                Variant::Original => handle_req!(original, req, simulate_shards),
-                Variant::Noria => handle_req!(noria, req, simulate_shards),
-                Variant::Natural => handle_req!(natural, req, simulate_shards),
-            }?;
+            let inner = async move {
+                let (c, with_notifications) = match variant {
+                    Variant::Original => handle_req!(original, req, simulate_shards),
+                    Variant::Noria => handle_req!(noria, req, simulate_shards),
+                    Variant::Natural => handle_req!(natural, req, simulate_shards),
+                }?;
 
-            // notifications
-            if let Some(uid) = acting_as {
-                if with_notifications && !priming {
-                    match variant {
-                        Variant::Original => endpoints::original::notifications(c, uid).await,
-                        Variant::Noria => endpoints::noria::notifications(c, uid).await,
-                        Variant::Natural => endpoints::natural::notifications(c, uid).await,
-                    }?;
+                // notifications
+                if let Some(uid) = acting_as {
+                    if with_notifications && !priming {
+                        match variant {
+                            Variant::Original => endpoints::original::notifications(c, uid).await,
+                            Variant::Noria => endpoints::noria::notifications(c, uid).await,
+                            Variant::Natural => endpoints::natural::notifications(c, uid).await,
+                        }?;
+                    }
                 }
-            }
 
-            Ok(())
+                Ok(())
+            };
+
+            // if the pool is disconnected, it just means that we exited while there were still
+            // outstanding requests. that's fine.
+            match inner.await {
+                Ok(())
+                | Err(my::error::Error::Driver(my::error::DriverError::PoolDisconnected)) => Ok(()),
+                Err(e) => Err(e),
+            }
         })
     }
 
