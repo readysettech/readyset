@@ -52,7 +52,7 @@ fn type_for_internal_column(
                 to_sql_type(&emits.1[off])
             }
         }
-        ops::NodeOperator::Sum(_) => {
+        ops::NodeOperator::Sum(_) | ops::NodeOperator::FilterSum(_) => {
             // computed column is always emitted last
             if column_index == node.fields().len() - 1 {
                 // counts and sums always produce integral columns
