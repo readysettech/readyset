@@ -19,3 +19,5 @@ crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
 crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
 # https://github.com/Detegr/rust-ctrlc/pull/64
 ctrlc = { git = "https://github.com/kornelski/rust-ctrlc.git", branch = "nix" }
+# https://github.com/blackbeam/mysql_async/pull/92
+mysql_async = { git = "https://github.com/jonhoo/mysql_async.git", branch = "simplified-pool" }
