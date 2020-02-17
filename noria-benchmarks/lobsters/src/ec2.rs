@@ -1,6 +1,6 @@
 #![feature(try_blocks)]
 
-use clap::{App, Arg};
+use clap::{value_t, App, Arg};
 use rusoto_core::Region;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -10,7 +10,7 @@ use std::{fmt, thread, time};
 use tsunami::*;
 use yansi::Paint;
 
-const AMI: &str = "ami-0804fdbc67d4197ab";
+const AMI: &str = "ami-06dc6a52f1b918c8a";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -107,6 +107,13 @@ fn main() {
                 .help("EC2 availability zone to use for launching instances"),
         )
         .arg(
+            Arg::with_name("in-flight")
+                .takes_value(true)
+                .long("in-flight")
+                .default_value("256")
+                .help("How many in-flight requests to allow"),
+        )
+        .arg(
             Arg::with_name("branch")
                 .takes_value(true)
                 .long("branch")
@@ -129,7 +136,7 @@ fn main() {
     b.add_set(
         "trawler",
         1,
-        MachineSetup::new("m5d.24xlarge", AMI, move |ssh| {
+        MachineSetup::new("m5n.24xlarge", AMI, move |ssh| {
             git_and_cargo(
                 ssh,
                 "noria",
@@ -143,10 +150,11 @@ fn main() {
         .as_user("ubuntu"),
     );
     let branch = args.value_of("branch").map(String::from);
+    let in_flight = clap::value_t!(args, "in-flight", usize).unwrap_or_else(|e| e.exit());
     b.add_set(
         "server",
         1,
-        MachineSetup::new("c5d.4xlarge", AMI, move |ssh| {
+        MachineSetup::new("r5n.4xlarge", AMI, move |ssh| {
             git_and_cargo(
                 ssh,
                 "noria",
@@ -278,7 +286,7 @@ fn main() {
 
                 eprintln!(
                     "{}",
-                    Paint::green(format!("==> benchmark {} w/ {}x load", backend, scale)).bold()
+                    Paint::green(format!("==> benchmark {} at {}x scale", backend, scale)).bold()
                 );
 
                 match backend {
@@ -409,6 +417,7 @@ fn main() {
                     ))
                     .bold()
                 );
+                let in_flight = format!("{}", in_flight);
 
                 let ip = match backend {
                     Backend::Mysql => &*server.private_ip,
@@ -421,11 +430,15 @@ fn main() {
                         "env",
                         "RUST_BACKTRACE=1",
                         "target/release/lobsters",
+                        "--scale",
+                        &scale,
                         "--warmup",
                         "0",
                         "--runtime",
                         "0",
                         "--prime",
+                        "--in-flight",
+                        &in_flight,
                         "--queries",
                         backend.queries(),
                         &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
@@ -452,11 +465,13 @@ fn main() {
                         "RUST_BACKTRACE=1",
                         "target/release/lobsters",
                         "--scale",
-                        "3000",
+                        &scale,
                         "--warmup",
                         "30",
                         "--runtime",
                         "0",
+                        "--in-flight",
+                        &in_flight,
                         "--queries",
                         backend.queries(),
                         &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
@@ -501,6 +516,8 @@ fn main() {
                         "15",
                         "--runtime",
                         "30",
+                        "--in-flight",
+                        &in_flight,
                         "--queries",
                         backend.queries(),
                         &hist_output,
@@ -747,9 +764,13 @@ impl ConvenientSession for tsunami::Session {
     }
     fn exec_print_nonempty(&self, cmd: &[&str], on: &str) -> Result<(), failure::Error> {
         let r = self.just_exec(cmd, on)?;
-        let erred = r.is_err();
+        let mut erred = r.is_err();
         match r {
             Ok(stdout) | Err(stdout) => {
+                if stdout.contains("panicked at") {
+                    erred = true;
+                }
+
                 let out = stdout.trim_end();
                 if erred || (!out.is_empty() && out != "Already up to date.") {
                     for line in out.lines() {
