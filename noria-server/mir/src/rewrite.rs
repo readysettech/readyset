@@ -1,7 +1,7 @@
-use column::Column;
-use query::MirQuery;
+use crate::column::Column;
+use crate::query::MirQuery;
+use crate::MirNodeRef;
 use std::collections::HashMap;
-use MirNodeRef;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {

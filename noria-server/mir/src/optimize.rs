@@ -1,9 +1,9 @@
+use crate::node::{MirNode, MirNodeType};
+use crate::query::MirQuery;
+use crate::MirNodeRef;
 use dataflow::ops::filter::FilterCondition;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation;
 use dataflow::ops::grouped::aggregate::Aggregation;
-use node::{MirNode, MirNodeType};
-use query::MirQuery;
-use MirNodeRef;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation;
 
 use std::collections::HashMap;
 
@@ -21,7 +21,6 @@ pub fn optimize_post_reuse(_q: &mut MirQuery) {
 }
 
 fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
-
     // 1. depth first search to find all the nodes, so we can process them later
 
     let mut node_stack = Vec::new();
@@ -70,7 +69,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
         // now scan for candidacy
         let mut candidate = false;
         match n.borrow().inner {
-            MirNodeType::Filter { .. }  => {
+            MirNodeType::Filter { .. } => {
                 // if the child is an aggregation and it has exactly one parent,
                 // then this is a candidate
                 if let MirNodeType::Aggregation { .. } = child.inner {
@@ -78,8 +77,8 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                         candidate = true;
                     }
                 }
-            },
-            MirNodeType::Aggregation { ref on, .. }  => {
+            }
+            MirNodeType::Aggregation { ref on, .. } => {
                 // if the child is a filter and it has exactly one parent,
                 // then this is a candidate
                 if let MirNodeType::Filter { ref conditions } = child.inner {
@@ -89,12 +88,14 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     candidate = true;
 
                     // But wait -- need to check if the filter is on the aggregation result
-                    use nom_sql::FunctionExpression::{Count, Sum};
                     use nom_sql::FunctionArguments;
+                    use nom_sql::FunctionExpression::{Count, Sum};
                     for (i, col) in child.columns.iter().enumerate() {
                         match col.function.as_deref() {
-                             Some(Count(FunctionArguments::Column(ref col), _))
-                             | Some(Sum(FunctionArguments::Column(ref col), _)) if col.name == on.name => {
+                            Some(Count(FunctionArguments::Column(ref col), _))
+                            | Some(Sum(FunctionArguments::Column(ref col), _))
+                                if col.name == on.name =>
+                            {
                                 // this column may be the aggregation result
                                 // so if we're filtering on it, we're not a candidate
                                 for (j, _cond) in conditions {
@@ -103,13 +104,13 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                                         break;
                                     }
                                 }
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     }
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         };
         if candidate {
             candidate_nodes.push(n);
@@ -128,7 +129,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
 
         // determine which is the aggregation, and update the conditions if the second isn't filter
         let (cond, agg) = match n.borrow().inner {
-            MirNodeType::Aggregation { .. }  => {
+            MirNodeType::Aggregation { .. } => {
                 if let MirNodeType::Filter { ref conditions } = child.inner {
                     // for each column in filter's conditions, we need to figure out
                     // which column in input to aggregation has the same name so we
@@ -152,33 +153,30 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     }
 
                     (conds.clone(), n.clone())
-                }
-                else {
+                } else {
                     unreachable!()
                 }
-            },
-            MirNodeType::Filter { ref conditions } => {
-                (conditions.clone(), c.clone())
-            },
+            }
+            MirNodeType::Filter { ref conditions } => (conditions.clone(), c.clone()),
             _ => unreachable!(),
         };
-
-
 
         let mut new_name = child.name.clone();
         new_name.push_str("_filteragg");
 
         let (on, group_by, kind) =
-        if let MirNodeType::Aggregation { on, group_by, kind } = &agg.borrow().inner {
-            (on.clone(),
-             group_by.to_vec(),
-             match kind {
-                Aggregation::COUNT => FilterAggregation::COUNT,
-                Aggregation::SUM => FilterAggregation::SUM,
-            })
-        } else {
-            unimplemented!()
-        };
+            if let MirNodeType::Aggregation { on, group_by, kind } = &agg.borrow().inner {
+                (
+                    on.clone(),
+                    group_by.to_vec(),
+                    match kind {
+                        Aggregation::COUNT => FilterAggregation::COUNT,
+                        Aggregation::SUM => FilterAggregation::SUM,
+                    },
+                )
+            } else {
+                unimplemented!()
+            };
 
         let new_node = MirNode::new(
             &new_name,
@@ -202,8 +200,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                 // TODO is versioned_name sufficiently unique for here (and below)?
                 if a.borrow().versioned_name() == child.versioned_name() {
                     new_ancestors.push(new_node.clone());
-                }
-                else {
+                } else {
                     new_ancestors.push(a.clone());
                 }
             }
@@ -217,8 +214,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     // automatically adds things to their ancestors, so
                     // new_node is already in the list and we just need to
                     // ignore the old node here
-                }
-                else {
+                } else {
                     new_children.push(c.clone());
                 }
             }
@@ -336,9 +332,7 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
     chained_filters.clear();
 }
 
-fn to_conditions(
-    chained_filters: &[MirNodeRef],
-) -> Vec<(usize, FilterCondition)> {
+fn to_conditions(chained_filters: &[MirNodeRef]) -> Vec<(usize, FilterCondition)> {
     let mut merged_conditions = Vec::new();
     for filter in chained_filters {
         match filter.borrow().inner {

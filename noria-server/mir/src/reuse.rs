@@ -1,8 +1,7 @@
-use column::Column;
-use node::{MirNode, MirNodeType};
-use query::MirQuery;
-use slog;
-use MirNodeRef;
+use crate::column::Column;
+use crate::node::{MirNode, MirNodeType};
+use crate::query::MirQuery;
+use crate::MirNodeRef;
 
 pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Option<MirNodeRef> {
     let mut cur = leaf;
@@ -223,9 +222,9 @@ pub fn merge_mir_for_queries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use node::{MirNode, MirNodeType};
+    use crate::node::{MirNode, MirNodeType};
+    use crate::MirNodeRef;
     use nom_sql::{self, ColumnSpecification, SqlType};
-    use MirNodeRef;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
@@ -286,8 +285,8 @@ mod tests {
 
     #[test]
     fn merge_mir() {
-        use node::{MirNode, MirNodeType};
-        use query::MirQuery;
+        use crate::node::{MirNode, MirNodeType};
+        use crate::query::MirQuery;
 
         let log = slog::Logger::root(slog::Discard, o!());
 

@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
+use crate::node::{MirNode, MirNodeType};
+use crate::query::MirQuery;
 use dataflow::ops::filter::FilterCondition;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use node::{MirNode, MirNodeType};
-use query::MirQuery;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 
 pub trait GraphViz {
     fn to_graphviz(&self) -> Result<String, fmt::Error>;
@@ -87,7 +87,7 @@ impl GraphViz for MirNode {
 
 impl GraphViz for MirNodeType {
     fn to_graphviz(&self) -> Result<String, fmt::Error> {
-        use column::Column;
+        use crate::column::Column;
 
         let mut out = String::new();
 

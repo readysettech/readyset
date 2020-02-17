@@ -1,18 +1,18 @@
-use nom_sql::{ArithmeticExpression, ColumnSpecification, OrderType, Literal};
+use nom_sql::{ArithmeticExpression, ColumnSpecification, Literal, OrderType};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
-use column::Column;
+use crate::column::Column;
+use crate::{FlowNode, MirNodeRef};
 use common::DataType;
 use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
+use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use std::collections::HashMap;
-use {FlowNode, MirNodeRef};
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
@@ -187,8 +187,7 @@ impl MirNode {
     pub fn add_column(&mut self, c: Column) {
         match self.inner {
             // the aggregation column must always be the last column
-            MirNodeType::Aggregation { .. }
-            | MirNodeType::FilterAggregation { .. } => {
+            MirNodeType::Aggregation { .. } | MirNodeType::FilterAggregation { .. } => {
                 let pos = self.columns.len() - 1;
                 self.columns.insert(pos, c.clone());
             }
@@ -510,7 +509,9 @@ impl MirNodeType {
                 group_by.push(c);
             }
             MirNodeType::Filter { .. } => {}
-            MirNodeType::FilterAggregation { ref mut group_by, .. } => {
+            MirNodeType::FilterAggregation {
+                ref mut group_by, ..
+            } => {
                 group_by.push(c);
             }
             MirNodeType::Join {
@@ -639,21 +640,22 @@ impl MirNodeType {
                 group_by: ref our_group_by,
                 kind: ref our_kind,
                 conditions: ref our_conditions,
-            } => {
-                match *other {
-                    MirNodeType::FilterAggregation {
-                        ref on,
-                        ref else_on,
-                        ref group_by,
-                        ref kind,
-                        ref conditions,
-                    } => {
-                        our_on == on && our_else_on == else_on && our_group_by == group_by
-                        && our_kind == kind && our_conditions == conditions
-                    }
-                    _ => false,
+            } => match *other {
+                MirNodeType::FilterAggregation {
+                    ref on,
+                    ref else_on,
+                    ref group_by,
+                    ref kind,
+                    ref conditions,
+                } => {
+                    our_on == on
+                        && our_else_on == else_on
+                        && our_group_by == group_by
+                        && our_kind == kind
+                        && our_conditions == conditions
                 }
-            }
+                _ => false,
+            },
             MirNodeType::Join {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,

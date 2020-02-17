@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
+use crate::MirNodeRef;
 use petgraph::graph::NodeIndex;
-use MirNodeRef;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
