@@ -89,6 +89,7 @@ pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),
     NegationOp(Box<ConditionExpression>),
+    ExistsOp(Box<SelectStatement>),
     Base(ConditionBase),
     Arithmetic(Box<ArithmeticExpression>),
     Bracketed(Box<ConditionExpression>),
@@ -100,6 +101,7 @@ impl fmt::Display for ConditionExpression {
             ConditionExpression::ComparisonOp(ref tree) => write!(f, "{}", tree),
             ConditionExpression::LogicalOp(ref tree) => write!(f, "{}", tree),
             ConditionExpression::NegationOp(ref expr) => write!(f, "NOT {}", expr),
+            ConditionExpression::ExistsOp(ref expr) => write!(f, "EXISTS {}", expr),
             ConditionExpression::Bracketed(ref expr) => write!(f, "({})", expr),
             ConditionExpression::Base(ref base) => write!(f, "{}", base),
             ConditionExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
@@ -273,21 +275,40 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
             }
         },
     );
-
-    let (remaining_input, (left, op_right)) =
-        tuple((simple_expr, opt(alt((nested_sel_pred, in_list_pred)))))(i)?;
-
-    match op_right {
-        Some(right) => Ok((
-            remaining_input,
-            ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::In,
-                left: Box::new(left),
-                right: Box::new(right),
-            }),
+    let nested_exists = map(
+        tuple((
+            opt(delimited(multispace0, tag_no_case("not"), multispace1)),
+            delimited(multispace0, tag_no_case("exists"), multispace0),
+            delimited(
+                pair(tag("("), multispace0),
+                nested_selection,
+                pair(multispace0, tag(")")),
+            ),
         )),
-        None => Ok((remaining_input, left)),
-    }
+        |p| {
+            let nested = ConditionExpression::ExistsOp(Box::new(p.2));
+            if (p.0).is_some() {
+                ConditionExpression::NegationOp(Box::new(nested))
+            } else {
+                nested
+            }
+        },
+    );
+
+    alt((
+        map(
+            pair(simple_expr, opt(alt((nested_sel_pred, in_list_pred)))),
+            |p| match p.1 {
+                Some(right) => ConditionExpression::ComparisonOp(ConditionTree {
+                    operator: Operator::In,
+                    left: Box::new(p.0),
+                    right: Box::new(right),
+                }),
+                None => p.0,
+            },
+        ),
+        nested_exists,
+    ))(i)
 }
 
 fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
@@ -724,6 +745,49 @@ mod tests {
             Field("bar".into()),
             NestedSelect(nested_select),
         );
+
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn exists_in_select() {
+        use select::SelectStatement;
+        use std::default::Default;
+        use table::Table;
+
+        let cond = "exists (  select col from foo  )";
+
+        let res = condition_expr(cond.as_bytes());
+
+        let nested_select = Box::new(SelectStatement {
+            tables: vec![Table::from("foo")],
+            fields: columns(&["col"]),
+            ..Default::default()
+        });
+
+        let expected = ConditionExpression::ExistsOp(nested_select);
+
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn not_exists_in_select() {
+        use select::SelectStatement;
+        use std::default::Default;
+        use table::Table;
+
+        let cond = "not exists (select col from foo)";
+
+        let res = condition_expr(cond.as_bytes());
+
+        let nested_select = Box::new(SelectStatement {
+            tables: vec![Table::from("foo")],
+            fields: columns(&["col"]),
+            ..Default::default()
+        });
+
+        let expected =
+            ConditionExpression::NegationOp(Box::new(ConditionExpression::ExistsOp(nested_select)));
 
         assert_eq!(res.unwrap().1, expected);
     }
