@@ -50,9 +50,9 @@ mio = "0.6.9"
 tokio = { version = "0.2.0", features = ["full"] }
 tokio-test = "0.2.0"
 # ec2
-rusoto_core = { optional = true, version = "0.42" }
-rusoto_sts = { optional = true, version = "0.42" }
-tsunami = { optional = true, version = "0.10" }
+rusoto_core = { optional = true, version = "=0.43.0-beta.1" }
+rusoto_sts = { optional = true, version = "=0.43.0-beta.1" }
+tsunami = { optional = true, version = "=0.11.0-beta.1" }
 timeout-readwrite = "0.3"
 ctrlc = "3.1"
 failure = "0.1"
