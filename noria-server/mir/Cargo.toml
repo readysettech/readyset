@@ -1,8 +1,7 @@
 [package]
-name = "mir"
-version = "0.3.0"
+name = "noria-mir"
+version = "0.4.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
-publish = false
 
 [dependencies]
 nom-sql = "0.0.11"
@@ -11,5 +10,5 @@ slog = "2.4.0"
 petgraph = { version = "0.5", features = ["serde-1"] }
 
 # local deps
-common = { path = "../common" }
-dataflow = { path = "../dataflow" }
+common = { version = "0.4.0", path = "../common", package = "noria-common" }
+dataflow = { version = "0.4.0", path = "../dataflow", package = "noria-dataflow" }
