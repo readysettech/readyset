@@ -1,18 +1,5 @@
 jobs:
  - job: check
-   displayName: "cargo check"
-   dependsOn: []
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     - template: install-rust.yml@templates
-       parameters:
-         rust: nightly
-     - bash: cargo check --workspace --all-features --all-targets
-       displayName: cargo check
- - job: test
-   dependsOn: check
-   displayName: "cargo test"
    strategy:
      matrix:
        Linux:
@@ -25,39 +12,35 @@ jobs:
      vmImage: $(vmImage)
    continueOnError: $[ ne( variables['Agent.OS'], 'Linux' ) ]
    steps:
-    - template: install-rust.yml@templates
-      parameters:
-        rust: nightly
-    - powershell: |
-        Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
-        ./LLVM-9.0.0-win64.exe /S
-        [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
-      displayName: Install LLVM (Windows)
-      condition: eq( variables['Agent.OS'], 'Windows_NT' )
-    - bash: |
-        brew install llvm
-        brew link --force llvm
-        echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
-        echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
-      displayName: Install LLVM (macOS)
-      condition: eq( variables['Agent.OS'], 'Darwin' )
-    - script: cargo test -- --test-threads=1
-      displayName: "cargo test"
-      env:
-       SETTLE_TIME: 2000
- - job: style
-   displayName: "cargo fmt"
-   dependsOn: check
-   pool:
-     vmImage: ubuntu-latest
-   continueOnError: true
-   steps:
-    - template: install-rust.yml@templates
-      parameters:
-        rust: nightly
-        components:
-         - rustfmt
-    - script: cargo fmt --all -- --check
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+         components:
+           - rustfmt
+     - powershell: |
+         Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
+         ./LLVM-9.0.0-win64.exe /S
+         [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
+       displayName: Install LLVM (Windows)
+       condition: eq( variables['Agent.OS'], 'Windows_NT' )
+     - bash: |
+         brew install llvm
+         brew link --force llvm
+         echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
+         echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
+       displayName: Install LLVM (macOS)
+       condition: eq( variables['Agent.OS'], 'Darwin' )
+     - bash: cargo check --workspace --all-features --all-targets
+       displayName: cargo check
+     - script: cargo fmt --all -- --check
+       displayName: cargo fmt --check
+       condition: eq( variables['Agent.OS'], 'Linux' )
+       continueOnError: true
+     - script: cargo test -- --test-threads=1
+       displayName: "cargo test"
+       condition: eq( variables['Agent.OS'], 'Linux' )
+       env:
+        SETTLE_TIME: 2000
 
 resources:
   repositories:
