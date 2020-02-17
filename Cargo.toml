@@ -26,4 +26,7 @@ tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preemp
 # and
 #   https://github.com/blackbeam/mysql_async/issues/96
 # but none of these are API changes, so not having this patch is fine
-mysql_async = { git = "https://github.com/blackbeam/mysql_async.git", branch = "master" }
+mysql_async = { git = "https://github.com/blackbeam/mysql_async.git" }
+# https://github.com/rust-rocksdb/rust-rocksdb/pull/387#issuecomment-587087310
+# optional -- just removes a bunch of outdated dependencies
+librocksdb-sys = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git" }
