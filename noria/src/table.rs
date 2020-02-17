@@ -107,7 +107,7 @@ pub struct Input {
 }
 
 impl fmt::Debug for Input {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Input")
             .field("dst", &self.dst)
             .field("data", &self.data)
@@ -213,7 +213,7 @@ pub struct Table {
 }
 
 impl fmt::Debug for Table {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Table")
             .field("ni", &self.ni)
             .field("node", &self.node)

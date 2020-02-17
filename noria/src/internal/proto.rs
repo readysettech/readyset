@@ -79,7 +79,7 @@ impl<T> fmt::Debug for LocalOrNot<T>
 where
     T: fmt::Debug,
 {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = if let LocalOrNotInner::Local(..) = self.0 {
             "LocalOrNot::Local"
         } else {

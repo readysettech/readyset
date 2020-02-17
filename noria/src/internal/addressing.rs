@@ -45,7 +45,7 @@ impl LocalNodeIndex {
 }
 
 impl fmt::Display for LocalNodeIndex {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "l{}", self.id)
     }
 }

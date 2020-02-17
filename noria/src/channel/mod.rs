@@ -43,7 +43,7 @@ struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
 impl<T> Sink<T> for ImplSinkForSender<T> {
     type Error = tokio::sync::mpsc::error::SendError<T>;
 
-    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -51,11 +51,11 @@ impl<T> Sink<T> for ImplSinkForSender<T> {
         self.0.send(item)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }

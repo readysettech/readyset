@@ -185,7 +185,7 @@ pub struct View {
 }
 
 impl fmt::Debug for View {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("View")
             .field("node", &self.node)
             .field("columns", &self.columns)

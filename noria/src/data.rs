@@ -44,11 +44,11 @@ pub enum DataType {
 }
 
 impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             DataType::None => write!(f, "*"),
             DataType::Text(..) | DataType::TinyText(..) => {
-                let text: Cow<str> = self.into();
+                let text: Cow<'_, str> = self.into();
                 // TODO: do we really want to produce quoted strings?
                 write!(f, "\"{}\"", text)
             }
@@ -70,15 +70,15 @@ impl fmt::Display for DataType {
 }
 
 impl fmt::Debug for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             DataType::None => write!(f, "None"),
             DataType::Text(..) => {
-                let text: Cow<str> = self.into();
+                let text: Cow<'_, str> = self.into();
                 write!(f, "Text({:?})", text)
             }
             DataType::TinyText(..) => {
-                let text: Cow<str> = self.into();
+                let text: Cow<'_, str> = self.into();
                 write!(f, "TinyText({:?})", text)
             }
             DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
@@ -164,8 +164,8 @@ impl PartialEq for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                let a: Cow<str> = self.into();
-                let b: Cow<str> = other.into();
+                let a: Cow<'_, str> = self.into();
+                let b: Cow<'_, str> = other.into();
                 a == b
             }
             (&DataType::BigInt(a), &DataType::BigInt(b)) => a == b,
@@ -211,8 +211,8 @@ impl Ord for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.cmp(b),
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                let a: Cow<str> = self.into();
-                let b: Cow<str> = other.into();
+                let a: Cow<'_, str> = self.into();
+                let b: Cow<'_, str> = other.into();
                 a.cmp(&b)
             }
             (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
@@ -274,7 +274,7 @@ impl Hash for DataType {
                 f.hash(state);
             }
             DataType::Text(..) | DataType::TinyText(..) => {
-                let t: Cow<str> = self.into();
+                let t: Cow<'_, str> = self.into();
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
@@ -401,7 +401,7 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
 
 impl<'a> Into<String> for &'a DataType {
     fn into(self) -> String {
-        let cow: Cow<str> = self.into();
+        let cow: Cow<'_, str> = self.into();
         cow.to_string()
     }
 }
@@ -662,7 +662,7 @@ impl From<Vec<DataType>> for TableOperation {
 }
 
 /// Represents a set of records returned from a query.
-pub type Datas = Vec<Vec<DataType>>;
+pub(crate) type Datas = Vec<Vec<DataType>>;
 
 #[cfg(test)]
 mod tests {

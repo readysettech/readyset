@@ -179,7 +179,7 @@ where
     type Error = bincode::Error;
 
     #[project]
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_ready(cx),
@@ -197,7 +197,7 @@ where
     }
 
     #[project]
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_flush(cx),
@@ -206,7 +206,7 @@ where
     }
 
     #[project]
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         #[project]
         match self.project() {
             DualTcpStream::Passthrough(abs) => abs.poll_close(cx),
