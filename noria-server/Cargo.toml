@@ -1,15 +1,26 @@
 [package]
 name = "noria-server"
 version = "0.4.0"
+edition = "2018"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
-edition = '2018'
+license = "MIT OR Apache-2.0"
+
+readme = "README.md"
+description = "The Noria data-flow database server"
+repository = "https://github.com/mit-pdos/noria.git"
+homepage = "https://pdos.csail.mit.edu/noria"
+
+keywords = ["database", "dataflow", "backend", "storage", "sql"]
+categories = ["database"]
+
+[badges]
+azure-devops = { project = "mit-pdos/mit-pdos", pipeline = "noria", build = "1" }
+maintenance = { status = "experimental" }
 
 [features]
-default = ["carry_local"]
+default = []
 profiling = ["timekeeper/default"]
-binaries = ["default"]
 generate_mysql_tests = ["default"]
-carry_local = []
 
 [dependencies]
 clap = "2.25.0"

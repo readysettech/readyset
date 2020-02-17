@@ -1,8 +1,18 @@
 [package]
 name = "noria-dataflow"
 version = "0.4.0"
-authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = "2018"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+license = "MIT OR Apache-2.0"
+
+description = "Internal noria-server crate"
+repository = "https://github.com/mit-pdos/noria.git"
+homepage = "https://pdos.csail.mit.edu/noria"
+
+keywords = ["internal"]
+
+[badges]
+maintenance = { status = "experimental" }
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 jemallocator = "0.3"

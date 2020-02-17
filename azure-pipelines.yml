@@ -1,63 +1,67 @@
-stages:
- - stage: check
-   displayName: Compilation check
+jobs:
+ - job: check
+   displayName: "cargo check"
    dependsOn: []
-   jobs:
-     - template: azure/cargo-check.yml@templates
+   pool:
+     vmImage: ubuntu-latest
+   steps:
+     - template: install-rust.yml@templates
        parameters:
-         name: cargo_check
          rust: nightly
-         benches: true
- - stage: test
+     - bash: cargo check --workspace --all-features --all-targets
+       displayName: cargo check
+ - job: test
    dependsOn: check
-   jobs:
-    - job: test
+   displayName: "cargo test"
+   strategy:
+     matrix:
+       Linux:
+       MacOS:
+         vmImage: macOS-10.14
+       Windows:
+         vmImage: windows-2019
+   pool:
+     vmImage: $(vmImage)
+   continueOnError: $[ ne( variables['Agent.OS'], 'Linux' ) ]
+   steps:
+    - template: install-rust.yml@templates
+      parameters:
+        rust: nightly
+    - powershell: |
+        Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
+        ./LLVM-9.0.0-win64.exe /S
+        [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
+      displayName: Install LLVM (Windows)
+      condition: eq( variables['Agent.OS'], 'Windows_NT' )
+    - bash: |
+        brew install llvm
+        brew link --force llvm
+        echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
+        echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
+      displayName: Install LLVM (macOS)
+      condition: eq( variables['Agent.OS'], 'Darwin' )
+    - script: cargo test -- --test-threads=1
       displayName: "cargo test"
-      strategy:
-        matrix:
-          Linux:
-            vmImage: ubuntu-16.04
-          MacOS:
-            vmImage: macOS-10.14
-          Windows:
-            vmImage: windows-2019
-      pool:
-        vmImage: $(vmImage)
-      steps:
-       - template: azure/install-rust.yml@templates
-         parameters:
-           rust: nightly
-       - powershell: |
-           Invoke-WebRequest http://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe -OutFile LLVM-9.0.0-win64.exe
-           ./LLVM-9.0.0-win64.exe /S
-           [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$($env:SystemDrive)\Program Files\LLVM\bin", "Machine")
-         displayName: Install LLVM (Windows)
-         condition: eq( variables['Agent.OS'], 'Windows_NT' )
-       - bash: |
-           brew install llvm
-           brew link --force llvm
-           echo "##vso[task.setvariable variable=LLVM_CONFIG]/usr/local/opt/llvm/bin/llvm-config"
-           echo "##vso[task.setvariable variable=PATH]/usr/local/opt/llvm/bin:$PATH"
-         displayName: Install LLVM (macOS)
-         condition: eq( variables['Agent.OS'], 'Darwin' )
-       - script: cargo test --all -- --test-threads=1
-         displayName: Run tests
-         env:
-          SETTLE_TIME: 2000
- - stage: style
-   displayName: Style linting
+      env:
+       SETTLE_TIME: 2000
+ - job: style
+   displayName: "cargo fmt"
    dependsOn: check
-   jobs:
-     - template: azure/rustfmt.yml@templates
-       parameters:
-         name: rustfmt
-         rust: nightly
-         allow_fail: true
+   pool:
+     vmImage: ubuntu-latest
+   continueOnError: true
+   steps:
+    - template: install-rust.yml@templates
+      parameters:
+        rust: nightly
+        components:
+         - rustfmt
+    - script: cargo fmt --all -- --check
 
 resources:
   repositories:
     - repository: templates
       type: github
       name: crate-ci/azure-pipelines
-      ref: refs/heads/v0.2
+      ref: refs/heads/v0.3
       endpoint: mit-pdos
