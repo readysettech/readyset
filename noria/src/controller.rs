@@ -170,6 +170,8 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
     }
 }
 
+// this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
+// the A parameter is needed so it gets captured into the impl Trait
 type RpcFuture<A, R> = impl Future<Output = Result<R, failure::Error>>;
 
 // Needed b/c of https://github.com/rust-lang/rust/issues/65442
