@@ -10,7 +10,6 @@ use nom_sql::SqlQuery;
 use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 
-use nom::{self, is_alphanumeric, multispace};
 use nom_sql::CreateTableStatement;
 use slog;
 use std::collections::HashMap;
@@ -72,35 +71,57 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 }
 
 #[inline]
-fn is_ident(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr as char == '_'
+fn ident(input: &str) -> nom::IResult<&str, &str> {
+    use nom::InputTakeAtPosition;
+    input.split_at_position_complete(|chr| {
+        !(chr.is_ascii() && (nom::character::is_alphanumeric(chr as u8) || chr == '_'))
+    })
 }
 
-use nom::types::CompleteByteSlice;
-use nom::*;
-named!(query_expr<CompleteByteSlice, (bool, Option<String>, SqlQuery)>,
-    do_parse!(
-        prefix: opt!(do_parse!(
-            public: opt!(alt!(tag_no_case!("query") | tag_no_case!("view"))) >>
-            opt!(multispace) >>
-            name: opt!(terminated!(take_while1!(is_ident), opt!(multispace))) >>
-            tag!(":") >>
-            opt!(multispace) >>
-            (public, name)
-        )) >>
-        expr: apply!(sql_parser::sql_query,) >>
-        opt!(multispace) >>
-        (match prefix {
-            None => (false, None, expr),
-            Some(p) => (p.0.is_some(),
-                        p.1.map(|s| str::from_utf8(s.as_bytes()).unwrap().into()), expr)
-        })
-    )
-);
+fn query_prefix(input: &str) -> nom::IResult<&str, (bool, Option<&str>)> {
+    use nom::branch::alt;
+    use nom::bytes::complete::tag_no_case;
+    use nom::character::complete::{char, multispace0, space1};
+    use nom::combinator::opt;
+    use nom::sequence::{pair, terminated};
+    let (input, public) = opt(pair(
+        alt((tag_no_case("query"), tag_no_case("view"))),
+        space1,
+    ))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, name) = opt(terminated(ident, multispace0))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char(':')(input)?;
+    let (input, _) = multispace0(input)?;
+    Ok((input, (public.is_some(), name)))
+}
 
-named!(query_exprs<CompleteByteSlice, Vec<(bool, Option<String>, SqlQuery)>>,
-    many1!(query_expr)
-);
+fn query_expr(input: &str) -> nom::IResult<&str, (bool, Option<&str>, SqlQuery)> {
+    use nom::character::complete::multispace0;
+    use nom::combinator::opt;
+    let (input, prefix) = opt(query_prefix)(input)?;
+    // NOTE: some massaging since nom_sql operates on &[u8], not &str
+    let (input, expr) = match sql_parser::sql_query(input.as_bytes()) {
+        Ok((i, e)) => Ok((std::str::from_utf8(i).unwrap(), e)),
+        Err(nom::Err::Incomplete(n)) => Err(nom::Err::Incomplete(n)),
+        Err(nom::Err::Error((i, e))) => Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e))),
+        Err(nom::Err::Failure((i, e))) => {
+            Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e)))
+        }
+    }?;
+    let (input, _) = multispace0(input)?;
+    Ok((
+        input,
+        match prefix {
+            None => (false, None, expr),
+            Some((public, name)) => (public, name, expr),
+        },
+    ))
+}
+
+fn query_exprs(input: &str) -> nom::IResult<&str, Vec<(bool, Option<&str>, SqlQuery)>> {
+    nom::multi::many1(query_expr)(input)
+}
 
 #[allow(unused)]
 impl Recipe {
@@ -265,7 +286,7 @@ impl Recipe {
                 }
                 (qid, (n, q, is_leaf))
             })
-            .collect::<HashMap<QueryID, (Option<String>, SqlQuery, bool)>>();
+            .collect::<HashMap<_, _>>();
 
         let inc = match log {
             None => SqlIncorporator::default(),
@@ -613,8 +634,8 @@ impl Recipe {
 
         let parsed_queries = query_strings.iter().fold(
             Vec::new(),
-            |mut acc: Vec<Result<(bool, Option<String>, SqlQuery), String>>, q| {
-                match query_exprs(CompleteByteSlice(q.as_bytes())) {
+            |mut acc: Vec<Result<(bool, Option<&str>, SqlQuery), String>>, q| {
+                match query_exprs(q) {
                     Result::Err(e) => {
                         // we got a parse error
                         acc.push(Err(format!("Query \"{}\", parse error: {}", q, e)));
@@ -625,7 +646,7 @@ impl Recipe {
                             remainder.is_empty(),
                             format!(
                                 "failed to parse the complete recipe; left with: {}",
-                                str::from_utf8(*remainder).unwrap()
+                                remainder
                             )
                         );
                         acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
@@ -639,7 +660,7 @@ impl Recipe {
             .into_iter()
             .map(|pr| {
                 let pr = pr.unwrap();
-                (pr.1, pr.2, pr.0)
+                (pr.1.map(String::from), pr.2, pr.0)
             })
             .collect::<Vec<_>>())
     }

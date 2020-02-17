@@ -22,7 +22,7 @@ travis-ci = { repository = "mit-pdos/noria" }
 assert_infrequent = "0.1.0"
 failure = "0.1"
 hyper = { version = "0.13.0", features = [ "stream" ] }
-nom-sql = "0.0.10"
+nom-sql = "0.0.11"
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 serde_json = "1.0.2"

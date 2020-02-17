@@ -13,7 +13,7 @@ chrono = { version = "0.4.0", features = ["serde"] }
 noria = { path = "../noria-server", package = "noria-server" }
 futures-util = "0.3.0"
 futures-core = "0.3.0"
-nom-sql = "0.0.10"
+nom-sql = "0.0.11"
 regex = "1.0.0"
 itertools = "0.8"
 slog = "2.4.0"

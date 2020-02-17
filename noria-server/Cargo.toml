@@ -22,8 +22,8 @@ futures-executor = "0.3.0" # for block_on
 pin-project = "0.4.0"
 hyper = { version = "0.13.0", features = [ "stream" ] }
 mio = "0.6.9"
-nom = "4.0.0"
-nom-sql = "0.0.10"
+nom = "5"
+nom-sql = "0.0.11"
 petgraph = { version = "0.5", features = ["serde-1"] }
 rand = "0.7.0"
 serde_derive = "1.0.8"
