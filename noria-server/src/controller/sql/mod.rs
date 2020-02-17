@@ -975,7 +975,9 @@ mod tests {
     use crate::controller::Migration;
     use crate::integration;
     use dataflow::prelude::*;
-    use nom_sql::{CaseWhenExpression, Column, ColumnOrLiteral, FunctionExpression, FunctionArguments, Literal};
+    use nom_sql::{
+        CaseWhenExpression, Column, ColumnOrLiteral, FunctionArguments, FunctionExpression, Literal,
+    };
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -1007,12 +1009,12 @@ mod tests {
 
         let mut hasher = DefaultHasher::new();
         let mut r_vec: Vec<&str> = relations.to_vec();
-        r_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        r_vec.sort(); // QueryGraph.signature() sorts them, so we must to match
         for r in &r_vec {
             r.hash(&mut hasher);
         }
         let mut a_vec: Vec<&Column> = attrs.to_vec();
-        a_vec.sort();  // QueryGraph.signature() sorts them, so we must to match
+        a_vec.sort(); // QueryGraph.signature() sorts them, so we must to match
         for a in &a_vec {
             a.hash(&mut hasher);
         }
@@ -1510,7 +1512,10 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(FunctionArguments::Column(Column::from("votes.aid")), false));
+            let f = Box::new(FunctionExpression::Count(
+                FunctionArguments::Column(Column::from("votes.aid")),
+                false,
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -1536,7 +1541,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_count() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_count").await;
         g.migrate(|mig| {
@@ -1599,7 +1604,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_sum() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum").await;
         g.migrate(|mig| {
@@ -1662,7 +1667,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_sum_else() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
         g.migrate(|mig| {
@@ -1731,12 +1736,19 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .add_query(
+                    "CREATE TABLE votes (userid int, aid int, sign int);",
+                    None,
+                    mig
+                )
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes").fields(),
+                &["userid", "aid", "sign"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
@@ -1745,7 +1757,10 @@ mod tests {
             );
             assert!(res.is_ok());
             // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
-            let f = Box::new(FunctionExpression::Sum(FunctionArguments::Column(Column::from("votes.sign")), false));
+            let f = Box::new(FunctionExpression::Sum(
+                FunctionArguments::Column(Column::from("votes.sign")),
+                false,
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
@@ -1778,12 +1793,19 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .add_query(
+                    "CREATE TABLE votes (userid int, aid int, sign int);",
+                    None,
+                    mig
+                )
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes").fields(),
+                &["userid", "aid", "sign"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
@@ -1804,12 +1826,19 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .add_query(
+                    "CREATE TABLE votes (userid int, aid int, sign int);",
+                    None,
+                    mig
+                )
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes").fields(),
+                &["userid", "aid", "sign"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 "SELECT SUM(sign) AS sum FROM votes WHERE sum>0 GROUP BY votes.userid;",
@@ -1822,7 +1851,8 @@ mod tests {
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
                 FunctionArguments::Column(Column::from("votes.sign")),
-                false));
+                false,
+            ));
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("sum")],
@@ -1846,13 +1876,13 @@ mod tests {
         .await;
     }
 
-// currently, this test will fail because logical operations are unimplemented
-// (in particular, any complex operation that might involve multiple filter conditions
-// is currently unimplemented for filter-aggregations (TODO (jamb)))
+    // currently, this test will fail because logical operations are unimplemented
+    // (in particular, any complex operation that might involve multiple filter conditions
+    // is currently unimplemented for filter-aggregations (TODO (jamb)))
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_logical_op() {
-        use nom_sql::{ConditionExpression, ConditionBase, ConditionTree, Operator};
+        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
         g.migrate(|mig| {

@@ -2,7 +2,10 @@ use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::{Column, MirNodeRef};
 use nom_sql::FunctionExpression::*;
-use nom_sql::{self, CaseWhenExpression, ColumnOrLiteral, ConditionExpression, FunctionExpression, FunctionArguments};
+use nom_sql::{
+    self, CaseWhenExpression, ColumnOrLiteral, ConditionExpression, FunctionArguments,
+    FunctionExpression,
+};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 
@@ -12,17 +15,29 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
     match *computed_col.function.as_ref().unwrap().deref() {
         Avg(FunctionArguments::Column(ref col), _)
         | Count(FunctionArguments::Column(ref col), _)
-        | Count(FunctionArguments::Conditional(CaseWhenExpression{ then_expr: ColumnOrLiteral::Column(ref col), .. }), _)
+        | Count(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(ref col),
+                ..
+            }),
+            _,
+        )
         | GroupConcat(FunctionArguments::Column(ref col), _)
         | Max(FunctionArguments::Column(ref col))
         | Min(FunctionArguments::Column(ref col))
-        | Sum(FunctionArguments::Conditional(CaseWhenExpression{ then_expr: ColumnOrLiteral::Column(ref col), .. }), _)
+        | Sum(
+            FunctionArguments::Conditional(CaseWhenExpression {
+                then_expr: ColumnOrLiteral::Column(ref col),
+                ..
+            }),
+            _,
+        )
         | Sum(FunctionArguments::Column(ref col), _) => Column::from(col),
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
         }
-        _ => unreachable!()
+        _ => unreachable!(),
     }
 }
 
@@ -106,29 +121,31 @@ pub(super) fn make_grouped(
                         Sum(FunctionArguments::Column(ref col), b) => {
                             let colname =
                                 format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
-                            FunctionExpression::Sum(FunctionArguments::Column(
-                                nom_sql::Column::from(colname.as_ref())
-                            ), b)
+                            FunctionExpression::Sum(
+                                FunctionArguments::Column(nom_sql::Column::from(colname.as_ref())),
+                                b,
+                            )
                         }
                         Count(FunctionArguments::Column(ref col), b) => {
                             let colname =
                                 format!("{}.count({})", col.clone().table.unwrap(), col.name);
-                            FunctionExpression::Sum(FunctionArguments::Column(
-                                nom_sql::Column::from(colname.as_ref())
-                            ), b)
+                            FunctionExpression::Sum(
+                                FunctionArguments::Column(nom_sql::Column::from(colname.as_ref())),
+                                b,
+                            )
                         }
                         Max(FunctionArguments::Column(ref col)) => {
                             let colname =
                                 format!("{}.max({})", col.clone().table.unwrap(), col.name);
                             FunctionExpression::Max(FunctionArguments::Column(
-                                nom_sql::Column::from(colname.as_ref())
+                                nom_sql::Column::from(colname.as_ref()),
                             ))
                         }
                         Min(FunctionArguments::Column(ref col)) => {
                             let colname =
                                 format!("{}.min({})", col.clone().table.unwrap(), col.name);
                             FunctionExpression::Min(FunctionArguments::Column(
-                                nom_sql::Column::from(colname.as_ref())
+                                nom_sql::Column::from(colname.as_ref()),
                             ))
                         }
                         _ => unimplemented!(),

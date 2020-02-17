@@ -1,7 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, CaseWhenExpression, Column, ColumnOrLiteral, ConditionExpression, ConditionTree,
-    FieldDefinitionExpression, FieldValueExpression, FunctionArguments, JoinRightSide,
-    SelectStatement, SqlQuery, Table,
+    ArithmeticBase, CaseWhenExpression, Column, ColumnOrLiteral, ConditionExpression,
+    ConditionTree, FieldDefinitionExpression, FieldValueExpression, FunctionArguments,
+    JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use std::collections::HashMap;
@@ -141,13 +141,21 @@ fn rewrite_selection(
                         // tables in its specification
                         match **f {
                             Avg(FunctionArguments::Column(ref mut fe), _)
-                            | Count(FunctionArguments::Conditional(CaseWhenExpression{
-                                then_expr: ColumnOrLiteral::Column(ref mut fe), ..
-                              }), _)
+                            | Count(
+                                FunctionArguments::Conditional(CaseWhenExpression {
+                                    then_expr: ColumnOrLiteral::Column(ref mut fe),
+                                    ..
+                                }),
+                                _,
+                            )
                             | Count(FunctionArguments::Column(ref mut fe), _)
-                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{
-                                then_expr: ColumnOrLiteral::Column(ref mut fe), ..
-                              }), _)
+                            | Sum(
+                                FunctionArguments::Conditional(CaseWhenExpression {
+                                    then_expr: ColumnOrLiteral::Column(ref mut fe),
+                                    ..
+                                }),
+                                _,
+                            )
                             | Sum(FunctionArguments::Column(ref mut fe), _)
                             | Min(FunctionArguments::Column(ref mut fe))
                             | Max(FunctionArguments::Column(ref mut fe))
@@ -155,7 +163,7 @@ fn rewrite_selection(
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
-                            },
+                            }
                             _ => {}
                         }
                         None
@@ -196,15 +204,26 @@ fn rewrite_selection(
                 *f = expand_columns(f.clone(), &tables);
                 // also need to expand any conditionals in the column, e.g. for filtered aggregations
                 match f.function {
-                    Some(ref mut f) => {
-                        match **f {
-                            Count(FunctionArguments::Conditional(CaseWhenExpression{ ref mut condition, .. }), _)
-                            | Sum(FunctionArguments::Conditional(CaseWhenExpression{ ref mut condition, .. }), _) => {
-                                *condition = rewrite_conditional(&expand_columns, condition.clone(), &tables);
-                            }
-                            _ => {}
+                    Some(ref mut f) => match **f {
+                        Count(
+                            FunctionArguments::Conditional(CaseWhenExpression {
+                                ref mut condition,
+                                ..
+                            }),
+                            _,
+                        )
+                        | Sum(
+                            FunctionArguments::Conditional(CaseWhenExpression {
+                                ref mut condition,
+                                ..
+                            }),
+                            _,
+                        ) => {
+                            *condition =
+                                rewrite_conditional(&expand_columns, condition.clone(), &tables);
                         }
-                    }
+                        _ => {}
+                    },
                     None => {}
                 }
             }

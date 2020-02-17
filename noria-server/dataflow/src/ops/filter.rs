@@ -142,7 +142,7 @@ impl Ingredient for Filter {
                 .filter_map(|(i, ref cond)| match *cond {
                     FilterCondition::Comparison(ref op, ref x) => {
                         Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                    },
+                    }
                     FilterCondition::In(ref xs) => Some(format!(
                         "f{} IN ({})",
                         i,
@@ -234,12 +234,10 @@ mod tests {
             &["x", "y"],
             Filter::new(
                 s.as_global(),
-                filters.unwrap_or(&[
-                    (1, FilterCondition::Comparison(
-                        Operator::Equal,
-                        Value::Constant("a".into())
-                    )),
-                ]),
+                filters.unwrap_or(&[(
+                    1,
+                    FilterCondition::Comparison(Operator::Equal, Value::Constant("a".into())),
+                )]),
             ),
             materialized,
         );
@@ -283,14 +281,14 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                (0, FilterCondition::Comparison(
-                    Operator::Equal,
-                    Value::Constant(1.into()),
-                )),
-                (1, FilterCondition::Comparison(
-                    Operator::Equal,
-                    Value::Constant("a".into()),
-                )),
+                (
+                    0,
+                    FilterCondition::Comparison(Operator::Equal, Value::Constant(1.into())),
+                ),
+                (
+                    1,
+                    FilterCondition::Comparison(Operator::Equal, Value::Constant("a".into())),
+                ),
             ]),
         );
 
@@ -348,14 +346,14 @@ mod tests {
         let mut g = setup(
             false,
             Some(&[
-                (0, FilterCondition::Comparison(
-                    Operator::LessOrEqual,
-                    Value::Constant(2.into()),
-                )),
-                (1, FilterCondition::Comparison(
-                    Operator::NotEqual,
-                    Value::Constant("a".into()),
-                )),
+                (
+                    0,
+                    FilterCondition::Comparison(Operator::LessOrEqual, Value::Constant(2.into())),
+                ),
+                (
+                    1,
+                    FilterCondition::Comparison(Operator::NotEqual, Value::Constant("a".into())),
+                ),
             ]),
         );
 
@@ -382,12 +380,10 @@ mod tests {
     fn it_works_with_columns() {
         let mut g = setup(
             false,
-            Some(&[
-                (0, FilterCondition::Comparison(
-                    Operator::Equal,
-                    Value::Column(1),
-                )),
-            ]),
+            Some(&[(
+                0,
+                FilterCondition::Comparison(Operator::Equal, Value::Column(1)),
+            )]),
         );
 
         let mut left: Vec<DataType>;

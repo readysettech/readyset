@@ -1,5 +1,5 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, OrderType, Literal,
+    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -584,9 +584,15 @@ fn make_grouped_node(
             mig.add_ingredient(
                 String::from(name),
                 column_names.as_slice(),
-                agg.over(parent_na, cond, over_col_indx, else_on, group_col_indx.as_slice()),
+                agg.over(
+                    parent_na,
+                    cond,
+                    over_col_indx,
+                    else_on,
+                    group_col_indx.as_slice(),
+                ),
             )
-        },
+        }
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
             let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);

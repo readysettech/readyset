@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn it_expands_count_star() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionExpression, FunctionArguments};
+        use nom_sql::{FunctionArguments, FunctionExpression};
 
         // SELECT COUNT(*) FROM users;
         // -->
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn it_expands_count_star_with_group_by() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionExpression, FunctionArguments};
+        use nom_sql::{FunctionArguments, FunctionExpression};
 
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->

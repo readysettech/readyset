@@ -1,9 +1,9 @@
 use std::sync;
 
-pub use nom_sql::{Operator, Literal};
+use crate::ops::filter::{FilterCondition, Value};
 use crate::ops::grouped::GroupedOperation;
 use crate::ops::grouped::GroupedOperator;
-use crate::ops::filter::{FilterCondition, Value};
+pub use nom_sql::{Literal, Operator};
 
 use crate::prelude::*;
 
@@ -112,33 +112,27 @@ impl GroupedOperation for FilterAggregator {
         let v = if passes_filter {
             match self.op {
                 FilterAggregation::COUNT => 1,
-                FilterAggregation::SUM => {
-                    match r[self.over] {
-                        DataType::Int(n) => i128::from(n),
-                        DataType::UnsignedInt(n) => i128::from(n),
-                        DataType::BigInt(n) => i128::from(n),
-                        DataType::UnsignedBigInt(n) => i128::from(n),
-                        DataType::None => 0,
-                        ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
-                    }
-                }
+                FilterAggregation::SUM => match r[self.over] {
+                    DataType::Int(n) => i128::from(n),
+                    DataType::UnsignedInt(n) => i128::from(n),
+                    DataType::BigInt(n) => i128::from(n),
+                    DataType::UnsignedBigInt(n) => i128::from(n),
+                    DataType::None => 0,
+                    ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
+                },
             }
         } else {
             // the filter returned false, so check whether we have an else case
             match self.over_else.clone() {
-                Some(over_else) => {
-                    match self.op {
-                        FilterAggregation::COUNT => 1,
-                        FilterAggregation::SUM => {
-                            match over_else {
-                                Literal::Integer(n) => i128::from(n),
-                                Literal::UnsignedInteger(n) => i128::from(n),
-                                ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
-                            }
-                        }
-                    }
-                }
-                None => 0
+                Some(over_else) => match self.op {
+                    FilterAggregation::COUNT => 1,
+                    FilterAggregation::SUM => match over_else {
+                        Literal::Integer(n) => i128::from(n),
+                        Literal::UnsignedInteger(n) => i128::from(n),
+                        ref x => unreachable!("tried to aggregate over {:?} on {:?}", x, r),
+                    },
+                },
+                None => 0,
             }
         };
 
@@ -207,15 +201,14 @@ mod tests {
             &["x", "ys"],
             FilterAggregation::COUNT.over(
                 s.as_global(),
-                &[
-                    (1, FilterCondition::Comparison(
-                        Operator::Equal,
-                        Value::Constant(2.into()),
-                    )),
-                ],
+                &[(
+                    1,
+                    FilterCondition::Comparison(Operator::Equal, Value::Constant(2.into())),
+                )],
                 1,
                 None,
-                &[0]),
+                &[0],
+            ),
             mat,
         );
         g
@@ -229,15 +222,14 @@ mod tests {
             &["x", "z", "ys"],
             FilterAggregation::COUNT.over(
                 s.as_global(),
-                &[
-                    (1, FilterCondition::Comparison(
-                        Operator::Equal,
-                        Value::Constant(2.into()),
-                    )),
-                ],
+                &[(
+                    1,
+                    FilterCondition::Comparison(Operator::Equal, Value::Constant(2.into())),
+                )],
                 1,
                 None,
-                &[0, 2]),
+                &[0, 2],
+            ),
             mat,
         );
         g
@@ -253,18 +245,18 @@ mod tests {
             FilterAggregation::SUM.over(
                 s.as_global(),
                 &[
-                    (1, FilterCondition::Comparison(
-                        Operator::NotEqual,
-                        Value::Column(0),
-                    )),
-                    (2, FilterCondition::Comparison(
-                        Operator::Greater,
-                        Value::Constant(1.into()),
-                    )),
+                    (
+                        1,
+                        FilterCondition::Comparison(Operator::NotEqual, Value::Column(0)),
+                    ),
+                    (
+                        2,
+                        FilterCondition::Comparison(Operator::Greater, Value::Constant(1.into())),
+                    ),
                 ],
                 2,
                 None,
-                &[1]
+                &[1],
             ),
             mat,
         );
@@ -280,15 +272,16 @@ mod tests {
             &["g", "zsum"],
             FilterAggregation::SUM.over(
                 s.as_global(),
-                &[
-                    (1, FilterCondition::Comparison(
+                &[(
+                    1,
+                    FilterCondition::Comparison(
                         Operator::GreaterOrEqual,
                         Value::Constant(3.into()),
-                    )),
-                ],
+                    ),
+                )],
                 2,
                 Some(Literal::Integer(6)),
-                &[3]
+                &[3],
             ),
             mat,
         );
