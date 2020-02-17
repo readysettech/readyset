@@ -11,13 +11,19 @@ debug=true
 
 [patch.crates-io]
 # https://github.com/tower-rs/tokio-tower/pull/6
+# optional -- just a perf optimization
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 # https://github.com/tokio-rs/tokio/pull/2160
+# optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
-# https://github.com/crossbeam-rs/crossbeam/pull/460#issuecomment-573145406
-crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
-crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
-# https://github.com/Detegr/rust-ctrlc/pull/64
-ctrlc = { git = "https://github.com/kornelski/rust-ctrlc.git", branch = "master" }
-# https://github.com/blackbeam/mysql_async/pull/92
-mysql_async = { git = "https://github.com/jonhoo/mysql_async.git", branch = "simplified-pool" }
+# mostly optional.
+# master fixes
+#   https://github.com/blackbeam/mysql_async/issues/65
+# by virtue of
+#   https://github.com/blackbeam/mysql_async/pull/92
+# we still care about
+#   https://github.com/blackbeam/mysql_async/issues/94
+# and
+#   https://github.com/blackbeam/mysql_async/issues/96
+# but none of these are API changes, so not having this patch is fine
+mysql_async = { git = "https://github.com/blackbeam/mysql_async.git", branch = "master" }
