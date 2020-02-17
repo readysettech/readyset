@@ -1,4 +1,3 @@
-use std;
 use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::marker::PhantomData;
@@ -10,7 +9,6 @@ use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
 use futures_util::{sink::Sink, stream::Stream};
-use net2;
 use pin_project::{pin_project, project};
 use serde::{Deserialize, Serialize};
 use std::{

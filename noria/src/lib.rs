@@ -105,6 +105,8 @@
 #![feature(type_alias_impl_trait)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
+// https://github.com/rust-lang/rust-clippy/issues/5188
+#![allow(clippy::needless_doctest_main)]
 
 #[macro_use]
 extern crate failure;

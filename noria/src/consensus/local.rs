@@ -4,7 +4,6 @@ use std::sync::{Condvar, Mutex};
 use failure::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json;
 
 use super::Authority;
 use super::Epoch;

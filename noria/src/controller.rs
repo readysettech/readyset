@@ -3,14 +3,10 @@ use crate::debug::stats;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::ActivationResult;
-#[cfg(debug_assertions)]
-use assert_infrequent;
 use failure::{self, ResultExt};
 use futures_util::future;
-use hyper;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

@@ -144,7 +144,7 @@ impl ViewBuilder {
                         pool::Builder::new()
                             .urgency(0.03)
                             .loaded_above(0.2)
-                            .underutilized_below(0.000000001)
+                            .underutilized_below(0.000_000_001)
                             .max_services(Some(32))
                             .build(multiplex::client::Maker::new(ViewEndpoint(addr)), ()),
                         50,
@@ -312,7 +312,7 @@ impl View {
 
     /// Get the schema definition of this view.
     pub fn schema(&self) -> Option<&[ColumnSpecification]> {
-        self.schema.as_ref().map(Vec::as_slice)
+        self.schema.as_deref()
     }
 
     /// Get the current size of this view.
@@ -327,12 +327,9 @@ impl View {
             .iter_mut()
             .enumerate()
             .map(|(shardi, shard)| {
-                shard.call(
-                    Tagged::from(ReadQuery::Size {
-                        target: (node, shardi),
-                    })
-                    .into(),
-                )
+                shard.call(Tagged::from(ReadQuery::Size {
+                    target: (node, shardi),
+                }))
             })
             .collect::<FuturesUnordered<_>>();
 

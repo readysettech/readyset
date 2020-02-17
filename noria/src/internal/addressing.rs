@@ -30,6 +30,11 @@ pub struct LocalNodeIndex {
 }
 
 impl LocalNodeIndex {
+    /// # Safety
+    ///
+    /// This function is not _memory_ unsafe, but users of this method should show an abundance of
+    /// caution so they do not cause hard-to-debug runtime errors. Local node indices **must** be
+    /// 0-indexed, contiguous, and distinct within each domain, otherwise bad things will happen.
     pub unsafe fn make(id: u32) -> LocalNodeIndex {
         LocalNodeIndex { id }
     }

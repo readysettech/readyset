@@ -5,8 +5,6 @@ use std::time::Duration;
 use failure::{Error, ResultExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json;
-use slog;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use super::Authority;

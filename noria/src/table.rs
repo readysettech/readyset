@@ -154,7 +154,7 @@ impl TableBuilder {
                         pool::Builder::new()
                             .urgency(0.01)
                             .loaded_above(0.2)
-                            .underutilized_below(0.000000001)
+                            .underutilized_below(0.000_000_001)
                             .max_services(Some(32))
                             .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
                         50,
@@ -242,6 +242,7 @@ impl Service<Input> for Table {
         Poll::Ready(Ok(()))
     }
 
+    #[allow(clippy::cognitive_complexity)]
     fn call(&mut self, mut i: Input) -> Self::Future {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
