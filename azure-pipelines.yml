@@ -16,6 +16,7 @@ jobs:
    strategy:
      matrix:
        Linux:
+         vmImage: ubuntu-latest
        MacOS:
          vmImage: macOS-10.14
        Windows:

@@ -11,7 +11,7 @@ repository = "https://github.com/mit-pdos/noria.git"
 homepage = "https://pdos.csail.mit.edu/noria"
 
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
-categories = ["database"]
+categories = ["database", "database-implementations"]
 
 [badges]
 azure-devops = { project = "mit-pdos/mit-pdos", pipeline = "noria", build = "1" }
