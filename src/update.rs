@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
     use column::Column;
-    use common::{Literal, LiteralExpression, Operator, Real};
+    use common::{ItemPlaceholder, Literal, LiteralExpression, Operator, Real};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -149,7 +149,9 @@ mod tests {
         let expected_left = Base(Field(Column::from("stories.id")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         }));
         assert_eq!(
@@ -178,7 +180,9 @@ mod tests {
         let res = updating(qstring.as_bytes());
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("users.id")))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         }));
         let expected_ae = ArithmeticExpression {

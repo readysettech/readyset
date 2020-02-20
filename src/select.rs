@@ -311,7 +311,9 @@ mod tests {
     use super::*;
     use case::{CaseWhenExpression, ColumnOrLiteral};
     use column::{Column, FunctionArguments, FunctionExpression};
-    use common::{FieldDefinitionExpression, FieldValueExpression, Literal, Operator};
+    use common::{
+        FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal, Operator,
+    };
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -457,37 +459,35 @@ mod tests {
 
     #[test]
     fn where_clause() {
-        let qstring = "select * from ContactInfo where email=?;";
-
-        let res = selection(qstring.as_bytes());
-
-        let expected_left = Base(Field(Column::from("email")));
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
-            operator: Operator::Equal,
-        }));
-        assert_eq!(
-            res.unwrap().1,
-            SelectStatement {
-                tables: vec![Table::from("ContactInfo")],
-                fields: vec![FieldDefinitionExpression::All],
-                where_clause: expected_where_cond,
-                ..Default::default()
-            }
+        where_clause_with_variable_placeholder(
+            "select * from ContactInfo where email=?;",
+            Literal::Placeholder(ItemPlaceholder::QuestionMark),
         );
     }
 
     #[test]
-    fn where_clause_with_variable_placeholder() {
-        let qstring = "select * from ContactInfo where email=$1;";
+    fn where_clause_with_dollar_variable() {
+        where_clause_with_variable_placeholder(
+            "select * from ContactInfo where email= $3;",
+            Literal::Placeholder(ItemPlaceholder::DollarNumber(3)),
+        );
+    }
 
+    #[test]
+    fn where_clause_with_colon_variable() {
+        where_clause_with_variable_placeholder(
+            "select * from ContactInfo where email= :5;",
+            Literal::Placeholder(ItemPlaceholder::ColonNumber(5)),
+        );
+    }
+
+    fn where_clause_with_variable_placeholder(qstring: &str, literal: Literal) {
         let res = selection(qstring.as_bytes());
 
         let expected_left = Base(Field(Column::from("email")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::VariablePlaceholder(1)))),
+            right: Box::new(Base(Literal(literal))),
             operator: Operator::Equal,
         }));
         assert_eq!(
@@ -642,7 +642,9 @@ mod tests {
         let expected_left = Base(Field(Column::from("paperId")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         }));
         assert_eq!(
@@ -665,13 +667,17 @@ mod tests {
 
         let left_ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("paperId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         };
         let left_comp = Box::new(ComparisonOp(left_ct));
         let right_ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("paperStorageId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         };
         let right_comp = Box::new(ComparisonOp(right_ct));
@@ -702,7 +708,9 @@ mod tests {
         });
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("id")))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));
@@ -976,7 +984,9 @@ mod tests {
             })),
             right: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("item.i_subject")))),
-                right: Box::new(Base(Literal(Literal::Placeholder))),
+                right: Box::new(Base(Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                )))),
                 operator: Operator::Equal,
             })),
             operator: Operator::And,
@@ -1075,7 +1085,9 @@ mod tests {
         let res = selection(qstring.as_bytes());
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("ContactInfo.contactId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
             operator: Operator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));
