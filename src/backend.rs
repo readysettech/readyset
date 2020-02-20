@@ -295,7 +295,7 @@ impl NoriaBackend {
                     match block_on_buffer(mutator.delete(key)) {
                         Ok(_) => {}
                         Err(e) => {
-                            error!(error = ?e, "failed");
+                            error!(error = %e, "failed");
                             return results.error(
                                 msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                                 format!("{:?}", e).as_bytes(),
@@ -512,7 +512,7 @@ impl NoriaBackend {
                                     .noria
                                     .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             ) {
-                                error!(error = ?e, "add query failed");
+                                error!(error = %e, "add query failed");
                                 return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
                             }
 
@@ -816,7 +816,7 @@ impl NoriaBackend {
         match result {
             Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
             Err(e) => {
-                error!(error = ?e, "failed");
+                error!(error = %e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
@@ -936,7 +936,7 @@ impl NoriaBackend {
                 rw.finish()
             }
             Err(e) => {
-                error!(error = ?e, "failed");
+                error!(error = %e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     "Noria returned an error".as_bytes(),
@@ -982,7 +982,7 @@ impl NoriaBackend {
                 results.completed(1 /* TODO */, 0)
             }
             Err(e) => {
-                error!(error = ?e, "failed");
+                error!(error = %e, "failed");
                 results.error(
                     msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                     format!("{:?}", e).as_bytes(),
