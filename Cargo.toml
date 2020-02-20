@@ -42,9 +42,8 @@ path = "src/lib.rs"
 
 [patch.crates-io]
 # https://github.com/tower-rs/tokio-tower/pull/6
+# optional -- just a perf optimization
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 # https://github.com/tokio-rs/tokio/pull/2160
+# optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
-# https://github.com/crossbeam-rs/crossbeam/pull/460#issuecomment-573145406
-crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
-crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git" }
