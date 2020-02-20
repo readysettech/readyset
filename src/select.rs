@@ -479,6 +479,29 @@ mod tests {
     }
 
     #[test]
+    fn where_clause_with_variable_placeholder() {
+        let qstring = "select * from ContactInfo where email=$1;";
+
+        let res = selection(qstring.as_bytes());
+
+        let expected_left = Base(Field(Column::from("email")));
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Box::new(expected_left),
+            right: Box::new(Base(Literal(Literal::VariablePlaceholder(1)))),
+            operator: Operator::Equal,
+        }));
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec![Table::from("ContactInfo")],
+                fields: vec![FieldDefinitionExpression::All],
+                where_clause: expected_where_cond,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn limit_clause() {
         let qstring1 = "select * from users limit 10\n";
         let qstring2 = "select * from users limit 10 offset 10\n";
