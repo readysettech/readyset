@@ -379,6 +379,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn equality_variable_placeholder() {
+        x_equality_variable_placeholder("foo = :12");
+    }
+
+    #[test]
+    fn equality_variable_placeholder_with_dollar_sign() {
+        x_equality_variable_placeholder("foo = $12");
+    }
+
+    fn x_equality_variable_placeholder(cond: &str) {
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            flat_condition_tree(
+                Operator::Equal,
+                ConditionBase::Field(Column::from("foo")),
+                ConditionBase::Literal(Literal::VariablePlaceholder(12))
+            )
+        );
+    }
+
     fn x_operator_value(op: ArithmeticOperator, value: Literal) -> ConditionExpression {
         ConditionExpression::Arithmetic(Box::new(ArithmeticExpression::new(
             op,

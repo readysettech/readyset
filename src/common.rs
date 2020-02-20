@@ -101,6 +101,7 @@ pub enum Literal {
     CurrentDate,
     CurrentTimestamp,
     Placeholder,
+    VariablePlaceholder(i32),
 }
 
 impl From<i64> for Literal {
@@ -158,6 +159,7 @@ impl ToString for Literal {
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
             Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
             Literal::Placeholder => "?".to_string(),
+            Literal::VariablePlaceholder(ref i) => format!("${}", i),
         }
     }
 }
@@ -938,6 +940,10 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
         map(tag_no_case("current_date"), |_| Literal::CurrentDate),
         map(tag_no_case("current_time"), |_| Literal::CurrentTime),
         map(tag("?"), |_| Literal::Placeholder),
+        map(preceded(alt((tag(":"), tag("$"))), digit1), |num| {
+            let value = i32::from_str(str::from_utf8(num).unwrap()).unwrap();
+            Literal::VariablePlaceholder(value)
+        }),
     ))(i)
 }
 
