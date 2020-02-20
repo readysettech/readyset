@@ -13,7 +13,7 @@ noria = { git = "https://github.com/mit-pdos/noria.git" }
 futures-executor = "0.3.0"
 futures-util = "0.3.0"
 lazy_static = "1.0.0"
-nom-sql = "0.0.10"
+nom-sql = "0.0.11"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
@@ -47,3 +47,6 @@ tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "n
 # https://github.com/tokio-rs/tokio/pull/2160
 # optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
+# https://github.com/rust-rocksdb/rust-rocksdb/pull/387#issuecomment-587087310
+# optional -- just removes a bunch of outdated dependencies
+librocksdb-sys = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git" }
