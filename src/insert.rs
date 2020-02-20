@@ -118,6 +118,7 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
     use column::Column;
+    use common::ItemPlaceholder;
     use table::Table;
 
     #[test]
@@ -235,7 +236,10 @@ mod tests {
             InsertStatement {
                 table: Table::from("users"),
                 fields: Some(vec![Column::from("id"), Column::from("name")]),
-                data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
+                data: vec![vec![
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark)
+                ]],
                 ..Default::default()
             }
         );
@@ -243,7 +247,7 @@ mod tests {
 
     #[test]
     fn insert_with_on_dup_update() {
-        let qstring = "INSERT INTO keystores (`key`, `value`) VALUES (?, ?) \
+        let qstring = "INSERT INTO keystores (`key`, `value`) VALUES ($1, :2) \
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
         let res = insertion(qstring.as_bytes());
@@ -258,7 +262,10 @@ mod tests {
             InsertStatement {
                 table: Table::from("keystores"),
                 fields: Some(vec![Column::from("key"), Column::from("value")]),
-                data: vec![vec![Literal::Placeholder, Literal::Placeholder]],
+                data: vec![vec![
+                    Literal::Placeholder(ItemPlaceholder::DollarNumber(1)),
+                    Literal::Placeholder(ItemPlaceholder::ColonNumber(2))
+                ]],
                 on_duplicate: Some(vec![(
                     Column::from("value"),
                     FieldValueExpression::Arithmetic(expected_ae),

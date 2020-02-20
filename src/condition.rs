@@ -366,37 +366,36 @@ mod tests {
 
     #[test]
     fn equality_placeholder() {
-        let cond = "foo = ?";
-
-        let res = condition_expr(cond.as_bytes());
-        assert_eq!(
-            res.unwrap().1,
-            flat_condition_tree(
-                Operator::Equal,
-                ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Literal(Literal::Placeholder)
-            )
+        x_equality_variable_placeholder(
+            "foo = ?",
+            Literal::Placeholder(ItemPlaceholder::QuestionMark),
         );
     }
 
     #[test]
     fn equality_variable_placeholder() {
-        x_equality_variable_placeholder("foo = :12");
+        x_equality_variable_placeholder(
+            "foo = :12",
+            Literal::Placeholder(ItemPlaceholder::ColonNumber(12)),
+        );
     }
 
     #[test]
     fn equality_variable_placeholder_with_dollar_sign() {
-        x_equality_variable_placeholder("foo = $12");
+        x_equality_variable_placeholder(
+            "foo = $12",
+            Literal::Placeholder(ItemPlaceholder::DollarNumber(12)),
+        );
     }
 
-    fn x_equality_variable_placeholder(cond: &str) {
+    fn x_equality_variable_placeholder(cond: &str, literal: Literal) {
         let res = condition_expr(cond.as_bytes());
         assert_eq!(
             res.unwrap().1,
             flat_condition_tree(
                 Operator::Equal,
                 ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Literal(Literal::VariablePlaceholder(12))
+                ConditionBase::Literal(literal)
             )
         );
     }
@@ -596,7 +595,9 @@ mod tests {
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
         });
 
         let b = ComparisonOp(ConditionTree {
@@ -638,7 +639,9 @@ mod tests {
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Literal(Literal::Placeholder))),
+            right: Box::new(Base(Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            )))),
         });
 
         let b = ComparisonOp(ConditionTree {
@@ -883,7 +886,7 @@ mod tests {
                             right: Box::new(flat_condition_tree(
                                 Operator::Equal,
                                 Field("read_ribbons.user_id".into()),
-                                Literal(Literal::Placeholder),
+                                Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
                             )),
                         })),
                     })),

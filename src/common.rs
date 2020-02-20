@@ -90,6 +90,23 @@ pub struct Real {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum ItemPlaceholder {
+    QuestionMark,
+    DollarNumber(i32),
+    ColonNumber(i32),
+}
+
+impl ToString for ItemPlaceholder {
+    fn to_string(&self) -> String {
+        match *self {
+            ItemPlaceholder::QuestionMark => "?".to_string(),
+            ItemPlaceholder::DollarNumber(ref i) => format!("${}", i),
+            ItemPlaceholder::ColonNumber(ref i) => format!(":{}", i),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Null,
     Integer(i64),
@@ -100,8 +117,7 @@ pub enum Literal {
     CurrentTime,
     CurrentDate,
     CurrentTimestamp,
-    Placeholder,
-    VariablePlaceholder(i32),
+    Placeholder(ItemPlaceholder),
 }
 
 impl From<i64> for Literal {
@@ -158,8 +174,7 @@ impl ToString for Literal {
             Literal::CurrentTime => "CURRENT_TIME".to_string(),
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
             Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
-            Literal::Placeholder => "?".to_string(),
-            Literal::VariablePlaceholder(ref i) => format!("${}", i),
+            Literal::Placeholder(ref item) => item.to_string(),
         }
     }
 }
@@ -939,10 +954,16 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
         }),
         map(tag_no_case("current_date"), |_| Literal::CurrentDate),
         map(tag_no_case("current_time"), |_| Literal::CurrentTime),
-        map(tag("?"), |_| Literal::Placeholder),
-        map(preceded(alt((tag(":"), tag("$"))), digit1), |num| {
+        map(tag("?"), |_| {
+            Literal::Placeholder(ItemPlaceholder::QuestionMark)
+        }),
+        map(preceded(tag(":"), digit1), |num| {
             let value = i32::from_str(str::from_utf8(num).unwrap()).unwrap();
-            Literal::VariablePlaceholder(value)
+            Literal::Placeholder(ItemPlaceholder::ColonNumber(value))
+        }),
+        map(preceded(tag("$"), digit1), |num| {
+            let value = i32::from_str(str::from_utf8(num).unwrap()).unwrap();
+            Literal::Placeholder(ItemPlaceholder::DollarNumber(value))
         }),
     ))(i)
 }
