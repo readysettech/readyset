@@ -150,7 +150,7 @@ impl TableBuilder {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
-                    let c = Buffer::new(
+                    let (c, w) = Buffer::pair(
                         pool::Builder::new()
                             .urgency(0.01)
                             .loaded_above(0.2)
@@ -159,6 +159,12 @@ impl TableBuilder {
                             .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
                         50,
                     );
+                    use tracing_futures::Instrument;
+                    tokio::spawn(w.instrument(tracing::debug_span!(
+                        "table-worker",
+                        addr = %addr,
+                        shard = shardi
+                    )));
                     h.insert(c.clone());
                     c
                 }

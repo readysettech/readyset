@@ -140,7 +140,7 @@ impl ViewBuilder {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
-                    let c = Buffer::new(
+                    let (c, w) = Buffer::pair(
                         pool::Builder::new()
                             .urgency(0.03)
                             .loaded_above(0.2)
@@ -149,6 +149,12 @@ impl ViewBuilder {
                             .build(multiplex::client::Maker::new(ViewEndpoint(addr)), ()),
                         50,
                     );
+                    use tracing_futures::Instrument;
+                    tokio::spawn(w.instrument(tracing::debug_span!(
+                        "view-worker",
+                        addr = %addr,
+                        shard = shardi
+                    )));
                     h.insert(c.clone());
                     c
                 }
