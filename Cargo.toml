@@ -47,6 +47,3 @@ tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "n
 # https://github.com/tokio-rs/tokio/pull/2160
 # optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
-# https://github.com/rust-rocksdb/rust-rocksdb/pull/387#issuecomment-587087310
-# optional -- just removes a bunch of outdated dependencies
-librocksdb-sys = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git" }
