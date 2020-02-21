@@ -324,7 +324,7 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticOperator};
     use column::Column;
-    use common::{FieldDefinitionExpression, Literal, Operator};
+    use common::{FieldDefinitionExpression, ItemPlaceholder, Literal, Operator};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
