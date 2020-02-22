@@ -370,6 +370,27 @@ fn len_as_u16(len: &[u8]) -> u16 {
     }
 }
 
+pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(first: F, second: G, third: H) -> impl Fn(I) -> IResult<I, O2, E>
+where
+  F: Fn(I) -> IResult<I, O1, E>,
+  G: Fn(I) -> IResult<I, O2, E>,
+  H: Fn(I) -> IResult<I, O3, E>,
+{
+    move |input: I| {
+        let first_ = &first;
+        let second_ = &second;
+        let third_ = &third;
+
+        let inp = input.clone();
+        match second(input) {
+            Ok((i, o)) => Ok((i, o)),
+            _ => {
+                delimited(first_, second_, third_)(inp)
+            }
+        }
+    }
+}
+
 fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     let (remaining_input, (m, d)) = tuple((
         digit1,
@@ -973,7 +994,7 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
 pub fn literal_expression(i: &[u8]) -> IResult<&[u8], LiteralExpression> {
     map(
         pair(
-            delimited(opt(tag("(")), literal, opt(tag(")"))),
+            opt_delimited(tag("("), literal, tag(")")),
             opt(as_alias),
         ),
         |p| LiteralExpression {
@@ -1051,6 +1072,21 @@ mod tests {
         assert!(sql_identifier(id4).is_err());
         assert!(sql_identifier(id5).is_err());
         assert!(sql_identifier(id6).is_ok());
+    }
+
+
+    fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
+        opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())
+    }
+
+    #[test]
+    fn opt_delimited_tests() {
+        // let ok1 = IResult::Ok(("".as_bytes(), "abc".as_bytes()));
+        assert_eq!(test_opt_delimited_fn_call("abc"), IResult::Ok(("".as_bytes(), "abc".as_bytes())));
+        assert_eq!(test_opt_delimited_fn_call("(abc)"), IResult::Ok(("".as_bytes(), "abc".as_bytes())));
+        assert!(test_opt_delimited_fn_call("(abc").is_err());
+        assert_eq!(test_opt_delimited_fn_call("abc)"), IResult::Ok((")".as_bytes(), "abc".as_bytes())));
+        assert!(test_opt_delimited_fn_call("ab").is_err());
     }
 
     #[test]
