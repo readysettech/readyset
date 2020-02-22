@@ -2,7 +2,7 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use common::statement_terminator;
+use common::{statement_terminator, opt_delimited};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -90,15 +90,13 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
 }
 
 fn other_selects(i: &[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
-    let (remaining_input, (_, op, _, _, _, select, _, _)) = tuple((
+    let (remaining_input, (_, op, _, select)) = tuple((
         multispace0,
         compound_op,
         multispace1,
-        opt(tag("(")),
-        multispace0,
-        nested_selection,
-        multispace0,
-        opt(tag(")")),
+        opt_delimited(tag("("),
+            delimited(multispace0, nested_selection, multispace0),
+            tag(")")),
     ))(i)?;
 
     Ok((remaining_input, (Some(op), select)))
@@ -107,7 +105,7 @@ fn other_selects(i: &[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, Se
 // Parse compound selection
 pub fn compound_selection(i: &[u8]) -> IResult<&[u8], CompoundSelectStatement> {
     let (remaining_input, (first_select, other_selects, _, order, limit, _)) = tuple((
-        delimited(opt(tag("(")), nested_selection, opt(tag(")"))),
+        opt_delimited(tag("("), nested_selection, tag(")")),
         many1(other_selects),
         multispace0,
         opt(order_clause),
@@ -171,6 +169,23 @@ mod tests {
 
         assert_eq!(res.unwrap().1, expected);
         assert_eq!(res2.unwrap().1, expected);
+    }
+
+    #[test]
+    fn union_strict() {
+        let qstr = "SELECT id, 1 FROM Vote);";
+        let qstr2 = "(SELECT id, 1 FROM Vote;";
+        let qstr3 = "SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating;";
+        let res = compound_selection(qstr.as_bytes());
+        let res2 = compound_selection(qstr2.as_bytes());
+        let res3 = compound_selection(qstr3.as_bytes());
+
+        assert!(&res.is_err());
+        assert_eq!(res.unwrap_err(), nom::Err::Error((");".as_bytes(), nom::error::ErrorKind::Tag)));
+        assert!(&res2.is_err());
+        assert_eq!(res2.unwrap_err(), nom::Err::Error((";".as_bytes(), nom::error::ErrorKind::Tag)));
+        assert!(&res3.is_err());
+        assert_eq!(res3.unwrap_err(), nom::Err::Error((") UNION (SELECT id, stars from Rating;".as_bytes(), nom::error::ErrorKind::Tag)));
     }
 
     #[test]
