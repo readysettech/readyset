@@ -746,15 +746,15 @@ dependencies = [
  "byteorder",
  "crossbeam-channel",
  "flate2",
- "nom 5.1.0",
+ "nom 5.1.1",
  "num-traits",
 ]
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2c55f143919fbc0bc77e427fe2d74cf23786d7c1875666f2fde3ac3c659bb67"
+checksum = "1010591b26bbfe835e9faeabeb11866061cc7dcebffd56ad7d0942d0e61aefd8"
 dependencies = [
  "libc",
 ]
@@ -933,21 +933,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0afaeae1c07c575338ef6809875bfea8daa9ea8b2ee381ef1f93ba0c6e32f003"
 dependencies = [
  "cfg-if",
- "lexical-core 0.6.2",
+ "lexical-core",
  "rustc_version",
-]
-
-[[package]]
-name = "lexical-core"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2304bccb228c4b020f3a4835d247df0a02a7c4686098d4167762cfbbe4c5cb14"
-dependencies = [
- "arrayvec 0.4.12",
- "cfg-if",
- "rustc_version",
- "ryu",
- "static_assertions",
 ]
 
 [[package]]
@@ -1142,7 +1129,7 @@ dependencies = [
  "byteorder",
  "chrono",
  "mysql_common",
- "nom 5.1.0",
+ "nom 5.1.1",
 ]
 
 [[package]]
@@ -1275,18 +1262,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ad2a91a8e869eeb30b9cb3119ae87773a8f4ae617f41b1eb9c154b2905f7bd6"
 dependencies = [
  "memchr",
- "version_check",
+ "version_check 0.1.5",
 ]
 
 [[package]]
 name = "nom"
-version = "5.1.0"
+version = "5.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c433f4d505fe6ce7ff78523d2fa13a0b9f2690e181fc26168bcbe5ccc5d14e07"
+checksum = "0b471253da97532da4b61552249c521e01e736071f71c1a4f7ebbfbf0a06aad6"
 dependencies = [
- "lexical-core 0.4.6",
+ "lexical-core",
  "memchr",
- "version_check",
+ "version_check 0.9.1",
 ]
 
 [[package]]
@@ -1295,7 +1282,7 @@ version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5266bcf166285da22fdc385d696725e7a9e7791b10af9baaeabc69428079730"
 dependencies = [
- "nom 5.1.0",
+ "nom 5.1.1",
  "serde",
  "serde_derive",
 ]
@@ -1437,7 +1424,7 @@ dependencies = [
  "futures-util",
  "hyper",
  "mio",
- "nom 5.1.0",
+ "nom 5.1.1",
  "nom-sql",
  "noria",
  "noria-common",
@@ -2376,9 +2363,9 @@ dependencies = [
 
 [[package]]
 name = "tower-ready-cache"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2183d0a00b68a41c0af9e281cf51f40c7de2e1d4af4a43f92a5c35bbe7728d7"
+checksum = "4eabb6620e5481267e2ec832c780b31cad0c15dcb14ed825df5076b26b591e1f"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -2624,6 +2611,12 @@ name = "version_check"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
+
+[[package]]
+name = "version_check"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "078775d0255232fb988e6fccf26ddc9d1ac274299aaedcedce21c6f72cc533ce"
 
 [[package]]
 name = "void"
