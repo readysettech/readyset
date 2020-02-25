@@ -203,41 +203,38 @@ impl trawler::LobstersClient for MysqlTrawler {
         macro_rules! handle_req {
             ($module:tt, $req:expr, $sim_shards:ident) => {{
                 match req {
-                    LobstersRequest::User(uid) => endpoints::$module::user::handle(c, acting_as, uid).await,
-                    LobstersRequest::Frontpage => endpoints::$module::frontpage::handle(c, acting_as).await,
-                    LobstersRequest::Comments => endpoints::$module::comments::handle(c, acting_as).await,
-                    LobstersRequest::Recent => endpoints::$module::recent::handle(c, acting_as).await,
+                    LobstersRequest::User(uid) => {
+                        endpoints::$module::user::handle(c, acting_as, uid).await
+                    }
+                    LobstersRequest::Frontpage => {
+                        endpoints::$module::frontpage::handle(c, acting_as).await
+                    }
+                    LobstersRequest::Comments => {
+                        endpoints::$module::comments::handle(c, acting_as).await
+                    }
+                    LobstersRequest::Recent => {
+                        endpoints::$module::recent::handle(c, acting_as).await
+                    }
                     LobstersRequest::Login => {
                         let c = c.await?;
-                            let (mut c, user) = c.first_exec::<_, _, my::Row>(
-                                "\
-                                 SELECT  1 as one \
-                                 FROM `users` \
-                                 WHERE `users`.`username` = ?",
+                        let (mut c, user) = c
+                            .first_exec::<_, _, my::Row>(
+                                "SELECT 1 as one FROM `users` WHERE `users`.`username` = ?",
                                 (format!("user{}", acting_as.unwrap()),),
-                            ).await?;
+                            )
+                            .await?;
 
-                            if user.is_none() {
-                                let uid = acting_as.unwrap();
-                                c = c.drop_exec(
-                                    "\
-                                     INSERT INTO `users` \
-                                     (`username`, `email`, `password_digest`, `created_at`, \
-                                     `session_token`, `rss_token`, `mailing_list_token`) \
-                                     VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                    (
-                                        format!("user{}", uid),
-                                        format!("user{}@example.com", uid),
-                                        "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka", // test
-                                        chrono::Local::now().naive_local(),
-                                        format!("token{}", uid),
-                                        format!("rsstoken{}", uid),
-                                        format!("mtok{}", uid),
-                                    ),
-                                ).await?;
-                            }
+                        if user.is_none() {
+                            let uid = acting_as.unwrap();
+                            c = c
+                                .drop_exec(
+                                    "INSERT INTO `users` (`username`) VALUES (?)",
+                                    (format!("user{}", uid),),
+                                )
+                                .await?;
+                        }
 
-                            Ok((c, false))
+                        Ok((c, false))
                     }
                     LobstersRequest::Logout => Ok((c.await?, false)),
                     LobstersRequest::Story(id) => {
@@ -253,10 +250,13 @@ impl trawler::LobstersClient for MysqlTrawler {
                         endpoints::$module::submit::handle(c, acting_as, id, title, priming).await
                     }
                     LobstersRequest::Comment { id, story, parent } => {
-                        endpoints::$module::comment::handle(c, acting_as, id, story, parent, priming).await
+                        endpoints::$module::comment::handle(
+                            c, acting_as, id, story, parent, priming,
+                        )
+                        .await
                     }
                 }
-            }}
+            }};
         };
 
         let variant = self.variant;
