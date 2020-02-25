@@ -161,7 +161,7 @@ impl TableBuilder {
                     );
                     use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(
-                        "table-worker",
+                        "table_worker",
                         addr = %addr,
                         shard = shardi
                     )));

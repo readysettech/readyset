@@ -151,7 +151,7 @@ impl ViewBuilder {
                     );
                     use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(
-                        "view-worker",
+                        "view_worker",
                         addr = %addr,
                         shard = shardi
                     )));
