@@ -10,7 +10,7 @@ use std::{fmt, thread, time};
 use tsunami::*;
 use yansi::Paint;
 
-const AMI: &str = "ami-06dc6a52f1b918c8a";
+const AMI: &str = "ami-02054f0cde96cb783";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Backend {
@@ -62,7 +62,9 @@ fn git_and_cargo(
                 "sed",
                 "-i",
                 "-e",
-                "s/^###//g",
+                "/patch\\.crates-io/,$ s/^noria/# noria/g",
+                "-e",
+                "/path/ s/^# noria/noria/g",
                 &format!("{}/Cargo.toml", dir),
             ],
             on,
@@ -289,369 +291,456 @@ fn main() {
                     Paint::green(format!("==> benchmark {} at {}x scale", backend, scale)).bold()
                 );
 
-                match backend {
-                    Backend::Mysql => {
-                        let ssh = server.ssh.as_ref().unwrap();
-                        ssh.just_exec(
-                            &[
-                                "sudo", "mount", "-t", "tmpfs", "-o", "size=16G", "tmpfs", "/mnt",
-                            ],
-                            "server",
-                        )?
-                        .map_err(failure::err_msg)?;
-                        ssh.just_exec(
-                            &["sudo", "cp", "-r", "/var/lib/mysql.clean", "/mnt/mysql"],
-                            "server",
-                        )?
-                        .map_err(failure::err_msg)?;
-                        ssh.just_exec(&["sudo", "rm", "-rf", "/var/lib/mysql"], "server")?
-                            .map_err(failure::err_msg)?;
-                        ssh.just_exec(
-                            &["sudo", "ln", "-sfn", "/mnt/mysql", "/var/lib/mysql"],
-                            "server",
-                        )?
-                        .map_err(failure::err_msg)?;
-                        ssh.just_exec(
-                            &["sudo", "chown", "-R", "mysql:mysql", "/var/lib/mysql/"],
-                            "server",
-                        )?
-                        .map_err(failure::err_msg)?;
-                    }
-                    Backend::Noria(_) | Backend::Natural(_) => {
-                        // just to make totally sure
-                        server.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["pkill", "-9", "-f", "noria-server", "2>&1"],
-                            "server",
-                        )?;
-                        trawler.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["pkill", "-9", "-f", "noria-mysql", "2>&1"],
-                            "client",
-                        )?;
-
-                        // XXX: also delete log files if we later run with RocksDB?
-                        server.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &[
-                                "target/release/noria-zk",
-                                "--clean",
-                                "--deployment",
-                                "trawler",
-                            ],
-                            "server",
-                        )?;
-
-                        // Don't hit Noria listening timeout think
-                        thread::sleep(time::Duration::from_secs(10));
-                    }
-                }
-
-                // start server again
+                let prefix = format!("lobsters-{}-{}", backend, scale);
                 let mut server_chan = None;
                 let mut shim_chan = None;
-                match backend {
-                    Backend::Mysql => {
-                        server.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["sudo", "systemctl", "start", "mariadb", "2>&1"],
-                            "server",
-                        )?;
-                    }
-                    Backend::Noria(shards) | Backend::Natural(shards) => {
-                        let shards = format!("{}", shards);
-                        let mut cmd = vec![
-                            "env",
-                            "RUST_BACKTRACE=1",
-                            "target/release/noria-server",
-                            "--deployment",
-                            "trawler",
-                            "--durability",
-                            "memory",
-                            "--no-reuse",
-                            "--address",
-                            &server.private_ip,
-                            "--shards",
-                            &shards,
-                            "2>&1",
-                            "|",
-                            "tee",
-                            "server.log",
-                        ];
-                        if let Some(memlimit) = memlimit {
-                            cmd.extend(&["--memory", memlimit]);
+
+                let run: Result<_, failure::Error> = try {
+                    match backend {
+                        Backend::Mysql => {
+                            let ssh = server.ssh.as_ref().unwrap();
+                            ssh.just_exec(
+                                &[
+                                    "sudo", "mount", "-t", "tmpfs", "-o", "size=16G", "tmpfs",
+                                    "/mnt",
+                                ],
+                                "server",
+                            )?
+                            .map_err(failure::err_msg)?;
+                            ssh.just_exec(
+                                &["sudo", "cp", "-r", "/var/lib/mysql.clean", "/mnt/mysql"],
+                                "server",
+                            )?
+                            .map_err(failure::err_msg)?;
+                            ssh.just_exec(&["sudo", "rm", "-rf", "/var/lib/mysql"], "server")?
+                                .map_err(failure::err_msg)?;
+                            ssh.just_exec(
+                                &["sudo", "ln", "-sfn", "/mnt/mysql", "/var/lib/mysql"],
+                                "server",
+                            )?
+                            .map_err(failure::err_msg)?;
+                            ssh.just_exec(
+                                &["sudo", "chown", "-R", "mysql:mysql", "/var/lib/mysql/"],
+                                "server",
+                            )?
+                            .map_err(failure::err_msg)?;
                         }
+                        Backend::Noria(_) | Backend::Natural(_) => {
+                            // just to make totally sure
+                            server.ssh.as_ref().unwrap().exec_print_nonempty(
+                                &["pkill", "-9", "-f", "noria-server", "2>&1"],
+                                "server",
+                            )?;
+                            trawler.ssh.as_ref().unwrap().exec_print_nonempty(
+                                &["pkill", "-9", "-f", "noria-mysql", "2>&1"],
+                                "client",
+                            )?;
 
-                        server_chan = Some(server.ssh.as_ref().unwrap().exec(&cmd[..], "server")?);
+                            // XXX: also delete log files if we later run with RocksDB?
+                            server.ssh.as_ref().unwrap().exec_print_nonempty(
+                                &[
+                                    "target/release/noria-zk",
+                                    "--clean",
+                                    "--deployment",
+                                    "trawler",
+                                ],
+                                "server",
+                            )?;
 
-                        // start the shim (which will block until noria is available)
-                        shim_chan = Some(trawler.ssh.as_ref().unwrap().exec(
-                            &[
+                            // Don't hit Noria listening timeout think
+                            thread::sleep(time::Duration::from_secs(10));
+                        }
+                    }
+
+                    // start server again
+                    match backend {
+                        Backend::Mysql => {
+                            server.ssh.as_ref().unwrap().exec_print_nonempty(
+                                &["sudo", "systemctl", "start", "mariadb", "2>&1"],
+                                "server",
+                            )?;
+                        }
+                        Backend::Noria(shards) | Backend::Natural(shards) => {
+                            let shards = format!("{}", shards);
+                            let mut cmd = vec![
                                 "env",
                                 "RUST_BACKTRACE=1",
-                                "target/release/noria-mysql",
+                                "target/release/noria-server",
                                 "--deployment",
                                 "trawler",
-                                "--no-sanitize",
-                                "--no-static-responses",
-                                "-z",
-                                &format!("{}:2181", server.private_ip),
-                                "-p",
-                                "3306",
+                                "--durability",
+                                "memory",
+                                "--no-reuse",
+                                "--address",
+                                &server.private_ip,
+                                "--shards",
+                                &shards,
                                 "2>&1",
                                 "|",
                                 "tee",
-                                "shim.log",
-                            ],
-                            "client",
-                        )?);
+                                "server.log",
+                            ];
+                            if let Some(memlimit) = memlimit {
+                                cmd.extend(&["--memory", memlimit]);
+                            }
 
-                        // give noria a chance to start
-                        thread::sleep(time::Duration::from_secs(5));
-                    }
-                }
+                            server_chan =
+                                Some(server.ssh.as_ref().unwrap().exec(&cmd[..], "server")?);
 
-                // run priming
-                // XXX: with MySQL we *could* just reprime by copying over the old ramdisk again
-                eprintln!(
-                    "{}",
-                    Paint::new(format!(
-                        "--> priming at {}",
-                        Local::now().time().format("%H:%M:%S")
-                    ))
-                    .bold()
-                );
-                let in_flight = format!("{}", in_flight);
+                            // start the shim (which will block until noria is available)
+                            shim_chan = Some(trawler.ssh.as_ref().unwrap().exec(
+                                &[
+                                    "env",
+                                    "RUST_BACKTRACE=1",
+                                    "target/release/noria-mysql",
+                                    "--deployment",
+                                    "trawler",
+                                    "--no-sanitize",
+                                    "--no-static-responses",
+                                    "-z",
+                                    &format!("{}:2181", server.private_ip),
+                                    "-p",
+                                    "3306",
+                                    "2>&1",
+                                    "|",
+                                    "tee",
+                                    "shim.log",
+                                ],
+                                "client",
+                            )?);
 
-                let ip = match backend {
-                    Backend::Mysql => &*server.private_ip,
-                    Backend::Noria(_) | Backend::Natural(_) => "127.0.0.1",
-                };
-
-                let scale = format!("{}", scale);
-                trawler.ssh.as_ref().unwrap().exec_print_nonempty(
-                    &[
-                        "env",
-                        "RUST_BACKTRACE=1",
-                        "target/release/lobsters",
-                        "--scale",
-                        &scale,
-                        "--warmup",
-                        "0",
-                        "--runtime",
-                        "0",
-                        "--prime",
-                        "--in-flight",
-                        &in_flight,
-                        "--queries",
-                        backend.queries(),
-                        &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
-                        "2>&1",
-                        "|",
-                        "tee",
-                        "client.log",
-                    ],
-                    "client",
-                )?;
-
-                eprintln!(
-                    "{}",
-                    Paint::new(format!(
-                        "--> warming at {}",
-                        Local::now().time().format("%H:%M:%S")
-                    ))
-                    .bold()
-                );
-
-                trawler.ssh.as_ref().unwrap().exec_print_nonempty(
-                    &[
-                        "env",
-                        "RUST_BACKTRACE=1",
-                        "target/release/lobsters",
-                        "--scale",
-                        &scale,
-                        "--warmup",
-                        "30",
-                        "--runtime",
-                        "0",
-                        "--in-flight",
-                        &in_flight,
-                        "--queries",
-                        backend.queries(),
-                        &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
-                        "2>&1",
-                        "|",
-                        "tee",
-                        "client.log",
-                    ],
-                    "client",
-                )?;
-
-                eprintln!(
-                    "{}",
-                    Paint::new(format!(
-                        "--> started at {}",
-                        Local::now().time().format("%H:%M:%S")
-                    ))
-                    .bold()
-                );
-
-                let prefix = format!("lobsters-{}-{}", backend, scale);
-                let mut output = File::create(format!("{}.log", prefix))?;
-                let hist_output = if let Some(memlimit) = memlimit {
-                    format!(
-                        "--histogram=lobsters-{}-r{}-l{}.hist ",
-                        backend, scale, memlimit
-                    )
-                } else {
-                    format!(
-                        "--histogram=lobsters-{}-r{}-unlimited.hist ",
-                        backend, scale
-                    )
-                };
-                let res = trawler.ssh.as_ref().unwrap().just_exec(
-                    &[
-                        "env",
-                        "RUST_BACKTRACE=1",
-                        "target/release/lobsters",
-                        "--scale",
-                        &scale,
-                        "--warmup",
-                        "15",
-                        "--runtime",
-                        "30",
-                        "--in-flight",
-                        &in_flight,
-                        "--queries",
-                        backend.queries(),
-                        &hist_output,
-                        &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
-                        "2>&1",
-                        "|",
-                        "tee",
-                        "client.log",
-                    ],
-                    "client",
-                )?;
-
-                let erred = res.is_err();
-                match res {
-                    Ok(result) | Err(result) => {
-                        output.write_all(result.as_bytes())?;
-                    }
-                }
-
-                drop(output);
-                eprintln!(
-                    "{}",
-                    Paint::new(format!(
-                        "--> finished at {}",
-                        Local::now().time().format("%H:%M:%S")
-                    ))
-                    .bold()
-                );
-
-                // gather server load
-                let sload = server
-                    .ssh
-                    .as_ref()
-                    .unwrap()
-                    .just_exec(&["awk", "{print $1\" \"$2}", "/proc/loadavg"], "server")?
-                    .map_err(failure::err_msg)?;
-                let sload = sload.trim_end();
-
-                // gather client load
-                let cload = trawler
-                    .ssh
-                    .as_ref()
-                    .unwrap()
-                    .just_exec(&["awk", "{print $1\" \"$2}", "/proc/loadavg"], "client")?
-                    .map_err(failure::err_msg)?;
-                let cload = cload.trim_end();
-
-                load.write_all(format!("{} {} ", scale, backend).as_bytes())?;
-                load.write_all(sload.as_bytes())?;
-                load.write_all(b" ")?;
-                load.write_all(cload.as_bytes())?;
-                load.write_all(b"\n")?;
-
-                let mut hist = File::create(format!("{}.hist", prefix))?;
-                let hist_cmd = if let Some(memlimit) = memlimit {
-                    format!("cat lobsters-{}-r{}-l{}.hist", backend, scale, memlimit)
-                } else {
-                    format!("cat lobsters-{}-r{}-unlimited.hist", backend, scale)
-                };
-                trawler
-                    .ssh
-                    .as_ref()
-                    .unwrap()
-                    .cmd_raw(&hist_cmd)
-                    .and_then(|out| Ok(hist.write_all(&out[..]).map(|_| ())?))?;
-
-                // stop old server
-                match backend {
-                    Backend::Mysql => {
-                        server.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["sudo", "systemctl", "stop", "mariadb", "2>&1"],
-                            "server",
-                        )?;
-                        server
-                            .ssh
-                            .as_ref()
-                            .unwrap()
-                            .exec_print_nonempty(&["sudo", "umount", "/mnt"], "server")?;
-                    }
-                    Backend::Noria(_) | Backend::Natural(_) => {
-                        // gather state size
-                        let mem_limit = if let Some(limit) = memlimit {
-                            format!("l{}", limit)
-                        } else {
-                            "unlimited".to_owned()
-                        };
-                        let mut sizefile = File::create(format!(
-                            "lobsters-{}-r{}-{}.json",
-                            backend, scale, mem_limit
-                        ))?;
-                        trawler
-                            .ssh
-                            .as_ref()
-                            .unwrap()
-                            .cmd_raw(&format!(
-                                "wget http://{}:9000/get_statistics",
-                                server.private_ip
-                            ))
-                            .and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
-
-                        // stop the server and shim
-                        trawler.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["pkill", "-f", "noria-mysql", "2>&1"],
-                            "client",
-                        )?;
-                        let mut shim_chan = shim_chan.unwrap();
-                        let shim_stdout = finalize(&mut shim_chan)?;
-                        if erred {
-                            eprintln!("{}", shim_stdout.unwrap_err());
+                            // give noria a chance to start
+                            thread::sleep(time::Duration::from_secs(5));
                         }
+                    }
 
-                        server.ssh.as_ref().unwrap().exec_print_nonempty(
-                            &["pkill", "-f", "noria-server", "2>&1"],
-                            "server",
-                        )?;
-                        let mut server_chan = server_chan.unwrap();
-                        let server_stdout = finalize(&mut server_chan)?;
-                        if erred {
-                            eprintln!("{}", server_stdout.unwrap_err());
+                    // run priming
+                    // XXX: with MySQL we *could* just reprime by copying over the old ramdisk again
+                    eprintln!(
+                        "{}",
+                        Paint::new(format!(
+                            "--> priming at {}",
+                            Local::now().time().format("%H:%M:%S")
+                        ))
+                        .bold()
+                    );
+                    let in_flight = format!("{}", in_flight);
+
+                    let ip = match backend {
+                        Backend::Mysql => &*server.private_ip,
+                        Backend::Noria(_) | Backend::Natural(_) => "127.0.0.1",
+                    };
+
+                    let scale = format!("{}", scale);
+                    trawler.ssh.as_ref().unwrap().exec_print_nonempty(
+                        &[
+                            "env",
+                            "RUST_BACKTRACE=1",
+                            "target/release/lobsters",
+                            "--scale",
+                            &scale,
+                            "--warmup",
+                            "0",
+                            "--runtime",
+                            "0",
+                            "--prime",
+                            "--in-flight",
+                            &in_flight,
+                            "--queries",
+                            backend.queries(),
+                            &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
+                            "2>&1",
+                            "|",
+                            "tee",
+                            "client.log",
+                        ],
+                        "client",
+                    )?;
+
+                    eprintln!(
+                        "{}",
+                        Paint::new(format!(
+                            "--> warming at {}",
+                            Local::now().time().format("%H:%M:%S")
+                        ))
+                        .bold()
+                    );
+
+                    trawler.ssh.as_ref().unwrap().exec_print_nonempty(
+                        &[
+                            "env",
+                            "RUST_BACKTRACE=1",
+                            "target/release/lobsters",
+                            "--scale",
+                            &scale,
+                            "--warmup",
+                            "30",
+                            "--runtime",
+                            "0",
+                            "--in-flight",
+                            &in_flight,
+                            "--queries",
+                            backend.queries(),
+                            &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
+                            "2>&1",
+                            "|",
+                            "tee",
+                            "client.log",
+                        ],
+                        "client",
+                    )?;
+
+                    eprintln!(
+                        "{}",
+                        Paint::new(format!(
+                            "--> started at {}",
+                            Local::now().time().format("%H:%M:%S")
+                        ))
+                        .bold()
+                    );
+
+                    let mut output = File::create(format!("{}.log", prefix))?;
+                    let hist_output = if let Some(memlimit) = memlimit {
+                        format!(
+                            "--histogram=lobsters-{}-r{}-l{}.hist ",
+                            backend, scale, memlimit
+                        )
+                    } else {
+                        format!(
+                            "--histogram=lobsters-{}-r{}-unlimited.hist ",
+                            backend, scale
+                        )
+                    };
+                    let res = trawler.ssh.as_ref().unwrap().just_exec(
+                        &[
+                            "env",
+                            "RUST_BACKTRACE=1",
+                            "target/release/lobsters",
+                            "--scale",
+                            &scale,
+                            "--warmup",
+                            "15",
+                            "--runtime",
+                            "30",
+                            "--in-flight",
+                            &in_flight,
+                            "--queries",
+                            backend.queries(),
+                            &hist_output,
+                            &format!("!mysql://lobsters:$(cat ~/mysql.pass)@{}/lobsters", ip),
+                            "2>&1",
+                            "|",
+                            "tee",
+                            "client.log",
+                        ],
+                        "client",
+                    )?;
+
+                    match res {
+                        Ok(ref result) | Err(ref result) => {
+                            output.write_all(result.as_bytes())?;
+                        }
+                    }
+                    drop(output);
+
+                    let _ = res.map_err(|_| failure::err_msg("client failed"))?;
+
+                    // gather server load
+                    let sload = server
+                        .ssh
+                        .as_ref()
+                        .unwrap()
+                        .just_exec(&["awk", "{print $1\" \"$2}", "/proc/loadavg"], "server")?
+                        .map_err(failure::err_msg)?;
+                    let sload = sload.trim_end();
+
+                    // gather client load
+                    let cload = trawler
+                        .ssh
+                        .as_ref()
+                        .unwrap()
+                        .just_exec(&["awk", "{print $1\" \"$2}", "/proc/loadavg"], "client")?
+                        .map_err(failure::err_msg)?;
+                    let cload = cload.trim_end();
+
+                    load.write_all(format!("{} {} ", scale, backend).as_bytes())?;
+                    load.write_all(sload.as_bytes())?;
+                    load.write_all(b" ")?;
+                    load.write_all(cload.as_bytes())?;
+                    load.write_all(b"\n")?;
+
+                    let mut hist = File::create(format!("{}.hist", prefix))?;
+                    let hist_cmd = if let Some(memlimit) = memlimit {
+                        format!("cat lobsters-{}-r{}-l{}.hist", backend, scale, memlimit)
+                    } else {
+                        format!("cat lobsters-{}-r{}-unlimited.hist", backend, scale)
+                    };
+                    trawler
+                        .ssh
+                        .as_ref()
+                        .unwrap()
+                        .cmd_raw(&hist_cmd)
+                        .and_then(|out| Ok(hist.write_all(&out[..]).map(|_| ())?))?;
+
+                    let sload: f64 = sload
+                        .split_whitespace()
+                        .next()
+                        .and_then(|l| l.parse().ok())
+                        .unwrap_or(0.0);
+                    let cload: f64 = cload
+                        .split_whitespace()
+                        .next()
+                        .and_then(|l| l.parse().ok())
+                        .unwrap_or(0.0);
+                    (sload, cload)
+                };
+
+                let erred = run.is_err();
+                if erred {
+                    eprintln!(
+                        "{}",
+                        Paint::red(format!(
+                            "--> errored at {}",
+                            Local::now().time().format("%H:%M:%S")
+                        ))
+                        .bold()
+                    );
+                } else {
+                    eprintln!(
+                        "{}",
+                        Paint::new(format!(
+                            "--> finished at {}",
+                            Local::now().time().format("%H:%M:%S")
+                        ))
+                        .bold()
+                    );
+                }
+
+                // attempt cleanup
+                let cleanup: Result<(), failure::Error> = try {
+                    // stop old server
+                    match backend {
+                        Backend::Mysql => {
+                            server.ssh.as_ref().unwrap().exec_print_nonempty(
+                                &["sudo", "systemctl", "stop", "mariadb", "2>&1"],
+                                "server",
+                            )?;
+                            server
+                                .ssh
+                                .as_ref()
+                                .unwrap()
+                                .exec_print_nonempty(&["sudo", "umount", "/mnt"], "server")?;
+                        }
+                        Backend::Noria(_) | Backend::Natural(_) => {
+                            // gather state size
+                            let mem_limit = if let Some(limit) = memlimit {
+                                format!("l{}", limit)
+                            } else {
+                                "unlimited".to_owned()
+                            };
+                            let mut sizefile = File::create(format!(
+                                "lobsters-{}-r{}-{}.json",
+                                backend, scale, mem_limit
+                            ))?;
+                            trawler
+                                .ssh
+                                .as_ref()
+                                .unwrap()
+                                .cmd_raw(&format!(
+                                    "wget http://{}:9000/get_statistics",
+                                    server.private_ip
+                                ))
+                                .and_then(|out| Ok(sizefile.write_all(&out[..]).map(|_| ())?))?;
+
+                            // stop the server and shim
+                            let _ = trawler
+                                .ssh
+                                .as_ref()
+                                .unwrap()
+                                .just_exec(&["pkill", "-f", "noria-mysql", "2>&1"], "client")?;
+                            if let Some(mut shim_chan) = shim_chan {
+                                let shim_stdout = finalize(&mut shim_chan)?;
+                                if erred {
+                                    let erred = shim_stdout.is_err();
+                                    let shim_stdout = shim_stdout.unwrap_or_else(|e| e);
+                                    for line in shim_stdout.lines() {
+                                        let mut paint = Paint::new("shim").dimmed();
+                                        if erred {
+                                            paint = paint.fg(yansi::Color::Red);
+                                        }
+                                        eprintln!(
+                                            "{:6} {}",
+                                            paint,
+                                            Paint::new(format!("| {}", line)).dimmed()
+                                        );
+                                    }
+                                }
+                            }
+
+                            let _ = server
+                                .ssh
+                                .as_ref()
+                                .unwrap()
+                                .just_exec(&["pkill", "-f", "noria-server", "2>&1"], "server")?;
+                            if let Some(mut server_chan) = server_chan {
+                                let server_stdout = finalize(&mut server_chan)?;
+                                if erred {
+                                    let erred = server_stdout.is_err();
+                                    let server_stdout = server_stdout.unwrap_or_else(|e| e);
+                                    for line in server_stdout.lines() {
+                                        let mut paint = Paint::new("shim").dimmed();
+                                        if erred {
+                                            paint = paint.fg(yansi::Color::Red);
+                                        }
+                                        eprintln!(
+                                            "{:6} {}",
+                                            paint,
+                                            Paint::new(format!("| {}", line)).dimmed()
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                // also parse achived ops/s to check that we're *really* keeping up
+                if let Ok(log) = File::open(format!("{}.log", prefix)) {
+                    let log = BufReader::new(log);
+                    let mut target = None;
+                    let mut actual = None;
+                    for line in log.lines() {
+                        let line = line?;
+                        if line.starts_with("# target ops/s") {
+                            target = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
+                        } else if line.starts_with("# generated ops/s") {
+                            actual = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
+                        }
+                        match (target, actual) {
+                            (Some(target), Some(actual)) => {
+                                eprintln!(
+                                    "{}",
+                                    Paint::cyan(format!(
+                                        " -> generated {} ops/s (target: {})",
+                                        actual, target
+                                    ))
+                                );
+                                if actual < target * 3.0 / 4.0 {
+                                    eprintln!(
+                                        "{}",
+                                        Paint::red(" -> backend is really not keeping up").bold()
+                                    );
+                                    survived_last = false;
+                                }
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                 }
 
                 // stop iterating through scales for this backend if it's not keeping up
-                let sload: f64 = sload
-                    .split_whitespace()
-                    .next()
-                    .and_then(|l| l.parse().ok())
-                    .unwrap_or(0.0);
-                let cload: f64 = cload
-                    .split_whitespace()
-                    .next()
-                    .and_then(|l| l.parse().ok())
-                    .unwrap_or(0.0);
+                let (sload, cload) = run?;
 
                 eprintln!(
                     "{}",
@@ -668,39 +757,7 @@ fn main() {
                     );
                 }
 
-                // also parse achived ops/s to check that we're *really* keeping up
-                let log = File::open(format!("{}.log", prefix))?;
-                let log = BufReader::new(log);
-                let mut target = None;
-                let mut actual = None;
-                for line in log.lines() {
-                    let line = line?;
-                    if line.starts_with("# target ops/s") {
-                        target = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
-                    } else if line.starts_with("# generated ops/s") {
-                        actual = Some(line.rsplitn(2, ' ').next().unwrap().parse::<f64>()?);
-                    }
-                    match (target, actual) {
-                        (Some(target), Some(actual)) => {
-                            eprintln!(
-                                "{}",
-                                Paint::cyan(format!(
-                                    " -> generated {} ops/s (target: {})",
-                                    actual, target
-                                ))
-                            );
-                            if actual < target * 3.0 / 4.0 {
-                                eprintln!(
-                                    "{}",
-                                    Paint::red(" -> backend is really not keeping up").bold()
-                                );
-                                survived_last = false;
-                            }
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
+                let _ = cleanup?;
 
                 if !running.load(Ordering::SeqCst) {
                     // user pressed ^C
@@ -783,7 +840,9 @@ impl ConvenientSession for tsunami::Session {
                 }
 
                 if erred {
-                    Err(failure::err_msg(stdout))
+                    Err(failure::err_msg("command exited with an error")
+                        .context(cmd.join(" "))
+                        .into())
                 } else {
                     Ok(())
                 }
