@@ -182,11 +182,8 @@ fn main() {
         };
         s.set_nodelay(true).unwrap();
 
-        let connection = span!(Level::DEBUG, "connection");
-        {
-            let _g = connection.enter();
-            debug!(from = ?s.peer_addr().unwrap(), "accepted");
-        }
+        let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
+        connection.in_scope(|| debug!("accepted"));
 
         let builder = thread::Builder::new().name(format!("conn-{}", i));
 
