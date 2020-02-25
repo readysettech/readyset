@@ -21,7 +21,7 @@ slog = "2.4.0"
 slog-term = "2.4.0"
 vec_map = { version = "0.8.0" }
 rayon = "1.0"
-ssh2 = "0.7"
+ssh2 = "0.8"
 shellwords = "1"
 zookeeper = "0.5.3"
 
@@ -52,7 +52,7 @@ tokio-test = "0.2.0"
 # ec2
 rusoto_core = { optional = true, version = "=0.43.0-beta.1" }
 rusoto_sts = { optional = true, version = "=0.43.0-beta.1" }
-tsunami = { optional = true, version = "=0.11.0-beta.1" }
+tsunami = { optional = true, version = "=0.11.0-beta.2" }
 timeout-readwrite = "0.3"
 ctrlc = "3.1"
 failure = "0.1"
