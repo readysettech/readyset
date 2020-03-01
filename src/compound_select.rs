@@ -2,7 +2,7 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use common::{statement_terminator, opt_delimited};
+use common::{opt_delimited, statement_terminator};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -94,9 +94,11 @@ fn other_selects(i: &[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, Se
         multispace0,
         compound_op,
         multispace1,
-        opt_delimited(tag("("),
+        opt_delimited(
+            tag("("),
             delimited(multispace0, nested_selection, multispace0),
-            tag(")")),
+            tag(")"),
+        ),
     ))(i)?;
 
     Ok((remaining_input, (Some(op), select)))
@@ -181,11 +183,23 @@ mod tests {
         let res3 = compound_selection(qstr3.as_bytes());
 
         assert!(&res.is_err());
-        assert_eq!(res.unwrap_err(), nom::Err::Error((");".as_bytes(), nom::error::ErrorKind::Tag)));
+        assert_eq!(
+            res.unwrap_err(),
+            nom::Err::Error((");".as_bytes(), nom::error::ErrorKind::Tag))
+        );
         assert!(&res2.is_err());
-        assert_eq!(res2.unwrap_err(), nom::Err::Error((";".as_bytes(), nom::error::ErrorKind::Tag)));
+        assert_eq!(
+            res2.unwrap_err(),
+            nom::Err::Error((";".as_bytes(), nom::error::ErrorKind::Tag))
+        );
         assert!(&res3.is_err());
-        assert_eq!(res3.unwrap_err(), nom::Err::Error((") UNION (SELECT id, stars from Rating;".as_bytes(), nom::error::ErrorKind::Tag)));
+        assert_eq!(
+            res3.unwrap_err(),
+            nom::Err::Error((
+                ") UNION (SELECT id, stars from Rating;".as_bytes(),
+                nom::error::ErrorKind::Tag
+            ))
+        );
     }
 
     #[test]

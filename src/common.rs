@@ -370,11 +370,15 @@ fn len_as_u16(len: &[u8]) -> u16 {
     }
 }
 
-pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(first: F, second: G, third: H) -> impl Fn(I) -> IResult<I, O2, E>
+pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(
+    first: F,
+    second: G,
+    third: H,
+) -> impl Fn(I) -> IResult<I, O2, E>
 where
-  F: Fn(I) -> IResult<I, O1, E>,
-  G: Fn(I) -> IResult<I, O2, E>,
-  H: Fn(I) -> IResult<I, O3, E>,
+    F: Fn(I) -> IResult<I, O1, E>,
+    G: Fn(I) -> IResult<I, O2, E>,
+    H: Fn(I) -> IResult<I, O3, E>,
 {
     move |input: I| {
         let first_ = &first;
@@ -384,9 +388,7 @@ where
         let inp = input.clone();
         match second(input) {
             Ok((i, o)) => Ok((i, o)),
-            _ => {
-                delimited(first_, second_, third_)(inp)
-            }
+            _ => delimited(first_, second_, third_)(inp),
         }
     }
 }
@@ -993,10 +995,7 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
 
 pub fn literal_expression(i: &[u8]) -> IResult<&[u8], LiteralExpression> {
     map(
-        pair(
-            opt_delimited(tag("("), literal, tag(")")),
-            opt(as_alias),
-        ),
+        pair(opt_delimited(tag("("), literal, tag(")")), opt(as_alias)),
         |p| LiteralExpression {
             value: p.0,
             alias: (p.1).map(|a| a.to_string()),
@@ -1074,7 +1073,6 @@ mod tests {
         assert!(sql_identifier(id6).is_ok());
     }
 
-
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
         opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())
     }
@@ -1082,10 +1080,19 @@ mod tests {
     #[test]
     fn opt_delimited_tests() {
         // let ok1 = IResult::Ok(("".as_bytes(), "abc".as_bytes()));
-        assert_eq!(test_opt_delimited_fn_call("abc"), IResult::Ok(("".as_bytes(), "abc".as_bytes())));
-        assert_eq!(test_opt_delimited_fn_call("(abc)"), IResult::Ok(("".as_bytes(), "abc".as_bytes())));
+        assert_eq!(
+            test_opt_delimited_fn_call("abc"),
+            IResult::Ok(("".as_bytes(), "abc".as_bytes()))
+        );
+        assert_eq!(
+            test_opt_delimited_fn_call("(abc)"),
+            IResult::Ok(("".as_bytes(), "abc".as_bytes()))
+        );
         assert!(test_opt_delimited_fn_call("(abc").is_err());
-        assert_eq!(test_opt_delimited_fn_call("abc)"), IResult::Ok((")".as_bytes(), "abc".as_bytes())));
+        assert_eq!(
+            test_opt_delimited_fn_call("abc)"),
+            IResult::Ok((")".as_bytes(), "abc".as_bytes()))
+        );
         assert!(test_opt_delimited_fn_call("ab").is_err());
     }
 
