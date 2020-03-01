@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
-use column::{Column, FunctionArguments, FunctionExpression};
+use column::{Column, FunctionArgument, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::combinator::opt;
@@ -631,11 +631,11 @@ pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)> {
+pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
     let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
     let args_parser = alt((
-        map(case_when_column, |cw| FunctionArguments::Conditional(cw)),
-        map(column_identifier_no_alias, |c| FunctionArguments::Column(c)),
+        map(case_when_column, |cw| FunctionArgument::Conditional(cw)),
+        map(column_identifier_no_alias, |c| FunctionArgument::Column(c)),
     ));
     let (remaining_input, (distinct, args)) = tuple((distinct_parser, args_parser))(i)?;
     Ok((remaining_input, (args, distinct.is_some())))
@@ -656,7 +656,7 @@ fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<&[u8]>)> {
     pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
 }
 
-fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (FunctionArguments, bool)> {
+fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
     delimited(tag("("), function_arguments, tag(")"))(i)
 }
 
@@ -688,7 +688,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
                     None => String::from(","),
                     Some(s) => String::from_utf8(s.to_vec()).unwrap(),
                 };
-                FunctionExpression::GroupConcat(FunctionArguments::Column(col.clone()), sep)
+                FunctionExpression::GroupConcat(FunctionArgument::Column(col.clone()), sep)
             },
         ),
     ))(i)
@@ -1128,7 +1128,7 @@ mod tests {
             alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Max(
-                FunctionArguments::Column(Column::from("addr_id")),
+                FunctionArgument::Column(Column::from("addr_id")),
             ))),
         };
         assert_eq!(res.unwrap().1, expected);

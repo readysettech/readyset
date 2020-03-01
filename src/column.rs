@@ -8,13 +8,13 @@ use keywords::escape_if_keyword;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
-    Avg(FunctionArguments, bool),
-    Count(FunctionArguments, bool),
+    Avg(FunctionArgument, bool),
+    Count(FunctionArgument, bool),
     CountStar,
-    Sum(FunctionArguments, bool),
-    Max(FunctionArguments),
-    Min(FunctionArguments),
-    GroupConcat(FunctionArguments, String),
+    Sum(FunctionArgument, bool),
+    Max(FunctionArgument),
+    Min(FunctionArgument),
+    GroupConcat(FunctionArgument, String),
 }
 
 impl Display for FunctionExpression {
@@ -38,16 +38,16 @@ impl Display for FunctionExpression {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FunctionArguments {
+pub enum FunctionArgument {
     Column(Column),
     Conditional(CaseWhenExpression),
 }
 
-impl Display for FunctionArguments {
+impl Display for FunctionArgument {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FunctionArguments::Column(ref col) => write!(f, "{}", col)?,
-            FunctionArguments::Conditional(ref e) => {
+            FunctionArgument::Column(ref col) => write!(f, "{}", col)?,
+            FunctionArgument::Conditional(ref e) => {
                 write!(f, "{}", e)?;
             }
         }
@@ -247,7 +247,7 @@ mod tests {
             alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Sum(
-                FunctionArguments::Column(Column::from("mytab.foo")),
+                FunctionArgument::Column(Column::from("mytab.foo")),
                 false,
             ))),
         };

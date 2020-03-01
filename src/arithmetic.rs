@@ -256,7 +256,7 @@ mod tests {
             ArithmeticBase::{Column as ABColumn, Scalar},
             ArithmeticOperator::*,
         };
-        use crate::column::{FunctionArguments, FunctionExpression};
+        use crate::column::{FunctionArgument, FunctionExpression};
 
         let lit_ae = [
             "5 + 42",
@@ -308,7 +308,7 @@ mod tests {
                     alias: None,
                     table: None,
                     function: Some(Box::new(FunctionExpression::Max(
-                        FunctionArguments::Column("foo".into()),
+                        FunctionArgument::Column("foo".into()),
                     ))),
                 }),
                 Scalar(3333.into()),

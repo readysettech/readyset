@@ -11,7 +11,7 @@ extern crate pretty_assertions;
 pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 pub use self::case::{CaseWhenExpression, ColumnOrLiteral};
 pub use self::column::{
-    Column, ColumnConstraint, ColumnSpecification, FunctionArguments, FunctionExpression,
+    Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionExpression,
 };
 pub use self::common::{
     FieldDefinitionExpression, FieldValueExpression, Literal, LiteralExpression, Operator, Real,

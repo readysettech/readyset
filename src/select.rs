@@ -310,7 +310,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 mod tests {
     use super::*;
     use case::{CaseWhenExpression, ColumnOrLiteral};
-    use column::{Column, FunctionArguments, FunctionExpression};
+    use column::{Column, FunctionArgument, FunctionExpression};
     use common::{
         FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal, Operator,
     };
@@ -732,7 +732,7 @@ mod tests {
         let qstring = "SELECT max(addr_id) FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
+        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("addr_id")));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -753,7 +753,7 @@ mod tests {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("addr_id")));
+        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("addr_id")));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -796,7 +796,7 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
         let agg_expr =
-            FunctionExpression::Count(FunctionArguments::Column(Column::from("vote_id")), true);
+            FunctionExpression::Count(FunctionArgument::Column(Column::from("vote_id")), true);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -826,7 +826,7 @@ mod tests {
             operator: Operator::Greater,
         });
         let agg_expr = FunctionExpression::Count(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: None,
                 condition: filter_cond,
@@ -862,7 +862,7 @@ mod tests {
             operator: Operator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: None,
                 condition: filter_cond,
@@ -899,7 +899,7 @@ mod tests {
             operator: Operator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
                 condition: filter_cond,
@@ -946,7 +946,7 @@ mod tests {
             operator: Operator::And,
         });
         let agg_expr = FunctionExpression::Count(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
                 else_expr: None,
                 condition: filter_cond,
@@ -1165,7 +1165,7 @@ mod tests {
 
         let res = selection(qstr.as_bytes());
 
-        let agg_expr = FunctionExpression::Max(FunctionArguments::Column(Column::from("o_id")));
+        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("o_id")));
         let recursive_select = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1279,7 +1279,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Max(
-                            FunctionArguments::Column("o_id".into()),
+                            FunctionArgument::Column("o_id".into()),
                         ))),
                     }),
                     ArithmeticBase::Scalar(3333.into()),
@@ -1309,7 +1309,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Max(
-                            FunctionArguments::Column("o_id".into()),
+                            FunctionArgument::Column("o_id".into()),
                         ))),
                     }),
                     ArithmeticBase::Scalar(2.into()),
