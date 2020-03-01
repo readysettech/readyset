@@ -307,9 +307,9 @@ mod tests {
                     name: String::from("max(foo)"),
                     alias: None,
                     table: None,
-                    function: Some(Box::new(FunctionExpression::Max(
-                        FunctionArgument::Column("foo".into()),
-                    ))),
+                    function: Some(Box::new(FunctionExpression::Max(FunctionArgument::Column(
+                        "foo".into(),
+                    )))),
                 }),
                 Scalar(3333.into()),
                 None,
