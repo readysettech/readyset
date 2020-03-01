@@ -15,6 +15,7 @@ pub enum FunctionExpression {
     Max(FunctionArgument),
     Min(FunctionArgument),
     GroupConcat(FunctionArgument, String),
+    Generic(String, FunctionArguments),
 }
 
 impl Display for FunctionExpression {
@@ -32,8 +33,31 @@ impl Display for FunctionExpression {
             FunctionExpression::Min(ref col) => write!(f, "min({})", col),
             FunctionExpression::GroupConcat(ref col, ref s) => {
                 write!(f, "group_concat({}, {})", col, s)
+            },
+            FunctionExpression::Generic(ref name, ref args) => {
+                write!(f, "{}({})", name, args)
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct FunctionArguments {
+    arguments : Vec<FunctionArgument>
+}
+
+impl Display for FunctionArguments {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut first = true;
+        for argument in self.arguments.iter() {
+            if !first {
+                write!(f, ",")?;
+            } else {
+                first = false;
+            }
+            write!(f, "{}", argument)?;
+        }
+        Ok(())
     }
 }
 
