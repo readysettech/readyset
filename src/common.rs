@@ -9,12 +9,12 @@ use std::str::FromStr;
 
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use case::case_when_column;
-use column::{Column, FunctionArgument, FunctionExpression};
+use column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
 use keywords::{escape_if_keyword, sql_keyword};
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::combinator::opt;
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{fold_many0, many0, many1};
+use nom::multi::{fold_many0, many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use table::Table;
 
@@ -629,15 +629,19 @@ pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((type_identifier_first_half, type_identifier_second_half))(i)
 }
 
+// Parses the argument for an aggregation function
+pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], FunctionArgument> {
+    alt((
+        map(case_when_column, |cw| FunctionArgument::Conditional(cw)),
+        map(column_identifier_no_alias, |c| FunctionArgument::Column(c)),
+    ))(i)
+}
+
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
 pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
     let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
-    let args_parser = alt((
-        map(case_when_column, |cw| FunctionArgument::Conditional(cw)),
-        map(column_identifier_no_alias, |c| FunctionArgument::Column(c)),
-    ));
-    let (remaining_input, (distinct, args)) = tuple((distinct_parser, args_parser))(i)?;
+    let (remaining_input, (distinct, args)) = tuple((distinct_parser, function_argument_parser))(i)?;
     Ok((remaining_input, (args, distinct.is_some())))
 }
 
@@ -691,6 +695,12 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
                 FunctionExpression::GroupConcat(FunctionArgument::Column(col.clone()), sep)
             },
         ),
+        map(tuple((sql_identifier, multispace0, tag("("), separated_list(tag(","), delimited(multispace0, function_argument_parser, multispace0)), tag(")"))), |tuple| {
+            let (name, _, _, arguments, _) = tuple;
+            FunctionExpression::Generic(
+                str::from_utf8(name).unwrap().to_string(), 
+                FunctionArguments::from(arguments))
+        })
     ))(i)
 }
 
@@ -1132,6 +1142,22 @@ mod tests {
             ))),
         };
         assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn simple_generic_function() {
+        let qlist = ["coalesce(a,b,c)".as_bytes(), "coalesce (a,b,c)".as_bytes(), "coalesce(a ,b,c)".as_bytes(), "coalesce(a, b,c)".as_bytes()];
+        for q in qlist.iter() {
+            let res = column_function(q);
+            let expected = FunctionExpression::Generic("coalesce".to_string(), 
+                FunctionArguments::from(
+                    vec!(
+                        FunctionArgument::Column(Column::from("a")),
+                        FunctionArgument::Column(Column::from("b")),
+                        FunctionArgument::Column(Column::from("c"))
+                )));
+            assert_eq!(res, Ok((&b""[..], expected)));
+        }
     }
 
     #[test]

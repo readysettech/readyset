@@ -33,17 +33,15 @@ impl Display for FunctionExpression {
             FunctionExpression::Min(ref col) => write!(f, "min({})", col),
             FunctionExpression::GroupConcat(ref col, ref s) => {
                 write!(f, "group_concat({}, {})", col, s)
-            },
-            FunctionExpression::Generic(ref name, ref args) => {
-                write!(f, "{}({})", name, args)
             }
+            FunctionExpression::Generic(ref name, ref args) => write!(f, "{}({})", name, args),
         }
     }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct FunctionArguments {
-    arguments : Vec<FunctionArgument>
+    pub arguments: Vec<FunctionArgument>,
 }
 
 impl Display for FunctionArguments {
@@ -58,6 +56,12 @@ impl Display for FunctionArguments {
             write!(f, "{}", argument)?;
         }
         Ok(())
+    }
+}
+
+impl<'a> From<Vec<FunctionArgument>> for FunctionArguments {
+    fn from(args: Vec<FunctionArgument>) -> FunctionArguments {
+        FunctionArguments { arguments: args }
     }
 }
 
