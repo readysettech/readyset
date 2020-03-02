@@ -725,7 +725,7 @@ fn main() {
                                         actual, target
                                     ))
                                 );
-                                if actual < target * 3.0 / 4.0 {
+                                if actual < target * 9.0 / 10.0 {
                                     eprintln!(
                                         "{}",
                                         Paint::red(" -> backend is really not keeping up").bold()

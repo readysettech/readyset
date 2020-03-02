@@ -1,3 +1,4 @@
+use mysql::prelude::Queryable;
 use mysql::OptsBuilder;
 use mysql::Params;
 use serde_derive::Deserialize;
@@ -137,25 +138,25 @@ pub fn setup_mysql(addr: &str) -> mysql::Pool {
     let options = Opts::from_url(&addr[0..addr.rfind("/").unwrap()]).unwrap();
 
     // clear the db (note that we strip of /db so we get default)
-    let mut opts = OptsBuilder::from_opts(options.clone());
-    opts.db_name(Some(db));
-    opts.init(vec!["SET max_heap_table_size = 4294967296;"]);
+    let opts = OptsBuilder::from_opts(options.clone())
+        .db_name(Some(db))
+        .init(vec!["SET max_heap_table_size = 4294967296;"]);
     let pool = mysql::Pool::new_manual(1, 4, opts).unwrap();
     let mut conn = pool.get_conn().unwrap();
-    if conn.query(format!("USE {}", db)).is_ok() {
-        conn.query(format!("DROP DATABASE {}", &db).as_str())
+    if conn.query_drop(format!("USE {}", db)).is_ok() {
+        conn.query_drop(format!("DROP DATABASE {}", &db).as_str())
             .unwrap();
     }
-    conn.query(format!("CREATE DATABASE {}", &db).as_str())
+    conn.query_drop(format!("CREATE DATABASE {}", &db).as_str())
         .unwrap();
-    conn.query(format!("USE {}", db)).unwrap();
+    conn.query_drop(format!("USE {}", db)).unwrap();
 
     drop(conn);
 
     // now we connect for real
-    let mut opts = OptsBuilder::from_opts(options);
-    opts.db_name(Some(db));
-    opts.init(vec!["SET max_heap_table_size = 4294967296;"]);
+    let opts = OptsBuilder::from_opts(options)
+        .db_name(Some(db))
+        .init(vec!["SET max_heap_table_size = 4294967296;"]);
     mysql::Pool::new_manual(1, 4, opts).unwrap()
 }
 
@@ -163,15 +164,16 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
     for (schema_name, schema) in schemas.iter() {
         let pool = setup_mysql("soup@127.0.0.1:3306/mysql_comparison_test");
         for (table_name, table) in schema.tables.iter() {
-            pool.prep_exec(&table.create_query, ()).unwrap();
+            let mut conn = pool.get_conn().unwrap();
+            conn.exec_drop(&table.create_query, ()).unwrap();
             let query = format!(
                 "INSERT INTO {} VALUES ({})",
                 table_name,
                 vec!["?"; table.types.len()].join(", ")
             );
-            let mut insert = pool.prepare(query).unwrap();
+            let insert = conn.prep(query).unwrap();
             for row in table.data.as_ref().unwrap().iter() {
-                if let Err(msg) = insert.execute(row.clone()) {
+                if let Err(msg) = conn.exec_drop(&insert, row.clone()) {
                     println!(
                         "MySQL insert query failed for table: {}, values: {:?}",
                         table_name, row
@@ -196,9 +198,13 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
                     .insert(i.to_string(), Vec::new());
 
                 let values = Params::Positional(values.iter().map(|v| v.into()).collect());
-                for row in pool.prep_exec(&query.select_query, values).unwrap() {
+                for row in pool
+                    .get_conn()
+                    .unwrap()
+                    .exec::<mysql::Row, _, _>(&query.select_query, values)
+                    .unwrap()
+                {
                     let row = row
-                        .unwrap()
                         .unwrap()
                         .into_iter()
                         .map(|v| {

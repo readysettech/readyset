@@ -71,7 +71,7 @@ backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.5"
 diff = "0.1.10"
 tempfile = "3.0.2"
-mysql = "17.0.0"
+mysql = "18.0.0"
 
 [lib]
 name = "noria_server"
