@@ -16,14 +16,3 @@ tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "n
 # https://github.com/tokio-rs/tokio/pull/2160
 # optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "jonhoo/preempt" }
-# mostly optional.
-# master fixes
-#   https://github.com/blackbeam/mysql_async/issues/65
-# by virtue of
-#   https://github.com/blackbeam/mysql_async/pull/92
-# we still care about
-#   https://github.com/blackbeam/mysql_async/issues/94
-# and
-#   https://github.com/blackbeam/mysql_async/issues/96
-# but none of these are API changes, so not having this patch is fine
-mysql_async = { git = "https://github.com/blackbeam/mysql_async.git" }

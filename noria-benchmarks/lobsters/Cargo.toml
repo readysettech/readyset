@@ -10,7 +10,7 @@ default = []
 
 [dependencies]
 trawler = "0.8"
-mysql_async = "0.21.0"
+mysql_async = "0.22.0"
 tokio = { version = "0.2.0", features = ["full"] }
 clap = "2.31"
 futures-core = "0.3.0"

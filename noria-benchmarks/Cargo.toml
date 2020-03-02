@@ -39,7 +39,7 @@ hdrhistogram = "7"
 # futures-state-stream = "0.1"
 # tiberius = "0.3.1"
 # mysql
-mysql_async = "0.21.0"
+mysql_async = "0.22.0"
 # memcached
 memcached-rs = "0.4.2"
 # mio
