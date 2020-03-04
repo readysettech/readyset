@@ -34,7 +34,6 @@ pub struct ViewEndpoint(SocketAddr);
 impl Service<()> for ViewEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
-    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     type Future = impl Future<
         Output = Result<multiplex::MultiplexTransport<Transport, Tagger>, tokio::io::Error>,
     >;
@@ -203,7 +202,6 @@ impl fmt::Debug for View {
 impl Service<(Vec<Vec<DataType>>, bool)> for View {
     type Response = Vec<Datas>;
     type Error = ViewError;
-    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     type Future = impl Future<Output = Result<Vec<Datas>, ViewError>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

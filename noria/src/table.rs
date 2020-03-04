@@ -39,7 +39,6 @@ pub struct TableEndpoint(SocketAddr);
 impl Service<()> for TableEndpoint {
     type Response = multiplex::MultiplexTransport<Transport, Tagger>;
     type Error = tokio::io::Error;
-    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     type Future = impl Future<
         Output = Result<multiplex::MultiplexTransport<Transport, Tagger>, tokio::io::Error>,
     >;
@@ -238,7 +237,6 @@ impl fmt::Debug for Table {
 impl Service<Input> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    // have to repeat types because https://github.com/rust-lang/rust/issues/57807
     type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
