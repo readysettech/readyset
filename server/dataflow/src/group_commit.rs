@@ -91,7 +91,6 @@ impl GroupCommitQueueSet {
     {
         let mut packets = packets.peekable();
         let merged_dst = packets.peek().as_mut().unwrap().dst();
-        let mut merged_tracer: Tracer = None;
 
         let mut all_senders = vec![];
         let merged_data = packets.fold(Vec::new(), |mut acc, p| {
@@ -101,7 +100,7 @@ impl GroupCommitQueueSet {
                     src,
                     senders,
                 } => {
-                    let Input { dst, data, tracer } = unsafe { inner.take() };
+                    let Input { dst, data } = unsafe { inner.take() };
 
                     assert_eq!(senders.len(), 0);
                     assert_eq!(merged_dst, dst);
@@ -109,22 +108,6 @@ impl GroupCommitQueueSet {
 
                     if let Some(src) = src {
                         all_senders.push(src);
-                    }
-
-                    match (&merged_tracer, tracer) {
-                        (&Some((mtag, _)), Some((tag, Some(sender)))) => {
-                            use noria::debug::trace::*;
-                            sender
-                                .send(Event {
-                                    instant: time::Instant::now(),
-                                    event: EventType::PacketEvent(PacketEvent::Merged(mtag), tag),
-                                })
-                                .unwrap();
-                        }
-                        (_, mut tracer @ Some(_)) => {
-                            merged_tracer = tracer.take();
-                        }
-                        _ => {}
                     }
                 }
                 _ => unreachable!(),
@@ -136,7 +119,6 @@ impl GroupCommitQueueSet {
             inner: LocalOrNot::new(Input {
                 dst: merged_dst,
                 data: merged_data,
-                tracer: merged_tracer,
             }),
             src: None,
             senders: all_senders,

@@ -1,6 +1,5 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
-use crate::debug::trace::Tracer;
 use crate::internal::*;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
@@ -102,7 +101,6 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for TableError {
 pub struct Input {
     pub dst: LocalNodeIndex,
     pub data: Vec<TableOperation>,
-    pub tracer: Tracer,
 }
 
 impl fmt::Debug for Input {
@@ -110,7 +108,6 @@ impl fmt::Debug for Input {
         fmt.debug_struct("Input")
             .field("dst", &self.dst)
             .field("data", &self.data)
-            .field("tracer", &"_")
             .finish()
     }
 }
@@ -179,7 +176,6 @@ impl TableBuilder {
             key_is_primary: self.key_is_primary,
             columns: self.columns,
             dropped: self.dropped,
-            tracer: None,
             table_name: self.table_name,
             schema: self.schema,
             dst_is_local: false,
@@ -206,7 +202,6 @@ pub struct Table {
     key: Vec<usize>,
     columns: Vec<String>,
     dropped: VecMap<DataType>,
-    tracer: Tracer,
     table_name: String,
     schema: Option<CreateTableStatement>,
     dst_is_local: bool,
@@ -257,8 +252,6 @@ impl Service<Input> for Table {
             None
         };
 
-        i.tracer = self.tracer.take();
-
         // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
 
         if self.shards.len() == 1 {
@@ -304,14 +297,12 @@ impl Service<Input> for Table {
                         unsafe {
                             LocalOrNot::for_local_transfer(Input {
                                 dst: i.dst,
-                                tracer: i.tracer.clone(),
                                 data: rs,
                             })
                         }
                     } else {
                         LocalOrNot::new(Input {
                             dst: i.dst,
-                            tracer: i.tracer.clone(),
                             data: rs,
                         })
                     };
@@ -477,7 +468,6 @@ impl Table {
         Input {
             dst: self.node,
             data: ops,
-            tracer: None,
         }
     }
 
@@ -586,17 +576,5 @@ impl Table {
             update: set,
         })
         .await
-    }
-
-    /// Trace the next modification to this base table.
-    ///
-    /// When an input is traced, events are triggered as it flows through the dataflow, and are
-    /// communicated back to the controller. Currently, you can only receive trace events if you
-    /// build a local controller, specifically by calling `create_debug_channel` before adding any
-    /// operators to the dataflow.
-    ///
-    /// Traced events are sent on the debug channel, and are tagged with the given `tag`.
-    pub fn trace_next(&mut self, tag: u64) {
-        self.tracer = Some((tag, None));
     }
 }

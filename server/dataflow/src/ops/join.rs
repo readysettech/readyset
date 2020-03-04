@@ -231,7 +231,6 @@ impl Ingredient for Join {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        _: &mut Tracer,
         replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,

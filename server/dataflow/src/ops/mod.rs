@@ -149,7 +149,6 @@ impl Ingredient for NodeOperator {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
-        tracer: &mut Tracer,
         replay_key_col: Option<&[usize]>,
         domain: &DomainNodes,
         states: &StateMap,
@@ -160,7 +159,6 @@ impl Ingredient for NodeOperator {
             ex,
             from,
             data,
-            tracer,
             replay_key_col,
             domain,
             states
@@ -171,22 +169,11 @@ impl Ingredient for NodeOperator {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
-        tracer: &mut Tracer,
         replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> RawProcessingResult {
-        impl_ingredient_fn_mut!(
-            self,
-            on_input_raw,
-            ex,
-            from,
-            data,
-            tracer,
-            replay,
-            domain,
-            states
-        )
+        impl_ingredient_fn_mut!(self, on_input_raw, ex, from, data, replay, domain, states)
     }
     fn on_eviction(
         &mut self,

@@ -16,8 +16,6 @@ impl Node {
         swap: bool,
         ex: &mut dyn Executor,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
-        m.as_mut().unwrap().trace(PacketEvent::Process);
-
         let addr = self.local_addr();
         match self.inner {
             NodeType::Ingress => {
@@ -33,7 +31,7 @@ impl Node {
                     Some(Packet::Input {
                         inner, mut senders, ..
                     }) => {
-                        let Input { dst, data, tracer } = unsafe { inner.take() };
+                        let Input { dst, data } = unsafe { inner.take() };
                         let mut rs = b.process(addr, data, &*state);
 
                         // When a replay originates at a base node, we replay the data *through* that
@@ -54,7 +52,6 @@ impl Node {
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
                             data: rs,
-                            tracer,
                         }));
                     }
                     Some(ref p) => {
@@ -79,7 +76,6 @@ impl Node {
                 let mut captured = HashSet::new();
                 let mut misses = Vec::new();
                 let mut lookups = Vec::new();
-                let mut tracer;
 
                 {
                     let m = m.as_mut().unwrap();
@@ -111,13 +107,11 @@ impl Node {
                     };
 
                     let mut set_replay_last = None;
-                    tracer = m.tracer().and_then(Option::take);
                     m.map_data(|data| {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(ex, from, old_data, &mut tracer, &replay, nodes, state)
-                        {
+                        match i.on_input_raw(ex, from, old_data, &replay, nodes, state) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 lookups = m.lookups;
@@ -185,10 +179,6 @@ impl Node {
                 }
 
                 let m = m.as_mut().unwrap();
-                if let Some(t) = m.tracer() {
-                    *t = tracer.take();
-                }
-
                 let tag = match **m {
                     Packet::ReplayPiece {
                         tag,

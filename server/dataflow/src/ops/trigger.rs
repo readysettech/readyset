@@ -85,7 +85,6 @@ impl Ingredient for Trigger {
         executor: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,

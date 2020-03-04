@@ -41,7 +41,6 @@ impl Ingredient for Distinct {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,

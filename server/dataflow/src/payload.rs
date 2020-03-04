@@ -11,7 +11,6 @@ use noria::internal::LocalOrNot;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::SocketAddr;
-use std::time;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
@@ -93,7 +92,6 @@ pub enum Packet {
     Message {
         link: Link,
         data: Records,
-        tracer: Tracer,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -322,14 +320,9 @@ impl Packet {
 
     pub(crate) fn clone_data(&self) -> Self {
         match *self {
-            Packet::Message {
-                link,
-                ref data,
-                ref tracer,
-            } => Packet::Message {
+            Packet::Message { link, ref data } => Packet::Message {
                 link,
                 data: data.clone(),
-                tracer: tracer.clone(),
             },
             Packet::ReplayPiece {
                 link,
@@ -343,29 +336,6 @@ impl Packet {
                 context: context.clone(),
             },
             _ => unreachable!(),
-        }
-    }
-
-    pub(crate) fn trace(&self, event: PacketEvent) {
-        if let Packet::Message {
-            tracer: Some((tag, Some(ref sender))),
-            ..
-        } = *self
-        {
-            use noria::debug::trace::{Event, EventType};
-            sender
-                .send(Event {
-                    instant: time::Instant::now(),
-                    event: EventType::PacketEvent(event, tag),
-                })
-                .unwrap();
-        }
-    }
-
-    pub(crate) fn tracer(&mut self) -> Option<&mut Tracer> {
-        match *self {
-            Packet::Message { ref mut tracer, .. } => Some(tracer),
-            _ => None,
         }
     }
 }

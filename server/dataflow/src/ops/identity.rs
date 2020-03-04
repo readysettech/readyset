@@ -36,7 +36,6 @@ impl Ingredient for Identity {
         _: &mut dyn Executor,
         _: LocalNodeIndex,
         rs: Records,
-        _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,

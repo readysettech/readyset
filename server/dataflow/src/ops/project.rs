@@ -225,7 +225,6 @@ impl Ingredient for Project {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         mut rs: Records,
-        _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,

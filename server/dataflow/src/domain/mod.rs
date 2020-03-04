@@ -744,7 +744,6 @@ impl Domain {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
-        m.trace(PacketEvent::Handle);
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
@@ -2851,7 +2850,6 @@ impl Domain {
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
-                    packet.trace(PacketEvent::ExitInputChannel);
                     if let Some(packet) = self.group_commit_queues.append(packet) {
                         self.handle(packet, executor, true);
                     }

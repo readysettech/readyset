@@ -214,8 +214,6 @@ impl Reader {
 
         // TODO: don't send replays to streams?
 
-        m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
-
         if !self.streamers.is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
             let mut left = self.streamers.len();

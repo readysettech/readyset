@@ -186,7 +186,6 @@ impl Ingredient for Union {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        _: &mut Tracer,
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
@@ -227,7 +226,6 @@ impl Ingredient for Union {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        tracer: &mut Tracer,
         replay: &ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
@@ -265,7 +263,7 @@ impl Ingredient for Union {
                     assert!(self.replay_key.is_none() || self.replay_pieces.is_empty());
 
                     // process the results (self is okay to have mutably borrowed here)
-                    let rs = self.on_input(ex, from, rs, tracer, None, n, s).results;
+                    let rs = self.on_input(ex, from, rs, None, n, s).results;
 
                     // *then* borrow self.full_wait_state again
                     if let FullWait::Ongoing {
@@ -287,9 +285,7 @@ impl Ingredient for Union {
                 let replay_key = self.replay_key.as_ref().and_then(|rks| rks.get(&from));
                 if replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(
-                        self.on_input(ex, from, rs, tracer, None, n, s),
-                    );
+                    return RawProcessingResult::Regular(self.on_input(ex, from, rs, None, n, s));
                 }
 
                 let k = replay_key.unwrap();
@@ -321,7 +317,7 @@ impl Ingredient for Union {
                     }
                 }
 
-                RawProcessingResult::Regular(self.on_input(ex, from, rs, tracer, None, n, s))
+                RawProcessingResult::Regular(self.on_input(ex, from, rs, None, n, s))
             }
             ReplayContext::Full { last } => {
                 // this part is actually surpringly straightforward, but the *reason* it is
@@ -377,7 +373,7 @@ impl Ingredient for Union {
                 // arm). feel free to go check. interestingly enough, it's also fine for us to
                 // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
                 // domain.
-                let mut rs = self.on_input(ex, from, rs, tracer, None, n, s).results;
+                let mut rs = self.on_input(ex, from, rs, None, n, s).results;
                 if let FullWait::None = self.full_wait_state {
                     if self.required == 1 {
                         // no need to ever buffer
@@ -573,7 +569,7 @@ impl Ingredient for Union {
                             pieces.buffered.into_iter()
                         })
                         .flat_map(|(from, rs)| {
-                            self.on_input(ex, from, rs, tracer, Some(&key_cols[..]), n, s)
+                            self.on_input(ex, from, rs, Some(&key_cols[..]), n, s)
                                 .results
                         })
                         .collect()
