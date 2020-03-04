@@ -22,7 +22,7 @@ binary MySQL protocol. This lets any application that currently talks to
 MySQL or MariaDB switch to Noria with minimal effort. For example,
 running a [Lobsters-like workload](https://github.com/jonhoo/trawler)
 that issues the [equivalent SQL
-queries](https://github.com/mit-pdos/noria/tree/master/noria-benchmarks/lobsters/src/endpoints/natural)
+queries](https://github.com/mit-pdos/noria/tree/master/applications/lobsters/src/endpoints/natural)
 to the real [Lobsters website](https://lobste.rs), Noria improves
 throughput supported by 5x:
 
@@ -95,7 +95,7 @@ instructions on how to use the library. You can also take a look at the
 [example Noria program](noria/examples/quickstart-async.rs) using Noria's async client
 API, or the same example using [the synchronous API](noria/examples/quickstart-sync.rs).
 You can also see a self-contained version that embeds `noria-server` (and
-doesn't require ZooKeeper) in [this example](noria-server/examples/local-server.rs).
+doesn't require ZooKeeper) in [this example](server/examples/local-server.rs).
 
 ### MySQL adapter
 
@@ -121,13 +121,13 @@ interface](https://github.com/mit-pdos/noria-ui).
 Noria is a large piece of software that spans many sub-crates and
 external tools (see links in the text above). Each sub-crate is
 responsible for a component of Noria's architecture, such as external
-API (`noria`), mapping SQL to data-flow (`noria-server/mir`), and
-executing data-flow operators (`noria-server/dataflow`). The code in
-`noria-server/src/` is the glue that ties these pieces together by
+API (`noria`), mapping SQL to data-flow (`server/mir`), and
+executing data-flow operators (`server/dataflow`). The code in
+`server/src/` is the glue that ties these pieces together by
 establishing materializations, scheduling data-flow work, orchestrating
 Noria program changes, handling failovers, etc.
 
-[`noria-server/src/lib.rs`](noria-server/src/lib.rs) has a pretty extensive comment at
+[`server/src/lib.rs`](server/src/lib.rs) has a pretty extensive comment at
 the top of it that goes through how the Noria internals fit together at
 an implementation level. While it occasionally lags behind, especially
 following larger changes, it should serve to get you familiarized with
@@ -146,36 +146,36 @@ The sub-crates each serve a distinct role:
    server like [`DataType`](basics/src/data.rs) (Noria's "value"
    type). These are annotated with `#[doc(hidden)]`, and should be easy
    to spot in `noria/src/lib.rs`.
- - [`noria-benchmarks/`](noria-benchmarks/): a collection of various
+ - [`applications/`](applications/): a collection of various
    Noria benchmarks. The most frequently used one is `vote`, which runs
    the vote benchmark from §8.2 of the OSDI paper. You can run it in a
    bunch of different ways (`--help` should be useful), and with many
    different backends. The `localsoup` backend is the one that's easiest
    to get up and running with.
- - [`noria-server/src/`](noria-server/src/): the Noria server, including
+ - [`server/src/`](server/src/): the Noria server, including
    high-level components such as RPC handling, domain scheduling,
    connection management, and all the controller operations (listening
    for heartbeats, handling failed workers, etc.). It contains two
    notable sub-crates:
 
-   - [`dataflow/`](noria-server/dataflow/): the code that implements the
+   - [`dataflow/`](server/dataflow/): the code that implements the
      internals of the data-flow graph. This includes implementations of
-     the different operators ([`ops/`](noria-server/dataflow/src/ops/)),
+     the different operators ([`ops/`](server/dataflow/src/ops/)),
      "special" operators like leaf views and sharders
-     ([`node/special/`](noria-server/dataflow/src/node/special/)),
-     implementations of view storage ([`state/`](noria-server/dataflow/src/state/)),
+     ([`node/special/`](server/dataflow/src/node/special/)),
+     implementations of view storage ([`state/`](server/dataflow/src/state/)),
      and the code that coordinates execution of control, data, and
      backfill messages within a thread domain
-     ([`domain/`](noria-server/dataflow/src/domain/)).
-   - [`mir/`](noria-server/mir/): the code that implements Noria's
+     ([`domain/`](server/dataflow/src/domain/)).
+   - [`mir/`](server/mir/): the code that implements Noria's
      SQL-to-dataflow mapping. This includes resolving columns and keys,
      creating dataflow operators, and detecting reuse opportunities, and
      triggering migrations to make changes after new SQL queries have
      been added. @ms705 is the primary author of this particular
      subcrate, and it builds largely upon
      [`nom-sql`](https://docs.rs/nom-sql/).
-   - [`common/`](noria-server/common/): data-structures that are shared
-     between the various `noria-server` sub-crates.
+   - [`common/`](server/common/): data-structures that are shared
+     between the various `server` sub-crates.
 
 To run the test suite, use:
 ```console

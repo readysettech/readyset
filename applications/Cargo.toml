@@ -1,82 +1,44 @@
 [package]
-name = "noria-benchmarks"
+name = "noria-applications"
 version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
 publish = false
 
-[features]
-orchestration = ["rusoto_core", "rusoto_sts", "tsunami"]
-
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
-noria = { path = "../noria-server", package = "noria-server" }
-futures-util = "0.3.0"
+clap = "2.25.0"
+failure = "0.1"
 futures-core = "0.3.0"
-nom-sql = "0.0.11"
-regex = "1.0.0"
+futures-util = "0.3.0"
+hdrhistogram = "7"
 itertools = "0.8"
+memcached-rs = "0.4.2"
+mysql_async = "0.22.0"
+nom-sql = "0.0.11"
+noria = { path = "../server", package = "noria-server" }
+rand = "0.7"
+rand_distr = "0.2"
+regex = "1.0.0"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
 slog-term = "2.4.0"
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-test = "0.2.0"
+tower-service = "0.3.0"
+trawler = "0.8"
 vec_map = { version = "0.8.0" }
-rayon = "1.0"
-ssh2 = "0.8"
-shellwords = "1"
+zipf = "6"
 zookeeper = "0.5.3"
 
-# for benchmarks
-# cli
-clap = "2.25.0"
-# distributions
-rand = "0.7"
-rand_distr = "0.2"
-zipf = "6"
-# sampling
-hdrhistogram = "7"
 # mssql
 # disabled due to lack of async/await support
 # futures-state-stream = "0.1"
 # tiberius = "0.3.1"
-# mysql
-mysql_async = "0.22.0"
-# memcached
-memcached-rs = "0.4.2"
-# mio
-mio = "0.6.9"
-# futures
-#futures = "0.1.14"
-#futures-cpupool = "0.1.8"
-tokio = { version = "0.2.0", features = ["full"] }
-tokio-test = "0.2.0"
-# ec2
-rusoto_core = { optional = true, version = "=0.43.0-beta.1" }
-rusoto_sts = { optional = true, version = "=0.43.0-beta.1" }
-tsunami = { optional = true, version = "=0.11.0-beta.2" }
-timeout-readwrite = "0.3"
-ctrlc = "3.1"
-failure = "0.1"
-tower-service = "0.3.0"
-#tokio-mock-task = "0.1"
 
 [[bin]]
 name = "vote"
 path = "vote/main.rs"
-
-[[bin]]
-name = "vote-distributed"
-path = "vote/distributed.rs"
-required-features = ["orchestration"]
-
-[[bin]]
-name = "vote-eintopf"
-path = "vote/eintopf.rs"
-required-features = ["orchestration"]
-
-[[bin]]
-name = "vote-orchestrator"
-path = "vote/orchestrator.rs"
-required-features = ["orchestration"]
 
 [[bin]]
 name = "tpc_w"
@@ -117,6 +79,10 @@ path = "vote-purge-stress/main.rs"
 [[bin]]
 name = "replay"
 path = "replay/main.rs"
+
+[[bin]]
+name = "lobsters"
+path = "lobsters/main.rs"
 
 #[[bin]]
 #name = "security-mysql"

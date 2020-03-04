@@ -1,0 +1,46 @@
+[package]
+name = "noria-orchestration"
+version = "0.3.0"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+edition = '2018'
+publish = false
+
+[dependencies]
+chrono = { version = "0.4.0", features = ["serde"] }
+clap = "2.25.0"
+ctrlc = "3.1"
+failure = "0.1"
+futures-core = "0.3.0"
+futures-util = "0.3.0"
+rand = "0.7"
+rayon = "1.0"
+regex = "1.0.0"
+rusoto_core = "=0.43.0-beta.1"
+rusoto_sts = "=0.43.0-beta.1"
+shellwords = "1"
+slog = "2.4.0"
+#slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.4.0"
+ssh2 = "0.8"
+timeout-readwrite = "0.3"
+tokio = { version = "0.2.0", features = ["full"] }
+tower-service = "0.3.0"
+tsunami = "=0.11.0-beta.2"
+vec_map = { version = "0.8.0" }
+yansi = "0.5"
+
+[[bin]]
+name = "vote-distributed"
+path = "src/vote-distributed.rs"
+
+[[bin]]
+name = "vote-eintopf"
+path = "src/eintopf.rs"
+
+[[bin]]
+name = "vote"
+path = "src/vote/main.rs"
+
+[[bin]]
+name = "lobsters-mysql"
+path = "src/lobsters-mysql.rs"

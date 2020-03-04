@@ -1,9 +1,9 @@
 [workspace]
 members = [
 	"noria",
-	"noria-server",
-	"noria-benchmarks",
-	"noria-benchmarks/lobsters",
+	"server",
+	"applications",
+	"orchestration",
 ]
 
 [profile.release]

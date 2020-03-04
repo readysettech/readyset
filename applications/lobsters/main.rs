@@ -18,9 +18,9 @@ use std::pin::Pin;
 use std::time;
 use trawler::{LobstersRequest, UserId};
 
-const ORIGINAL_SCHEMA: &'static str = include_str!("../db-schema/original.sql");
-const NORIA_SCHEMA: &'static str = include_str!("../db-schema/noria.sql");
-const NATURAL_SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
+const ORIGINAL_SCHEMA: &'static str = include_str!("db-schema/original.sql");
+const NORIA_SCHEMA: &'static str = include_str!("db-schema/noria.sql");
+const NATURAL_SCHEMA: &'static str = include_str!("db-schema/natural.sql");
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum Variant {
