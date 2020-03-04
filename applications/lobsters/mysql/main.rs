@@ -15,12 +15,14 @@ use my::prelude::*;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time;
-use trawler::{LobstersRequest, UserId};
+use tower_service::Service;
+use trawler::{LobstersRequest, TrawlerRequest};
 
-const ORIGINAL_SCHEMA: &'static str = include_str!("db-schema/original.sql");
-const NORIA_SCHEMA: &'static str = include_str!("db-schema/noria.sql");
-const NATURAL_SCHEMA: &'static str = include_str!("db-schema/natural.sql");
+const ORIGINAL_SCHEMA: &'static str = include_str!("../db-schema/original.sql");
+const NORIA_SCHEMA: &'static str = include_str!("../db-schema/noria.sql");
+const NATURAL_SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum Variant {
@@ -29,42 +31,25 @@ enum Variant {
     Natural,
 }
 
-#[derive(Clone, Debug)]
-enum MaybeConn {
-    Connected(my::Pool),
-    None(my::OptsBuilder),
+struct MysqlTrawlerBuilder {
+    opts: my::OptsBuilder,
+    variant: Variant,
+    simulate_shards: Option<u32>,
 }
 
-impl MaybeConn {
-    fn pool(&mut self) -> &mut my::Pool {
-        match *self {
-            MaybeConn::Connected(ref mut pool) => pool,
-            MaybeConn::None(ref opts) => {
-                let c = my::Pool::new(opts.clone());
-                let _ = std::mem::replace(self, MaybeConn::Connected(c));
-                self.pool()
-            }
-        }
-    }
+enum MaybeConn {
+    None,
+    Pending(my::futures::GetConn),
+    Ready(my::Conn),
 }
 
 struct MysqlTrawler {
-    c: MaybeConn,
+    c: my::Pool,
+    next_conn: MaybeConn,
     variant: Variant,
     tokens: HashMap<u32, String>,
     simulate_shards: Option<u32>,
     reset: bool,
-}
-impl MysqlTrawler {
-    fn new(variant: Variant, opts: my::OptsBuilder, simulate_shards: Option<u32>) -> Self {
-        MysqlTrawler {
-            c: MaybeConn::None(opts),
-            tokens: HashMap::new(),
-            simulate_shards,
-            variant,
-            reset: false,
-        }
-    }
 }
 /*
 impl Drop for MysqlTrawler {
@@ -76,65 +61,120 @@ impl Drop for MysqlTrawler {
 
 mod endpoints;
 
-impl trawler::LobstersClient for MysqlTrawler {
+impl Service<bool> for MysqlTrawlerBuilder {
+    type Response = MysqlTrawler;
     type Error = my::error::Error;
-    type RequestFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
-    type SetupFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
-    type ShutdownFuture = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
-
-    fn setup(&mut self) -> Self::SetupFuture {
-        let mut opts = if let MaybeConn::None(ref opts) = self.c {
-            opts.clone()
-        } else {
-            unreachable!("connection established before setup");
-        };
-        opts.pool_options(my::PoolOptions::with_constraints(
-            my::PoolConstraints::new(1, 1).unwrap(),
-        ));
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn call(&mut self, priming: bool) -> Self::Future {
+        let orig_opts = self.opts.clone();
+        let simulate_shards = self.simulate_shards;
         let variant = self.variant;
-        let db: String = my::Opts::from(opts.clone())
-            .get_db_name()
-            .unwrap()
-            .to_string();
-        let c = my::Pool::new(opts);
-        let db_drop = format!("DROP DATABASE {}", db);
-        let db_create = format!("CREATE DATABASE {}", db);
-        let db_use = format!("USE {}", db);
-        Box::pin(async move {
-            let mut c = c.get_conn().await?;
-            c = c.drop_query(&db_drop).await?;
-            c = c.drop_query(&db_create).await?;
-            c = c.drop_query(&db_use).await?;
-            let schema = match variant {
-                Variant::Original => ORIGINAL_SCHEMA,
-                Variant::Noria => NORIA_SCHEMA,
-                Variant::Natural => NATURAL_SCHEMA,
-            };
-            let mut current_q = String::new();
-            for line in schema.lines() {
-                if line.starts_with("--") || line.is_empty() {
-                    continue;
+
+        if priming {
+            // we need a special conn for setup
+            let mut opts = self.opts.clone();
+            opts.pool_options(my::PoolOptions::with_constraints(
+                my::PoolConstraints::new(1, 1).unwrap(),
+            ));
+            let db: String = my::Opts::from(opts.clone())
+                .get_db_name()
+                .unwrap()
+                .to_string();
+            let c = my::Pool::new(opts);
+            let db_drop = format!("DROP DATABASE {}", db);
+            let db_create = format!("CREATE DATABASE {}", db);
+            let db_use = format!("USE {}", db);
+            Box::pin(async move {
+                let mut c = c.get_conn().await?;
+                c = c.drop_query(&db_drop).await?;
+                c = c.drop_query(&db_create).await?;
+                c = c.drop_query(&db_use).await?;
+                let schema = match variant {
+                    Variant::Original => ORIGINAL_SCHEMA,
+                    Variant::Noria => NORIA_SCHEMA,
+                    Variant::Natural => NATURAL_SCHEMA,
+                };
+                let mut current_q = String::new();
+                for line in schema.lines() {
+                    if line.starts_with("--") || line.is_empty() {
+                        continue;
+                    }
+                    if !current_q.is_empty() {
+                        current_q.push_str(" ");
+                    }
+                    current_q.push_str(line);
+                    if current_q.ends_with(';') {
+                        c = c.drop_query(&current_q).await?;
+                        current_q.clear();
+                    }
                 }
-                if !current_q.is_empty() {
-                    current_q.push_str(" ");
+
+                Ok(MysqlTrawler {
+                    c: my::Pool::new(orig_opts.clone()),
+                    next_conn: MaybeConn::None,
+                    variant,
+                    tokens: Default::default(),
+                    simulate_shards,
+                    reset: false,
+                })
+            })
+        } else {
+            Box::pin(async move {
+                Ok(MysqlTrawler {
+                    c: my::Pool::new(orig_opts.clone()),
+                    next_conn: MaybeConn::None,
+                    variant,
+                    tokens: Default::default(),
+                    simulate_shards,
+                    reset: false,
+                })
+            })
+        }
+    }
+}
+
+impl Service<TrawlerRequest> for MysqlTrawler {
+    type Response = ();
+    type Error = my::error::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
+    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        loop {
+            match self.next_conn {
+                MaybeConn::None => {
+                    self.next_conn = MaybeConn::Pending(self.c.get_conn());
                 }
-                current_q.push_str(line);
-                if current_q.ends_with(';') {
-                    c = c.drop_query(&current_q).await?;
-                    current_q.clear();
+                MaybeConn::Pending(ref mut getconn) => {
+                    if let Poll::Ready(conn) = Pin::new(getconn).poll(cx)? {
+                        self.next_conn = MaybeConn::Ready(conn);
+                    } else {
+                        return Poll::Pending;
+                    }
+                }
+                MaybeConn::Ready(_) => {
+                    return Poll::Ready(Ok(()));
                 }
             }
-            Ok(())
-        })
+        }
     }
-
-    fn handle(
+    fn call(
         &mut self,
-        acting_as: Option<UserId>,
-        req: trawler::LobstersRequest,
-        priming: bool,
-    ) -> Self::RequestFuture {
-        let c = self.c.pool().get_conn();
+        TrawlerRequest {
+            user: acting_as,
+            page: req,
+            is_priming: priming,
+            ..
+        }: TrawlerRequest,
+    ) -> Self::Future {
+        let c = match std::mem::replace(&mut self.next_conn, MaybeConn::None) {
+            MaybeConn::None | MaybeConn::Pending(_) => {
+                unreachable!("call called without poll_ready")
+            }
+            MaybeConn::Ready(c) => c,
+        };
+        let c = futures_util::future::ready(Ok(c));
 
         let c = if priming {
             Either::Right(c)
@@ -292,14 +332,15 @@ impl trawler::LobstersClient for MysqlTrawler {
             }
         })
     }
+}
 
+impl trawler::AsyncShutdown for MysqlTrawler {
+    type ShutdownFuture = Pin<Box<dyn Future<Output = ()>>>;
     fn shutdown(mut self) -> Self::ShutdownFuture {
-        let _ = self.c.pool();
-        if let MaybeConn::Connected(pool) = self.c {
-            Box::pin(pool.disconnect())
-        } else {
-            unreachable!();
-        }
+        let _ = std::mem::replace(&mut self.next_conn, MaybeConn::None);
+        Box::pin(async move {
+            let _ = self.c.disconnect().await.unwrap();
+        })
     }
 }
 
@@ -405,7 +446,11 @@ fn main() {
     opts.pool_options(my::PoolOptions::with_constraints(
         my::PoolConstraints::new(in_flight, in_flight).unwrap(),
     ));
-    let s = MysqlTrawler::new(variant, opts.into(), simulate_shards);
+    let s = MysqlTrawlerBuilder {
+        variant,
+        opts: opts.into(),
+        simulate_shards,
+    };
 
     wl.run(s, args.is_present("prime"));
 }
