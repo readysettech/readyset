@@ -10,9 +10,8 @@ macro_rules! format {
 
 use clap::value_t_or_exit;
 use clap::{App, Arg};
-use futures_util::future::{ready, Either, TryFutureExt};
+use futures_util::future::{Either, TryFutureExt};
 use my::prelude::*;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -47,7 +46,6 @@ struct MysqlTrawler {
     c: my::Pool,
     next_conn: MaybeConn,
     variant: Variant,
-    tokens: HashMap<u32, String>,
     simulate_shards: Option<u32>,
     reset: bool,
 }
@@ -116,7 +114,6 @@ impl Service<bool> for MysqlTrawlerBuilder {
                     c: my::Pool::new(orig_opts.clone()),
                     next_conn: MaybeConn::None,
                     variant,
-                    tokens: Default::default(),
                     simulate_shards,
                     reset: false,
                 })
@@ -127,7 +124,6 @@ impl Service<bool> for MysqlTrawlerBuilder {
                     c: my::Pool::new(orig_opts.clone()),
                     next_conn: MaybeConn::None,
                     variant,
-                    tokens: Default::default(),
                     simulate_shards,
                     reset: false,
                 })
@@ -175,25 +171,6 @@ impl Service<TrawlerRequest> for MysqlTrawler {
             MaybeConn::Ready(c) => c,
         };
         let c = futures_util::future::ready(Ok(c));
-
-        let c = if priming {
-            Either::Right(c)
-        } else if let Some(u) = acting_as {
-            let tokens = self.tokens.get(&u).cloned();
-            Either::Left(c.and_then(move |c| {
-                if let Some(u) = tokens {
-                    Either::Left(c.drop_exec(
-                        "SELECT users.* \
-                         FROM users WHERE users.session_token = ?",
-                        (u,),
-                    ))
-                } else {
-                    Either::Right(ready(Ok(c)))
-                }
-            }))
-        } else {
-            Either::Right(c)
-        };
 
         // Give shim a heads up that we have finished priming.
         let c = if !priming {
