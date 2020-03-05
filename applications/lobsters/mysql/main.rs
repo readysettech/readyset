@@ -322,7 +322,7 @@ impl trawler::AsyncShutdown for MysqlTrawler {
 }
 
 fn main() {
-    let args = App::new("trawler-mysql")
+    let args = App::new("lobsters-mysql")
         .version("0.1")
         .about("Benchmark a lobste.rs Rails installation using MySQL directly")
         .arg(
