@@ -312,8 +312,8 @@ impl Service<TrawlerRequest> for MysqlTrawler {
 }
 
 impl trawler::AsyncShutdown for MysqlTrawler {
-    type ShutdownFuture = Pin<Box<dyn Future<Output = ()>>>;
-    fn shutdown(mut self) -> Self::ShutdownFuture {
+    type Future = Pin<Box<dyn Future<Output = ()>>>;
+    fn shutdown(mut self) -> Self::Future {
         let _ = std::mem::replace(&mut self.next_conn, MaybeConn::None);
         Box::pin(async move {
             let _ = self.c.disconnect().await.unwrap();
