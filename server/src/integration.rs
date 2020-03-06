@@ -1434,7 +1434,7 @@ async fn migrate_added_columns() {
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
-            .filter(|&r| r == &vec![3.into(), id.clone()])
+            .filter(|r| r == &vec![3.into(), id.clone()])
             .count(),
         2
     );

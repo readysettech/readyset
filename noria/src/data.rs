@@ -426,7 +426,7 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
     }
 }
 
-impl<'a> Into<String> for &'a DataType {
+impl Into<String> for &'_ DataType {
     fn into(self) -> String {
         let cow: Cow<'_, str> = self.into();
         cow.to_string()
@@ -461,17 +461,7 @@ impl Into<i64> for DataType {
     }
 }
 
-impl Into<u64> for DataType {
-    fn into(self) -> u64 {
-        match self {
-            DataType::UnsignedBigInt(s) => s,
-            DataType::UnsignedInt(s) => u64::from(s),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<'a> Into<i128> for &'a DataType {
+impl Into<i128> for &'_ DataType {
     fn into(self) -> i128 {
         match *self {
             DataType::BigInt(s) => i128::from(s),
@@ -483,7 +473,7 @@ impl<'a> Into<i128> for &'a DataType {
     }
 }
 
-impl<'a> Into<i64> for &'a DataType {
+impl Into<i64> for &'_ DataType {
     fn into(self) -> i64 {
         match *self {
             DataType::BigInt(s) => s,
@@ -493,7 +483,7 @@ impl<'a> Into<i64> for &'a DataType {
     }
 }
 
-impl<'a> Into<u64> for &'a DataType {
+impl Into<u64> for &'_ DataType {
     fn into(self) -> u64 {
         match *self {
             DataType::UnsignedBigInt(s) => s,
@@ -503,9 +493,9 @@ impl<'a> Into<u64> for &'a DataType {
     }
 }
 
-impl Into<i32> for DataType {
+impl Into<i32> for &'_ DataType {
     fn into(self) -> i32 {
-        if let DataType::Int(s) = self {
+        if let DataType::Int(s) = *self {
             s
         } else {
             unreachable!();
@@ -513,7 +503,17 @@ impl Into<i32> for DataType {
     }
 }
 
-impl<'a> Into<f64> for &'a DataType {
+impl Into<u32> for &'_ DataType {
+    fn into(self) -> u32 {
+        if let DataType::UnsignedInt(s) = *self {
+            s
+        } else {
+            unreachable!()
+        }
+    }
+}
+
+impl Into<f64> for &'_ DataType {
     fn into(self) -> f64 {
         match *self {
             DataType::Real(i, f) => i as f64 + f64::from(f) / FLOAT_PRECISION,

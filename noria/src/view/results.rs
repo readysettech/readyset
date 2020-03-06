@@ -13,6 +13,10 @@ impl Results {
     pub(crate) fn new(results: Vec<Vec<DataType>>, columns: Arc<[String]>) -> Self {
         Self { results, columns }
     }
+
+    pub fn iter(&self) -> ResultIter<'_> {
+        self.into_iter()
+    }
 }
 
 impl PartialEq<[Vec<DataType>]> for Results {
@@ -27,14 +31,20 @@ impl PartialEq<Vec<Vec<DataType>>> for Results {
     }
 }
 
+impl PartialEq<&'_ Vec<Vec<DataType>>> for Results {
+    fn eq(&self, other: &&Vec<Vec<DataType>>) -> bool {
+        &self.results == *other
+    }
+}
+
 #[derive(PartialEq, Eq)]
 pub struct ResultRow<'a> {
-    result: &'a [DataType],
+    result: &'a Vec<DataType>,
     columns: &'a [String],
 }
 
 impl<'a> ResultRow<'a> {
-    fn new(row: &'a [DataType], columns: &'a [String]) -> Self {
+    fn new(row: &'a Vec<DataType>, columns: &'a [String]) -> Self {
         Self {
             result: row,
             columns,
@@ -60,16 +70,28 @@ impl std::ops::Index<&'_ str> for ResultRow<'_> {
 impl<'a> ResultRow<'a> {
     pub fn get<T>(&self, field: &str) -> Option<T>
     where
-        T: From<&'a DataType>,
+        &'a DataType: Into<T>,
     {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some(T::from(&self.result[index]))
+        Some((&self.result[index]).into())
     }
 }
 
 impl PartialEq<[DataType]> for ResultRow<'_> {
     fn eq(&self, other: &[DataType]) -> bool {
+        &self.result[..] == other
+    }
+}
+
+impl PartialEq<Vec<DataType>> for ResultRow<'_> {
+    fn eq(&self, other: &Vec<DataType>) -> bool {
         self.result == other
+    }
+}
+
+impl PartialEq<&'_ Vec<DataType>> for ResultRow<'_> {
+    fn eq(&self, other: &&Vec<DataType>) -> bool {
+        &self.result == other
     }
 }
 
@@ -208,6 +230,12 @@ impl PartialEq<Vec<DataType>> for Row {
     }
 }
 
+impl PartialEq<&'_ Vec<DataType>> for Row {
+    fn eq(&self, other: &&Vec<DataType>) -> bool {
+        &self.row == *other
+    }
+}
+
 impl fmt::Debug for Row {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_map()
@@ -255,9 +283,9 @@ impl std::ops::Index<&'_ str> for Row {
 impl Row {
     pub fn get<T>(&self, field: &str) -> Option<T>
     where
-        T: for<'a> From<&'a DataType>,
+        for<'a> &'a DataType: Into<T>,
     {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some(T::from(&self.row[index]))
+        Some((&self.row[index]).into())
     }
 }
