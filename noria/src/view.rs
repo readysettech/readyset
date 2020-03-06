@@ -98,7 +98,7 @@ pub enum ReadQuery {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply {
     /// Errors if view isn't ready yet.
-    Normal(Result<Vec<Datas>, ()>),
+    Normal(Result<Vec<Vec<Vec<DataType>>>, ()>),
     /// Read size of view
     Size(usize),
 }
@@ -165,7 +165,7 @@ impl ViewBuilder {
         Ok(View {
             node,
             schema,
-            columns,
+            columns: Arc::from(columns),
             shard_addrs: addrs,
             shards: conns,
             tracer,
@@ -180,7 +180,7 @@ impl ViewBuilder {
 #[derive(Clone)]
 pub struct View {
     node: NodeIndex,
-    columns: Vec<String>,
+    columns: Arc<[String]>,
     schema: Option<Vec<ColumnSpecification>>,
 
     shards: Vec<ViewRpc>,
@@ -199,10 +199,13 @@ impl fmt::Debug for View {
     }
 }
 
+pub(crate) mod results;
+use self::results::{Results, Row};
+
 impl Service<(Vec<Vec<DataType>>, bool)> for View {
-    type Response = Vec<Datas>;
+    type Response = Vec<Results>;
     type Error = ViewError;
-    type Future = impl Future<Output = Result<Vec<Datas>, ViewError>> + Send;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
@@ -222,6 +225,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
             None
         };
 
+        let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
@@ -236,9 +240,12 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                 self.shards[0]
                     .call(request)
                     .map_err(ViewError::from)
-                    .and_then(|reply| async move {
+                    .and_then(move |reply| async move {
                         match reply.v {
-                            ReadReply::Normal(Ok(rows)) => Ok(rows),
+                            ReadReply::Normal(Ok(rows)) => Ok(rows
+                                .into_iter()
+                                .map(|rows| Results::new(rows, Arc::clone(&columns)))
+                                .collect()),
                             ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
                             _ => unreachable!(),
                         }
@@ -302,7 +309,12 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                         })
                 })
                 .collect::<FuturesUnordered<_>>()
-                .try_concat(),
+                .try_concat()
+                .map_ok(move |rows| {
+                    rows.into_iter()
+                        .map(|rows| Results::new(rows, Arc::clone(&columns)))
+                        .collect()
+                }),
         )
     }
 }
@@ -311,7 +323,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
 impl View {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[String] {
-        self.columns.as_slice()
+        &*self.columns
     }
 
     /// Get the schema definition of this view.
@@ -358,7 +370,7 @@ impl View {
         &mut self,
         keys: Vec<Vec<DataType>>,
         block: bool,
-    ) -> Result<Vec<Datas>, ViewError> {
+    ) -> Result<Vec<Results>, ViewError> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
         self.call((keys, block)).await
     }
@@ -366,9 +378,22 @@ impl View {
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Datas, ViewError> {
+    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
         // TODO: Optimized version of this function?
         let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
         Ok(rs.into_iter().next().unwrap())
+    }
+
+    /// Retrieve the first query result for the given parameter value.
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
+    pub async fn lookup_first(
+        &mut self,
+        key: &[DataType],
+        block: bool,
+    ) -> Result<Option<Row>, ViewError> {
+        // TODO: Optimized version of this function?
+        let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
+        Ok(rs.into_iter().next().unwrap().into_iter().next())
     }
 }

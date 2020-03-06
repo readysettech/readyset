@@ -1,0 +1,263 @@
+use crate::data::*;
+use std::fmt;
+use std::ops::Deref;
+use std::sync::Arc;
+
+#[derive(PartialEq, Eq)]
+pub struct Results {
+    results: Vec<Vec<DataType>>,
+    columns: Arc<[String]>,
+}
+
+impl Results {
+    pub(crate) fn new(results: Vec<Vec<DataType>>, columns: Arc<[String]>) -> Self {
+        Self { results, columns }
+    }
+}
+
+impl PartialEq<[Vec<DataType>]> for Results {
+    fn eq(&self, other: &[Vec<DataType>]) -> bool {
+        self.results == other
+    }
+}
+
+impl PartialEq<Vec<Vec<DataType>>> for Results {
+    fn eq(&self, other: &Vec<Vec<DataType>>) -> bool {
+        &self.results == other
+    }
+}
+
+#[derive(PartialEq, Eq)]
+pub struct ResultRow<'a> {
+    result: &'a [DataType],
+    columns: &'a [String],
+}
+
+impl<'a> ResultRow<'a> {
+    fn new(row: &'a [DataType], columns: &'a [String]) -> Self {
+        Self {
+            result: row,
+            columns,
+        }
+    }
+}
+
+impl std::ops::Index<usize> for ResultRow<'_> {
+    type Output = DataType;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.result[index]
+    }
+}
+
+impl std::ops::Index<&'_ str> for ResultRow<'_> {
+    type Output = DataType;
+    fn index(&self, index: &'_ str) -> &Self::Output {
+        let index = self.columns.iter().position(|col| col == index).unwrap();
+        &self.result[index]
+    }
+}
+
+impl<'a> ResultRow<'a> {
+    pub fn get<T>(&self, field: &str) -> Option<T>
+    where
+        T: From<&'a DataType>,
+    {
+        let index = self.columns.iter().position(|col| col == field)?;
+        Some(T::from(&self.result[index]))
+    }
+}
+
+impl PartialEq<[DataType]> for ResultRow<'_> {
+    fn eq(&self, other: &[DataType]) -> bool {
+        self.result == other
+    }
+}
+
+impl fmt::Debug for ResultRow<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entries(self.columns.iter().zip(self.result.iter()))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Results {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_list()
+            .entries(self.results.iter().map(|r| ResultRow {
+                result: r,
+                columns: &self.columns,
+            }))
+            .finish()
+    }
+}
+
+impl Deref for Results {
+    type Target = [Vec<DataType>];
+    fn deref(&self) -> &Self::Target {
+        &self.results
+    }
+}
+
+impl AsRef<[Vec<DataType>]> for Results {
+    fn as_ref(&self) -> &[Vec<DataType>] {
+        &self.results
+    }
+}
+
+pub struct ResultIter<'a> {
+    results: std::slice::Iter<'a, Vec<DataType>>,
+    columns: &'a [String],
+}
+
+impl<'a> IntoIterator for &'a Results {
+    type Item = ResultRow<'a>;
+    type IntoIter = ResultIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        ResultIter {
+            results: self.results.iter(),
+            columns: &self.columns,
+        }
+    }
+}
+
+impl<'a> Iterator for ResultIter<'a> {
+    type Item = ResultRow<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(ResultRow::new(self.results.next()?, &self.columns))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.results.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ResultIter<'_> {}
+impl DoubleEndedIterator for ResultIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        Some(ResultRow::new(self.results.next_back()?, &self.columns))
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        Some(ResultRow::new(self.results.nth_back(n)?, &self.columns))
+    }
+}
+
+pub struct ResultIntoIter {
+    results: std::vec::IntoIter<Vec<DataType>>,
+    columns: Arc<[String]>,
+}
+
+impl IntoIterator for Results {
+    type Item = Row;
+    type IntoIter = ResultIntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        ResultIntoIter {
+            results: self.results.into_iter(),
+            columns: self.columns,
+        }
+    }
+}
+
+impl Iterator for ResultIntoIter {
+    type Item = Row;
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(Row::new(self.results.next()?, &self.columns))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.results.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ResultIntoIter {}
+impl DoubleEndedIterator for ResultIntoIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        Some(Row::new(self.results.next_back()?, &self.columns))
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        Some(Row::new(self.results.nth_back(n)?, &self.columns))
+    }
+}
+
+#[derive(PartialEq, Eq)]
+pub struct Row {
+    row: Vec<DataType>,
+    columns: Arc<[String]>,
+}
+
+impl Row {
+    fn new(row: Vec<DataType>, columns: &Arc<[String]>) -> Self {
+        Self {
+            row,
+            columns: Arc::clone(columns),
+        }
+    }
+}
+
+impl PartialEq<[DataType]> for Row {
+    fn eq(&self, other: &[DataType]) -> bool {
+        self.row == other
+    }
+}
+
+impl PartialEq<Vec<DataType>> for Row {
+    fn eq(&self, other: &Vec<DataType>) -> bool {
+        &self.row == other
+    }
+}
+
+impl fmt::Debug for Row {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entries(self.columns.iter().zip(self.row.iter()))
+            .finish()
+    }
+}
+
+impl IntoIterator for Row {
+    type Item = DataType;
+    type IntoIter = std::vec::IntoIter<DataType>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.row.into_iter()
+    }
+}
+
+impl AsRef<[DataType]> for Row {
+    fn as_ref(&self) -> &[DataType] {
+        &self.row[..]
+    }
+}
+
+impl Deref for Row {
+    type Target = [DataType];
+    fn deref(&self) -> &Self::Target {
+        &self.row[..]
+    }
+}
+
+impl std::ops::Index<usize> for Row {
+    type Output = DataType;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.row[index]
+    }
+}
+
+impl std::ops::Index<&'_ str> for Row {
+    type Output = DataType;
+    fn index(&self, index: &'_ str) -> &Self::Output {
+        let index = self.columns.iter().position(|col| col == index).unwrap();
+        &self.row[index]
+    }
+}
+
+impl Row {
+    pub fn get<T>(&self, field: &str) -> Option<T>
+    where
+        T: for<'a> From<&'a DataType>,
+    {
+        let index = self.columns.iter().position(|col| col == field)?;
+        Some(T::from(&self.row[index]))
+    }
+}

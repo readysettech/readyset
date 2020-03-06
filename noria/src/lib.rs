@@ -103,7 +103,7 @@
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(type_alias_impl_trait)]
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
@@ -147,6 +147,10 @@ pub mod prelude {
     pub use super::ControllerHandle;
     pub use super::Table;
     pub use super::View;
+}
+
+pub mod results {
+    pub use super::view::results::{ResultRow, Results, Row};
 }
 
 /// Noria errors.

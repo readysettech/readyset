@@ -282,6 +282,18 @@ impl Hash for DataType {
     }
 }
 
+impl<T> From<Option<T>> for DataType
+where
+    DataType: From<T>,
+{
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(t) => DataType::from(t),
+            None => DataType::None,
+        }
+    }
+}
+
 impl From<i128> for DataType {
     fn from(s: i128) -> Self {
         if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
@@ -375,6 +387,21 @@ impl From<Literal> for DataType {
         }
     }
 }
+
+/*
+impl<'a, T> Into<Option<T>> for &'a DataType
+where
+    T: From<&'a DataType>,
+{
+    fn into(self) -> Option<T> {
+        if let DataType::None = self {
+            None
+        } else {
+            Some(T::from(self))
+        }
+    }
+}
+*/
 
 use std::borrow::Cow;
 impl<'a> Into<Cow<'a, str>> for &'a DataType {
@@ -660,9 +687,6 @@ impl From<Vec<DataType>> for TableOperation {
         TableOperation::Insert(other)
     }
 }
-
-/// Represents a set of records returned from a query.
-pub(crate) type Datas = Vec<Vec<DataType>>;
 
 #[cfg(test)]
 mod tests {
