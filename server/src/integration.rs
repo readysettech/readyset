@@ -120,6 +120,15 @@ async fn it_works_basic() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
+    // check that looking up columns by name works
+    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap() == 1));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 2));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 4));
+    // same with index
+    assert!(res.iter().all(|r| r["a"] == id));
+    assert!(res.iter().any(|r| r["b"] == 2.into()));
+    assert!(res.iter().any(|r| r["b"] == 4.into()));
+
     // Delete first record
     muta.delete(vec![id.clone()]).await.unwrap();
 
@@ -1425,7 +1434,7 @@ async fn migrate_added_columns() {
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
-            .filter(|&r| r == &vec![3.into(), id.clone()])
+            .filter(|r| r == &vec![3.into(), id.clone()])
             .count(),
         2
     );

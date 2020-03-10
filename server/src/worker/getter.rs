@@ -53,7 +53,7 @@ impl Getter {
     }
 
     /// Query for the results for the given key, optionally blocking if it is not yet available.
-    fn lookup(&self, q: &[DataType], block: bool) -> Result<Datas, ()> {
+    fn lookup(&self, q: &[DataType], block: bool) -> Result<Vec<Vec<DataType>>, ()> {
         self.lookup_map(
             q,
             |rs| {

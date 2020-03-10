@@ -23,7 +23,7 @@ evmap = { version = "=9.0.0-beta.2", features = ["indexed"] }
 hashbag = "0.1.2"
 fnv = "1.0.5"
 futures-util = "0.3.0"
-itertools = "0.8"
+itertools = "0.9"
 nom-sql = "0.0.11"
 indexmap = "1.1.0"
 rand = "0.7"

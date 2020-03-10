@@ -149,6 +149,11 @@ pub mod prelude {
     pub use super::View;
 }
 
+/// Wrapper types for Noria query results.
+pub mod results {
+    pub use super::view::results::{ResultRow, Results, Row};
+}
+
 /// Noria errors.
 pub mod error {
     pub use crate::table::TableError;
