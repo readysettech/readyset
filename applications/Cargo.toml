@@ -9,6 +9,7 @@ publish = false
 chrono = { version = "0.4.0", features = ["serde"] }
 clap = "2.25.0"
 failure = "0.1"
+flurry = "0.2"
 futures-core = "0.3.0"
 futures-util = "0.3.0"
 hdrhistogram = "7"
@@ -83,6 +84,10 @@ path = "replay/main.rs"
 [[bin]]
 name = "lobsters-mysql"
 path = "lobsters/mysql/main.rs"
+
+[[bin]]
+name = "lobsters-noria"
+path = "lobsters/noria/main.rs"
 
 #[[bin]]
 #name = "security-mysql"

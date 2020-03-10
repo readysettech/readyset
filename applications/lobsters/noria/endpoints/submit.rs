@@ -1,0 +1,83 @@
+use chrono;
+use std::future::Future;
+use trawler::{StoryId, UserId};
+
+pub(crate) async fn handle<F>(
+    c: F,
+    acting_as: Option<UserId>,
+    id: StoryId,
+    title: String,
+    priming: bool,
+) -> Result<(my::Conn, bool), my::error::Error>
+where
+    F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
+{
+    let c = c.await?;
+    let user = acting_as.unwrap();
+
+    // check that tags are active
+    let tag = c.view("submit_1").await?.lookup(&[], true).await?;
+    let tag = tag.unwrap().get::<u32>("id");
+
+    if !priming {
+        // check that story id isn't already assigned
+        let _ = c
+            .view("submit_2")
+            .await?
+            .lookup(&[::std::str::from_utf8(&id[..]).unwrap()], true)
+            .await?;
+    }
+
+    // TODO: check for similar stories if there's a url
+    // SELECT  `stories`.*
+    // FROM `stories`
+    // WHERE `stories`.`url` IN (
+    //  'https://google.com/test',
+    //  'http://google.com/test',
+    //  'https://google.com/test/',
+    //  'http://google.com/test/',
+    //  ... etc
+    // )
+    // AND (is_expired = 0 OR is_moderated = 1)
+
+    // TODO
+    // real impl queries `tags` and `users` again here..?
+
+    // TODO: real impl checks *new* short_id and duplicate urls *again*
+    // TODO: sometimes submit url
+
+    // NOTE: MySQL technically does everything inside this and_then in a transaction,
+    // but let's be nice to it
+    let tbl = c.table("stories").await?;
+    tbl.insert(vec![
+        chrono::Local::now().naive_local().into(), // created_at
+        user.into(),                               // user_id
+        title.into(),                              // title
+        "body".into(),                             // description
+        ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
+        "body".into(),                             // markeddown_description
+    ])
+    .await?;
+    // TODO: last_insert_id
+    let story = 1;
+
+    c.table("taggings")
+        .await?
+        .insert(vec![story.into(), tag.into()])
+        .await?;
+
+    if !priming {
+        let _ = c
+            .view("submit_3")
+            .await?
+            .lookup(&[user.into(), story.into()], true)
+            .await?;
+    }
+
+    c.table("votes")
+        .await?
+        .insert(vec![user.into(), story.into(), 1.into()])
+        .await?;
+
+    Ok((c, false))
+}
