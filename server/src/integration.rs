@@ -121,9 +121,9 @@ async fn it_works_basic() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // check that looking up columns by name works
-    assert!(res.iter().all(|r| r.get::<u32>("a").unwrap() == 1));
-    assert!(res.iter().any(|r| r.get::<u32>("b").unwrap() == 2));
-    assert!(res.iter().any(|r| r.get::<u32>("b").unwrap() == 4));
+    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap() == 1));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 2));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 4));
     // same with index
     assert!(res.iter().all(|r| r["a"] == id));
     assert!(res.iter().any(|r| r["b"] == 2.into()));

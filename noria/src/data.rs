@@ -421,7 +421,7 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
                     String::from_utf8_lossy(&bts[..])
                 }
             }
-            _ => unreachable!(),
+            _ => panic!("attempted to convert a {:?} to a string", self),
         }
     }
 }
@@ -446,7 +446,7 @@ impl Into<i128> for DataType {
             DataType::UnsignedBigInt(s) => i128::from(s),
             DataType::Int(s) => i128::from(s),
             DataType::UnsignedInt(s) => i128::from(s),
-            _ => unreachable!(),
+            _ => panic!("attempted to convert a {:?} to an i128", self),
         }
     }
 }
@@ -456,7 +456,8 @@ impl Into<i64> for DataType {
         match self {
             DataType::BigInt(s) => s,
             DataType::Int(s) => i64::from(s),
-            _ => unreachable!(),
+            DataType::UnsignedInt(s) => i64::from(s),
+            _ => panic!("attempted to convert a {:?} to an i64", self),
         }
     }
 }
@@ -468,7 +469,7 @@ impl Into<i128> for &'_ DataType {
             DataType::UnsignedBigInt(s) => i128::from(s),
             DataType::Int(s) => i128::from(s),
             DataType::UnsignedInt(s) => i128::from(s),
-            _ => unreachable!(),
+            _ => panic!("attempted to convert a {:?} to an i128", self),
         }
     }
 }
@@ -478,7 +479,8 @@ impl Into<i64> for &'_ DataType {
         match *self {
             DataType::BigInt(s) => s,
             DataType::Int(s) => i64::from(s),
-            _ => unreachable!(),
+            DataType::UnsignedInt(s) => i64::from(s),
+            _ => panic!("attempted to convert a {:?} to an i64", self),
         }
     }
 }
@@ -488,7 +490,7 @@ impl Into<u64> for &'_ DataType {
         match *self {
             DataType::UnsignedBigInt(s) => s,
             DataType::UnsignedInt(s) => u64::from(s),
-            _ => unreachable!(),
+            _ => panic!("attempted to convert a {:?} to a u64", self),
         }
     }
 }
@@ -498,7 +500,7 @@ impl Into<i32> for &'_ DataType {
         if let DataType::Int(s) = *self {
             s
         } else {
-            unreachable!();
+            panic!("attempted to convert a {:?} to a i32", self)
         }
     }
 }
@@ -508,7 +510,7 @@ impl Into<u32> for &'_ DataType {
         if let DataType::UnsignedInt(s) = *self {
             s
         } else {
-            unreachable!()
+            panic!("attempted to convert a {:?} to a u32", self)
         }
     }
 }
@@ -519,7 +521,7 @@ impl Into<f64> for &'_ DataType {
             DataType::Real(i, f) => i as f64 + f64::from(f) / FLOAT_PRECISION,
             DataType::Int(i) => f64::from(i),
             DataType::BigInt(i) => i as f64,
-            _ => unreachable!(),
+            _ => panic!("attempted to convert a {:?} to an f64", self),
         }
     }
 }
