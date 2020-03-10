@@ -9,7 +9,6 @@ use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
 use hyper::{self, Method, StatusCode};
-use mio::net::TcpListener;
 use nom_sql::ColumnSpecification;
 use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
@@ -49,7 +48,6 @@ pub(super) struct ControllerInner {
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
     pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
-    pub(super) debug_channel: Option<SocketAddr>,
 
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
@@ -467,7 +465,6 @@ impl ControllerInner {
             domains: Default::default(),
             domain_nodes: Default::default(),
             channel_coordinator: cc,
-            debug_channel: None,
             epoch: state.epoch,
 
             remap: HashMap::default(),
@@ -480,20 +477,6 @@ impl ControllerInner {
 
             replies: DomainReplies(drx),
         }
-    }
-
-    /// Create a global channel for receiving tracer events.
-    ///
-    /// Only domains created after this method is called will be able to send trace events.
-    ///
-    /// This function may only be called once because the receiving end it returned.
-    #[allow(unused)]
-    fn create_tracer_channel(&mut self) -> TcpListener {
-        assert!(self.debug_channel.is_none());
-        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
-        self.debug_channel = Some(listener.local_addr().unwrap());
-        listener
     }
 
     /// Controls the persistence mode, and parameters related to persistence.

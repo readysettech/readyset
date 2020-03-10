@@ -32,7 +32,6 @@ futures-sink = "0.3.0"
 futures-executor = "0.3.0" # for block_on
 pin-project = "0.4.0"
 hyper = { version = "0.13.0", features = [ "stream" ] }
-mio = "0.6.9"
 nom = "5"
 nom-sql = "0.0.11"
 petgraph = { version = "0.5", features = ["serde-1"] }
