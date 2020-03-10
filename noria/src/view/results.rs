@@ -11,7 +11,10 @@ pub struct Results {
 }
 
 impl Results {
-    pub(crate) fn new(results: Vec<Vec<DataType>>, columns: Arc<[String]>) -> Self {
+    // NOTE: should be pub(crate), but that triggers:
+    // https://github.com/rust-lang/rust/issues/69785
+    #[doc(hidden)]
+    pub fn new(results: Vec<Vec<DataType>>, columns: Arc<[String]>) -> Self {
         Self { results, columns }
     }
 
