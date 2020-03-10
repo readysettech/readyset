@@ -390,11 +390,13 @@ mod tests {
 
         let n = 1_000;
         let (r, mut w) = new(1, &[0]);
-        thread::spawn(move || {
+        let jh = thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
                 w.swap();
             }
+            // important that we don't drop w here, or the loop below never exits
+            w
         });
 
         for i in 0..n {
@@ -408,6 +410,8 @@ mod tests {
                 }
             }
         }
+
+        jh.join().unwrap();
     }
 
     #[test]
