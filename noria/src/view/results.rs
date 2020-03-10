@@ -3,6 +3,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
+/// A result set from a Noria query.
 #[derive(PartialEq, Eq)]
 pub struct Results {
     results: Vec<Vec<DataType>>,
@@ -14,6 +15,7 @@ impl Results {
         Self { results, columns }
     }
 
+    /// Iterate over references to the returned rows.
     pub fn iter(&self) -> ResultIter<'_> {
         self.into_iter()
     }
@@ -37,6 +39,10 @@ impl PartialEq<&'_ Vec<Vec<DataType>>> for Results {
     }
 }
 
+/// A reference to a row in a result set.
+///
+/// You can access fields either by numerical index or by field index.
+/// If you want to also perform type conversion, use [`ResultRow::get`].
 #[derive(PartialEq, Eq)]
 pub struct ResultRow<'a> {
     result: &'a Vec<DataType>,
@@ -68,6 +74,11 @@ impl std::ops::Index<&'_ str> for ResultRow<'_> {
 }
 
 impl<'a> ResultRow<'a> {
+    /// Retrieve the field of the result by the given name as a `T`.
+    ///
+    /// Returns `None` if the given field does not exist.
+    ///
+    /// Panics if the value at the given field cannot be turned into a `T`.
     pub fn get<T>(&self, field: &str) -> Option<T>
     where
         &'a DataType: Into<T>,
@@ -203,6 +214,10 @@ impl DoubleEndedIterator for ResultIntoIter {
     }
 }
 
+/// A single row from a result set.
+///
+/// You can access fields either by numerical index or by field index.
+/// If you want to also perform type conversion, use [`Row::get`].
 #[derive(PartialEq, Eq)]
 pub struct Row {
     row: Vec<DataType>,
@@ -281,6 +296,11 @@ impl std::ops::Index<&'_ str> for Row {
 }
 
 impl Row {
+    /// Retrieve the field of the result by the given name as a `T`.
+    ///
+    /// Returns `None` if the given field does not exist.
+    ///
+    /// Panics if the value at the given field cannot be turned into a `T`.
     pub fn get<T>(&self, field: &str) -> Option<T>
     where
         for<'a> &'a DataType: Into<T>,
