@@ -17,16 +17,16 @@ where
     let comment = c
         .view("comment_vote_1")
         .await?
-        .lookup(&[::std::str::from_utf8(&comment[..]).unwrap()])
-        .await?;
+        .lookup_first(&[::std::str::from_utf8(&comment[..]).unwrap().into()], true)
+        .await?
+        .unwrap();
 
-    let comment = comment.unwrap();
-    let sid = comment.get::<u32, _>("story_id").unwrap();
-    let comment = comment.get::<u32, _>("id").unwrap();
+    let sid = comment["story_id"];
+    let comment = comment["id"];
     let _ = c
         .view("comment_vote_2")
         .await?
-        .lookup(&[user, sid, comment])
+        .lookup(&[user.into(), sid, comment], true)
         .await?;
 
     // TODO: do something else if user has already voted
@@ -36,13 +36,14 @@ where
     // but let's be nice to it
     let tbl = c.table("vote").await?;
     tbl.insert(vec![
-        user,
+        user.into(),
         sid,
         comment,
         match v {
             Vote::Up => 1,
             Vote::Down => 0,
-        },
+        }
+        .into(),
     ])
     .await?;
 

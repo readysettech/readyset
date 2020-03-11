@@ -6,9 +6,9 @@ pub(crate) async fn handle<F>(
     acting_as: Option<UserId>,
     story: StoryId,
     v: Vote,
-) -> Result<(my::Conn, bool), my::error::Error>
+) -> Result<(crate::Conn, bool), failure::Error>
 where
-    F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
 {
     let c = c.await?;
     let user = acting_as.unwrap();
@@ -16,15 +16,15 @@ where
     let story = c
         .view("story_vote_1")
         .await?
-        .lookup(&[::std::str::from_utf8(&story[..]).unwrap()], true)
-        .await?;
-    let story = story.swap_remove(0);
+        .lookup_first(&[::std::str::from_utf8(&story[..]).unwrap().into()], true)
+        .await?
+        .unwrap();
 
-    let story = story.get::<u32, _>("id").unwrap();
+    let story = story["id"];
     let _ = c
         .view("story_vote_2")
         .await?
-        .lookup(&[user, story], true)
+        .lookup(&[user.into(), story], true)
         .await?;
 
     // TODO: do something else if user has already voted
@@ -34,12 +34,13 @@ where
     // but let's be nice to it
     let tbl = c.table("votes").await?;
     tbl.insert(vec![
-        user,
+        user.into(),
         story,
         match v {
             Vote::Up => 1,
             Vote::Down => 0,
-        },
+        }
+        .into(),
     ])
     .await?;
 

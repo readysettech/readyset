@@ -162,7 +162,7 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                         let c = c.await?;
                         let users = c.view("login_1").await?;
                         let user = users
-                            .lookup(&[format!("user{}", acting_as.unwrap()).into()], true)
+                            .lookup_first(&[format!("user{}", acting_as.unwrap()).into()], true)
                             .await?;
 
                         if user.is_none() {
@@ -187,7 +187,7 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                     LobstersRequest::Comment { id, story, parent } => {
                         endpoints::comment::handle(c, acting_as, id, story, parent, priming).await
                     }
-                };
+                }?;
 
                 // notifications
                 if let Some(uid) = acting_as {
@@ -199,11 +199,10 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                 Ok(())
             };
 
-            // if the pool is disconnected, it just means that we exited while there were still
-            // outstanding requests. that's fine.
+            // XXX: there may be particular errors we want to ignore here that relate to there
+            // being outstanding requests during exit.
             match inner.await {
-                Ok(())
-                | Err(my::error::Error::Driver(my::error::DriverError::PoolDisconnected)) => Ok(()),
+                Ok(()) => Ok(()),
                 Err(e) => Err(e),
             }
         })

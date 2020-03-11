@@ -388,6 +388,12 @@ impl From<Literal> for DataType {
     }
 }
 
+impl From<NaiveDateTime> for DataType {
+    fn from(dt: NaiveDateTime) -> Self {
+        DataType::Timestamp(dt)
+    }
+}
+
 /*
 impl<'a, T> Into<Option<T>> for &'a DataType
 where

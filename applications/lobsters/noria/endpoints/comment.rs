@@ -20,14 +20,14 @@ where
     let story = c
         .view("comment_1")
         .await?
-        .lookup(&[::std::str::from_utf8(&story[..]).unwrap()])
-        .await?;
-    let story = story.unwrap();
-    let author = story.get::<u32, _>("user_id").unwrap();
-    let story = story.get::<u32, _>("id").unwrap();
+        .lookup_first(&[::std::str::from_utf8(&story[..]).unwrap().into()], true)
+        .await?
+        .unwrap();
+    let author = story["user_id"];
+    let story = story["id"];
 
     if !priming {
-        let _ = c.view("comment_2").await?.lookup(&[author]).await?;
+        let _ = c.view("comment_2").await?.lookup(&[author], true).await?;
     }
 
     let parent = if let Some(parent) = parent {
@@ -35,14 +35,14 @@ where
         let p = c
             .view("comment_3")
             .await?
-            .lookup_first(&[story, ::std::str::from_utf8(&parent[..]).unwrap()])
+            .lookup_first(
+                &[story, ::std::str::from_utf8(&parent[..]).unwrap().into()],
+                true,
+            )
             .await?;
 
         if let Some(p) = p {
-            Some((
-                p.get::<u32, _>("id").unwrap(),
-                p.get::<Option<u32>, _>("thread_id").unwrap(),
-            ))
+            Some((p["id"], p["thread_id"]))
         } else {
             eprintln!(
                 "failed to find parent comment {} in story {}",
@@ -80,8 +80,8 @@ where
             ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
             story.into(),                                   // story_id
             user.into(),                                    // user_id
-            parent.into(),                                  // parent_comment_id
-            thread.into(),                                  // thread_id
+            parent,                                         // parent_comment_id
+            thread,                                         // thread_id
             "moar".into(),                                  // comment
             "moar".into(),                                  // markdown comment
         ])

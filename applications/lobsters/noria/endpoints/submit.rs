@@ -8,15 +8,15 @@ pub(crate) async fn handle<F>(
     id: StoryId,
     title: String,
     priming: bool,
-) -> Result<(my::Conn, bool), my::error::Error>
+) -> Result<(crate::Conn, bool), failure::Error>
 where
-    F: 'static + Future<Output = Result<my::Conn, my::error::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
 {
     let c = c.await?;
     let user = acting_as.unwrap();
 
     // check that tags are active
-    let tag = c.view("submit_1").await?.lookup(&[], true).await?;
+    let tag = c.view("submit_1").await?.lookup_first(&[], true).await?;
     let tag = tag.unwrap().get::<u32>("id");
 
     if !priming {
@@ -24,7 +24,7 @@ where
         let _ = c
             .view("submit_2")
             .await?
-            .lookup(&[::std::str::from_utf8(&id[..]).unwrap()], true)
+            .lookup(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
             .await?;
     }
 

@@ -11,36 +11,38 @@ where
     F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
 {
     let c = c.await?;
-    let ids = c.view("comments_1").await?.lookup(&[]).await?;
+    let ids: Vec<_> = c.view("comments_1").await?.lookup(&[], true).await?.into();
 
     let cview = c.view("comments_2").await?;
     let mut comments = Vec::new();
     let mut users = HashSet::new();
     let mut stories = HashSet::new();
-    for comment in cview.multi_lookup(ids).await? {
-        let mut comment = comment.into_iter();
-        comments.push(comment.next().unwrap());
-        users.insert(comment.next().unwrap());
-        stories.insert(comment.next().unwrap());
+    for comment in cview.multi_lookup(ids, true).await? {
+        let comment = comment.into_iter().last().unwrap();
+        comments.push(comment["id"]);
+        users.insert(comment["user_id"]);
+        stories.insert(comment["story_id"]);
     }
 
     if let Some(uid) = acting_as {
         let cview = c.view("comments_3").await?;
         // TODO: multi-lookup
         for story in &stories {
-            cview.lookup(&[uid, story]).await?;
+            cview.lookup(&[uid.into(), story.clone()], true).await?;
         }
     }
 
     let cview = c.view("comments_4").await?;
-    let _ = cview.multi_lookup(users, true).await?;
+    let _ = cview
+        .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
+        .await?;
 
     let cview = c.view("comments_5").await?;
-    let authors = cview
-        .multi_lookup(stories, true)
+    let authors: HashSet<_> = cview
+        .multi_lookup(stories.into_iter().map(|v| vec![v]).collect(), true)
         .await?
         .into_iter()
-        .map(|row| row.into_iter().next().unwrap())
+        .map(|row| row.into_iter().next().unwrap()["user_id"])
         .collect();
 
     if let Some(uid) = acting_as {
@@ -52,7 +54,9 @@ where
     }
 
     let cview = c.view("comments_7").await?;
-    let _ = cview.multi_lookup(authors, true).await?;
+    let _ = cview
+        .multi_lookup(authors.into_iter().map(|v| vec![v]).collect(), true)
+        .await?;
 
     Ok((c, true))
 }

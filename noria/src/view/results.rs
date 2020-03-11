@@ -24,6 +24,12 @@ impl Results {
     }
 }
 
+impl Into<Vec<Vec<DataType>>> for Results {
+    fn into(self) -> Vec<Vec<DataType>> {
+        self.results
+    }
+}
+
 impl PartialEq<[Vec<DataType>]> for Results {
     fn eq(&self, other: &[Vec<DataType>]) -> bool {
         self.results == other

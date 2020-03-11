@@ -83,11 +83,11 @@ where
     let story = c
         .view("story_1")
         .await?
-        .lookup(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
-        .await?;
-    let story = story.swap_remove(0);
-    let author = story.get::<u32>("user_id").unwrap();
-    let story = story.get::<u32>("id").unwrap();
+        .lookup_first(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
+        .await?
+        .unwrap();
+    let author = story["user_id"];
+    let story = story["id"];
 
     let _ = c.view("story_2").await?.lookup(&[author], true).await?;
 
@@ -120,12 +120,16 @@ where
     let mut users = HashSet::new();
     let mut comments = HashSet::new();
     for comment in c.view("story_5").await?.lookup(&[story], true).await? {
-        users.insert(comment.get::<u32>("user_id").unwrap());
-        comments.insert(comment.get::<u32>("id").unwrap());
+        users.insert(comment["user_id"]);
+        comments.insert(comment["id"]);
     }
 
     // get user info for all commenters
-    let _ = c.view("story_6").await?.multi_lookup(users, true).await?;
+    let _ = c
+        .view("story_6")
+        .await?
+        .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
+        .await?;
 
     if let Some(uid) = acting_as {
         let view = c.view("story_7").await?;
@@ -163,7 +167,11 @@ where
         .map(|tagging| tagging.into_iter().last().unwrap())
         .collect();
 
-    let _ = c.view("story_12").await?.multi_lookup(tags, true).await?;
+    let _ = c
+        .view("story_12")
+        .await?
+        .multi_lookup(tags.into_iter().map(|v| vec![v]).collect(), true)
+        .await?;
 
     Ok((c, true))
 }
