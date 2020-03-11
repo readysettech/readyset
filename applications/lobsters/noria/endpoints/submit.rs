@@ -48,18 +48,19 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    let tbl = c.table("stories").await?;
-    tbl.insert(vec![
-        chrono::Local::now().naive_local().into(), // created_at
-        user.into(),                               // user_id
-        title.into(),                              // title
-        "body".into(),                             // description
-        ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
-        "body".into(),                             // markeddown_description
-    ])
-    .await?;
-    // TODO: last_insert_id
-    let story = 1;
+    c.table("stories")
+        .await?
+        .insert(vec![
+            chrono::Local::now().naive_local().into(), // created_at
+            user.into(),                               // user_id
+            title.into(),                              // title
+            "body".into(),                             // description
+            ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
+            "body".into(),                             // markeddown_description
+        ])
+        .await?;
+    // XXX: last_insert_id
+    let story = super::slug_to_id(&id);
 
     c.table("taggings")
         .await?

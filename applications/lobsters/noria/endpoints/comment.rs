@@ -17,14 +17,14 @@ where
     let c = c.await?;
     let user = acting_as.unwrap();
 
-    let story = c
+    let mut story = c
         .view("comment_1")
         .await?
         .lookup_first(&[::std::str::from_utf8(&story[..]).unwrap().into()], true)
         .await?
         .unwrap();
-    let author = story["user_id"];
-    let story = story["id"];
+    let author = story.take("user_id").unwrap();
+    let story = story.take("id").unwrap();
 
     if !priming {
         let _ = c.view("comment_2").await?.lookup(&[author], true).await?;
@@ -36,13 +36,16 @@ where
             .view("comment_3")
             .await?
             .lookup_first(
-                &[story, ::std::str::from_utf8(&parent[..]).unwrap().into()],
+                &[
+                    story.clone(),
+                    ::std::str::from_utf8(&parent[..]).unwrap().into(),
+                ],
                 true,
             )
             .await?;
 
-        if let Some(p) = p {
-            Some((p["id"], p["thread_id"]))
+        if let Some(mut p) = p {
+            Some((p.take("id").unwrap(), p.take("thread_id").unwrap()))
         } else {
             eprintln!(
                 "failed to find parent comment {} in story {}",
@@ -72,13 +75,13 @@ where
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let now = chrono::Local::now().naive_local();
-    let tbl = c.table("comments").await?;
-    let q = if let Some((parent, thread)) = parent {
+    let mut tbl = c.table("comments").await?;
+    if let Some((parent, thread)) = parent {
         tbl.insert(vec![
             now.into(),                                     // created_at
             now.into(),                                     // updated_at
             ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
-            story.into(),                                   // story_id
+            story.clone(),                                  // story_id
             user.into(),                                    // user_id
             parent,                                         // parent_comment_id
             thread,                                         // thread_id
@@ -91,7 +94,7 @@ where
             now.into(),                                     // created_at
             now.into(),                                     // updated_at
             ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
-            story.into(),                                   // story_id
+            story.clone(),                                  // story_id
             user.into(),                                    // user_id
             DataType::None,                                 // parent_comment_id
             DataType::None,                                 // thread_id
@@ -99,20 +102,20 @@ where
             "moar".into(),                                  // markdown comment
         ])
         .await?;
-    };
-    // TODO: last_insert_id
-    let comment = 1;
+    }
+    // XXX: last_insert_id
+    let comment = super::slug_to_id(&id);
 
     if !priming {
         // but why?!
         let _ = c
             .view("comment_5")
             .await?
-            .lookup(&[user.into(), story, comment.into()], true)
+            .lookup(&[user.into(), story.clone(), comment.into()], true)
             .await?;
     }
 
-    let votes = c.table("votes").await?;
+    let mut votes = c.table("votes").await?;
     votes
         .insert(vec![user.into(), story, comment.into(), 1.into()])
         .await?;

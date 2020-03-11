@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::future::Future;
-use std::iter;
 use trawler::UserId;
 
 pub(crate) async fn handle<F>(
@@ -12,32 +11,41 @@ where
 {
     let c = c.await?;
 
-    let view = c.view("frontpage_1").await?;
-    let stories = view.lookup(&[], true).await?;
+    let stories = c.view("frontpage_1").await?.lookup(&[], true).await?;
 
     assert!(!stories.is_empty(), "got no stories from /frontpage");
 
-    let stories: Vec<_> = stories.into_iter().map(|row| row["id"]).collect();
+    let stories: Vec<_> = stories
+        .into_iter()
+        .map(|mut row| row.take("id").unwrap())
+        .collect();
     let stories_multi: Vec<_> = stories.iter().map(|dt| vec![dt.clone()]).collect();
 
     // NOTE: the filters should be *before* the topk
-    let view = c.view("frontpage_2").await?;
-    let users: HashSet<_> = view
+    let users: HashSet<_> = c
+        .view("frontpage_2")
+        .await?
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
-        .map(|story| story.into_iter().last().unwrap()["user_id"])
+        .map(|story| story.into_iter().last().unwrap().take("user_id").unwrap())
         .collect();
 
     if let Some(uid) = acting_as {
-        let view = c.view("frontpage_3").await?;
-        let _ = view.lookup(&[uid.into()], true).await?;
+        let _ = c
+            .view("frontpage_3")
+            .await?
+            .lookup(&[uid.into()], true)
+            .await?;
 
         // TODO
         // AND `taggings`.`tag_id` IN ({})",
         //tags
-        let view = c.view("frontpage_4").await?;
-        let _ = view.multi_lookup(stories_multi.clone(), true).await?;
+        let _ = c
+            .view("frontpage_4")
+            .await?
+            .multi_lookup(stories_multi.clone(), true)
+            .await?;
     }
 
     let _ = c
@@ -62,7 +70,7 @@ where
         .multi_lookup(stories_multi, true)
         .await?
         .into_iter()
-        .map(|tagging| tagging.into_iter().last().unwrap()["tag_id"])
+        .map(|tagging| tagging.into_iter().last().unwrap().take("tag_id").unwrap())
         .collect();
 
     let _ = c
@@ -73,21 +81,21 @@ where
 
     // also load things that we need to highlight
     if let Some(uid) = acting_as {
-        let view = c.view("frontpage_10").await?;
+        let mut view = c.view("frontpage_10").await?;
         // TODO: multi-lookup
-        for story in stories {
+        for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
         }
 
-        let view = c.view("frontpage_11").await?;
+        let mut view = c.view("frontpage_11").await?;
         // TODO: multi-lookup
-        for story in stories {
+        for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
         }
 
-        let view = c.view("frontpage_12").await?;
+        let mut view = c.view("frontpage_12").await?;
         // TODO: multi-lookup
-        for story in stories {
+        for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
         }
     }

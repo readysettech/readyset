@@ -13,18 +13,18 @@ where
     let c = c.await?;
     let user = acting_as.unwrap();
 
-    let story = c
+    let mut story = c
         .view("story_vote_1")
         .await?
         .lookup_first(&[::std::str::from_utf8(&story[..]).unwrap().into()], true)
         .await?
         .unwrap();
 
-    let story = story["id"];
+    let story = story.take("id").unwrap();
     let _ = c
         .view("story_vote_2")
         .await?
-        .lookup(&[user.into(), story], true)
+        .lookup(&[user.into(), story.clone()], true)
         .await?;
 
     // TODO: do something else if user has already voted
@@ -32,17 +32,18 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    let tbl = c.table("votes").await?;
-    tbl.insert(vec![
-        user.into(),
-        story,
-        match v {
-            Vote::Up => 1,
-            Vote::Down => 0,
-        }
-        .into(),
-    ])
-    .await?;
+    c.table("votes")
+        .await?
+        .insert(vec![
+            user.into(),
+            story,
+            match v {
+                Vote::Up => 1,
+                Vote::Down => 0,
+            }
+            .into(),
+        ])
+        .await?;
 
     Ok((c, false))
 }

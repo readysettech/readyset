@@ -16,15 +16,20 @@ where
         .await?
         .lookup_first(&[format!("user{}", uid).into()], true)
         .await?;
-    let uid = user.unwrap()["id"];
+    let uid = user.unwrap().take("id").unwrap();
 
-    let _ = c.view("user_2").await?.lookup(&[uid], true).await?;
+    let _ = c.view("user_2").await?.lookup(&[uid.clone()], true).await?;
 
     // most popular tag
-    let tag = c.view("user_3").await?.lookup_first(&[uid], true).await?;
+    let tag = c
+        .view("user_3")
+        .await?
+        .lookup_first(&[uid.clone()], true)
+        .await?;
 
-    if let Some(tag) = tag {
-        let _ = c.view("user_4").await?.lookup(&[tag["id"]], true).await?;
+    if let Some(mut tag) = tag {
+        let tag = tag.take("id").unwrap();
+        let _ = c.view("user_4").await?.lookup(&[tag], true).await?;
     }
 
     let _ = c.view("user_5").await?.lookup(&[uid], true).await?;

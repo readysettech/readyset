@@ -3,11 +3,8 @@
 use clap::value_t_or_exit;
 use clap::{App, Arg};
 use flurry::HashMap as ConcurrentHashMap;
-use futures_util::future::{ready, Either, TryFutureExt};
-use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
+use noria::{self, ControllerHandle, ZookeeperAuthority};
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +12,7 @@ use std::task::{Context, Poll};
 use std::time;
 use tokio::sync::Mutex;
 use tower_service::Service;
-use trawler::{LobstersRequest, TrawlerRequest, UserId};
+use trawler::{LobstersRequest, TrawlerRequest};
 
 const SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
 const QUERIES: &'static str = include_str!("queries.sql");
@@ -82,7 +79,7 @@ impl Service<bool> for NoriaTrawlerBuilder {
                 c.install_recipe(QUERIES).await?;
             }
 
-            let mut tables = ConcurrentHashMap::new();
+            let tables = ConcurrentHashMap::new();
             for (table, _) in c.inputs().await? {
                 let handle = c.table(&table).await?;
                 tables.pin().insert(Cow::Owned(table), handle);
@@ -103,7 +100,7 @@ impl Service<TrawlerRequest> for NoriaTrawler {
     type Response = ();
     type Error = failure::Error;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
-    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
     fn call(
@@ -160,15 +157,18 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                     LobstersRequest::Recent => endpoints::recent::handle(c, acting_as).await,
                     LobstersRequest::Login => {
                         let c = c.await?;
-                        let users = c.view("login_1").await?;
-                        let user = users
+                        let user = c
+                            .view("login_1")
+                            .await?
                             .lookup_first(&[format!("user{}", acting_as.unwrap()).into()], true)
                             .await?;
 
                         if user.is_none() {
                             let uid = acting_as.unwrap();
-                            let users = c.table("users").await?;
-                            users.insert(vec![format!("user{}", uid).into()]).await?;
+                            c.table("users")
+                                .await?
+                                .insert(vec![format!("user{}", uid).into()])
+                                .await?;
                         }
 
                         Ok((c, false))

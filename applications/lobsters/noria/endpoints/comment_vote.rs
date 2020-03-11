@@ -1,4 +1,3 @@
-use noria::DataType;
 use std::future::Future;
 use trawler::{StoryId, UserId, Vote};
 
@@ -14,19 +13,19 @@ where
     let c = c.await?;
     let user = acting_as.unwrap();
 
-    let comment = c
+    let mut comment = c
         .view("comment_vote_1")
         .await?
         .lookup_first(&[::std::str::from_utf8(&comment[..]).unwrap().into()], true)
         .await?
         .unwrap();
 
-    let sid = comment["story_id"];
-    let comment = comment["id"];
+    let sid = comment.take("story_id").unwrap();
+    let comment = comment.take("id").unwrap();
     let _ = c
         .view("comment_vote_2")
         .await?
-        .lookup(&[user.into(), sid, comment], true)
+        .lookup(&[user.into(), sid.clone(), comment.clone()], true)
         .await?;
 
     // TODO: do something else if user has already voted
@@ -34,18 +33,19 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    let tbl = c.table("vote").await?;
-    tbl.insert(vec![
-        user.into(),
-        sid,
-        comment,
-        match v {
-            Vote::Up => 1,
-            Vote::Down => 0,
-        }
-        .into(),
-    ])
-    .await?;
+    c.table("vote")
+        .await?
+        .insert(vec![
+            user.into(),
+            sid,
+            comment,
+            match v {
+                Vote::Up => 1,
+                Vote::Down => 0,
+            }
+            .into(),
+        ])
+        .await?;
 
     Ok((c, false))
 }

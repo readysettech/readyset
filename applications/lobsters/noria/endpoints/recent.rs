@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::future::Future;
-use std::iter;
 use trawler::UserId;
 
 pub(crate) async fn handle<F>(
@@ -21,7 +20,10 @@ where
 
     assert!(!stories.is_empty(), "got no stories from /recent");
 
-    let stories: Vec<_> = stories.into_iter().map(|row| row["id"]).collect();
+    let stories: Vec<_> = stories
+        .into_iter()
+        .map(|mut row| row.take("id").unwrap())
+        .collect();
     let stories_multi: Vec<_> = stories.iter().map(|dt| vec![dt.clone()]).collect();
 
     let users: HashSet<_> = c
@@ -30,7 +32,7 @@ where
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
-        .map(|story| story.into_iter().last().unwrap()["user_id"])
+        .map(|story| story.into_iter().last().unwrap().take("user_id").unwrap())
         .collect();
 
     if let Some(uid) = acting_as {
@@ -73,7 +75,7 @@ where
         .multi_lookup(stories_multi, true)
         .await?
         .into_iter()
-        .map(|tagging| tagging.into_iter().last().unwrap()["tag_id"])
+        .map(|tagging| tagging.into_iter().last().unwrap().take("tag_id").unwrap())
         .collect();
 
     let _ = c
@@ -84,19 +86,19 @@ where
 
     // also load things that we need to highlight
     if let Some(uid) = acting_as {
-        let view = c.view("recent_10").await?;
+        let mut view = c.view("recent_10").await?;
         // TODO: multi-lookup
         for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
         }
 
-        let view = c.view("recent_11").await?;
+        let mut view = c.view("recent_11").await?;
         // TODO: multi-lookup
         for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
         }
 
-        let view = c.view("recent_12").await?;
+        let mut view = c.view("recent_12").await?;
         // TODO: multi-lookup
         for story in &stories {
             view.lookup(&[uid.into(), story.clone()], true).await?;
