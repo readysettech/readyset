@@ -914,7 +914,8 @@ impl NoriaBackend {
                 trace!("select::complete");
                 let mut rw = results.start(schema).unwrap();
                 for resultsets in d {
-                    for mut r in resultsets {
+                    for r in resultsets {
+                        let mut r: Vec<_> = r.into();
                         if is_bogo {
                             // drop bogokey
                             r.pop();
