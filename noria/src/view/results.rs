@@ -236,6 +236,12 @@ impl Row {
     }
 }
 
+impl Into<Vec<DataType>> for Row {
+    fn into(self) -> Vec<DataType> {
+        self.row
+    }
+}
+
 impl PartialEq<[DataType]> for Row {
     fn eq(&self, other: &[DataType]) -> bool {
         self.row == other
