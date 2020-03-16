@@ -48,6 +48,14 @@ fn main() {
         .version("0.0.1")
         .about("MySQL shim for Noria.")
         .arg(
+            Arg::with_name("address")
+                .short("a")
+                .long("address")
+                .takes_value(true)
+                .default_value("127.0.0.1")
+                .help("IP address to listen on"),
+        )
+        .arg(
             Arg::with_name("deployment")
                 .long("deployment")
                 .takes_value(true)
@@ -100,6 +108,7 @@ fn main() {
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
+    let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
     let deployment = matches.value_of("deployment").unwrap().to_owned();
     assert!(!deployment.contains("-"));
 
@@ -134,7 +143,7 @@ fn main() {
 
     let mut listener = rt
         .block_on(tokio::net::TcpListener::bind(&std::net::SocketAddr::new(
-            std::net::Ipv4Addr::LOCALHOST.into(),
+            listen_addr,
             port,
         )))
         .unwrap();
