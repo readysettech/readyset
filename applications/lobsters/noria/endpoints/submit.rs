@@ -22,7 +22,7 @@ where
         .await?
         .lookup_first(&[DataType::from(0i32)], true)
         .await?;
-    let tag = tag.unwrap().get::<u32>("id");
+    let tag = tag.unwrap().take("id").unwrap();
 
     if !priming {
         // check that story id isn't already assigned
@@ -69,7 +69,7 @@ where
 
     c.table("taggings")
         .await?
-        .insert(vec![story.into(), tag.into()])
+        .insert(vec![story.into(), tag])
         .await?;
 
     if !priming {
