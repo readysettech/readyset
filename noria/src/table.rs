@@ -53,14 +53,44 @@ type Transport = AsyncBincodeStream<
 #[macro_export]
 macro_rules! row {
     // https://danielkeep.github.io/tlborm/book/pat-trailing-separators.html
-    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => {{
+    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => {
+        $crate::row!(@step $tbl, $($k => $v),+)
+    };
+
+    // macros for counting:
+    // https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length
+    // these can't be moved into the macro case below because of
+    // https://github.com/rust-lang/rust/issues/35853
+    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
+    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::row!(@replace_expr ($e, ()))),*])};
+
+    // we want to allow the caller to move values into row. but, since we loop over the colums, the
+    // compiler will think that we might be moving each $v multiple times (once each time through
+    // the loop), even though that can't happen as long as the field names are distinct. we're
+    // going to work around that by constructing an array that holds an Option<DataType> of each
+    // $v, and then `take()` them when we actually use them for a column value. to do so though, we
+    // also need each $k/$v pair's index so we can refer to the appropriate element of the array.
+    // the ugliness below recursively expands one $k => $v at a time into @$idx; $k => $v using the
+    // counting trick from https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length.
+    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
+        $crate::row!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::row!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
+    };
+
+    // ultimately, the call will end up here with all the indices set
+    // the indices will not technically be numbers, they'll be something like
+    //
+    //     <[()]>::len(&[(), ()])
+    //
+    // but those expressions can crucially be computed at compile time.
+    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
         let mut row = vec![$crate::DataType::None; $tbl.columns().len()];
+        let mut vals = [$(Some(Into::<$crate::DataType>::into($v))),+];
         let schema = $tbl.schema();
         for (coli, col) in $tbl.columns().iter().enumerate() {
             match &**col {
                 $($k => {
                     // TODO: check row[coli] against schema.fields[coli].sql_type ?
-                    row[coli] = Into::<$crate::DataType>::into($v);
+                    row[coli] = vals[$idx].take().expect("field name appears twice -- should be caught by match");
                 },)|+
                 cname if schema.is_some() => {
                     let schema = schema.as_ref().unwrap();
@@ -101,10 +131,12 @@ macro_rules! row {
 #[cfg(test)]
 #[allow(dead_code)]
 async fn add_user(users: &mut Table) -> Result<(), TableError> {
+    let s = String::from("non copy");
     let user = row!(users,
       "username" => "jonhoo",
       "password" => "hunter2",
       "created_at" => chrono::Local::now().naive_local(),
+      "not an ident" => s,
       "logins" => 0,
     );
     users.insert(user).await
