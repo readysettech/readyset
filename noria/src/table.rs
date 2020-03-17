@@ -252,7 +252,56 @@ impl Service<Input> for Table {
             None
         };
 
-        // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
+        // NOTE: this is really just a try block
+        let immediate_err = || {
+            let ncols = self.columns.len() + self.dropped.len();
+            for op in &i.data {
+                match op {
+                    TableOperation::Insert(ref row) => {
+                        if row.len() != ncols {
+                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                        }
+                    }
+                    TableOperation::Delete { ref key } => {
+                        if key.len() != self.key.len() {
+                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                        }
+                    }
+                    TableOperation::InsertOrUpdate {
+                        ref row,
+                        ref update,
+                    } => {
+                        if row.len() != ncols {
+                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                        }
+                        if update.len() > self.columns.len() {
+                            // NOTE: < is okay to allow dropping tailing no-ops
+                            return Err(TableError::WrongColumnCount(
+                                self.columns.len(),
+                                update.len(),
+                            ));
+                        }
+                    }
+                    TableOperation::Update { ref set, ref key } => {
+                        if key.len() != self.key.len() {
+                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                        }
+                        if set.len() > self.columns.len() {
+                            // NOTE: < is okay to allow dropping tailing no-ops
+                            return Err(TableError::WrongColumnCount(
+                                self.columns.len(),
+                                set.len(),
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        };
+
+        if let Err(e) = immediate_err() {
+            return future::Either::Left(async move { Err(e) });
+        }
 
         if self.shards.len() == 1 {
             let request = Tagged::from(if self.dst_is_local {
@@ -263,7 +312,9 @@ impl Service<Input> for Table {
 
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
-            future::Either::Left(self.shards[0].call(request).map_err(TableError::from))
+            future::Either::Right(future::Either::Left(
+                self.shards[0].call(request).map_err(TableError::from),
+            ))
         } else {
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -326,12 +377,12 @@ impl Service<Input> for Table {
                 }
             }
 
-            future::Either::Right(
+            future::Either::Right(future::Either::Right(
                 wait_for
                     .try_for_each(|_| async { Ok(()) })
                     .map_err(TableError::from)
                     .map_ok(Tagged::from),
-            )
+            ))
         }
     }
 }
@@ -406,6 +457,7 @@ impl Table {
                 | TableOperation::InsertOrUpdate { ref mut row, .. } => row,
                 _ => unimplemented!("we need to shift the update/delete cols!"),
             };
+            // TODO: what about updates? do we need to rewrite the set vector?
 
             // we want to be a bit careful here to avoid shifting elements multiple times. we
             // do this by moving from the back, and swapping the tail element to the end of the
@@ -523,10 +575,6 @@ impl Table {
             "update operations can only be applied to base nodes with key columns"
         );
 
-        if key.len() != self.key.len() {
-            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
-        }
-
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
@@ -555,13 +603,6 @@ impl Table {
             !self.key.is_empty() && self.key_is_primary,
             "update operations can only be applied to base nodes with key columns"
         );
-
-        if insert.len() != self.columns.len() {
-            return Err(TableError::WrongColumnCount(
-                self.columns.len(),
-                insert.len(),
-            ));
-        }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
