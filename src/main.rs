@@ -52,8 +52,8 @@ fn main() {
                 .short("a")
                 .long("address")
                 .takes_value(true)
-                .default_value("127.0.0.1")
-                .help("IP address to listen on"),
+                .default_value("127.0.0.1:3306")
+                .help("IP:PORT to listen on"),
         )
         .arg(
             Arg::with_name("deployment")
@@ -68,14 +68,6 @@ fn main() {
                 .short("z")
                 .default_value("127.0.0.1:2181")
                 .help("IP:PORT for Zookeeper."),
-        )
-        .arg(
-            Arg::with_name("port")
-                .long("port")
-                .short("p")
-                .default_value("3306")
-                .takes_value(true)
-                .help("Port to listen on."),
         )
         .arg(
             Arg::with_name("slowlog")
@@ -108,11 +100,10 @@ fn main() {
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
-    let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
+    let listen_addr = value_t_or_exit!(matches, "address", String);
     let deployment = matches.value_of("deployment").unwrap().to_owned();
     assert!(!deployment.contains("-"));
 
-    let port = value_t_or_exit!(matches, "port", u16);
     let histograms = matches.is_present("time");
     let trace_every = if matches.is_present("trace") {
         Some(value_t_or_exit!(matches, "trace", usize))
@@ -140,16 +131,14 @@ fn main() {
     };
     tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
     let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+    let listen_socket:std::net::SocketAddr = listen_addr.parse().unwrap();
 
     let mut listener = rt
-        .block_on(tokio::net::TcpListener::bind(&std::net::SocketAddr::new(
-            listen_addr,
-            port,
-        )))
+        .block_on(tokio::net::TcpListener::bind(&listen_socket))
         .unwrap();
 
     let log = logger_pls();
-    slog::info!(log, "listening on port {}", port);
+    slog::info!(log, "listening on address {}", listen_addr);
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
