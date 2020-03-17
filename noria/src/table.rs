@@ -30,6 +30,86 @@ type Transport = AsyncBincodeStream<
     AsyncDestination,
 >;
 
+/// Create a new row for insertion into a [`Table`] using column names.
+///
+/// If the schema of the given table is known, column defaults and `NOT NULL` restrictions will
+/// also be respected. In the future, this method will also check that the provided `DataType`
+/// matches the expected data type for each column.
+///
+/// Values are automatically converted to `DataType` as necessary.
+///
+///
+/// ```rust
+/// async fn add_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+///   let user = noria::row!(users,
+///     "username" => "jonhoo",
+///     "password" => "hunter2",
+///     "created_at" => chrono::Local::now().naive_local(),
+///     "logins" => 0,
+///   );
+///   users.insert(user).await
+/// }
+/// ```
+#[macro_export]
+macro_rules! row {
+    // https://danielkeep.github.io/tlborm/book/pat-trailing-separators.html
+    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => {{
+        let mut row = vec![$crate::DataType::None; $tbl.columns().len()];
+        let schema = $tbl.schema();
+        for (coli, col) in $tbl.columns().iter().enumerate() {
+            match &**col {
+                $($k => {
+                    // TODO: check row[coli] against schema.fields[coli].sql_type ?
+                    row[coli] = Into::<$crate::DataType>::into($v);
+                },)|+
+                cname if schema.is_some() => {
+                    let schema = schema.as_ref().unwrap();
+
+                    // Maybe we have a default value?
+                    let mut allow_null = true;
+                    let spec = &schema.fields[coli];
+                    for c in &spec.constraints {
+                        use nom_sql::ColumnConstraint;
+                        match c {
+                            ColumnConstraint::NotNull => {
+                                allow_null = false;
+                            }
+                            ColumnConstraint::DefaultValue(ref literal) => {
+                                row[coli] = Into::<$crate::DataType>::into(literal);
+                            }
+                            ColumnConstraint::AutoIncrement => {
+                                // TODO
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if !allow_null && row[coli].is_none() {
+                        panic!("Column {} is declared NOT NULL, has no default, and was not provided", cname);
+                    }
+                }
+                _ => { /* leave column value as None */ }
+            }
+        }
+
+        row
+    }};
+}
+
+// this is here just to get better compiler errors for row!
+// the doc test will not show the source of the error _inside_ the macro since it's cross-crate.
+#[cfg(test)]
+#[allow(dead_code)]
+async fn add_user(users: &mut Table) -> Result<(), TableError> {
+    let user = row!(users,
+      "username" => "jonhoo",
+      "password" => "hunter2",
+      "created_at" => chrono::Local::now().naive_local(),
+      "logins" => 0,
+    );
+    users.insert(user).await
+}
+
 #[derive(Debug)]
 #[doc(hidden)]
 // only pub because we use it to figure out the error type for TableError
