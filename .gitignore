@@ -1,7 +1,7 @@
 run.sh
 *.hist
 .*.rustfmt
-*-log-*.json
+*.json
 *.png
 *.log
 *.svg
