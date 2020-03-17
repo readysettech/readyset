@@ -136,6 +136,10 @@ pub mod consensus;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod internal;
 
+// for the row! macro
+#[doc(hidden)]
+pub use nom_sql::ColumnConstraint;
+
 pub use crate::consensus::ZookeeperAuthority;
 use crate::internal::*;
 use std::cell::RefCell;

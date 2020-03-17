@@ -69,7 +69,7 @@ macro_rules! row {
                     let mut allow_null = true;
                     let spec = &schema.fields[coli];
                     for c in &spec.constraints {
-                        use nom_sql::ColumnConstraint;
+                        use $crate::ColumnConstraint;
                         match c {
                             ColumnConstraint::NotNull => {
                                 allow_null = false;
