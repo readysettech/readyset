@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use tower_service::Service;
 use trawler::{LobstersRequest, TrawlerRequest};
 
-const SCHEMA: &'static str = include_str!("../db-schema/natural.sql");
+const SCHEMA: &'static str = include_str!("schema.sql");
 const QUERIES: &'static str = include_str!("queries.sql");
 
 struct NoriaTrawlerBuilder(Option<ZookeeperAuthority>);
