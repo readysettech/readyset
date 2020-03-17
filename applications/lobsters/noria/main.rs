@@ -168,10 +168,9 @@ impl Service<TrawlerRequest> for NoriaTrawler {
 
                         if user.is_none() {
                             let uid = acting_as.unwrap();
-                            c.table("users")
-                                .await?
-                                .insert(vec![format!("user{}", uid).into()])
-                                .await?;
+                            let mut tbl = c.table("users").await?;
+                            let user = noria::row!(tbl, "username" => format!("user{}", uid));
+                            tbl.insert(user).await?;
                         }
 
                         Ok((c, false))
