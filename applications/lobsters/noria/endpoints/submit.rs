@@ -1,4 +1,5 @@
 use chrono;
+use noria::DataType;
 use std::future::Future;
 use trawler::{StoryId, UserId};
 
@@ -16,7 +17,11 @@ where
     let user = acting_as.unwrap();
 
     // check that tags are active
-    let tag = c.view("submit_1").await?.lookup_first(&[], true).await?;
+    let tag = c
+        .view("submit_1")
+        .await?
+        .lookup_first(&[DataType::from(0i32)], true)
+        .await?;
     let tag = tag.unwrap().get::<u32>("id");
 
     if !priming {

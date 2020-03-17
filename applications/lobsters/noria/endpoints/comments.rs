@@ -1,3 +1,4 @@
+use noria::DataType;
 use std::collections::HashSet;
 use std::future::Future;
 use trawler::UserId;
@@ -10,7 +11,12 @@ where
     F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
 {
     let c = c.await?;
-    let ids: Vec<_> = c.view("comments_1").await?.lookup(&[], true).await?.into();
+    let ids: Vec<_> = c
+        .view("comments_1")
+        .await?
+        .lookup(&[DataType::from(0i32)], true)
+        .await?
+        .into();
 
     let mut comments = Vec::new();
     let mut users = HashSet::new();

@@ -1,3 +1,4 @@
+use noria::DataType;
 use std::collections::HashSet;
 use std::future::Future;
 use trawler::UserId;
@@ -11,7 +12,11 @@ where
 {
     let c = c.await?;
 
-    let stories = c.view("frontpage_1").await?.lookup(&[], true).await?;
+    let stories = c
+        .view("frontpage_1")
+        .await?
+        .lookup(&[DataType::from(0i32)], true)
+        .await?;
 
     assert!(!stories.is_empty(), "got no stories from /frontpage");
 

@@ -1,3 +1,4 @@
+use noria::DataType;
 use std::collections::HashSet;
 use std::future::Future;
 use trawler::UserId;
@@ -16,7 +17,11 @@ where
     // also note the `NOW()` hack to support dbs primed a while ago
     let c = c.await?;
 
-    let stories = c.view("recent_1").await?.lookup(&[], true).await?;
+    let stories = c
+        .view("recent_1")
+        .await?
+        .lookup(&[DataType::from(0i32)], true)
+        .await?;
 
     assert!(!stories.is_empty(), "got no stories from /recent");
 
