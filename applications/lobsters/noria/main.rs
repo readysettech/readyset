@@ -76,7 +76,9 @@ impl Service<bool> for NoriaTrawlerBuilder {
 
             if priming {
                 c.install_recipe(SCHEMA).await?;
-                c.table("tags").await?.insert(vec!["test".into()]).await?;
+                let mut tbl = c.table("tags").await?;
+                let tag = noria::row!(tbl, "tag" => "test");
+                tbl.insert(tag).await?;
                 c.extend_recipe(QUERIES).await?;
             }
 
