@@ -76,6 +76,7 @@ impl Service<bool> for NoriaTrawlerBuilder {
 
             if priming {
                 c.install_recipe(SCHEMA).await?;
+                c.table("tags").await?.insert(vec!["test".into()]).await?;
                 c.install_recipe(QUERIES).await?;
             }
 

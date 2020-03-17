@@ -208,7 +208,3 @@ BOUNDARY_notifications:
 SELECT BOUNDARY_replying_comments_for_count.user_id, COUNT(*) AS notifications,
 FROM `BOUNDARY_replying_comments_for_count`
 GROUP BY `BOUNDARY_replying_comments_for_count`.`user_id`;
-
------------------------------------------------------
-
-INSERT INTO `tags` (`tag`, `hotness_mod`) VALUES ('test', 1);
