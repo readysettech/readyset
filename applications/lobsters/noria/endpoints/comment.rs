@@ -1,5 +1,4 @@
 use chrono;
-use noria::DataType;
 use std::future::Future;
 use trawler::{CommentId, StoryId, UserId};
 
@@ -72,53 +71,59 @@ where
 
     // TODO: real impl checks *new* short_id *again*
 
+    // XXX: last_insert_id
+    let comment_id = super::slug_to_id(&id);
+
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let now = chrono::Local::now().naive_local();
     let mut tbl = c.table("comments").await?;
-    if let Some((parent, thread)) = parent {
-        tbl.insert(vec![
-            now.into(),                                     // created_at
-            now.into(),                                     // updated_at
-            ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
-            story.clone(),                                  // story_id
-            user.into(),                                    // user_id
-            parent,                                         // parent_comment_id
-            thread,                                         // thread_id
-            "moar".into(),                                  // comment
-            "moar".into(),                                  // markdown comment
-        ])
-        .await?;
+
+    let comment = if let Some((parent, thread)) = parent {
+        noria::row!(tbl,
+            "id" => comment_id,
+            "created_at" => now,
+            "updated_at" => now,
+            "short_id" => ::std::str::from_utf8(&id[..]).unwrap(),
+            "story_id" => &story,
+            "user_id" => user,
+            "parent_comment_id" => parent,
+            "thread_id" => thread,
+            "comment" => "moar",
+            "markeddown_comment" => "moar",
+        )
     } else {
-        tbl.insert(vec![
-            now.into(),                                     // created_at
-            now.into(),                                     // updated_at
-            ::std::str::from_utf8(&id[..]).unwrap().into(), // short_id
-            story.clone(),                                  // story_id
-            user.into(),                                    // user_id
-            DataType::None,                                 // parent_comment_id
-            DataType::None,                                 // thread_id
-            "moar".into(),                                  // comment
-            "moar".into(),                                  // markdown comment
-        ])
-        .await?;
-    }
-    // XXX: last_insert_id
-    let comment = super::slug_to_id(&id);
+        noria::row!(tbl,
+            "id" => comment_id,
+            "created_at" => now,
+            "updated_at" => now,
+            "short_id" => ::std::str::from_utf8(&id[..]).unwrap(),
+            "story_id" => &story,
+            "user_id" => user,
+            "comment" => "moar",
+            "markeddown_comment" => "moar",
+        )
+    };
+    tbl.insert(comment).await?;
 
     if !priming {
         // but why?!
         let _ = c
             .view("comment_5")
             .await?
-            .lookup(&[user.into(), story.clone(), comment.into()], true)
+            .lookup(&[user.into(), story.clone(), comment_id.into()], true)
             .await?;
     }
 
     let mut votes = c.table("votes").await?;
-    votes
-        .insert(vec![user.into(), story, comment.into(), 1.into()])
-        .await?;
+    let vote = noria::row!(votes,
+        "id" => rand::random::<i64>(),
+        "user_id" => user,
+        "story_id" => story,
+        "comment_id" => comment_id,
+        "vote" => 1,
+    );
+    votes.insert(vote).await?;
 
     Ok((c, false))
 }

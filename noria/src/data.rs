@@ -354,6 +354,12 @@ impl From<f64> for DataType {
     }
 }
 
+impl<'a> From<&'a DataType> for DataType {
+    fn from(dt: &'a DataType) -> Self {
+        dt.clone()
+    }
+}
+
 impl<'a> From<&'a Literal> for DataType {
     fn from(l: &'a Literal) -> Self {
         match *l {

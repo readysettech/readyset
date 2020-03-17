@@ -33,19 +33,18 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    c.table("vote")
-        .await?
-        .insert(vec![
-            user.into(),
-            sid,
-            comment,
-            match v {
-                Vote::Up => 1,
-                Vote::Down => 0,
-            }
-            .into(),
-        ])
-        .await?;
+    let mut votes = c.table("votes").await?;
+    let vote = noria::row!(votes,
+        "id" => rand::random::<i64>(),
+        "user_id" => user,
+        "story_id" => sid,
+        "comment_id" => comment,
+        "vote" => match v {
+            Vote::Up => 1,
+            Vote::Down => 0,
+        },
+    );
+    votes.insert(vote).await?;
 
     Ok((c, false))
 }

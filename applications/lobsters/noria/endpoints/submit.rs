@@ -51,11 +51,14 @@ where
     // TODO: real impl checks *new* short_id and duplicate urls *again*
     // TODO: sometimes submit url
 
+    // XXX: last_insert_id
+    let story_id = super::slug_to_id(&id);
+
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let mut stories = c.table("stories").await?;
-    let story = noria::row!(
-        stories,
+    let story = noria::row!(stories,
+        "id" => story_id,
         "created_at" => chrono::Local::now().naive_local(),
         "user_id" => user,
         "title" => title,
@@ -64,26 +67,31 @@ where
         "markeddown_description" => "body",
     );
     stories.insert(story).await?;
-    // XXX: last_insert_id
-    let story = super::slug_to_id(&id);
 
-    c.table("taggings")
-        .await?
-        .insert(vec![story.into(), tag])
-        .await?;
+    let mut taggings = c.table("taggings").await?;
+    let tagging = noria::row!(taggings,
+        "id" => rand::random::<i64>(),
+        "story_id" => story_id,
+        "tag_id" => tag,
+    );
+    taggings.insert(tagging).await?;
 
     if !priming {
         let _ = c
             .view("submit_3")
             .await?
-            .lookup(&[user.into(), story.into()], true)
+            .lookup(&[user.into(), story_id.into()], true)
             .await?;
     }
 
-    c.table("votes")
-        .await?
-        .insert(vec![user.into(), story.into(), 1.into()])
-        .await?;
+    let mut votes = c.table("votes").await?;
+    let vote = noria::row!(votes,
+        "id" => rand::random::<i64>(),
+        "user_id" => user,
+        "story_id" => story_id,
+        "vote" => 1,
+    );
+    votes.insert(vote).await?;
 
     Ok((c, false))
 }
