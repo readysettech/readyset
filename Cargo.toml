@@ -41,7 +41,7 @@ path = "src/lib.rs"
 noria = { git = "https://github.com/mit-pdos/noria.git" }
 noria-server = { git = "https://github.com/mit-pdos/noria.git" }
 # noria = { path = "../noria/noria/" }
-# noria-server = { path = "../noria/noria-server/" }
+# noria-server = { path = "../noria/server/" }
 # optional overrides:
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
