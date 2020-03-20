@@ -91,6 +91,11 @@ macro_rules! row {
                 $($k => {
                     // TODO: check row[coli] against schema.fields[coli].sql_type ?
                     row[coli] = vals[$idx].take().expect("field name appears twice -- should be caught by match");
+                    if let Some(ref schema) = schema {
+                        if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
+                            assert!(!row[coli].is_none(), "Attempted to set NOT NULL column '{}' to DataType::None", col);
+                        }
+                    }
                 },)|+
                 cname if schema.is_some() => {
                     let schema = schema.as_ref().unwrap();
@@ -140,6 +145,58 @@ async fn add_user(users: &mut Table) -> Result<(), TableError> {
       "logins" => 0,
     );
     users.insert(user).await
+}
+
+/// Create an update for a given [`Table`] using column names.
+///
+/// In the future, this method will also check that the provided `DataType`
+/// matches the expected data type for each column if the schema is known.
+///
+/// Values are automatically converted to `DataType` as necessary.
+///
+///
+/// ```rust
+/// async fn update_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+///   let user = noria::update!(users,
+///     "password" => "hunter3",
+///     "logins" => noria::Modification::Apply(noria::Operation::Addr, 1.into()),
+///   );
+///   users.update(vec!["jonhoo".into()], user).await
+/// }
+/// ```
+#[macro_export]
+macro_rules! update {
+    // these are identical as for row! see comments there.
+    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => { $crate::update!(@step $tbl, $($k => $v),+) };
+    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
+    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::update!(@replace_expr ($e, ()))),*])};
+    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
+        $crate::update!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::update!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
+    };
+
+    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
+        let mut set = vec![$((0, Into::<$crate::Modification>::into($v))),+];
+        for (coli, col) in $tbl.columns().iter().enumerate() {
+            match &**col {
+                $($k => {
+                    // TODO: check set[$idx].1 against schema.fields[coli].sql_type ?
+                    set[$idx].0 = coli;
+                },)|+
+                _ => { /* column value not updated */ }
+            }
+        }
+        set
+    }};
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+async fn update_user(users: &mut Table) -> Result<(), TableError> {
+    let user = update!(users,
+      "password" => "hunter3",
+      "logins" => crate::Modification::Apply(crate::Operation::Add, 1.into()),
+    );
+    users.update(vec!["jonhoo".into()], user).await
 }
 
 #[derive(Debug)]

@@ -658,6 +658,15 @@ pub enum Modification {
     None,
 }
 
+impl<T> From<T> for Modification
+where
+    T: Into<DataType>,
+{
+    fn from(t: T) -> Modification {
+        Modification::Set(t.into())
+    }
+}
+
 /// An operation to apply to a base table.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum TableOperation {

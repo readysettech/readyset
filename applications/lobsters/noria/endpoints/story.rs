@@ -35,18 +35,17 @@ where
             .lookup(&[uid.into(), story.clone()], true)
             .await?;
         let now = chrono::Local::now().naive_local();
-        c.table("read_ribbons")
-            .await?
-            .insert_or_update(
-                vec![
-                    now.into(),    // created_at
-                    now.into(),    // updated_at,
-                    uid.into(),    // user_id,
-                    story.clone(), // story_id
-                ],
-                vec![(1, noria::Modification::Set(now.into()))],
-            )
-            .await?;
+        let mut tbl = c.table("read_ribbons").await?;
+        let row = noria::row!(tbl,
+            "created_at" => now,
+            "updated_at" => now,
+            "user_id" => uid,
+            "story_id" => &story,
+        );
+        let set = noria::update!(tbl,
+            "updated_at" => noria::Modification::Set(now.into())
+        );
+        tbl.insert_or_update(row, set).await?;
     }
 
     // XXX: probably not drop here, but we know we have no merged stories
