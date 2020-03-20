@@ -185,7 +185,7 @@ impl Recipe {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
-    fn resolve_alias(&self, alias: &str) -> Option<&str> {
+    pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
         self.aliases.get(alias).map(|ref qid| {
             let (ref internal_qn, _, _) = self.expressions[qid];
             internal_qn.as_ref().unwrap().as_str()
