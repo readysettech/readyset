@@ -1,4 +1,5 @@
 use std::future::Future;
+use tower_util::ServiceExt;
 use trawler::{StoryId, UserId, Vote};
 
 pub(crate) async fn handle<F>(
@@ -16,6 +17,8 @@ where
     let mut comment = c
         .view("comment_vote_1")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup_first(&[::std::str::from_utf8(&comment[..]).unwrap().into()], true)
         .await?
         .unwrap();
@@ -25,6 +28,8 @@ where
     let _ = c
         .view("comment_vote_2")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup(&[user.into(), sid.clone(), comment.clone()], true)
         .await?;
 
@@ -33,7 +38,7 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    let mut votes = c.table("votes").await?;
+    let mut votes = c.table("votes").await?.ready_oneshot().await?;
     let vote = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,

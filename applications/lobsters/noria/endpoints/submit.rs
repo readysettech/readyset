@@ -1,6 +1,7 @@
 use chrono;
 use noria::DataType;
 use std::future::Future;
+use tower_util::ServiceExt;
 use trawler::{StoryId, UserId};
 
 pub(crate) async fn handle<F>(
@@ -20,6 +21,8 @@ where
     let tag = c
         .view("submit_1")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup_first(&[DataType::from(0i32)], true)
         .await?;
     let tag = tag.unwrap().take("id").unwrap();
@@ -28,6 +31,8 @@ where
         // check that story id isn't already assigned
         let _ = c
             .view("submit_2")
+            .await?
+            .ready_oneshot()
             .await?
             .lookup(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
             .await?;
@@ -56,7 +61,7 @@ where
 
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
-    let mut stories = c.table("stories").await?;
+    let mut stories = c.table("stories").await?.ready_oneshot().await?;
     let story = noria::row!(stories,
         "id" => story_id,
         "created_at" => chrono::Local::now().naive_local(),
@@ -68,7 +73,7 @@ where
     );
     stories.insert(story).await?;
 
-    let mut taggings = c.table("taggings").await?;
+    let mut taggings = c.table("taggings").await?.ready_oneshot().await?;
     let tagging = noria::row!(taggings,
         "id" => rand::random::<i64>(),
         "story_id" => story_id,
@@ -80,11 +85,13 @@ where
         let _ = c
             .view("submit_3")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[user.into(), story_id.into()], true)
             .await?;
     }
 
-    let mut votes = c.table("votes").await?;
+    let mut votes = c.table("votes").await?.ready_oneshot().await?;
     let vote = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,

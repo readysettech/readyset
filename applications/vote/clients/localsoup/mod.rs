@@ -147,8 +147,7 @@ impl Service<WriteRequest> for LocalNoria {
     type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap(), cx)
-            .map_err(failure::Error::from)
+        Service::poll_ready(self.w.as_mut().unwrap(), cx).map_err(failure::Error::from)
     }
 
     fn call(&mut self, req: WriteRequest) -> Self::Future {

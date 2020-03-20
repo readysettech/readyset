@@ -1,5 +1,6 @@
 use chrono;
 use std::future::Future;
+use tower_util::ServiceExt;
 use trawler::{CommentId, StoryId, UserId};
 
 pub(crate) async fn handle<F>(
@@ -19,6 +20,8 @@ where
     let mut story = c
         .view("comment_1")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup_first(&[::std::str::from_utf8(&story[..]).unwrap().into()], true)
         .await?
         .unwrap();
@@ -26,13 +29,21 @@ where
     let story = story.take("id").unwrap();
 
     if !priming {
-        let _ = c.view("comment_2").await?.lookup(&[author], true).await?;
+        let _ = c
+            .view("comment_2")
+            .await?
+            .ready_oneshot()
+            .await?
+            .lookup(&[author], true)
+            .await?;
     }
 
     let parent = if let Some(parent) = parent {
         // check that parent exists
         let p = c
             .view("comment_3")
+            .await?
+            .ready_oneshot()
             .await?
             .lookup_first(
                 &[
@@ -65,6 +76,8 @@ where
         let _ = c
             .view("comment_4")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
             .await?;
     }
@@ -77,7 +90,7 @@ where
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let now = chrono::Local::now().naive_local();
-    let mut tbl = c.table("comments").await?;
+    let mut tbl = c.table("comments").await?.ready_oneshot().await?;
 
     let comment = if let Some((parent, thread)) = parent {
         noria::row!(tbl,
@@ -111,11 +124,13 @@ where
         let _ = c
             .view("comment_5")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[user.into(), story.clone(), comment_id.into()], true)
             .await?;
     }
 
-    let mut votes = c.table("votes").await?;
+    let mut votes = c.table("votes").await?.ready_oneshot().await?;
     let vote = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,

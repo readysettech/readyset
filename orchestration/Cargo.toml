@@ -44,3 +44,7 @@ path = "src/vote/main.rs"
 [[bin]]
 name = "lobsters-mysql"
 path = "src/lobsters-mysql.rs"
+
+[[bin]]
+name = "lobsters-noria"
+path = "src/lobsters-noria.rs"

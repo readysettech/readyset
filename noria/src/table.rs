@@ -398,20 +398,12 @@ impl fmt::Debug for Table {
     }
 }
 
-impl Service<Input> for Table {
-    type Error = TableError;
-    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for s in &mut self.shards {
-            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
-        }
-        Poll::Ready(Ok(()))
-    }
-
+impl Table {
     #[allow(clippy::cognitive_complexity)]
-    fn call(&mut self, mut i: Input) -> Self::Future {
+    fn input(
+        &mut self,
+        mut i: Input,
+    ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "table-request",
@@ -556,33 +548,21 @@ impl Service<Input> for Table {
     }
 }
 
-impl Service<TableOperation> for Table {
-    type Error = TableError;
-    type Response = <Table as Service<Input>>::Response;
-    type Future = <Table as Service<Input>>::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        <Table as Service<Input>>::poll_ready(self, cx)
-    }
-
-    fn call(&mut self, op: TableOperation) -> Self::Future {
-        let i = self.prep_records(vec![op]);
-        <Table as Service<Input>>::call(self, i)
-    }
-}
-
 impl Service<Vec<TableOperation>> for Table {
     type Error = TableError;
-    type Response = <Table as Service<Input>>::Response;
-    type Future = <Table as Service<Input>>::Future;
+    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
+    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        <Table as Service<Input>>::poll_ready(self, cx)
+        for s in &mut self.shards {
+            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
+        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, ops: Vec<TableOperation>) -> Self::Future {
         let i = self.prep_records(ops);
-        <Table as Service<Input>>::call(self, i)
+        self.input(i)
     }
 }
 
@@ -709,7 +689,8 @@ impl Table {
     where
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableOperation::Insert(u.into())).await
+        self.quick_n_dirty(vec![TableOperation::Insert(u.into())])
+            .await
     }
 
     /// Perform multiple operation on this base table.
@@ -727,7 +708,7 @@ impl Table {
     where
         I: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableOperation::Delete { key: key.into() })
+        self.quick_n_dirty(vec![TableOperation::Delete { key: key.into() }])
             .await
     }
 
@@ -752,7 +733,7 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(TableOperation::Update { key, set })
+        self.quick_n_dirty(vec![TableOperation::Update { key, set }])
             .await
     }
 
@@ -781,10 +762,10 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(TableOperation::InsertOrUpdate {
+        self.quick_n_dirty(vec![TableOperation::InsertOrUpdate {
             row: insert,
             update: set,
-        })
+        }])
         .await
     }
 }

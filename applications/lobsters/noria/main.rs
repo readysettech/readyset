@@ -12,6 +12,7 @@ use std::task::{Context, Poll};
 use std::time;
 use tokio::sync::Mutex;
 use tower_service::Service;
+use tower_util::ServiceExt;
 use trawler::{LobstersRequest, TrawlerRequest};
 
 const SCHEMA: &'static str = include_str!("schema.sql");
@@ -163,12 +164,14 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                         let user = c
                             .view("login_1")
                             .await?
+                            .ready_oneshot()
+                            .await?
                             .lookup_first(&[format!("user{}", acting_as.unwrap()).into()], true)
                             .await?;
 
                         if user.is_none() {
                             let uid = acting_as.unwrap();
-                            let mut tbl = c.table("users").await?;
+                            let mut tbl = c.table("users").await?.ready_oneshot().await?;
                             let user =
                                 noria::row!(tbl, "id" => uid, "username" => format!("user{}", uid));
                             tbl.insert(user).await?;

@@ -1,6 +1,7 @@
 use chrono;
 use std::collections::HashSet;
 use std::future::Future;
+use tower_util::ServiceExt;
 use trawler::{StoryId, UserId};
 
 pub(crate) async fn handle<F>(
@@ -17,13 +18,21 @@ where
     let mut story = c
         .view("story_1")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup_first(&[::std::str::from_utf8(&id[..]).unwrap().into()], true)
         .await?
         .unwrap();
     let author = story.take("user_id").unwrap();
     let story = story.take("id").unwrap();
 
-    let _ = c.view("story_2").await?.lookup(&[author], true).await?;
+    let _ = c
+        .view("story_2")
+        .await?
+        .ready_oneshot()
+        .await?
+        .lookup(&[author], true)
+        .await?;
 
     // NOTE: technically this happens before the select from user...
     if let Some(uid) = acting_as {
@@ -32,10 +41,12 @@ where
         let _ = c
             .view("story_3")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[uid.into(), story.clone()], true)
             .await?;
         let now = chrono::Local::now().naive_local();
-        let mut tbl = c.table("read_ribbons").await?;
+        let mut tbl = c.table("read_ribbons").await?.ready_oneshot().await?;
         let row = noria::row!(tbl,
             "id" => (i64::from(uid) << 32) + Into::<i64>::into(&story),
             "created_at" => now,
@@ -53,6 +64,8 @@ where
     let _ = c
         .view("story_4")
         .await?
+        .ready_oneshot()
+        .await?
         .lookup(&[story.clone()], true)
         .await?;
 
@@ -60,6 +73,8 @@ where
     let mut comments = HashSet::new();
     for mut comment in c
         .view("story_5")
+        .await?
+        .ready_oneshot()
         .await?
         .lookup(&[story.clone()], true)
         .await?
@@ -72,6 +87,8 @@ where
     let _ = c
         .view("story_6")
         .await?
+        .ready_oneshot()
+        .await?
         .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
         .await?;
 
@@ -79,7 +96,11 @@ where
         let mut view = c.view("story_7").await?;
         // TODO: multi-lookup
         for comment in comments {
-            let _ = view.lookup(&[uid.into(), comment.into()], true).await?;
+            let _ = view
+                .ready_and()
+                .await?
+                .lookup(&[uid.into(), comment.into()], true)
+                .await?;
         }
     }
 
@@ -88,15 +109,21 @@ where
         let _ = c
             .view("story_8")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[uid.into(), story.clone()], true)
             .await?;
         let _ = c
             .view("story_9")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[uid.into(), story.clone()], true)
             .await?;
         let _ = c
             .view("story_10")
+            .await?
+            .ready_oneshot()
             .await?
             .lookup(&[uid.into(), story.clone()], true)
             .await?;
@@ -104,6 +131,8 @@ where
 
     let tags: HashSet<_> = c
         .view("story_11")
+        .await?
+        .ready_oneshot()
         .await?
         .lookup(&[story], true)
         .await?
@@ -113,6 +142,8 @@ where
 
     let _ = c
         .view("story_12")
+        .await?
+        .ready_oneshot()
         .await?
         .multi_lookup(tags.into_iter().map(|v| vec![v]).collect(), true)
         .await?;

@@ -27,6 +27,7 @@ slog-term = "2.4.0"
 tokio = { version = "0.2.0", features = ["full"] }
 tokio-test = "0.2.0"
 tower-service = "0.3.0"
+tower-util = "0.3.0"
 trawler = "=0.9.0-beta.3"
 vec_map = { version = "0.8.0" }
 zipf = "6"

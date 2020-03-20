@@ -1,6 +1,7 @@
 use noria::DataType;
 use std::collections::HashSet;
 use std::future::Future;
+use tower_util::ServiceExt;
 use trawler::UserId;
 
 pub(crate) async fn handle<F>(
@@ -14,6 +15,8 @@ where
 
     let stories = c
         .view("frontpage_1")
+        .await?
+        .ready_oneshot()
         .await?
         .lookup(&[DataType::from(0i32)], true)
         .await?;
@@ -30,6 +33,8 @@ where
     let users: HashSet<_> = c
         .view("frontpage_2")
         .await?
+        .ready_oneshot()
+        .await?
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
@@ -40,6 +45,8 @@ where
         let _ = c
             .view("frontpage_3")
             .await?
+            .ready_oneshot()
+            .await?
             .lookup(&[uid.into()], true)
             .await?;
 
@@ -49,6 +56,8 @@ where
         let _ = c
             .view("frontpage_4")
             .await?
+            .ready_oneshot()
+            .await?
             .multi_lookup(stories_multi.clone(), true)
             .await?;
     }
@@ -56,21 +65,29 @@ where
     let _ = c
         .view("frontpage_5")
         .await?
+        .ready_oneshot()
+        .await?
         .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
         .await?;
     let _ = c
         .view("frontpage_6")
+        .await?
+        .ready_oneshot()
         .await?
         .multi_lookup(stories_multi.clone(), true)
         .await?;
     let _ = c
         .view("frontpage_7")
         .await?
+        .ready_oneshot()
+        .await?
         .multi_lookup(stories_multi.clone(), true)
         .await?;
 
     let tags: HashSet<_> = c
         .view("frontpage_8")
+        .await?
+        .ready_oneshot()
         .await?
         .multi_lookup(stories_multi, true)
         .await?
@@ -81,6 +98,8 @@ where
     let _ = c
         .view("frontpage_9")
         .await?
+        .ready_oneshot()
+        .await?
         .multi_lookup(tags.into_iter().map(|v| vec![v]).collect(), true)
         .await?;
 
@@ -89,19 +108,28 @@ where
         let mut view = c.view("frontpage_10").await?;
         // TODO: multi-lookup
         for story in &stories {
-            view.lookup(&[uid.into(), story.clone()], true).await?;
+            view.ready_and()
+                .await?
+                .lookup(&[uid.into(), story.clone()], true)
+                .await?;
         }
 
         let mut view = c.view("frontpage_11").await?;
         // TODO: multi-lookup
         for story in &stories {
-            view.lookup(&[uid.into(), story.clone()], true).await?;
+            view.ready_and()
+                .await?
+                .lookup(&[uid.into(), story.clone()], true)
+                .await?;
         }
 
         let mut view = c.view("frontpage_12").await?;
         // TODO: multi-lookup
         for story in &stories {
-            view.lookup(&[uid.into(), story.clone()], true).await?;
+            view.ready_and()
+                .await?
+                .lookup(&[uid.into(), story.clone()], true)
+                .await?;
         }
     }
 
