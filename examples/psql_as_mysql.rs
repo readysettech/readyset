@@ -284,6 +284,7 @@ fn answer_rows<W: io::Write>(
                         ),
                     }
                 }
+                writer.end_row()?;
             }
             writer.finish()?;
         }
