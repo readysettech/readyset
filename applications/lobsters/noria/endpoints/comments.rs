@@ -16,7 +16,9 @@ where
         .await?
         .lookup(&[DataType::from(0i32)], true)
         .await?
-        .into();
+        .into_iter()
+        .map(|mut row| vec![row.take("id").unwrap()])
+        .collect();
 
     let mut comments = Vec::new();
     let mut users = HashSet::new();
