@@ -37,6 +37,7 @@ where
         let now = chrono::Local::now().naive_local();
         let mut tbl = c.table("read_ribbons").await?;
         let row = noria::row!(tbl,
+            "id" => (i64::from(uid) << 32) + Into::<i64>::into(&story),
             "created_at" => now,
             "updated_at" => now,
             "user_id" => uid,
