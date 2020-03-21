@@ -829,6 +829,19 @@ mod tests {
     }
 
     #[test]
+    fn it_handles_aliasing() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a FROM b;";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.version, 1);
+        assert_eq!(r1.expressions.len(), 1);
+        assert_eq!(r1.aliases.len(), 2);
+        assert_eq!(r1.resolve_alias("q_1"), r1.resolve_alias("q_0"));
+    }
+
+    #[test]
     #[should_panic(expected = "Query name exists but existing query is different")]
     fn it_avoids_spurious_aliasing() {
         let r0 = Recipe::blank(None);
