@@ -16,5 +16,3 @@ tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "n
 # https://github.com/tokio-rs/tokio/pull/2160
 # optional -- just saves us from busy future loops
 tokio = { git = "https://github.com/tokio-rs/tokio.git" }
-# necessary -- https://github.com/tower-rs/tower/pull/427
-tower-util = { git = "https://github.com/tower-rs/tower.git", branch = "ready-and" }
