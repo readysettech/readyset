@@ -159,7 +159,7 @@ async fn add_user(users: &mut Table) -> Result<(), TableError> {
 /// async fn update_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
 ///   let user = noria::update!(users,
 ///     "password" => "hunter3",
-///     "logins" => noria::Modification::Apply(noria::Operation::Addr, 1.into()),
+///     "logins" => noria::Modification::Apply(noria::Operation::Add, 1.into()),
 ///   );
 ///   users.update(vec!["jonhoo".into()], user).await
 /// }
