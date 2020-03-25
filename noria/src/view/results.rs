@@ -24,6 +24,12 @@ impl Results {
     }
 }
 
+impl Into<Vec<Vec<DataType>>> for Results {
+    fn into(self) -> Vec<Vec<DataType>> {
+        self.results
+    }
+}
+
 impl PartialEq<[Vec<DataType>]> for Results {
     fn eq(&self, other: &[Vec<DataType>]) -> bool {
         self.results == other
@@ -316,5 +322,13 @@ impl Row {
     {
         let index = self.columns.iter().position(|col| col == field)?;
         Some((&self.row[index]).into())
+    }
+
+    /// Remove the value for the field of the result by the given name.
+    ///
+    /// Returns `None` if the given field does not exist.
+    pub fn take(&mut self, field: &str) -> Option<DataType> {
+        let index = self.columns.iter().position(|col| col == field)?;
+        Some(std::mem::replace(&mut self.row[index], DataType::None))
     }
 }

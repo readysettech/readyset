@@ -185,7 +185,7 @@ impl Recipe {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
-    fn resolve_alias(&self, alias: &str) -> Option<&str> {
+    pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
         self.aliases.get(alias).map(|ref qid| {
             let (ref internal_qn, _, _) = self.expressions[qid];
             internal_qn.as_ref().unwrap().as_str()
@@ -826,6 +826,19 @@ mod tests {
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
         assert_eq!(r2.prior, Some(Box::new(r1_copy)));
+    }
+
+    #[test]
+    fn it_handles_aliasing() {
+        let r0 = Recipe::blank(None);
+
+        let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a FROM b;";
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
+        let r1 = r0.replace(r1_t).unwrap();
+        assert_eq!(r1.version, 1);
+        assert_eq!(r1.expressions.len(), 1);
+        assert_eq!(r1.aliases.len(), 2);
+        assert_eq!(r1.resolve_alias("q_1"), r1.resolve_alias("q_0"));
     }
 
     #[test]

@@ -629,6 +629,32 @@ async fn it_works_with_vote() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn it_works_with_identical_queries() {
+    let mut g = start_simple("it_works_with_identical_queries").await;
+    let sql = "
+        CREATE TABLE Article (aid int, PRIMARY KEY(aid));
+        QUERY aq1: SELECT Article.* FROM Article WHERE Article.aid = ?;
+        QUERY aq2: SELECT Article.* FROM Article WHERE Article.aid = ?;
+    ";
+
+    g.install_recipe(sql).await.unwrap();
+    let mut article = g.table("Article").await.unwrap();
+    let mut aq1 = g.view("aq1").await.unwrap();
+    let mut aq2 = g.view("aq2").await.unwrap();
+
+    let aid = 1u64;
+
+    assert!(aq1.lookup(&[aid.into()], true).await.unwrap().is_empty());
+    assert!(aq2.lookup(&[aid.into()], true).await.unwrap().is_empty());
+    article.insert(vec![aid.into()]).await.unwrap();
+    sleep().await;
+
+    let result = aq2.lookup(&[aid.into()], true).await.unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], vec![aid.into()]);
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_double_query_through() {
     let mut g = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "

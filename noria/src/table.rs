@@ -30,6 +30,175 @@ type Transport = AsyncBincodeStream<
     AsyncDestination,
 >;
 
+/// Create a new row for insertion into a [`Table`] using column names.
+///
+/// If the schema of the given table is known, column defaults and `NOT NULL` restrictions will
+/// also be respected. In the future, this method will also check that the provided `DataType`
+/// matches the expected data type for each column.
+///
+/// Values are automatically converted to `DataType` as necessary.
+///
+///
+/// ```rust
+/// async fn add_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+///   let user = noria::row!(users,
+///     "username" => "jonhoo",
+///     "password" => "hunter2",
+///     "created_at" => chrono::Local::now().naive_local(),
+///     "logins" => 0,
+///   );
+///   users.insert(user).await
+/// }
+/// ```
+#[macro_export]
+macro_rules! row {
+    // https://danielkeep.github.io/tlborm/book/pat-trailing-separators.html
+    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => {
+        $crate::row!(@step $tbl, $($k => $v),+)
+    };
+
+    // macros for counting:
+    // https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length
+    // these can't be moved into the macro case below because of
+    // https://github.com/rust-lang/rust/issues/35853
+    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
+    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::row!(@replace_expr ($e, ()))),*])};
+
+    // we want to allow the caller to move values into row. but, since we loop over the colums, the
+    // compiler will think that we might be moving each $v multiple times (once each time through
+    // the loop), even though that can't happen as long as the field names are distinct. we're
+    // going to work around that by constructing an array that holds an Option<DataType> of each
+    // $v, and then `take()` them when we actually use them for a column value. to do so though, we
+    // also need each $k/$v pair's index so we can refer to the appropriate element of the array.
+    // the ugliness below recursively expands one $k => $v at a time into @$idx; $k => $v using the
+    // counting trick from https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length.
+    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
+        $crate::row!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::row!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
+    };
+
+    // ultimately, the call will end up here with all the indices set
+    // the indices will not technically be numbers, they'll be something like
+    //
+    //     <[()]>::len(&[(), ()])
+    //
+    // but those expressions can crucially be computed at compile time.
+    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
+        let mut row = vec![$crate::DataType::None; $tbl.columns().len()];
+        let mut vals = [$(Some(Into::<$crate::DataType>::into($v))),+];
+        let schema = $tbl.schema();
+        for (coli, col) in $tbl.columns().iter().enumerate() {
+            match &**col {
+                $($k => {
+                    // TODO: check row[coli] against schema.fields[coli].sql_type ?
+                    row[coli] = vals[$idx].take().expect("field name appears twice -- should be caught by match");
+                    if let Some(ref schema) = schema {
+                        if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
+                            assert!(!row[coli].is_none(), "Attempted to set NOT NULL column '{}' to DataType::None", col);
+                        }
+                    }
+                },)|+
+                cname if schema.is_some() => {
+                    let schema = schema.as_ref().unwrap();
+
+                    // Maybe we have a default value?
+                    let mut allow_null = true;
+                    let spec = &schema.fields[coli];
+                    for c in &spec.constraints {
+                        use $crate::ColumnConstraint;
+                        match c {
+                            ColumnConstraint::NotNull => {
+                                allow_null = false;
+                            }
+                            ColumnConstraint::DefaultValue(ref literal) => {
+                                row[coli] = Into::<$crate::DataType>::into(literal);
+                            }
+                            ColumnConstraint::AutoIncrement => {
+                                // TODO
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if !allow_null && row[coli].is_none() {
+                        panic!("Column {} is declared NOT NULL, has no default, and was not provided", cname);
+                    }
+                }
+                _ => { /* leave column value as None */ }
+            }
+        }
+
+        row
+    }};
+}
+
+// this is here just to get better compiler errors for row!
+// the doc test will not show the source of the error _inside_ the macro since it's cross-crate.
+#[cfg(test)]
+#[allow(dead_code)]
+async fn add_user(users: &mut Table) -> Result<(), TableError> {
+    let s = String::from("non copy");
+    let user = row!(users,
+      "username" => "jonhoo",
+      "password" => "hunter2",
+      "created_at" => chrono::Local::now().naive_local(),
+      "not an ident" => s,
+      "logins" => 0,
+    );
+    users.insert(user).await
+}
+
+/// Create an update for a given [`Table`] using column names.
+///
+/// In the future, this method will also check that the provided `DataType`
+/// matches the expected data type for each column if the schema is known.
+///
+/// Values are automatically converted to `DataType` as necessary.
+///
+///
+/// ```rust
+/// async fn update_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+///   let user = noria::update!(users,
+///     "password" => "hunter3",
+///     "logins" => noria::Modification::Apply(noria::Operation::Add, 1.into()),
+///   );
+///   users.update(vec!["jonhoo".into()], user).await
+/// }
+/// ```
+#[macro_export]
+macro_rules! update {
+    // these are identical as for row! see comments there.
+    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => { $crate::update!(@step $tbl, $($k => $v),+) };
+    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
+    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::update!(@replace_expr ($e, ()))),*])};
+    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
+        $crate::update!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::update!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
+    };
+
+    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
+        let mut set = vec![$((0, Into::<$crate::Modification>::into($v))),+];
+        for (coli, col) in $tbl.columns().iter().enumerate() {
+            match &**col {
+                $($k => {
+                    // TODO: check set[$idx].1 against schema.fields[coli].sql_type ?
+                    set[$idx].0 = coli;
+                },)|+
+                _ => { /* column value not updated */ }
+            }
+        }
+        set
+    }};
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+async fn update_user(users: &mut Table) -> Result<(), TableError> {
+    let user = update!(users,
+      "password" => "hunter3",
+      "logins" => crate::Modification::Apply(crate::Operation::Add, 1.into()),
+    );
+    users.update(vec!["jonhoo".into()], user).await
+}
+
 #[derive(Debug)]
 #[doc(hidden)]
 // only pub because we use it to figure out the error type for TableError
@@ -229,20 +398,12 @@ impl fmt::Debug for Table {
     }
 }
 
-impl Service<Input> for Table {
-    type Error = TableError;
-    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
-    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for s in &mut self.shards {
-            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
-        }
-        Poll::Ready(Ok(()))
-    }
-
+impl Table {
     #[allow(clippy::cognitive_complexity)]
-    fn call(&mut self, mut i: Input) -> Self::Future {
+    fn input(
+        &mut self,
+        mut i: Input,
+    ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "table-request",
@@ -252,7 +413,56 @@ impl Service<Input> for Table {
             None
         };
 
-        // TODO: check each row's .len() against self.columns.len() -> WrongColumnCount
+        // NOTE: this is really just a try block
+        let immediate_err = || {
+            let ncols = self.columns.len() + self.dropped.len();
+            for op in &i.data {
+                match op {
+                    TableOperation::Insert(ref row) => {
+                        if row.len() != ncols {
+                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                        }
+                    }
+                    TableOperation::Delete { ref key } => {
+                        if key.len() != self.key.len() {
+                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                        }
+                    }
+                    TableOperation::InsertOrUpdate {
+                        ref row,
+                        ref update,
+                    } => {
+                        if row.len() != ncols {
+                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                        }
+                        if update.len() > self.columns.len() {
+                            // NOTE: < is okay to allow dropping tailing no-ops
+                            return Err(TableError::WrongColumnCount(
+                                self.columns.len(),
+                                update.len(),
+                            ));
+                        }
+                    }
+                    TableOperation::Update { ref set, ref key } => {
+                        if key.len() != self.key.len() {
+                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                        }
+                        if set.len() > self.columns.len() {
+                            // NOTE: < is okay to allow dropping tailing no-ops
+                            return Err(TableError::WrongColumnCount(
+                                self.columns.len(),
+                                set.len(),
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        };
+
+        if let Err(e) = immediate_err() {
+            return future::Either::Left(async move { Err(e) });
+        }
 
         if self.shards.len() == 1 {
             let request = Tagged::from(if self.dst_is_local {
@@ -263,7 +473,9 @@ impl Service<Input> for Table {
 
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
-            future::Either::Left(self.shards[0].call(request).map_err(TableError::from))
+            future::Either::Right(future::Either::Left(
+                self.shards[0].call(request).map_err(TableError::from),
+            ))
         } else {
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -326,43 +538,31 @@ impl Service<Input> for Table {
                 }
             }
 
-            future::Either::Right(
+            future::Either::Right(future::Either::Right(
                 wait_for
                     .try_for_each(|_| async { Ok(()) })
                     .map_err(TableError::from)
                     .map_ok(Tagged::from),
-            )
+            ))
         }
-    }
-}
-
-impl Service<TableOperation> for Table {
-    type Error = TableError;
-    type Response = <Table as Service<Input>>::Response;
-    type Future = <Table as Service<Input>>::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        <Table as Service<Input>>::poll_ready(self, cx)
-    }
-
-    fn call(&mut self, op: TableOperation) -> Self::Future {
-        let i = self.prep_records(vec![op]);
-        <Table as Service<Input>>::call(self, i)
     }
 }
 
 impl Service<Vec<TableOperation>> for Table {
     type Error = TableError;
-    type Response = <Table as Service<Input>>::Response;
-    type Future = <Table as Service<Input>>::Future;
+    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
+    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        <Table as Service<Input>>::poll_ready(self, cx)
+        for s in &mut self.shards {
+            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
+        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, ops: Vec<TableOperation>) -> Self::Future {
         let i = self.prep_records(ops);
-        <Table as Service<Input>>::call(self, i)
+        self.input(i)
     }
 }
 
@@ -406,6 +606,7 @@ impl Table {
                 | TableOperation::InsertOrUpdate { ref mut row, .. } => row,
                 _ => unimplemented!("we need to shift the update/delete cols!"),
             };
+            // TODO: what about updates? do we need to rewrite the set vector?
 
             // we want to be a bit careful here to avoid shifting elements multiple times. we
             // do this by moving from the back, and swapping the tail element to the end of the
@@ -488,7 +689,8 @@ impl Table {
     where
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableOperation::Insert(u.into())).await
+        self.quick_n_dirty(vec![TableOperation::Insert(u.into())])
+            .await
     }
 
     /// Perform multiple operation on this base table.
@@ -506,7 +708,7 @@ impl Table {
     where
         I: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableOperation::Delete { key: key.into() })
+        self.quick_n_dirty(vec![TableOperation::Delete { key: key.into() }])
             .await
     }
 
@@ -523,10 +725,6 @@ impl Table {
             "update operations can only be applied to base nodes with key columns"
         );
 
-        if key.len() != self.key.len() {
-            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
-        }
-
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
@@ -535,7 +733,7 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(TableOperation::Update { key, set })
+        self.quick_n_dirty(vec![TableOperation::Update { key, set }])
             .await
     }
 
@@ -556,13 +754,6 @@ impl Table {
             "update operations can only be applied to base nodes with key columns"
         );
 
-        if insert.len() != self.columns.len() {
-            return Err(TableError::WrongColumnCount(
-                self.columns.len(),
-                insert.len(),
-            ));
-        }
-
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
@@ -571,10 +762,10 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(TableOperation::InsertOrUpdate {
+        self.quick_n_dirty(vec![TableOperation::InsertOrUpdate {
             row: insert,
             update: set,
-        })
+        }])
         .await
     }
 }

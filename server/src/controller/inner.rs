@@ -763,6 +763,10 @@ impl ControllerInner {
             }
         };
 
+        let name = match self.recipe.resolve_alias(name) {
+            None => name,
+            Some(alias) => alias,
+        };
         self.find_view_for(node, name).map(|r| {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();

@@ -354,6 +354,12 @@ impl From<f64> for DataType {
     }
 }
 
+impl<'a> From<&'a DataType> for DataType {
+    fn from(dt: &'a DataType) -> Self {
+        dt.clone()
+    }
+}
+
 impl<'a> From<&'a Literal> for DataType {
     fn from(l: &'a Literal) -> Self {
         match *l {
@@ -385,6 +391,12 @@ impl From<Literal> for DataType {
             Literal::FixedPoint(r) => DataType::Real(i64::from(r.integral), r.fractional as i32),
             _ => unimplemented!(),
         }
+    }
+}
+
+impl From<NaiveDateTime> for DataType {
+    fn from(dt: NaiveDateTime) -> Self {
+        DataType::Timestamp(dt)
     }
 }
 
@@ -644,6 +656,15 @@ pub enum Modification {
     Apply(Operation, DataType),
     /// Leave the existing value as-is.
     None,
+}
+
+impl<T> From<T> for Modification
+where
+    T: Into<DataType>,
+{
+    fn from(t: T) -> Modification {
+        Modification::Set(t.into())
+    }
 }
 
 /// An operation to apply to a base table.
