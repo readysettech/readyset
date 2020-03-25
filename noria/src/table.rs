@@ -612,37 +612,60 @@ impl Table {
             // do this by moving from the back, and swapping the tail element to the end of the
             // vector until we hit each index.
 
+            // in other words, if we have two default values, we're going to start out with:
+            //
+            // |####..|
+            //
+            // where # are "real" fields in the record and . are None values.
+            // we want to end up with something like
+            //
+            // |#d##d#|
+            //
+            // if columns 1 and 5 were dropped (d here signifies the default values).
+            // what makes this tricky is that we need to preserve the order of all the #.
+            // to accomplish this, we're going to move the # to the end of the record, one at a
+            // time, starting with the last one, and then "inject" the default values as we go.
+            // that way, we only make one pass over the record!
+            //
+            // in particular, progress is going to look like this (i've swapped # for col #):
+            //
+            // |1234..|  hole = 5, next_insert = 4, last_unmoved = 3
+            // swap 4 and last .
+            // |123..4|  hole = 4, next_insert = 4, last_unmoved = 2
+            // hole == next_insert, so insert default value
+            // |123.d4|  hole = 4, next_insert = 4, last_unmoved = 2
+            // move on to next dropped column
+            // |123.d4|  hole = 3, next_insert = 1, last_unmoved = 2
+            // swap 3 and last .
+            // |12.3d4|  hole = 2, next_insert = 1, last_unmoved = 1
+            // swap 2 and last .
+            // |1.23d4|  hole = 1, next_insert = 1, last_unmoved = 0
+            // hole == next_insert, so insert default value
+            // |1d23d4|
+            // move on to next dropped column, but since there is none, we're done
+
             // make room in the record
-            r.reserve(ndropped);
-            let mut free = r.len() + ndropped;
+            let n = r.len() + ndropped;
+            let mut hole = n;
             let mut last_unmoved = r.len() - 1;
-            unsafe { r.set_len(free) };
-            // *technically* we should set all the extra elements just in case we get a panic
-            // below, because otherwise we might call drop() on uninitialized memory. we would
-            // do that like this (note the ::forget() on the swapped-out value):
-            //
-            //   for i in (free - ndropped)..r.len() {
-            //       mem::forget(mem::replace(r.get_mut(i).unwrap(), DataType::None));
-            //   }
-            //
-            // but for efficiency we dont' do that, and just make sure that the code below
-            // doesn't panic. what's the worst that could happen, right?
+            r.resize(n, DataType::None);
 
             // keep trying to insert the next dropped column
             for (next_insert, default) in dropped {
                 // think of this being at the bottom of the loop
                 // we just hoist it here to avoid underflow if we ever insert at 0
-                free -= 1;
+                hole -= 1;
 
                 // shift elements until the next free slot is the one we want to insert into
-                while free > next_insert {
-                    // shift another element so we the free slot is at a lower index
-                    r.swap(last_unmoved, free);
-                    free -= 1;
+                while hole != next_insert {
+                    // shift another element so the free slot is at a lower index
+                    r.swap(last_unmoved, hole);
+                    hole -= 1;
 
                     if last_unmoved == 0 {
-                        // avoid underflow
-                        debug_assert_eq!(next_insert, free);
+                        // there are no more elements -- the next slot to insert at better be [0]
+                        debug_assert_eq!(next_insert, 0);
+                        debug_assert_eq!(hole, 0);
                         break;
                     }
                     last_unmoved -= 1;
@@ -651,12 +674,7 @@ impl Table {
                 // we're at the right index -- insert the dropped value
                 let current = &mut r[next_insert];
                 let old = mem::replace(current, default.clone());
-                // the old value is uninitialized memory!
-                // (remember how we called set_len above?)
-                mem::forget(old);
-
-                // here, I'll help:
-                // free -= 1;
+                debug_assert_eq!(old, DataType::None);
             }
         }
     }
