@@ -307,6 +307,7 @@ fn main() {
                         &server.private_ip,
                         "--shards",
                         &shards,
+                        "-v",
                         "2>&1",
                         "|",
                         "tee",
