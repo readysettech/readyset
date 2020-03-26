@@ -17,6 +17,7 @@ use std::task::{Context, Poll};
 use tokio_tower::multiplex;
 use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
+use tower_limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
 
 type Transport = AsyncBincodeStream<
@@ -32,11 +33,15 @@ type Transport = AsyncBincodeStream<
 pub struct ViewEndpoint(SocketAddr);
 
 impl Service<()> for ViewEndpoint {
-    type Response = multiplex::MultiplexTransport<Transport, Tagger>;
-    type Error = tokio::io::Error;
-    type Future = impl Future<
-        Output = Result<multiplex::MultiplexTransport<Transport, Tagger>, tokio::io::Error>,
+    type Response = ConcurrencyLimit<
+        multiplex::Client<
+            multiplex::MultiplexTransport<Transport, Tagger>,
+            tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<ReadQuery>>,
+            Tagged<ReadQuery>,
+        >,
     >;
+    type Error = tokio::io::Error;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -48,15 +53,16 @@ impl Service<()> for ViewEndpoint {
             let s = f.await?;
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
-            Ok(multiplex::MultiplexTransport::new(s, Tagger::default()))
+            let t = multiplex::MultiplexTransport::new(s, Tagger::default());
+            Ok(ConcurrencyLimit::new(
+                multiplex::Client::with_error_handler(t, |e| panic!("{:?}", e)),
+                crate::PENDING_PER_CONN,
+            ))
         }
     }
 }
 
-pub(crate) type ViewRpc = Buffer<
-    Pool<multiplex::client::Maker<ViewEndpoint, Tagged<ReadQuery>>, (), Tagged<ReadQuery>>,
-    Tagged<ReadQuery>,
->;
+pub(crate) type ViewRpc = Buffer<Pool<ViewEndpoint, (), Tagged<ReadQuery>>, Tagged<ReadQuery>>;
 
 /// A failed [`SyncView`] operation.
 #[derive(Debug, Fail)]
@@ -144,9 +150,9 @@ impl ViewBuilder {
                             .urgency(0.03)
                             .loaded_above(0.2)
                             .underutilized_below(0.000_000_001)
-                            .max_services(Some(32))
-                            .build(multiplex::client::Maker::new(ViewEndpoint(addr)), ()),
-                        50,
+                            .max_services(Some(crate::MAX_POOL_SIZE))
+                            .build(ViewEndpoint(addr), ()),
+                        crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(

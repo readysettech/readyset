@@ -20,6 +20,7 @@ use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower_balance::pool::{self, Pool};
 use tower_buffer::Buffer;
+use tower_limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
 use vec_map::VecMap;
 
@@ -205,11 +206,18 @@ async fn update_user(users: &mut Table) -> Result<(), TableError> {
 pub struct TableEndpoint(SocketAddr);
 
 impl Service<()> for TableEndpoint {
-    type Response = multiplex::MultiplexTransport<Transport, Tagger>;
-    type Error = tokio::io::Error;
-    type Future = impl Future<
-        Output = Result<multiplex::MultiplexTransport<Transport, Tagger>, tokio::io::Error>,
+    type Response = ConcurrencyLimit<
+        multiplex::Client<
+            multiplex::MultiplexTransport<Transport, Tagger>,
+            tokio_tower::Error<
+                multiplex::MultiplexTransport<Transport, Tagger>,
+                Tagged<LocalOrNot<Input>>,
+            >,
+            Tagged<LocalOrNot<Input>>,
+        >,
     >;
+    type Error = tokio::io::Error;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -223,19 +231,18 @@ impl Service<()> for TableEndpoint {
             s.write_all(&[CONNECTION_FROM_BASE]).await.unwrap();
             s.flush().await.unwrap();
             let s = AsyncBincodeStream::from(s).for_async();
-            Ok(multiplex::MultiplexTransport::new(s, Tagger::default()))
+            let t = multiplex::MultiplexTransport::new(s, Tagger::default());
+            // NOTE: we need to limit concurrency since AsyncBincode does unlimited buffering
+            Ok(ConcurrencyLimit::new(
+                multiplex::Client::with_error_handler(t, |e| panic!("{:?}", e)),
+                crate::PENDING_PER_CONN,
+            ))
         }
     }
 }
 
-pub(crate) type TableRpc = Buffer<
-    Pool<
-        multiplex::client::Maker<TableEndpoint, Tagged<LocalOrNot<Input>>>,
-        (),
-        Tagged<LocalOrNot<Input>>,
-    >,
-    Tagged<LocalOrNot<Input>>,
->;
+pub(crate) type TableRpc =
+    Buffer<Pool<TableEndpoint, (), Tagged<LocalOrNot<Input>>>, Tagged<LocalOrNot<Input>>>;
 
 /// A failed [`SyncTable`] operation.
 #[derive(Debug, Fail)]
@@ -320,9 +327,9 @@ impl TableBuilder {
                             .urgency(0.01)
                             .loaded_above(0.2)
                             .underutilized_below(0.000_000_001)
-                            .max_services(Some(32))
-                            .build(multiplex::client::Maker::new(TableEndpoint(addr)), ()),
-                        50,
+                            .max_services(Some(crate::MAX_POOL_SIZE))
+                            .build(TableEndpoint(addr), ()),
+                        crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(

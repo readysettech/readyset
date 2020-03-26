@@ -117,6 +117,65 @@ extern crate serde_derive;
 #[macro_use]
 extern crate slog;
 
+/// Maximum number of requests that may be in-flight _to_ the connection pool at a time.
+///
+/// We want this to be > 1 so that multiple threads can enqueue requests at the same time without
+/// immediately blocking one another. The exact value is somewhat arbitrary.
+///
+/// The value isn't higher, because it wouldn't improve performance, just increase latency.
+///
+/// The value isn't lower, because it would mean fewer concurrent enqueues.
+///
+/// NOTE: This value also places a soft-ish limit on the number of instances you can have of
+/// `View`s or `Table`s that include a particular endpoint address when sharding is enabled. The
+/// reason for this is kind of subtle: when you `poll_ready` a `View` or `Table`, we internally
+/// `poll_ready` all the shards of that `View` or `Table`, each of which is a `tower-buffer`. When
+/// you `poll_ready` a `tower-buffer`, it reserves a "slot" in its buffer for the coming request,
+/// effectively reducing the capacity of the channel by 1 until the send happens. But, with
+/// sharding, it may be that no request then goes to a particular shard. So, you may end up with
+/// *all* the slots to a given resource taken up by `poll_ready`s that haven't been used yet. A
+/// similar issue arises if you ever do:
+///
+/// ```ignore
+/// view.ready().await;
+/// let req = reqs.next().await;
+/// view.call(req).await;
+/// ```
+///
+/// When `ready` resolves, it will be holding up a slot in the buffer to `view`. It will continue
+/// to hold that up all the way until the next request arrives from `reqs`, which may be a very
+/// long time!
+///
+/// This problem is also described inhttps://github.com/tower-rs/tower/pull/425 and
+/// https://github.com/tower-rs/tower/issues/408#issuecomment-593678194. Ultimately, we need
+/// something like https://github.com/tower-rs/tower/issues/408, but for the time being, just make
+/// sure this value is high enough.
+pub(crate) const BUFFER_TO_POOL: usize = 256;
+
+/// The maximum number of concurrent connections to a given backend resource.
+///
+/// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
+/// serialization/deserialization in parallel on multiple threads. Nothing else really.
+///
+/// The value isn't higher, because we only have so many cores. And keep in mind that this value is
+/// used per view/table _address_, so unless _all_ your requests are going to a single address,
+/// you'll be fine.
+///
+/// The value isn't lower, because we want _some_ concurrency in serialization.
+pub(crate) const MAX_POOL_SIZE: usize = 8;
+
+/// Number of requests that can be pending on any _single_ connection.
+///
+/// We need to limit this since `AsyncBincode` has unlimited buffering, and so will never apply
+/// back-pressure otherwise.
+///
+/// The value isn't higher, because it would inflate latency, and also prevent us from taking
+/// advantage of concurrent serialization/deserialization as much.
+///
+/// The value isn't lower, because lowering it would mean the server has less work at a time, which
+/// means it can batch less work, which means lower overall efficiency.
+pub(crate) const PENDING_PER_CONN: usize = 128;
+
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use tokio_tower::multiplex;
