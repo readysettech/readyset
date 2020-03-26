@@ -634,9 +634,16 @@ impl Future for Replica {
                         Poll::Pending => {
                             remote_done = true;
                         }
-                        Poll::Ready(Some((StreamYield::Item(Err(e)), _))) => {
+                        Poll::Ready(Some((StreamYield::Item(Err(e)), streami))) => {
                             error!(this.log, "input stream failed: {:?}", e);
-                            break;
+                            // we want to _forcibly_ retire streami
+                            this.inputs.as_mut().remove(streami);
+                            let c = &mut out.connections[streami];
+                            c.epoch += 1;
+                            c.unacked = 0;
+                            c.tag_acks.clear();
+                            c.pending_flush = false;
+                            out.pending.remove(&streami);
                         }
                     }
                 }
