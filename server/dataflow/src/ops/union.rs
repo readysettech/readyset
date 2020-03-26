@@ -45,6 +45,8 @@ pub struct Union {
     required: usize,
 
     full_wait_state: FullWait,
+
+    me: Option<NodeIndex>,
 }
 
 impl Clone for Union {
@@ -57,6 +59,8 @@ impl Clone for Union {
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
+
+            me: self.me.clone(),
         }
     }
 }
@@ -94,6 +98,7 @@ impl Union {
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
+            me: None,
         }
     }
 
@@ -107,6 +112,7 @@ impl Union {
             replay_key: None,
             replay_pieces: HashMap::new(),
             full_wait_state: FullWait::None,
+            me: None,
         }
     }
 
@@ -147,7 +153,8 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+    fn on_commit(&mut self, me: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.me = Some(me);
         match self.emit {
             Emit::Project {
                 ref mut emit,
@@ -508,6 +515,7 @@ impl Ingredient for Union {
                 let mut replay_pieces_tmp = HashMap::with_capacity(0);
                 mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
+                let me = self.me;
                 let required = self.required; // can't borrow self in closures below
                 let mut released = HashSet::new();
                 let mut captured = HashSet::new();
@@ -525,7 +533,12 @@ impl Ingredient for Union {
                                         // we'd need to keep a queue of replays from each side,
                                         // apply writes to all queued replays from that side, and
                                         // then emit all front-of-queue replays in lock-step.
-                                        unimplemented!("detected chained union");
+                                        unimplemented!(
+                                            "detected chained union at {:?} (from: {:?}, key: {:?})",
+                                            me.unwrap(),
+                                            n[from].borrow().global_addr(),
+                                            key_cols,
+                                        );
                                     }
                                     if e.get().buffered.len() == required - 1 {
                                         // release!
