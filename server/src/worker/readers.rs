@@ -54,10 +54,8 @@ pub(super) async fn listen(
     )>();
     tokio::spawn(async move {
         while let Some((blocking, ack)) = rx.next().await {
-            if let Err(_) = ack.send(blocking.await) {
-                // client went away, so no need to process more requests
-                break;
-            }
+            // if this errors, the client just went away
+            let _ = ack.send(blocking.await);
         }
     });
 
