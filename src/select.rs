@@ -971,6 +971,29 @@ mod tests {
     }
 
     #[test]
+    fn generic_function_query() {
+        let qstring = "SELECT coalesce(a, b,c),d FROM sometable;";
+
+        let res = selection(qstring.as_bytes());
+        let agg_expr = FunctionExpression::CountStar;
+        let expected_stmt = SelectStatement {
+            tables: vec![Table::from("sometable")],
+            fields: vec![FieldDefinitionExpression::Col(Column {
+                name: String::from("count(*)"),
+                alias: None,
+                table: None,
+                function: Some(Box::new(agg_expr)),
+            }), FieldDefinitionExpression::Col(Column {
+                name: String::from("d"),
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected_stmt);
+    }
+
+
+    #[test]
     fn moderately_complex_selection() {
         let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
