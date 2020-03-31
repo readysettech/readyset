@@ -64,6 +64,7 @@ You may need to install some dependencies for the above to work:
  - libclang-dev
  - libssl-dev
  - liblz4-dev
+ - build-essential
 
 To start a long-running `noria-server` instance, ensure that ZooKeeper
 is running, and then run:
