@@ -83,9 +83,11 @@ impl Node {
 
                     let mut replay = match (&mut **m,) {
                         (&mut Packet::ReplayPiece {
+                            tag,
                             context:
                                 payload::ReplayPieceContext::Partial {
                                     ref mut for_keys,
+                                    requesting_shard,
                                     unishard,
                                     ignore,
                                 },
@@ -96,7 +98,9 @@ impl Node {
                             ReplayContext::Partial {
                                 key_cols: keyed_by.unwrap().clone(),
                                 keys: mem::replace(for_keys, HashSet::new()),
+                                requesting_shard,
                                 unishard,
+                                tag,
                             }
                         }
                         (&mut Packet::ReplayPiece {

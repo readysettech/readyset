@@ -62,6 +62,7 @@ pub enum InitialState {
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<Vec<DataType>>,
+        requesting_shard: usize,
         unishard: bool,
         ignore: bool,
     },
@@ -195,6 +196,7 @@ pub enum Packet {
         tag: Tag,
         keys: Vec<Vec<DataType>>,
         unishard: bool,
+        requesting_shard: usize,
     },
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.

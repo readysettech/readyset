@@ -39,8 +39,9 @@ pub struct Union {
     // to sanity check that we're not asked to manage multiple replay paths with different keys
     replay_key_orig: Vec<usize>,
 
+    // TODO: these need to be _per Tag_.
     replay_key: Option<HashMap<LocalNodeIndex, Vec<usize>>>,
-    replay_pieces: HashMap<Vec<DataType>, ReplayPieces>,
+    replay_pieces: BTreeMap<(Vec<DataType>, usize), ReplayPieces>,
 
     required: usize,
 
@@ -57,7 +58,7 @@ impl Clone for Union {
             replay_key_orig: Vec::new(),
             // nothing can have been received yet
             replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
 
             me: self.me.clone(),
@@ -96,7 +97,7 @@ impl Union {
             required: parents,
             replay_key_orig: Vec::new(),
             replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
             me: None,
         }
@@ -110,7 +111,7 @@ impl Union {
             required: shards,
             replay_key_orig: Vec::new(),
             replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
             me: None,
         }
@@ -304,9 +305,10 @@ impl Ingredient for Union {
                 // *other* nodes downstream that do *not* have holes for the key in question.
                 for r in &rs {
                     // XXX: the clone + collect here is really sad
-                    if let Some(ref mut pieces) = self
+                    let key = k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>();
+                    for (_, pieces) in self
                         .replay_pieces
-                        .get_mut(&k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>())
+                        .range_mut((key.clone(), 0)..=(key, usize::max_value()))
                     {
                         if let Some(ref mut rs) = pieces.buffered.get_mut(&from) {
                             // we've received a replay piece from this ancestor already for this
@@ -319,8 +321,6 @@ impl Ingredient for Union {
                             // yet, so we know that the eventual replay piece must include this
                             // record.
                         }
-                    } else {
-                        // we're not waiting on replay pieces for this key
                     }
                 }
 
@@ -450,11 +450,14 @@ impl Ingredient for Union {
             ReplayContext::Partial {
                 ref key_cols,
                 ref keys,
+                requesting_shard,
                 unishard,
+                tag,
             } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
+                let mut is_shard_merger = false;
                 if let Emit::AllFrom(_, _) = self.emit {
                     if unishard {
                         // No need to buffer since request should only be for one shard
@@ -465,6 +468,7 @@ impl Ingredient for Union {
                             captured: HashSet::new(),
                         };
                     }
+                    is_shard_merger = true;
                 }
 
                 if self.replay_key.is_none() {
@@ -512,8 +516,7 @@ impl Ingredient for Union {
                 // we can't borrow self in both closures below, even though `self.on_input` doesn't
                 // access `self.replay_pieces`. if only the compiler was more clever. we get around
                 // this by mem::swapping a temporary (empty) HashMap (which doesn't allocate).
-                let mut replay_pieces_tmp = HashMap::with_capacity(0);
-                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
+                let mut replay_pieces_tmp = mem::take(&mut self.replay_pieces);
 
                 let me = self.me;
                 let required = self.required; // can't borrow self in closures below
@@ -525,18 +528,23 @@ impl Ingredient for Union {
                             let rs = rs_by_key.remove(&key[..]).unwrap_or_else(Records::default);
 
                             // store this replay piece
-                            use std::collections::hash_map::Entry;
-                            match replay_pieces_tmp.entry(key.clone()) {
+                            use std::collections::btree_map::Entry;
+                            match replay_pieces_tmp.entry((key.clone(), requesting_shard)) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
-                                        // chained unions are not yet supported.
-                                        // we'd need to keep a queue of replays from each side,
-                                        // apply writes to all queued replays from that side, and
-                                        // then emit all front-of-queue replays in lock-step.
+                                        // got two upquery responses for the same key for the same
+                                        // downstream shard. waaaaaaat?
                                         unimplemented!(
-                                            "detected chained union at {:?} (from: {:?}, key: {:?})",
-                                            me.unwrap(),
-                                            n[from].borrow().global_addr(),
+                                            "downstream shard double-requested key (node: {}, src: {}, key cols: {:?})",
+                                            me.unwrap().index(),
+                                            if is_shard_merger {
+                                                format!("shard {}", from.id())
+                                            } else {
+                                                format!(
+                                                    "node {}",
+                                                    n[from].borrow().global_addr().index()
+                                                )
+                                            },
                                             key_cols,
                                         );
                                     }
@@ -589,7 +597,7 @@ impl Ingredient for Union {
                 };
 
                 // and swap back replay pieces
-                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
+                mem::replace(&mut self.replay_pieces, replay_pieces_tmp);
 
                 RawProcessingResult::ReplayPiece {
                     rows: rs,
@@ -615,7 +623,10 @@ impl Ingredient for Union {
         }
 
         keys.retain(|key| {
-            if let Some(e) = self.replay_pieces.get_mut(key) {
+            for (_, e) in self
+                .replay_pieces
+                .range_mut((key.clone(), 0)..=(key.clone(), usize::max_value()))
+            {
                 if e.buffered.contains_key(&from) {
                     // we've already received something from left, but it has now been evicted.
                     // we can't remove the buffered replay, since we'll then get confused when the

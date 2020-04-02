@@ -84,6 +84,8 @@ pub(crate) enum ReplayContext {
     Partial {
         key_cols: Vec<usize>,
         keys: HashSet<Vec<DataType>>,
+        requesting_shard: usize,
+        tag: Tag,
         unishard: bool,
     },
     Full {
