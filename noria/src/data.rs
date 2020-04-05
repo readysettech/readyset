@@ -777,6 +777,14 @@ mod tests {
             DataType::Text(ArcCStr::try_from(&vec![1; 30][..]).unwrap())
         );
 
+        let mut s = [0; 15];
+        s[0] = 1;
+        s[1] = 2;
+        let a = mysql::Value::Bytes(s.to_vec());
+        let a_dt = DataType::try_from(a);
+        assert!(a_dt.is_ok());
+        assert_eq!(a_dt.unwrap(), DataType::TinyText(s));
+
         // Test Value::Int.
         let a = mysql::Value::Int(-5);
         let a_dt = DataType::try_from(a);
