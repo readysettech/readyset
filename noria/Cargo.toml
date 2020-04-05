@@ -44,7 +44,7 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "0.4.0"
 futures-util = "0.3.0"
-mysql = "18.1.0"
+mysql_common = "0.20.2"
 
 # consensus/
 slog = "2.4.0"

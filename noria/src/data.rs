@@ -2,8 +2,10 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime};
 
+use mysql_common::value::Value;
 use nom_sql::Literal;
 
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
@@ -538,7 +540,6 @@ impl Into<f64> for &'_ DataType {
     }
 }
 
-use std::convert::TryFrom;
 impl From<String> for DataType {
     fn from(s: String) -> Self {
         let len = s.as_bytes().len();
@@ -561,32 +562,25 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
-impl TryFrom<mysql::Value> for DataType {
+impl TryFrom<Value> for DataType {
     type Error = &'static str;
 
-    fn try_from(v: mysql::Value) -> Result<Self, Self::Error> {
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
         match v {
-            mysql::Value::NULL => Ok(DataType::None),
-            mysql::Value::Bytes(v) => {
-                let len = v.len();
-                if len <= TINYTEXT_WIDTH {
-                    let mut bytes = [0; TINYTEXT_WIDTH];
-                    for (i, c) in v.iter().enumerate() {
-                        bytes[i] = *c;
-                    }
-
-                    Ok(DataType::TinyText(bytes))
-                } else {
-                    match ArcCStr::try_from(&v[..]) {
-                        Ok(arc_c_str) => Ok(DataType::Text(arc_c_str)),
-                        Err(_) => Err("std::ffi::FromBytesWithNulError"),
-                    }
+            Value::NULL => Ok(DataType::None),
+            Value::Bytes(v) => {
+                if v.iter().any(|b| b == &0) {
+                    return Err("FromBytesWithNulError");
+                }
+                match String::from_utf8(v) {
+                    Ok(v) => Ok(v.into()),
+                    Err(_) => Err("Invalid utf-8 string"),
                 }
             }
-            mysql::Value::Int(v) => Ok(DataType::BigInt(v)),
-            mysql::Value::UInt(v) => Ok(DataType::UnsignedBigInt(v)),
-            mysql::Value::Float(v) => Ok(v.into()),
-            mysql::Value::Date(year, month, day, hour, minutes, seconds, micros) => {
+            Value::Int(v) => Ok(v.into()),
+            Value::UInt(v) => Ok(v.into()),
+            Value::Float(v) => Ok(v.into()),
+            Value::Date(year, month, day, hour, minutes, seconds, micros) => {
                 Ok(DataType::Timestamp(
                     NaiveDate::from_ymd(year.into(), month.into(), day.into()).and_hms_micro(
                         hour.into(),
@@ -596,7 +590,7 @@ impl TryFrom<mysql::Value> for DataType {
                     ),
                 ))
             }
-            mysql::Value::Time(..) => Err("`mysql::Value::time` is not supported in Noria"),
+            Value::Time(..) => Err("`mysql_common::value::Value::time` is not supported in Noria"),
         }
     }
 }
@@ -758,18 +752,18 @@ mod tests {
     #[test]
     fn mysql_value_to_datatype() {
         // Test Value::NULL.
-        let a = mysql::Value::NULL;
+        let a = Value::NULL;
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::None);
 
         // Test Value::Bytes.
         // Can't build a CString with interior nul-terminated chars.
-        let a = mysql::Value::Bytes(vec![0; 30]);
+        let a = Value::Bytes(vec![0; 30]);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_err());
 
-        let a = mysql::Value::Bytes(vec![1; 30]);
+        let a = Value::Bytes(vec![1; 30]);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(
@@ -777,42 +771,40 @@ mod tests {
             DataType::Text(ArcCStr::try_from(&vec![1; 30][..]).unwrap())
         );
 
-        let mut s = [0; 15];
-        s[0] = 1;
-        s[1] = 2;
-        let a = mysql::Value::Bytes(s.to_vec());
+        let s = [1; 15];
+        let a = Value::Bytes(s.to_vec());
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::TinyText(s));
 
         // Test Value::Int.
-        let a = mysql::Value::Int(-5);
+        let a = Value::Int(-5);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::BigInt(-5));
 
         // Test Value::Float.
-        let a = mysql::Value::UInt(5);
+        let a = Value::UInt(5);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::UnsignedBigInt(5));
 
         // Test Value::Float.
-        let a = mysql::Value::Float(4.2);
+        let a = Value::Float(4.2);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::Real(4, 200000000));
 
         // Test Value::Date.
         let ts = NaiveDate::from_ymd(1111, 1, 11).and_hms_micro(2, 3, 4, 5);
-        let a = mysql::Value::from(ts.clone());
+        let a = Value::from(ts.clone());
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::Timestamp(ts));
 
         // Test Value::Time.
         // noria::DataType has no `Time` representation.
-        let a = mysql::Value::Time(true, 0, 0, 0, 0, 0);
+        let a = Value::Time(true, 0, 0, 0, 0, 0);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_err());
     }
