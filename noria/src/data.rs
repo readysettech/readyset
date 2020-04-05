@@ -2,7 +2,6 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime};
 
-use mysql_common::value::Value;
 use nom_sql::Literal;
 
 use std::convert::TryFrom;
@@ -562,10 +561,12 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
-impl TryFrom<Value> for DataType {
+impl TryFrom<mysql_common::value::Value> for DataType {
     type Error = &'static str;
 
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
+    fn try_from(v: mysql_common::value::Value) -> Result<Self, Self::Error> {
+        use mysql_common::value::Value;
+
         match v {
             Value::NULL => Ok(DataType::None),
             Value::Bytes(v) => {
@@ -751,6 +752,8 @@ mod tests {
 
     #[test]
     fn mysql_value_to_datatype() {
+        use mysql_common::value::Value;
+
         // Test Value::NULL.
         let a = Value::NULL;
         let a_dt = DataType::try_from(a);
