@@ -541,23 +541,35 @@ impl Into<f64> for &'_ DataType {
 
 impl From<String> for DataType {
     fn from(s: String) -> Self {
-        let len = s.as_bytes().len();
-        if len <= TINYTEXT_WIDTH {
-            let mut bytes = [0; TINYTEXT_WIDTH];
-            if len != 0 {
-                let bts = &mut bytes[0..len];
-                bts.copy_from_slice(s.as_bytes());
-            }
-            DataType::TinyText(bytes)
-        } else {
-            DataType::Text(ArcCStr::try_from(s).unwrap())
-        }
+        DataType::try_from(s.as_bytes()).unwrap()
     }
 }
 
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
-        DataType::from(s.to_owned())
+        DataType::try_from(s.as_bytes()).unwrap()
+    }
+}
+
+impl<'a> TryFrom<&'a [u8]> for DataType {
+    type Error = &'static str;
+
+    fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
+        let len = b.len();
+        if len <= TINYTEXT_WIDTH {
+            let mut bytes = [0; TINYTEXT_WIDTH];
+            if len != 0 {
+                let bts = &mut bytes[0..len];
+                bts.copy_from_slice(b);
+            }
+
+            Ok(DataType::TinyText(bytes))
+        } else {
+            match ArcCStr::try_from(b) {
+                Ok(arc_c_str) => Ok(DataType::Text(arc_c_str)),
+                Err(_) => Err("Invalid utf-8 string"),
+            }
+        }
     }
 }
 
@@ -569,15 +581,7 @@ impl TryFrom<mysql_common::value::Value> for DataType {
 
         match v {
             Value::NULL => Ok(DataType::None),
-            Value::Bytes(v) => {
-                if v.iter().any(|b| b == &0) {
-                    return Err("FromBytesWithNulError");
-                }
-                match String::from_utf8(v) {
-                    Ok(v) => Ok(v.into()),
-                    Err(_) => Err("Invalid utf-8 string"),
-                }
-            }
+            Value::Bytes(v) => DataType::try_from(&v[..]),
             Value::Int(v) => Ok(v.into()),
             Value::UInt(v) => Ok(v.into()),
             Value::Float(v) => Ok(v.into()),
