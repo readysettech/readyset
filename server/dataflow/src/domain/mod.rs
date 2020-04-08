@@ -87,6 +87,7 @@ struct Redo {
     tag: Tag,
     replay_key: Vec<DataType>,
     unishard: bool,
+    requesting_shard: usize,
 }
 
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
@@ -333,6 +334,7 @@ impl Domain {
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
         was_single_shard: bool,
+        requesting_shard: usize,
         needed_for: Tag,
     ) {
         use std::collections::hash_map::Entry;
@@ -346,6 +348,7 @@ impl Domain {
             tag: needed_for,
             replay_key: replay_key.clone(),
             unishard: was_single_shard,
+            requesting_shard,
         };
         match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
             Entry::Occupied(e) => {
@@ -1619,7 +1622,15 @@ impl Domain {
                        "missed during replay request";
                        "tag" => tag,
                        "key" => ?key);
-                self.on_replay_miss(source, &cols[..], key.clone(), key, single_shard, tag);
+                self.on_replay_miss(
+                    source,
+                    &cols[..],
+                    key.clone(),
+                    key,
+                    single_shard,
+                    requesting_shard,
+                    tag,
+                );
             }
         }
 
@@ -1737,6 +1748,7 @@ impl Domain {
                 key.clone().into_owned(),
                 key.into_owned(),
                 single_shard,
+                requesting_shard,
                 tag,
             );
         } else {
@@ -2091,12 +2103,17 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let unishard = if let Packet::ReplayPiece {
-                                context: ReplayPieceContext::Partial { unishard, .. },
+                            let (unishard, requesting_shard) = if let Packet::ReplayPiece {
+                                context:
+                                    ReplayPieceContext::Partial {
+                                        unishard,
+                                        requesting_shard,
+                                        ..
+                                    },
                                 ..
                             } = **m.as_mut().unwrap()
                             {
-                                unishard
+                                (unishard, requesting_shard)
                             } else {
                                 unreachable!("backfill_keys.is_some() implies Context::Partial");
                             };
@@ -2108,6 +2125,7 @@ impl Domain {
                                     miss.lookup_key_vec(),
                                     miss.lookup_idx,
                                     unishard,
+                                    requesting_shard,
                                     tag,
                                 ));
                             }
@@ -2388,7 +2406,9 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial);
         }
 
-        for (node, while_replaying_key, miss_key, miss_cols, single_shard, tag) in need_replay {
+        for (node, while_replaying_key, miss_key, miss_cols, single_shard, requesting_shard, tag) in
+            need_replay
+        {
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag,
@@ -2402,6 +2422,7 @@ impl Domain {
                 while_replaying_key,
                 miss_key,
                 single_shard,
+                requesting_shard,
                 tag,
             );
         }
@@ -2468,6 +2489,7 @@ impl Domain {
                         tag,
                         replay_key,
                         unishard,
+                        requesting_shard,
                     } in replay
                     {
                         self.delayed_for_self
@@ -2475,7 +2497,7 @@ impl Domain {
                                 tag,
                                 unishard,
                                 keys: vec![replay_key],
-                                requesting_shard: self.shard.unwrap_or(0),
+                                requesting_shard,
                             }));
                     }
                 }
