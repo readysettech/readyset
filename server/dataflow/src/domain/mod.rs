@@ -1916,6 +1916,14 @@ impl Domain {
                     }
 
                     for (i, segment) in path.iter().enumerate() {
+                        if let Some(force_tag) = segment.force_tag_to {
+                            if let Packet::ReplayPiece { ref mut tag, .. } =
+                                m.as_deref_mut().unwrap()
+                            {
+                                *tag = force_tag;
+                            }
+                        }
+
                         let mut n = self.nodes[segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 

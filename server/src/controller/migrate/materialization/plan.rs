@@ -115,9 +115,103 @@ impl<'a> Plan<'a> {
             return;
         }
 
+        let paths = self.paths(&index_on[..]);
+
+        // all right, story time!
+        //
+        // image you have this graph:
+        //
+        //     a     b
+        //     +--+--+
+        //        |
+        //       u_1
+        //        |
+        //     +--+--+
+        //     c     d
+        //     +--+--+
+        //        |
+        //       u_2
+        //        |
+        //     +--+--+
+        //     e     f
+        //     +--+--+
+        //        |
+        //       u_3
+        //        |
+        //        v
+        //
+        // where c-f are all stateless. you will end up with 8 paths for replays to v.
+        // a and b will both appear as the root of 4 paths, and will be upqueried that many times.
+        // while inefficient (TODO), that is not in and of itself a problem. the issue arises at
+        // the unions, which need to do union buffering (that is, they need to forward _one_
+        // upquery response for each set of upquery responses they get). specifically, u_1 should
+        // forward 4 responses, even though it receives 8. u_2 should forward 2 responses, even
+        // though it gets 4, etc. we may later optimize that (in theory u_1 should be able to only
+        // forward _one_ response to multiple children, and a and b should only be upqueried
+        // _once_), but for now we need to deal with the correctness issue that arises if the
+        // unions do not buffer correctly.
+        //
+        // the issue, ultimately, is what the unions "group" upquery responses by. they can't group
+        // by tag (like shard mergers do), since there are 8 tags here, so there'd be 8 groups each
+        // with one response. here are the replay paths for u_1:
+        //
+        //  1. a -> c -> e
+        //  2. a -> c -> f
+        //  3. a -> d -> e
+        //  4. a -> d -> f
+        //  5. b -> c -> e
+        //  6. b -> c -> f
+        //  7. b -> d -> e
+        //  8. b -> d -> f
+        //
+        // we want to merge 1 with 5 since they're "going the same way". similarly, we want to
+        // merge 2 and 6, 3 and 7, and 4 and 8. the "grouping" here then is really the suffix of
+        // the replay's path beyond the union we're looking at. for u_2:
+        //
+        //  1/5. a/b -> c -> e
+        //  2/6. a/b -> c -> f
+        //  3/7. a/b -> d -> e
+        //  4/8. a/b -> d -> f
+        //
+        // we want to merge 1/5 and 3/7, again since they are going the same way _from here_.
+        // and similarly, we want to merge 2/6 and 4/8.
+        //
+        // so, how do we communicate this grouping to each of the unions?
+        // well, most of the infrastructure is actually already there in the domains.
+        // for each tag, each domain keeps some per-node state (`ReplayPathSegment`).
+        // we can inject the information there!
+        //
+        // we're actually going to play an additional trick here, as it allows us to simplify the
+        // implementation a fair amount. since we know that tags 1 and 5 are identical beyond u_1
+        // (that's what we're grouping by after all!), why don't we just rewrite all 1 tags to 5s?
+        // and all 2s to 6s, and so on. that way, at u_2, there will be no replays with tag 1 or 3,
+        // only 5 and 7. then we can pull the same trick there -- rewrite all 5s to 7s, so that at
+        // u_3 we only need to deal with 7s (and 8s). this simplifies the implementation since
+        // unions can now _always_ just group by tags, and it'll just magically work.
+        //
+        // this approach also gives us the property that we have a deterministic subset of the tags
+        // (and of strictly decreasing cardinality!) tags downstream of unions. this may (?)
+        // improve cache locality, but could perhaps also allow further optimizations later (?).
+        //
+        // TODO:
+        //
+        //  - create a map from (union NodeIndex, path suffix) -> Vec<Tag>
+        //  - for each path:
+        //    - assign it a tag
+        //    - for each union on the path:
+        //      - take the suffix of the path
+        //      - push tag to map[union index, suffix]
+        //  - crate a map from (union NodeIndex, Tag) -> Tag
+        //  - for each union in map:
+        //    - for each tag set for the union:
+        //      - for each tag in tag set:
+        //        - set map[union, tag] to the first tag in the tag set
+        //  - in normal for path in paths loop:
+        //    - when creating ReplayPathSegment, set force_tag_to = map[map, tag]
+
         // inform domains about replay paths
         let mut tags = Vec::new();
-        for path in self.paths(&index_on[..]) {
+        for path in paths {
             let tag = self.m.next_tag();
             self.paths
                 .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
@@ -192,6 +286,7 @@ impl<'a> Plan<'a> {
                     .map(|&(ni, ref key)| ReplayPathSegment {
                         node: self.graph[ni].local_addr(),
                         partial_key: key.clone(),
+                        force_tag_to: unimplemented!(),
                     })
                     .collect();
 

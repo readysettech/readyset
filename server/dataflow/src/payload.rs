@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
+    pub force_tag_to: Option<Tag>,
     pub partial_key: Option<Vec<usize>>,
 }
 
