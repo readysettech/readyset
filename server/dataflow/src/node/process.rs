@@ -171,6 +171,38 @@ impl Node {
                             unreachable!();
                         }
                     }
+
+                    if let Packet::ReplayPiece {
+                        context:
+                            payload::ReplayPieceContext::Partial {
+                                ref mut unishard, ..
+                            },
+                        ..
+                    } = **m
+                    {
+                        // hello, it's me again.
+                        //
+                        // on every replay path, there are some number of shard mergers, and
+                        // some number of sharders.
+                        //
+                        // if the source of a replay is sharded, and the upquery key matches
+                        // the sharding key, then only the matching shard of the source will be
+                        // queried. in that case, the next shard merger (if there is one)
+                        // shouldn't wait for replays from other shards, since none will
+                        // arrive. the same is not true for any _subsequent_ shard mergers
+                        // though, since sharders along a replay path send to _all_ shards
+                        // (modulo the last one if the destination is sharded, but then there
+                        // is no shard merger after it).
+                        //
+                        // to ensure that this is in fact what happens, we need to _unset_
+                        // unishard once we've passed the first shard merger, so that it is not
+                        // propagated to subsequent unions.
+                        if let NodeOperator::Union(ref u) = i {
+                            if u.is_shard_merger() {
+                                *unishard = false;
+                            }
+                        }
+                    }
                 }
 
                 if captured_full {

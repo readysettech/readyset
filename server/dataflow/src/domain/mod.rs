@@ -2103,6 +2103,11 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
+                            // so, in theory, unishard can be changed by n.process. however, it
+                            // will only ever be changed by a union, which can't cause misses.
+                            // since we only enter this branch in the cases where we have a miss,
+                            // it is okay to assume that unishard _hasn't_ changed, and therefore
+                            // we can use the value that's in m.
                             let (unishard, requesting_shard) = if let Packet::ReplayPiece {
                                 context:
                                     ReplayPieceContext::Partial {
