@@ -360,7 +360,7 @@ impl fmt::Debug for Packet {
                 f,
                 "Packet::ReplayPiece({:?}, tag {}, {} records)",
                 link,
-                tag.id(),
+                tag,
                 data.len()
             ),
             ref p => {

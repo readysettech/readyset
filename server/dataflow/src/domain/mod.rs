@@ -1009,12 +1009,12 @@ impl Domain {
                             info!(self.log,
                                   "told about terminating replay path {:?}",
                                   path;
-                                  "tag" => tag.id()
+                                  "tag" => tag
                             );
                         // NOTE: we set self.replaying_to when we first receive a replay with
                         // this tag
                         } else {
-                            info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
+                            info!(self.log, "told about replay path {:?}", path; "tag" => tag);
                         }
 
                         use crate::payload;
@@ -1125,7 +1125,7 @@ impl Domain {
                         trace!(
                             self.log,
                            "got replay request";
-                           "tag" => tag.id(),
+                           "tag" => tag,
                            "keys" => format!("{:?}", keys)
                         );
                         self.total_replay_time.start();
@@ -1594,7 +1594,7 @@ impl Domain {
             for key in misses {
                 trace!(self.log,
                        "missed during replay request";
-                       "tag" => tag.id(),
+                       "tag" => tag,
                        "key" => ?key);
                 self.on_replay_miss(source, &cols[..], key.clone(), key, single_shard, tag);
             }
@@ -1608,7 +1608,7 @@ impl Domain {
             {
                 trace!(self.log,
                        "satisfied replay request";
-                       "tag" => tag.id(),
+                       "tag" => tag,
                        //"data" => ?m.as_ref().unwrap().data(),
                        "keys" => ?for_keys,
                 );
@@ -1704,7 +1704,7 @@ impl Domain {
             // trigger a replay to source node, and enqueue this request.
             trace!(self.log,
                    "missed during replay request";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    "key" => ?key);
             self.on_replay_miss(
                 source,
@@ -1717,7 +1717,7 @@ impl Domain {
         } else {
             trace!(self.log,
                    "satisfied replay request";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    //"data" => ?m.as_ref().unwrap().data(),
                    "key" => ?key,
             );
@@ -1790,7 +1790,7 @@ impl Domain {
                             self.log,
                             "replaying batch";
                             "#" => data.len(),
-                            "tag" => tag.id(),
+                            "tag" => tag,
                             "keys" => ?for_keys,
                         );
                     } else {
@@ -2346,7 +2346,7 @@ impl Domain {
         for (node, while_replaying_key, miss_key, miss_cols, single_shard, tag) in need_replay {
             trace!(self.log,
                    "missed during replay processing";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    "during" => ?while_replaying_key,
                    "missed" => ?miss_key,
                    "on" => %node,
@@ -2714,7 +2714,7 @@ impl Domain {
                     (&rp.trigger, &rp.path)
                 } else {
                     debug!(self.log, "got eviction for tag that has not yet been finalized";
-                           "tag" => tag.id());
+                           "tag" => tag);
                     return;
                 };
 

@@ -153,7 +153,7 @@ impl<'a> Plan<'a> {
                 segments.last_mut().unwrap().1.push((node, key));
             }
 
-            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
+            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag);
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;
@@ -304,7 +304,7 @@ impl<'a> Plan<'a> {
                                 }
                             };
 
-                            debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag.id());
+                            debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag);
                             *trigger = TriggerEndpoint::End(selection, segments[0].0);
                         }
                     } else {
