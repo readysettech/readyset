@@ -608,16 +608,9 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_eviction(&mut self, from: LocalNodeIndex, key_columns: &[usize], keys: &[Vec<DataType>]) {
-        if self.replay_key_orig.is_empty() {
-            return;
-        }
-
-        if &self.replay_key_orig[..] != key_columns {
-            unimplemented!("multiple different replay paths flowing through union");
-        }
-
+    fn on_eviction(&mut self, from: LocalNodeIndex, _tag: Tag, keys: &[Vec<DataType>]) {
         for key in keys {
+            // TODO: the key.clone()s here are really sad
             for (_, e) in self
                 .replay_pieces
                 .range_mut((key.clone(), 0)..=(key.clone(), usize::max_value()))

@@ -244,10 +244,10 @@ impl Node {
                 s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
-                i.on_eviction(from, key_columns, keys);
+                i.on_eviction(from, tag, keys);
             }
             NodeType::Reader(ref mut r) => {
-                r.on_eviction(key_columns, &keys[..]);
+                r.on_eviction(&keys[..]);
             }
             NodeType::Ingress => {}
             NodeType::Dropped => {}
