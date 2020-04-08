@@ -79,11 +79,11 @@ pub(crate) enum RawProcessingResult {
 }
 
 #[derive(Debug)]
-pub(crate) enum ReplayContext {
+pub(crate) enum ReplayContext<'a> {
     None,
     Partial {
-        key_cols: Vec<usize>,
-        keys: HashSet<Vec<DataType>>,
+        key_cols: &'a [usize],
+        keys: &'a HashSet<Vec<DataType>>,
         requesting_shard: usize,
         tag: Tag,
         unishard: bool,
@@ -93,10 +93,10 @@ pub(crate) enum ReplayContext {
     },
 }
 
-impl ReplayContext {
-    fn key(&self) -> Option<&[usize]> {
-        if let ReplayContext::Partial { ref key_cols, .. } = *self {
-            Some(&key_cols[..])
+impl<'a> ReplayContext<'a> {
+    fn key(&self) -> Option<&'a [usize]> {
+        if let ReplayContext::Partial { key_cols, .. } = *self {
+            Some(key_cols)
         } else {
             None
         }
@@ -194,7 +194,7 @@ where
         executor: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
-        replay: &ReplayContext,
+        replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> RawProcessingResult {
@@ -214,7 +214,7 @@ where
         &mut self,
         _from: LocalNodeIndex,
         _key_columns: &[usize],
-        _keys: &mut Vec<Vec<DataType>>,
+        _keys: &[Vec<DataType>],
     ) {
     }
 

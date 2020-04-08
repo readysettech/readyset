@@ -94,7 +94,7 @@ impl Materializations {
 
 impl Materializations {
     fn next_tag(&self) -> Tag {
-        Tag(self.tag_generator.fetch_add(1, Ordering::SeqCst) as u32)
+        Tag::new(self.tag_generator.fetch_add(1, Ordering::SeqCst) as u32)
     }
 
     /// Extend the current set of materializations with any additional materializations needed to

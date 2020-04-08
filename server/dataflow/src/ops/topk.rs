@@ -290,15 +290,6 @@ impl Ingredient for TopK {
         }
     }
 
-    fn on_eviction(
-        &mut self,
-        _: LocalNodeIndex,
-        key_columns: &[usize],
-        _: &mut Vec<Vec<DataType>>,
-    ) {
-        assert_eq!(key_columns, &self.group_by[..]);
-    }
-
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         vec![(this, self.group_by.clone())].into_iter().collect()
     }

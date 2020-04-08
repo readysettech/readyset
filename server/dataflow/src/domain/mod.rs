@@ -1013,12 +1013,12 @@ impl Domain {
                             info!(self.log,
                                   "told about terminating replay path {:?}",
                                   path;
-                                  "tag" => tag.id()
+                                  "tag" => tag
                             );
                         // NOTE: we set self.replaying_to when we first receive a replay with
                         // this tag
                         } else {
-                            info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
+                            info!(self.log, "told about replay path {:?}", path; "tag" => tag);
                         }
 
                         use crate::payload;
@@ -1130,7 +1130,7 @@ impl Domain {
                         trace!(
                             self.log,
                            "got replay request";
-                           "tag" => tag.id(),
+                           "tag" => tag,
                            "keys" => format!("{:?}", keys)
                         );
                         self.total_replay_time.start();
@@ -1617,7 +1617,7 @@ impl Domain {
             for key in misses {
                 trace!(self.log,
                        "missed during replay request";
-                       "tag" => tag.id(),
+                       "tag" => tag,
                        "key" => ?key);
                 self.on_replay_miss(source, &cols[..], key.clone(), key, single_shard, tag);
             }
@@ -1631,7 +1631,7 @@ impl Domain {
             {
                 trace!(self.log,
                        "satisfied replay request";
-                       "tag" => tag.id(),
+                       "tag" => tag,
                        //"data" => ?m.as_ref().unwrap().data(),
                        "keys" => ?for_keys,
                 );
@@ -1729,7 +1729,7 @@ impl Domain {
             // trigger a replay to source node, and enqueue this request.
             trace!(self.log,
                    "missed during replay request";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    "key" => ?key);
             self.on_replay_miss(
                 source,
@@ -1742,7 +1742,7 @@ impl Domain {
         } else {
             trace!(self.log,
                    "satisfied replay request";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    //"data" => ?m.as_ref().unwrap().data(),
                    "key" => ?key,
             );
@@ -1815,7 +1815,7 @@ impl Domain {
                             self.log,
                             "replaying batch";
                             "#" => data.len(),
-                            "tag" => tag.id(),
+                            "tag" => tag,
                             "keys" => ?for_keys,
                         );
                     } else {
@@ -1876,9 +1876,27 @@ impl Domain {
                         link,
                         tag,
                         data,
-                        context: context.clone(),
+                        context,
                     });
                     let mut m = Some(m);
+
+                    macro_rules! replay_context {
+                        ($m:ident, $field:ident) => {
+                            if let Some(&mut Packet::ReplayPiece {
+                                ref mut context, ..
+                            }) = $m.as_deref_mut()
+                            {
+                                if let ReplayPieceContext::Partial { ref mut $field, .. } = *context
+                                {
+                                    Some($field)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                unreachable!("asked to fetch replay field on non-replay packet")
+                            }
+                        };
+                    }
 
                     for (i, segment) in path.iter().enumerate() {
                         let mut n = self.nodes[segment.node].borrow_mut();
@@ -1886,13 +1904,14 @@ impl Domain {
 
                         // keep track of whether we're filling any partial holes
                         let partial_key_cols = segment.partial_key.as_ref();
-                        let mut backfill_keys = if let ReplayPieceContext::Partial {
-                            ref mut for_keys,
-                            ..
-                        } = context
+                        // keep a copy of the partial keys from before we process
+                        // we need this because n.process may choose to reduce the set of keys
+                        // (e.g., because some of them missed), in which case we need to know what
+                        // keys to _undo_.
+                        let mut backfill_keys = if let Some(for_keys) = replay_context!(m, for_keys)
                         {
                             debug_assert!(partial_key_cols.is_some());
-                            Some(for_keys)
+                            Some(for_keys.clone())
                         } else {
                             None
                         };
@@ -2072,7 +2091,7 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let single_shard = if let Packet::ReplayPiece {
+                            let unishard = if let Packet::ReplayPiece {
                                 context: ReplayPieceContext::Partial { unishard, .. },
                                 ..
                             } = **m.as_mut().unwrap()
@@ -2081,13 +2100,14 @@ impl Domain {
                             } else {
                                 unreachable!("backfill_keys.is_some() implies Context::Partial");
                             };
+
                             for miss in misses {
                                 need_replay.push((
                                     miss.on,
                                     miss.replay_key_vec().unwrap(),
                                     miss.lookup_key_vec(),
                                     miss.lookup_idx,
-                                    single_shard,
+                                    unishard,
                                     tag,
                                 ));
                             }
@@ -2269,8 +2289,12 @@ impl Domain {
                         }
 
                         // we're all good -- continue propagating
-                        if m.as_ref().map(|m| m.is_empty()).unwrap_or(true) {
-                            if let ReplayPieceContext::Regular { last: false } = context {
+                        if m.as_ref().unwrap().is_empty() {
+                            if let &Packet::ReplayPiece {
+                                context: ReplayPieceContext::Regular { last: false },
+                                ..
+                            } = m.as_deref().unwrap()
+                            {
                                 trace!(self.log, "dropping empty non-terminal full replay packet");
                                 // don't continue processing empty updates, *except* if this is the
                                 // last replay batch. in that case we need to send it so that the
@@ -2291,29 +2315,24 @@ impl Domain {
                             m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
                         }
 
-                        // preserve whatever `last` flag that may have been set during processing
-                        if let Some(Packet::ReplayPiece {
-                            context: ReplayPieceContext::Regular { last },
+                        // feed forward the updated backfill_keys
+                        if let Packet::ReplayPiece {
+                            context:
+                                ReplayPieceContext::Partial {
+                                    ref mut for_keys, ..
+                                },
                             ..
-                        }) = m.as_ref().map(|m| &**m)
+                        } = m.as_deref_mut().unwrap()
                         {
-                            if let ReplayPieceContext::Regular {
-                                last: ref mut old_last,
-                            } = context
-                            {
-                                *old_last = *last;
-                            }
-                        }
-
-                        // feed forward any changes to the context (e.g., backfill_keys)
-                        if let Some(Packet::ReplayPiece {
-                            context: ref mut mcontext,
-                            ..
-                        }) = m.as_mut().map(|m| &mut **m)
-                        {
-                            *mcontext = context.clone();
+                            *for_keys = backfill_keys.unwrap();
                         }
                     }
+
+                    let context = if let Packet::ReplayPiece { context, .. } = *m.unwrap() {
+                        context
+                    } else {
+                        unreachable!("started as a replay, now not a replay?")
+                    };
 
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
@@ -2372,7 +2391,7 @@ impl Domain {
         for (node, while_replaying_key, miss_key, miss_cols, single_shard, tag) in need_replay {
             trace!(self.log,
                    "missed during replay processing";
-                   "tag" => tag.id(),
+                   "tag" => tag,
                    "during" => ?while_replaying_key,
                    "missed" => ?miss_key,
                    "on" => %node,
@@ -2741,7 +2760,7 @@ impl Domain {
                     (&rp.trigger, &rp.path)
                 } else {
                     debug!(self.log, "got eviction for tag that has not yet been finalized";
-                           "tag" => tag.id());
+                           "tag" => tag);
                     return;
                 };
 

@@ -169,18 +169,13 @@ impl Ingredient for NodeOperator {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
-        replay: &ReplayContext,
+        replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> RawProcessingResult {
         impl_ingredient_fn_mut!(self, on_input_raw, ex, from, data, replay, domain, states)
     }
-    fn on_eviction(
-        &mut self,
-        from: LocalNodeIndex,
-        key_columns: &[usize],
-        keys: &mut Vec<Vec<DataType>>,
-    ) {
+    fn on_eviction(&mut self, from: LocalNodeIndex, key_columns: &[usize], keys: &[Vec<DataType>]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, key_columns, keys)
     }
     fn can_query_through(&self) -> bool {
