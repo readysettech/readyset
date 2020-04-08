@@ -233,7 +233,7 @@ impl Ingredient for Union {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        replay: &ReplayContext,
+        replay: ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
     ) -> RawProcessingResult {
@@ -243,7 +243,7 @@ impl Ingredient for Union {
         // self.emit.is_empty()), `from` will *actually* hold the shard index of
         // the sharded egress that sent us this record. this should make everything
         // below just work out.
-        match *replay {
+        match replay {
             ReplayContext::None => {
                 // prepare for a little song-and-dance for the borrow-checker
                 let mut absorb_for_full = false;
@@ -448,8 +448,8 @@ impl Ingredient for Union {
                 exit
             }
             ReplayContext::Partial {
-                ref key_cols,
-                ref keys,
+                key_cols,
+                keys,
                 unishard,
             } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
@@ -473,7 +473,7 @@ impl Ingredient for Union {
                     match self.emit {
                         Emit::AllFrom(..) => {
                             self.replay_key =
-                                Some(Some((from, key_cols.clone())).into_iter().collect());
+                                Some(Some((from, Vec::from(key_cols))).into_iter().collect());
                         }
                         Emit::Project { ref emit_l, .. } => {
                             self.replay_key = Some(
@@ -486,10 +486,10 @@ impl Ingredient for Union {
                             );
                         }
                     }
-                    self.replay_key_orig = key_cols.clone();
+                    self.replay_key_orig = Vec::from(key_cols);
                 } else {
                     // make sure multiple different replay paths aren't getting mixed
-                    if &self.replay_key_orig != key_cols {
+                    if &self.replay_key_orig[..] != key_cols {
                         unimplemented!();
                     }
                 }
@@ -600,12 +600,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_eviction(
-        &mut self,
-        from: LocalNodeIndex,
-        key_columns: &[usize],
-        keys: &mut Vec<Vec<DataType>>,
-    ) {
+    fn on_eviction(&mut self, from: LocalNodeIndex, key_columns: &[usize], keys: &[Vec<DataType>]) {
         if self.replay_key_orig.is_empty() {
             return;
         }
@@ -614,7 +609,7 @@ impl Ingredient for Union {
             unimplemented!("multiple different replay paths flowing through union");
         }
 
-        keys.retain(|key| {
+        for key in keys {
             if let Some(e) = self.replay_pieces.get_mut(key) {
                 if e.buffered.contains_key(&from) {
                     // we've already received something from left, but it has now been evicted.
@@ -629,7 +624,6 @@ impl Ingredient for Union {
                     // upstream nodes won't send multiple evictions in a row (e.g., joins evictions
                     // could cause this).
                     e.evict = true;
-                    return false;
                 } else if !e.buffered.is_empty() {
                     // we've received replay pieces for this key from other ancestors, but not from
                     // this one. this indicates that the eviction happened logically before the
@@ -637,8 +631,7 @@ impl Ingredient for Union {
                     // downstream.
                 }
             }
-            true
-        });
+        }
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
