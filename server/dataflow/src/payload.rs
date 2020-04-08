@@ -187,6 +187,7 @@ pub enum Packet {
         tag: Tag,
         source: Option<LocalNodeIndex>,
         path: Vec<ReplayPathSegment>,
+        partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
     },

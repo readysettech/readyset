@@ -73,10 +73,11 @@ enum TriggerEndpoint {
     Local(Vec<usize>),
 }
 
-struct ReplayPath {
+pub(crate) struct ReplayPath {
     source: Option<LocalNodeIndex>,
     path: Vec<ReplayPathSegment>,
     notify_done: bool,
+    pub(crate) partial_unicast_sharder: Option<NodeIndex>,
     trigger: TriggerEndpoint,
 }
 
@@ -589,6 +590,7 @@ impl Domain {
                 &self.nodes,
                 self.shard,
                 true,
+                None,
                 executor,
             );
             assert_eq!(captured.len(), 0);
@@ -1005,6 +1007,7 @@ impl Domain {
                         source,
                         path,
                         notify_done,
+                        partial_unicast_sharder,
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
@@ -1071,6 +1074,7 @@ impl Domain {
                                 source,
                                 path,
                                 notify_done,
+                                partial_unicast_sharder,
                                 trigger,
                             },
                         );
@@ -1782,12 +1786,13 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
-            let ReplayPath {
+            let rp = &self.replay_paths[&tag];
+            let &ReplayPath {
                 ref path,
                 ref source,
                 notify_done,
                 ..
-            } = self.replay_paths[&tag];
+            } = rp;
 
             match self.mode {
                 DomainMode::Forwarding if notify_done => {
@@ -1972,6 +1977,7 @@ impl Domain {
                             &self.nodes,
                             self.shard,
                             false,
+                            Some(rp),
                             ex,
                         );
 

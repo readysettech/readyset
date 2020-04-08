@@ -14,9 +14,11 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
+        replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         let addr = self.local_addr();
+        let gaddr = self.global_addr();
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
@@ -69,7 +71,13 @@ impl Node {
                 e.process(m, on_shard.unwrap_or(0), ex);
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, addr, on_shard.is_some(), ex);
+                s.process(
+                    m,
+                    addr,
+                    on_shard.is_some(),
+                    replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
+                    ex,
+                );
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;

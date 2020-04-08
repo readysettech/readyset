@@ -134,6 +134,19 @@ impl<'a> Plan<'a> {
                 }
             }
 
+            // if this is a partial replay path, and the target node is sharded, then we need to
+            // make sure that the last sharder on the path knows to only send the replay response
+            // to the requesting shard, as opposed to all shards. in order to do that, that sharder
+            // needs to know who it is!
+            let mut partial_unicast_sharder = None;
+            if partial.is_some() && !self.graph[path.last().unwrap().0].sharded_by().is_none() {
+                partial_unicast_sharder = path
+                    .iter()
+                    .rev()
+                    .map(|&(ni, _)| ni)
+                    .find(|&ni| self.graph[ni].is_sharder());
+            }
+
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
@@ -195,6 +208,7 @@ impl<'a> Plan<'a> {
                     source: None,
                     path: locals,
                     notify_done: false,
+                    partial_unicast_sharder,
                     trigger: TriggerEndpoint::None,
                 });
 
