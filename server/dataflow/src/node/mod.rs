@@ -466,6 +466,14 @@ impl Node {
         }
     }
 
+    pub fn is_union(&self) -> bool {
+        if let NodeType::Internal(NodeOperator::Union(_)) = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_shard_merger(&self) -> bool {
         if let NodeType::Internal(NodeOperator::Union(ref u)) = self.inner {
             u.is_shard_merger()

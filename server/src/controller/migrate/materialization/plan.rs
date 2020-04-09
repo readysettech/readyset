@@ -4,7 +4,7 @@ use crate::controller::keys;
 use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub(super) struct Plan<'a> {
     m: &'a mut super::Materializations,
@@ -192,27 +192,44 @@ impl<'a> Plan<'a> {
         // this approach also gives us the property that we have a deterministic subset of the tags
         // (and of strictly decreasing cardinality!) tags downstream of unions. this may (?)
         // improve cache locality, but could perhaps also allow further optimizations later (?).
-        //
-        // TODO:
-        //
-        //  - create a map from (union NodeIndex, path suffix) -> Vec<Tag>
-        //  - for each path:
-        //    - assign it a tag
-        //    - for each union on the path:
-        //      - take the suffix of the path
-        //      - push tag to map[union index, suffix]
-        //  - crate a map from (union NodeIndex, Tag) -> Tag
-        //  - for each union in map:
-        //    - for each tag set for the union:
-        //      - for each tag in tag set:
-        //        - set map[union, tag] to the first tag in the tag set
-        //  - in normal for path in paths loop:
-        //    - when creating ReplayPathSegment, set force_tag_to = map[map, tag]
+
+        // find all paths through each union with the same suffix
+        let assigned_tags: Vec<_> = paths.iter().map(|_| self.m.next_tag()).collect();
+        let union_suffixes = paths
+            .iter()
+            .enumerate()
+            .flat_map(|(pi, path)| {
+                let graph = &self.graph;
+                path.iter().enumerate().filter_map(move |(at, &(ni, _))| {
+                    let n = &graph[ni];
+                    if n.is_union() && !n.is_shard_merger() {
+                        let suffix = &path[(at + 1)..];
+                        Some(((ni, suffix), pi))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .fold(BTreeMap::new(), |mut map, (key, pi)| {
+                map.entry(key).or_insert_with(Vec::new).push(pi);
+                map
+            });
+
+        // map each suffix-sharing group of paths at each union to one tag at that union
+        let path_grouping: HashMap<_, _> = union_suffixes
+            .into_iter()
+            .flat_map(|((union, _suffix), paths)| {
+                // at this union, all the given paths share a suffix
+                // make all of the paths use a single identifier from that point on
+                let tag_all_as = assigned_tags[paths[0]];
+                paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
+            })
+            .collect();
 
         // inform domains about replay paths
         let mut tags = Vec::new();
-        for path in paths {
-            let tag = self.m.next_tag();
+        for (pi, path) in paths.into_iter().enumerate() {
+            let tag = assigned_tags[pi];
             self.paths
                 .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
 
@@ -286,7 +303,7 @@ impl<'a> Plan<'a> {
                     .map(|&(ni, ref key)| ReplayPathSegment {
                         node: self.graph[ni].local_addr(),
                         partial_key: key.clone(),
-                        force_tag_to: unimplemented!(),
+                        force_tag_to: path_grouping.get(&(ni, pi)).copied(),
                     })
                     .collect();
 
