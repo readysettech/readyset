@@ -1,6 +1,7 @@
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
+use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
 
@@ -16,6 +17,7 @@ impl Node {
         swap: bool,
         replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
+        log: &Logger,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
@@ -128,7 +130,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(ex, from, old_data, replay, nodes, state) {
+                    match i.on_input_raw(ex, from, old_data, replay, nodes, state, log) {
                         RawProcessingResult::Regular(m) => {
                             mem::replace(data, m.results);
                             lookups = m.lookups;

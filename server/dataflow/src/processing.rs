@@ -1,3 +1,4 @@
+use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -197,6 +198,7 @@ where
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        _: &Logger,
     ) -> RawProcessingResult {
         RawProcessingResult::Regular(self.on_input(
             executor,

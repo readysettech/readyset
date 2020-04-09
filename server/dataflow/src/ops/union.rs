@@ -1,3 +1,4 @@
+use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::prelude::*;
@@ -240,6 +241,7 @@ impl Ingredient for Union {
         replay: ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
+        log: &Logger,
     ) -> RawProcessingResult {
         use std::mem;
 
@@ -263,6 +265,8 @@ impl Ingredient for Union {
                 }
 
                 if absorb_for_full {
+                    trace!(log, "union absorbing update for full replay");
+
                     // we shouldn't be stepping on any partial materialization toes, but let's
                     // make sure. i'm not 100% sure at this time if it's true.
                     //
@@ -440,6 +444,11 @@ impl Ingredient for Union {
                         return RawProcessingResult::FullReplay(rs, last);
                     }
 
+                    debug!(
+                        log,
+                        "union captured start of full replay; has: {}, need: {}", 1, self.required
+                    );
+
                     // we need to hold this back until we've received one from every ancestor
                     let mut s = HashSet::new();
                     s.insert(from);
@@ -466,6 +475,7 @@ impl Ingredient for Union {
                             // we can just send everything and we're done!
                             // make sure to include what's in *this* replay.
                             buffered.append(&mut *rs);
+                            debug!(log, "union releasing end of full replay");
                             exit =
                                 RawProcessingResult::FullReplay(buffered.split_off(0).into(), true);
                         // fall through to below match where we'll set FullWait::None
@@ -473,6 +483,7 @@ impl Ingredient for Union {
                             if started.len() != self.required {
                                 if started.insert(from) && started.len() == self.required {
                                     // we can release all buffered replays!
+                                    debug!(log, "union releasing full replay");
                                     buffered.append(&mut *rs);
                                     return RawProcessingResult::FullReplay(
                                         buffered.split_off(0).into(),
@@ -485,6 +496,13 @@ impl Ingredient for Union {
                                 debug_assert_eq!(buffered.len(), 0);
                                 return RawProcessingResult::FullReplay(rs, false);
                             }
+
+                            debug!(
+                                log,
+                                "union captured start of full replay; has: {}, need: {}",
+                                started.len(),
+                                self.required
+                            );
 
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
@@ -554,6 +572,13 @@ impl Ingredient for Union {
                 } else {
                     // we already know the meta info for this tag
                 }
+
+                trace!(
+                    log,
+                    "union got replay piece: {:?} with context {:?}",
+                    rs,
+                    replay
+                );
 
                 let mut rs_by_key = rs
                     .into_iter()

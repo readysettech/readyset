@@ -592,6 +592,7 @@ impl Domain {
                 true,
                 None,
                 executor,
+                &self.log,
             );
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
@@ -1987,6 +1988,7 @@ impl Domain {
                             false,
                             Some(rp),
                             ex,
+                            &self.log,
                         );
 
                         // ignore duplicate misses
