@@ -325,6 +325,13 @@ impl Ingredient for Union {
                 let mut replay_key = None;
                 let mut last_tag = None;
 
+                let rkey_from = if let Emit::AllFrom(..) = self.emit {
+                    // from is the shard index
+                    0
+                } else {
+                    from.id()
+                };
+
                 while let Some((&(tag, ref replaying_key, _), ref mut pieces)) = replays.next() {
                     assert!(
                         !pieces.buffered.is_empty(),
@@ -345,7 +352,7 @@ impl Ingredient for Union {
                     // make sure we use the right key columns for this tag
                     if last_tag.map(|lt| lt != tag).unwrap_or(true) {
                         // starting a new tag
-                        replay_key = self.replay_key.get(&(tag, from.id()));
+                        replay_key = Some(&self.replay_key[&(tag, rkey_from)]);
                     }
                     let k = replay_key.unwrap();
                     last_tag = Some(tag);
