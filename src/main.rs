@@ -126,12 +126,12 @@ fn main() {
     } else {
         use tracing_subscriber::fmt;
         let s = fmt::format::Format::default().with_timer(fmt::time::Uptime::default());
-        let s = fmt::LayerBuilder::default().event_format(s).finish();
+        let s = fmt::Layer::default().event_format(s);
         tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
     };
     tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
     let mut rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
-    let listen_socket:std::net::SocketAddr = listen_addr.parse().unwrap();
+    let listen_socket: std::net::SocketAddr = listen_addr.parse().unwrap();
 
     let mut listener = rt
         .block_on(tokio::net::TcpListener::bind(&listen_socket))
