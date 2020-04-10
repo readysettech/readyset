@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
+    pub force_tag_to: Option<Tag>,
     pub partial_key: Option<Vec<usize>>,
 }
 
@@ -62,6 +63,7 @@ pub enum InitialState {
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<Vec<DataType>>,
+        requesting_shard: usize,
         unishard: bool,
         ignore: bool,
     },
@@ -186,6 +188,7 @@ pub enum Packet {
         tag: Tag,
         source: Option<LocalNodeIndex>,
         path: Vec<ReplayPathSegment>,
+        partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
     },
@@ -195,6 +198,7 @@ pub enum Packet {
         tag: Tag,
         keys: Vec<Vec<DataType>>,
         unishard: bool,
+        requesting_shard: usize,
     },
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.

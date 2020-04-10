@@ -18,7 +18,7 @@ use std::time::Duration;
 use std::{env, thread};
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 200;
-const DEFAULT_SHARDING: Option<usize> = Some(2);
+const DEFAULT_SHARDING: usize = 2;
 
 // PersistenceParameters with a log_name on the form of `prefix` + timestamp,
 // avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
@@ -32,7 +32,7 @@ fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 
 // Builds a local worker with the given log prefix.
 pub async fn start_simple(prefix: &str) -> Handle<LocalAuthority> {
-    build(prefix, DEFAULT_SHARDING, false).await
+    build(prefix, Some(DEFAULT_SHARDING), false).await
 }
 
 #[allow(dead_code)]
@@ -42,7 +42,7 @@ pub async fn start_simple_unsharded(prefix: &str) -> Handle<LocalAuthority> {
 
 #[allow(dead_code)]
 pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
-    build(prefix, DEFAULT_SHARDING, true).await
+    build(prefix, Some(DEFAULT_SHARDING), true).await
 }
 
 async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
@@ -156,7 +156,7 @@ async fn it_works_basic() {
 #[tokio::test(threaded_scheduler)]
 async fn it_completes() {
     let mut builder = Builder::default();
-    builder.set_sharding(DEFAULT_SHARDING);
+    builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("it_completes"));
     let (g, done) = builder.start_local().await.unwrap();
 
@@ -207,6 +207,125 @@ async fn it_completes() {
 
     // wait for exit
     done.await;
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn sharded_shuffle() {
+    let mut g = start_simple("sharded_shuffle").await;
+
+    // in this test, we have a single sharded base node that is keyed on one column, and a sharded
+    // reader that is keyed by a different column. this requires a shuffle. we want to make sure
+    // that that shuffle happens correctly.
+
+    g.migrate(|mig| {
+        let a = mig.add_base(
+            "base",
+            &["id", "non_id"],
+            Base::new(vec![]).with_key(vec![0]),
+        );
+        mig.maintain_anonymous(a, &[1]);
+    })
+    .await;
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut base = g.table("base").await.unwrap();
+    let mut view = g.view("base").await.unwrap();
+
+    // make sure there is data on >1 shard, and that we'd get multiple rows by querying the reader
+    // for a single key.
+    base.perform_all((0..100).map(|i| vec![i.into(), DataType::Int(1)]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // moment of truth
+    let rows = view.lookup(&[DataType::Int(1)], true).await.unwrap();
+    assert_eq!(rows.len(), 100);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn broad_recursing_upquery() {
+    let nshards = 16;
+    let mut g = build("bru", Some(nshards), false).await;
+
+    // our goal here is to have a recursive upquery such that both levels of the upquery require
+    // contacting _all_ shards. in this setting, any miss at the leaf requires the upquery to go to
+    // all shards of the intermediate operator, and each miss there requires an upquery to each
+    // shard of the top level. as a result, we would expect every base to receive 2 upqueries for
+    // the same key, and a total of n^2+n upqueries. crucially, what we want to test is that the
+    // partial logic correctly manages all these requests, and the resulting responses (especially
+    // at the shard mergers). to achieve this, we're going to use this layout:
+    //
+    // base x    base y [sharded by a]
+    //   |         |
+    //   +----+----+ [lookup by b]
+    //        |
+    //      join [sharded by b]
+    //        |
+    //     reader [sharded by c]
+    //
+    // we basically _need_ a join in order to get this layout, since only joins allow us to
+    // introduce a new sharding without also dropping all columns that are not the sharding column
+    // (like aggregations would). with an aggregation for example, the downstream view could not be
+    // partial, since it would have no way to know the partial key to upquery for given a miss,
+    // since the miss would be on an _output_ column of the aggregation. we _could_ use a
+    // multi-column aggregation group by, but those have their own problems that we do not want to
+    // exercise here.
+    //
+    // we're also going to make the join a left join so that we know the upquery will go to base_x.
+
+    g.migrate(|mig| {
+        // bases, both sharded by their first column
+        let x = mig.add_base(
+            "base_x",
+            &["base_col", "join_col", "reader_col"],
+            Base::new(vec![]).with_key(vec![0]),
+        );
+        let y = mig.add_base("base_y", &["id"], Base::new(vec![]).with_key(vec![0]));
+        // join, sharded by the join column, which is be the second column on x
+        let join = mig.add_ingredient(
+            "join",
+            &["base_col", "join_col", "reader_col"],
+            Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
+        );
+        // reader, sharded by the lookup column, which is the third column on x
+        mig.maintain("reader".to_string(), join, &[2]);
+    })
+    .await;
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut base_x = g.table("base_x").await.unwrap();
+    let mut reader = g.view("reader").await.unwrap();
+
+    // we want to make sure that all the upqueries recurse all the way to cause maximum headache
+    // for the partial logic. we do this by ensuring that every shard at every operator has at
+    // least one record. we also ensure that we can get _all_ the rows by querying a single key on
+    // the reader.
+    let n = 10_000;
+    base_x
+        .perform_all((0..n).map(|i| {
+            vec![
+                DataType::Int(i),
+                DataType::Int(i % nshards as i32),
+                DataType::Int(1),
+            ]
+        }))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // moment of truth
+    let rows = reader.lookup(&[DataType::Int(1)], true).await.unwrap();
+    assert_eq!(rows.len(), n as usize);
+    for i in 0..n {
+        assert!(rows
+            .iter()
+            .any(|row| row.get::<i32>("base_col").unwrap() == i));
+    }
 }
 
 #[tokio::test(threaded_scheduler)]
@@ -937,7 +1056,7 @@ async fn connection_churn() {
     let authority = Arc::new(LocalAuthority::new());
 
     let mut builder = Builder::default();
-    builder.set_sharding(DEFAULT_SHARDING);
+    builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
     let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 
@@ -952,7 +1071,7 @@ async fn connection_churn() {
         let tx = tx.clone();
         tokio::spawn(async move {
             let mut builder = Builder::default();
-            builder.set_sharding(DEFAULT_SHARDING);
+            builder.set_sharding(Some(DEFAULT_SHARDING));
             builder.set_persistence(get_persistence_params("connection_churn"));
             let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 

@@ -1,3 +1,4 @@
+use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -172,11 +173,22 @@ impl Ingredient for NodeOperator {
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        log: &Logger,
     ) -> RawProcessingResult {
-        impl_ingredient_fn_mut!(self, on_input_raw, ex, from, data, replay, domain, states)
+        impl_ingredient_fn_mut!(
+            self,
+            on_input_raw,
+            ex,
+            from,
+            data,
+            replay,
+            domain,
+            states,
+            log
+        )
     }
-    fn on_eviction(&mut self, from: LocalNodeIndex, key_columns: &[usize], keys: &[Vec<DataType>]) {
-        impl_ingredient_fn_mut!(self, on_eviction, from, key_columns, keys)
+    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[Vec<DataType>]) {
+        impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
     }
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through,)

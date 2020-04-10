@@ -1,6 +1,7 @@
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
+use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
 
@@ -14,9 +15,12 @@ impl Node {
         nodes: &DomainNodes,
         on_shard: Option<usize>,
         swap: bool,
+        replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
+        log: &Logger,
     ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
         let addr = self.local_addr();
+        let gaddr = self.global_addr();
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
@@ -69,7 +73,13 @@ impl Node {
                 e.process(m, on_shard.unwrap_or(0), ex);
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, addr, on_shard.is_some(), ex);
+                s.process(
+                    m,
+                    addr,
+                    on_shard.is_some(),
+                    replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
+                    ex,
+                );
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
@@ -83,10 +93,12 @@ impl Node {
 
                     let (data, replay) = match **m {
                         Packet::ReplayPiece {
+                            tag,
                             ref mut data,
                             context:
                                 payload::ReplayPieceContext::Partial {
                                     ref for_keys,
+                                    requesting_shard,
                                     unishard,
                                     ignore,
                                 },
@@ -99,7 +111,9 @@ impl Node {
                                 ReplayContext::Partial {
                                     key_cols: keyed_by.unwrap(),
                                     keys: for_keys,
+                                    requesting_shard,
                                     unishard,
+                                    tag,
                                 },
                             )
                         }
@@ -116,7 +130,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(ex, from, old_data, replay, nodes, state) {
+                    match i.on_input_raw(ex, from, old_data, replay, nodes, state, log) {
                         RawProcessingResult::Regular(m) => {
                             mem::replace(data, m.results);
                             lookups = m.lookups;
@@ -165,6 +179,38 @@ impl Node {
                             *last = new_last;
                         } else {
                             unreachable!();
+                        }
+                    }
+
+                    if let Packet::ReplayPiece {
+                        context:
+                            payload::ReplayPieceContext::Partial {
+                                ref mut unishard, ..
+                            },
+                        ..
+                    } = **m
+                    {
+                        // hello, it's me again.
+                        //
+                        // on every replay path, there are some number of shard mergers, and
+                        // some number of sharders.
+                        //
+                        // if the source of a replay is sharded, and the upquery key matches
+                        // the sharding key, then only the matching shard of the source will be
+                        // queried. in that case, the next shard merger (if there is one)
+                        // shouldn't wait for replays from other shards, since none will
+                        // arrive. the same is not true for any _subsequent_ shard mergers
+                        // though, since sharders along a replay path send to _all_ shards
+                        // (modulo the last one if the destination is sharded, but then there
+                        // is no shard merger after it).
+                        //
+                        // to ensure that this is in fact what happens, we need to _unset_
+                        // unishard once we've passed the first shard merger, so that it is not
+                        // propagated to subsequent unions.
+                        if let NodeOperator::Union(ref u) = i {
+                            if u.is_shard_merger() {
+                                *unishard = false;
+                            }
                         }
                     }
                 }
@@ -240,10 +286,10 @@ impl Node {
                 s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
             }
             NodeType::Internal(ref mut i) => {
-                i.on_eviction(from, key_columns, keys);
+                i.on_eviction(from, tag, keys);
             }
             NodeType::Reader(ref mut r) => {
-                r.on_eviction(key_columns, &keys[..]);
+                r.on_eviction(&keys[..]);
             }
             NodeType::Ingress => {}
             NodeType::Dropped => {}

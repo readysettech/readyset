@@ -1,3 +1,4 @@
+use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::prelude::*;
@@ -36,11 +37,19 @@ struct ReplayPieces {
 pub struct Union {
     emit: Emit,
 
-    // to sanity check that we're not asked to manage multiple replay paths with different keys
-    replay_key_orig: Vec<usize>,
+    /// This is a map from (Tag, LocalNodeIndex) to ColumnList
+    replay_key: HashMap<(Tag, usize), Vec<usize>>,
 
-    replay_key: Option<HashMap<LocalNodeIndex, Vec<usize>>>,
-    replay_pieces: HashMap<Vec<DataType>, ReplayPieces>,
+    /// Buffered upquery responses that are waiting for more replay pieces.
+    ///
+    /// Stored as a btreemap so that when we iterate, we first get all the replays of one tag, then
+    /// all the records of another tag, etc. This lets us avoid looking up info related to the same
+    /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
+    /// check the replay pieces for all values of `requesting_shard` (the `usize`) if we do find a
+    /// key match for an update.
+    ///
+    /// This map's key is really (Tag, Key, requesting_shard)
+    replay_pieces: BTreeMap<(Tag, Vec<DataType>, usize), ReplayPieces>,
 
     required: usize,
 
@@ -54,10 +63,8 @@ impl Clone for Union {
         Union {
             emit: self.emit.clone(),
             required: self.required,
-            replay_key_orig: Vec::new(),
-            // nothing can have been received yet
-            replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_key: Default::default(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
 
             me: self.me.clone(),
@@ -94,9 +101,8 @@ impl Union {
                 cols_l: BTreeMap::new(),
             },
             required: parents,
-            replay_key_orig: Vec::new(),
-            replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_key: Default::default(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
             me: None,
         }
@@ -108,9 +114,8 @@ impl Union {
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
             required: shards,
-            replay_key_orig: Vec::new(),
-            replay_key: None,
-            replay_pieces: HashMap::new(),
+            replay_key: Default::default(),
+            replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
             me: None,
         }
@@ -236,6 +241,7 @@ impl Ingredient for Union {
         replay: ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
+        log: &Logger,
     ) -> RawProcessingResult {
         use std::mem;
 
@@ -259,6 +265,8 @@ impl Ingredient for Union {
                 }
 
                 if absorb_for_full {
+                    trace!(log, "union absorbing update for full replay");
+
                     // we shouldn't be stepping on any partial materialization toes, but let's
                     // make sure. i'm not 100% sure at this time if it's true.
                     //
@@ -267,7 +275,9 @@ impl Ingredient for Union {
                     // we can process it. the replay code below seems to require rs to be
                     // *unprocessed* (not sure why), and so once we add it to our buffer, we can't
                     // also execute the code below. if you fix that, you should be all good!
-                    assert!(self.replay_key.is_none() || self.replay_pieces.is_empty());
+                    //
+                    // TODO: why is this an || past self?
+                    assert!(self.replay_key.is_empty() || self.replay_pieces.is_empty());
 
                     // process the results (self is okay to have mutably borrowed here)
                     let rs = self.on_input(ex, from, rs, None, n, s).results;
@@ -289,38 +299,92 @@ impl Ingredient for Union {
                     }
                 }
 
-                let replay_key = self.replay_key.as_ref().and_then(|rks| rks.get(&from));
-                if replay_key.is_none() || self.replay_pieces.is_empty() {
+                if self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
                     return RawProcessingResult::Regular(self.on_input(ex, from, rs, None, n, s));
                 }
 
-                let k = replay_key.unwrap();
                 // partial replays are flowing through us, and at least one piece is being waited
                 // for. we need to keep track of any records that succeed a replay piece (and thus
                 // aren't included in it) before the other pieces come in. note that it's perfectly
                 // safe for us to also forward them, since they'll just be dropped when they miss
                 // in the downstream node. in fact, we *must* forward them, becuase there may be
                 // *other* nodes downstream that do *not* have holes for the key in question.
-                for r in &rs {
-                    // XXX: the clone + collect here is really sad
-                    if let Some(ref mut pieces) = self
-                        .replay_pieces
-                        .get_mut(&k.iter().map(|&c| r[c].clone()).collect::<Vec<_>>())
-                    {
-                        if let Some(ref mut rs) = pieces.buffered.get_mut(&from) {
-                            // we've received a replay piece from this ancestor already for this
-                            // key, and are waiting for replay pieces from other ancestors. we need
-                            // to incorporate this record into the replay piece so that it doesn't
-                            // end up getting lost.
-                            rs.push(r.clone());
-                        } else {
-                            // we haven't received a replay piece for this key from this ancestor
-                            // yet, so we know that the eventual replay piece must include this
-                            // record.
-                        }
+                // TODO: is the *must* still true now that we take tags into account?
+                //
+                // unfortunately, finding out which things we need to merge is a bit of a pain,
+                // since the bufferd upquery responses may be for different upquery paths with
+                // different key columns. in other words, for each record, we conceptually need to
+                // check each buffered replay.
+                //
+                // we have two options here. either, we iterate over the records in an outer loop
+                // and the buffered upquery responses in the inner loop, or the other way around.
+                // since iterating over the buffered upquery respones includes a btree loopup, we
+                // want to do fewer of those, so we do those in the outer loop.
+                let mut replays = self.replay_pieces.iter_mut();
+                let mut replay_key = None;
+                let mut last_tag = None;
+
+                let rkey_from = if let Emit::AllFrom(..) = self.emit {
+                    // from is the shard index
+                    0
+                } else {
+                    from.id()
+                };
+
+                while let Some((&(tag, ref replaying_key, _), ref mut pieces)) = replays.next() {
+                    assert!(
+                        !pieces.buffered.is_empty(),
+                        "empty pieces bucket left in replay pieces"
+                    );
+
+                    // first, let's see if _any_ of the records in this batch even affect this
+                    // buffered upquery response.
+                    let buffered = if let Some(rs) = pieces.buffered.get_mut(&from) {
+                        rs
                     } else {
-                        // we're not waiting on replay pieces for this key
+                        // we haven't received a replay piece for this key from this ancestor yet,
+                        // so we know that the eventual replay piece must include any records in
+                        // this batch.
+                        continue;
+                    };
+
+                    // make sure we use the right key columns for this tag
+                    if last_tag.map(|lt| lt != tag).unwrap_or(true) {
+                        // starting a new tag
+                        replay_key = Some(&self.replay_key[&(tag, rkey_from)]);
+                    }
+                    let k = replay_key.unwrap();
+                    last_tag = Some(tag);
+
+                    // and finally, check all the records
+                    for r in &rs {
+                        let hit = k
+                            .iter()
+                            .enumerate()
+                            .all(|(ki, &c)| r[c] == replaying_key[ki]);
+                        if !hit {
+                            // this record is irrelevant as far as this buffered upquery response
+                            // goes, since its key does not match the upquery's key.
+                            continue;
+                        }
+
+                        // we've received a replay piece from this ancestor already for this
+                        // key, and are waiting for replay pieces from other ancestors. we need
+                        // to incorporate this record into the replay piece so that it doesn't
+                        // end up getting lost.
+                        buffered.push(r.clone());
+
+                        // it'd be nice if we could avoid doing this exact same key check multiple
+                        // times if the same key is being replayed by multiple `requesting_shard`s.
+                        // in theory, the btreemap could let us do this by walking forward in the
+                        // iterator until we hit the next key or tag, and the rewinding back to
+                        // where we were before continuing to the same record. but that won't work
+                        // because https://github.com/rust-lang/rfcs/pull/2896.
+                        //
+                        // we could emulate the same thing by changing `ReplayPieces` to
+                        // `RefCell<ReplayPieces>`, using an ref-only iterator that is `Clone`, and
+                        // then play some games from there, but it seems not worth it.
                     }
                 }
 
@@ -387,6 +451,11 @@ impl Ingredient for Union {
                         return RawProcessingResult::FullReplay(rs, last);
                     }
 
+                    debug!(
+                        log,
+                        "union captured start of full replay; has: {}, need: {}", 1, self.required
+                    );
+
                     // we need to hold this back until we've received one from every ancestor
                     let mut s = HashSet::new();
                     s.insert(from);
@@ -413,6 +482,7 @@ impl Ingredient for Union {
                             // we can just send everything and we're done!
                             // make sure to include what's in *this* replay.
                             buffered.append(&mut *rs);
+                            debug!(log, "union releasing end of full replay");
                             exit =
                                 RawProcessingResult::FullReplay(buffered.split_off(0).into(), true);
                         // fall through to below match where we'll set FullWait::None
@@ -420,6 +490,7 @@ impl Ingredient for Union {
                             if started.len() != self.required {
                                 if started.insert(from) && started.len() == self.required {
                                     // we can release all buffered replays!
+                                    debug!(log, "union releasing full replay");
                                     buffered.append(&mut *rs);
                                     return RawProcessingResult::FullReplay(
                                         buffered.split_off(0).into(),
@@ -432,6 +503,13 @@ impl Ingredient for Union {
                                 debug_assert_eq!(buffered.len(), 0);
                                 return RawProcessingResult::FullReplay(rs, false);
                             }
+
+                            debug!(
+                                log,
+                                "union captured start of full replay; has: {}, need: {}",
+                                started.len(),
+                                self.required
+                            );
 
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
@@ -450,11 +528,11 @@ impl Ingredient for Union {
             ReplayContext::Partial {
                 key_cols,
                 keys,
+                requesting_shard,
                 unishard,
+                tag,
             } => {
-                // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
-                // replays!
-
+                let mut is_shard_merger = false;
                 if let Emit::AllFrom(_, _) = self.emit {
                     if unishard {
                         // No need to buffer since request should only be for one shard
@@ -465,34 +543,49 @@ impl Ingredient for Union {
                             captured: HashSet::new(),
                         };
                     }
+                    is_shard_merger = true;
                 }
 
-                if self.replay_key.is_none() {
+                let rkey_from = if let Emit::AllFrom(..) = self.emit {
+                    // from is the shard index
+                    0
+                } else {
+                    from.id()
+                };
+
+                use std::collections::hash_map::Entry;
+                if let Entry::Vacant(v) = self.replay_key.entry((tag, rkey_from)) {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
                     match self.emit {
                         Emit::AllFrom(..) => {
-                            self.replay_key =
-                                Some(Some((from, Vec::from(key_cols))).into_iter().collect());
+                            v.insert(Vec::from(key_cols));
                         }
                         Emit::Project { ref emit_l, .. } => {
-                            self.replay_key = Some(
-                                emit_l
-                                    .iter()
-                                    .map(|(src, emit)| {
-                                        (*src, key_cols.iter().map(|&c| emit[c]).collect())
-                                    })
-                                    .collect(),
-                            );
+                            let emit = &emit_l[&from];
+                            v.insert(key_cols.iter().map(|&c| emit[c]).collect());
+
+                            // Also insert for all the other sources while we're at it
+                            for (&src, emit) in emit_l {
+                                if src != from {
+                                    self.replay_key.insert(
+                                        (tag, src.id()),
+                                        key_cols.iter().map(|&c| emit[c]).collect(),
+                                    );
+                                }
+                            }
                         }
                     }
-                    self.replay_key_orig = Vec::from(key_cols);
                 } else {
-                    // make sure multiple different replay paths aren't getting mixed
-                    if &self.replay_key_orig[..] != key_cols {
-                        unimplemented!();
-                    }
+                    // we already know the meta info for this tag
                 }
+
+                trace!(
+                    log,
+                    "union got replay piece: {:?} with context {:?}",
+                    rs,
+                    replay
+                );
 
                 let mut rs_by_key = rs
                     .into_iter()
@@ -512,8 +605,7 @@ impl Ingredient for Union {
                 // we can't borrow self in both closures below, even though `self.on_input` doesn't
                 // access `self.replay_pieces`. if only the compiler was more clever. we get around
                 // this by mem::swapping a temporary (empty) HashMap (which doesn't allocate).
-                let mut replay_pieces_tmp = HashMap::with_capacity(0);
-                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
+                let mut replay_pieces_tmp = mem::take(&mut self.replay_pieces);
 
                 let me = self.me;
                 let required = self.required; // can't borrow self in closures below
@@ -525,18 +617,23 @@ impl Ingredient for Union {
                             let rs = rs_by_key.remove(&key[..]).unwrap_or_else(Records::default);
 
                             // store this replay piece
-                            use std::collections::hash_map::Entry;
-                            match replay_pieces_tmp.entry(key.clone()) {
+                            use std::collections::btree_map::Entry;
+                            match replay_pieces_tmp.entry((tag, key.clone(), requesting_shard)) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
-                                        // chained unions are not yet supported.
-                                        // we'd need to keep a queue of replays from each side,
-                                        // apply writes to all queued replays from that side, and
-                                        // then emit all front-of-queue replays in lock-step.
+                                        // got two upquery responses for the same key for the same
+                                        // downstream shard. waaaaaaat?
                                         unimplemented!(
-                                            "detected chained union at {:?} (from: {:?}, key: {:?})",
-                                            me.unwrap(),
-                                            n[from].borrow().global_addr(),
+                                            "downstream shard double-requested key (node: {}, src: {}, key cols: {:?})",
+                                            me.unwrap().index(),
+                                            if is_shard_merger {
+                                                format!("shard {}", from.id())
+                                            } else {
+                                                format!(
+                                                    "node {}",
+                                                    n[from].borrow().global_addr().index()
+                                                )
+                                            },
                                             key_cols,
                                         );
                                     }
@@ -589,7 +686,55 @@ impl Ingredient for Union {
                 };
 
                 // and swap back replay pieces
-                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
+                mem::replace(&mut self.replay_pieces, replay_pieces_tmp);
+
+                // here's another bit that's a little subtle:
+                //
+                // remember how, above, we stripped out the upquery identifier from the replay's
+                // tag? consider what happens if we buffer a replay with, say, tag 7.2 (so, upquery
+                // 7, path 2). later, when some other replay comes along with, say, tag 7.1, we
+                // decide that we're done buffering. we then release the buffered records from the
+                // first replay alongside the ones that were in the 7.1 replay. but, we just
+                // effectively _changed_ the tag for the records in that first replay! is that ok?
+                // it turns out it _is_, and here is the argument for why:
+                //
+                // first, for a given upquery, let's consider what paths flow through us when there
+                // is only a single union on the upquery's path. we know there is then one path for
+                // each parent we have. an upquery from below must query each of our parents once
+                // to get the complete results. those queries will all have the same upquery id,
+                // but different path ids. since there is no union above us or below us on the
+                // path, there are exactly as many paths as we have ancestors, and those paths only
+                // branch _above_ us. below us, those different paths are the _same_. this means
+                // that no matter what path discriminator we forward something with, it will follow
+                // the right path.
+                //
+                // now, what happens if there is a exactly one union on the upquery's path, at or
+                // above one of our parents. well, _that_ parent will have as many distinct path
+                // identifiers as that union has parents. we know that it will only produce _one_
+                // upquery response through (since the union will buffer), and that the repsonse
+                // will have (an arbitrary chosen) one of those path identifiers. we know that path
+                // discriminators are distinct, so whichever identifier our union ancestor chooses,
+                // it will be distinct from the paths that go through our _other_ parents.
+                // furthermore, we know that all those path identifiers ultimately share the same
+                // path below us. and we also know that the path identifiers of the paths through
+                // our other parents share that same path. so choosing any of them is fine.
+                //
+                // if we have unions above multiple of our parents, the same argument holds.
+                //
+                // if those unions again have ancestors that are unions, the same argument holds.
+                //
+                // the missing piece then is how a union that has a union as a _descendant_ knows
+                // that any choice it makes for path identifier is fine for that descendant. this
+                // is trickier to argue, but the argument goes like this:
+                //
+                // imagine you have a union immediately followed by a union, followed by some node
+                // that wishes to make an upquery. imagine that each union has two incoming edges:
+                // the bottom union has two edges to the top union (a "diamond"), and the top union
+                // has two incoming edges from disjoint parts of the graph. i don't know why you'd
+                // have that, but let's imagine. for the one upquery id here, there are four path
+                // identifiers: bottom-left:top-left, bottom-left:top-right, bottom-right:top-left,
+                // and bottom-right:top-right. as the top union, we will therefore receive two
+                // NOPE
 
                 RawProcessingResult::ReplayPiece {
                     rows: rs,
@@ -600,17 +745,13 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_eviction(&mut self, from: LocalNodeIndex, key_columns: &[usize], keys: &[Vec<DataType>]) {
-        if self.replay_key_orig.is_empty() {
-            return;
-        }
-
-        if &self.replay_key_orig[..] != key_columns {
-            unimplemented!("multiple different replay paths flowing through union");
-        }
-
+    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[Vec<DataType>]) {
         for key in keys {
-            if let Some(e) = self.replay_pieces.get_mut(key) {
+            // TODO: the key.clone()s here are really sad
+            for (_, e) in self
+                .replay_pieces
+                .range_mut((tag, key.clone(), 0)..=(tag, key.clone(), usize::max_value()))
+            {
                 if e.buffered.contains_key(&from) {
                     // we've already received something from left, but it has now been evicted.
                     // we can't remove the buffered replay, since we'll then get confused when the

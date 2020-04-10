@@ -73,10 +73,11 @@ enum TriggerEndpoint {
     Local(Vec<usize>),
 }
 
-struct ReplayPath {
+pub(crate) struct ReplayPath {
     source: Option<LocalNodeIndex>,
     path: Vec<ReplayPathSegment>,
     notify_done: bool,
+    pub(crate) partial_unicast_sharder: Option<NodeIndex>,
     trigger: TriggerEndpoint,
 }
 
@@ -87,6 +88,7 @@ struct Redo {
     tag: Tag,
     replay_key: Vec<DataType>,
     unishard: bool,
+    requesting_shard: usize,
 }
 
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
@@ -243,7 +245,7 @@ pub struct Domain {
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>, bool)>,
+    buffered_replay_requests: HashMap<(Tag, usize), (time::Instant, HashSet<Vec<DataType>>, bool)>,
     replay_batch_timeout: time::Duration,
     delayed_for_self: VecDeque<Box<Packet>>,
 
@@ -307,6 +309,7 @@ impl Domain {
                         tag,
                         keys,
                         unishard: true, // local replays are necessarily single-shard
+                        requesting_shard: self.shard.unwrap_or(0),
                     }));
                 continue;
             }
@@ -332,6 +335,7 @@ impl Domain {
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
         was_single_shard: bool,
+        requesting_shard: usize,
         needed_for: Tag,
     ) {
         use std::collections::hash_map::Entry;
@@ -345,6 +349,7 @@ impl Domain {
             tag: needed_for,
             replay_key: replay_key.clone(),
             unishard: was_single_shard,
+            requesting_shard,
         };
         match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
             Entry::Occupied(e) => {
@@ -410,6 +415,7 @@ impl Domain {
                             tag,
                             unishard: false, // ask_all is true, so replay is sharded
                             keys: keys.clone(), // sad to clone here
+                            requesting_shard: self.shard.unwrap_or(0),
                         }))
                         .is_err()
                     {
@@ -433,6 +439,7 @@ impl Domain {
                         tag,
                         keys,
                         unishard: true, // only one option, so only one path
+                        requesting_shard: self.shard.unwrap_or(0),
                     }))
                     .is_err()
                 {
@@ -450,6 +457,7 @@ impl Domain {
                             tag,
                             keys,
                             unishard: true, // !ask_all, so only one path
+                            requesting_shard: self.shard.unwrap_or(0),
                         }))
                         .is_err()
                     {
@@ -582,7 +590,9 @@ impl Domain {
                 &self.nodes,
                 self.shard,
                 true,
+                None,
                 executor,
+                &self.log,
             );
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
@@ -998,6 +1008,7 @@ impl Domain {
                         source,
                         path,
                         notify_done,
+                        partial_unicast_sharder,
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
@@ -1064,6 +1075,7 @@ impl Domain {
                                 source,
                                 path,
                                 notify_done,
+                                partial_unicast_sharder,
                                 trigger,
                             },
                         );
@@ -1121,6 +1133,7 @@ impl Domain {
                         tag,
                         keys,
                         unishard,
+                        requesting_shard,
                     } => {
                         trace!(
                             self.log,
@@ -1130,7 +1143,13 @@ impl Domain {
                         );
                         self.total_replay_time.start();
                         for key in keys {
-                            self.seed_replay(tag, Cow::Owned(key), unishard, executor);
+                            self.seed_replay(
+                                tag,
+                                Cow::Owned(key),
+                                unishard,
+                                requesting_shard,
+                                executor,
+                            );
                         }
                         self.total_replay_time.stop();
                     }
@@ -1448,20 +1467,30 @@ impl Domain {
                     let elapsed_replays: Vec<_> = {
                         self.buffered_replay_requests
                             .iter_mut()
-                            .filter_map(|(&tag, &mut (first, ref mut keys, single_shard))| {
-                                if !keys.is_empty() && now.duration_since(first) > to {
-                                    // will be removed by retain below
-                                    Some((tag, mem::replace(keys, HashSet::new()), single_shard))
-                                } else {
-                                    None
-                                }
-                            })
+                            .filter_map(
+                                |(
+                                    &(tag, requesting_shard),
+                                    &mut (first, ref mut keys, single_shard),
+                                )| {
+                                    if !keys.is_empty() && now.duration_since(first) > to {
+                                        // will be removed by retain below
+                                        Some((
+                                            tag,
+                                            requesting_shard,
+                                            mem::replace(keys, HashSet::new()),
+                                            single_shard,
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                },
+                            )
                             .collect()
                     };
                     self.buffered_replay_requests
                         .retain(|_, (_, ref keys, _)| !keys.is_empty());
-                    for (tag, keys, single_shard) in elapsed_replays {
-                        self.seed_all(tag, keys, single_shard, executor);
+                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays {
+                        self.seed_all(tag, requesting_shard, keys, single_shard, executor);
                     }
                     self.total_replay_time.stop();
                 }
@@ -1529,6 +1558,7 @@ impl Domain {
     fn seed_all(
         &mut self,
         tag: Tag,
+        requesting_shard: usize,
         keys: HashSet<Vec<DataType>>,
         single_shard: bool,
         ex: &mut dyn Executor,
@@ -1570,6 +1600,7 @@ impl Domain {
                             for_keys: keys,
                             unishard: single_shard, // if we are the only source, only one path
                             ignore: false,
+                            requesting_shard,
                         },
                         data: rs.into(),
                     }))
@@ -1596,7 +1627,15 @@ impl Domain {
                        "missed during replay request";
                        "tag" => tag,
                        "key" => ?key);
-                self.on_replay_miss(source, &cols[..], key.clone(), key, single_shard, tag);
+                self.on_replay_miss(
+                    source,
+                    &cols[..],
+                    key.clone(),
+                    key,
+                    single_shard,
+                    requesting_shard,
+                    tag,
+                );
             }
         }
 
@@ -1625,6 +1664,7 @@ impl Domain {
         tag: Tag,
         key: Cow<[DataType]>,
         single_shard: bool,
+        requesting_shard: usize,
         ex: &mut dyn Executor,
     ) {
         if let ReplayPath {
@@ -1640,7 +1680,7 @@ impl Domain {
             // TODO
             use std::collections::hash_map::Entry;
             let key = key.into_owned();
-            match self.buffered_replay_requests.entry(tag) {
+            match self.buffered_replay_requests.entry((tag, requesting_shard)) {
                 Entry::Occupied(o) => {
                     assert!(!o.get().1.is_empty());
                     o.into_mut().1.insert(key);
@@ -1688,6 +1728,7 @@ impl Domain {
                             for_keys: k,
                             unishard: single_shard, // if we are the only source, only one path
                             ignore: false,
+                            requesting_shard,
                         },
                         data,
                     }));
@@ -1712,6 +1753,7 @@ impl Domain {
                 key.clone().into_owned(),
                 key.into_owned(),
                 single_shard,
+                requesting_shard,
                 tag,
             );
         } else {
@@ -1745,12 +1787,13 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
-            let ReplayPath {
+            let rp = &self.replay_paths[&tag];
+            let &ReplayPath {
                 ref path,
                 ref source,
                 notify_done,
                 ..
-            } = self.replay_paths[&tag];
+            } = rp;
 
             match self.mode {
                 DomainMode::Forwarding if notify_done => {
@@ -1874,6 +1917,14 @@ impl Domain {
                     }
 
                     for (i, segment) in path.iter().enumerate() {
+                        if let Some(force_tag) = segment.force_tag_to {
+                            if let Packet::ReplayPiece { ref mut tag, .. } =
+                                m.as_deref_mut().unwrap()
+                            {
+                                *tag = force_tag;
+                            }
+                        }
+
                         let mut n = self.nodes[segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
@@ -1935,7 +1986,9 @@ impl Domain {
                             &self.nodes,
                             self.shard,
                             false,
+                            Some(rp),
                             ex,
+                            &self.log,
                         );
 
                         // ignore duplicate misses
@@ -2066,12 +2119,22 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let unishard = if let Packet::ReplayPiece {
-                                context: ReplayPieceContext::Partial { unishard, .. },
+                            // so, in theory, unishard can be changed by n.process. however, it
+                            // will only ever be changed by a union, which can't cause misses.
+                            // since we only enter this branch in the cases where we have a miss,
+                            // it is okay to assume that unishard _hasn't_ changed, and therefore
+                            // we can use the value that's in m.
+                            let (unishard, requesting_shard) = if let Packet::ReplayPiece {
+                                context:
+                                    ReplayPieceContext::Partial {
+                                        unishard,
+                                        requesting_shard,
+                                        ..
+                                    },
                                 ..
                             } = **m.as_mut().unwrap()
                             {
-                                unishard
+                                (unishard, requesting_shard)
                             } else {
                                 unreachable!("backfill_keys.is_some() implies Context::Partial");
                             };
@@ -2083,6 +2146,7 @@ impl Domain {
                                     miss.lookup_key_vec(),
                                     miss.lookup_idx,
                                     unishard,
+                                    requesting_shard,
                                     tag,
                                 ));
                             }
@@ -2327,6 +2391,7 @@ impl Domain {
                             for_keys,
                             ignore,
                             unishard: _,
+                            requesting_shard: _,
                         } => {
                             assert!(!ignore);
                             if dst_is_reader {
@@ -2362,7 +2427,9 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial);
         }
 
-        for (node, while_replaying_key, miss_key, miss_cols, single_shard, tag) in need_replay {
+        for (node, while_replaying_key, miss_key, miss_cols, single_shard, requesting_shard, tag) in
+            need_replay
+        {
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag,
@@ -2376,6 +2443,7 @@ impl Domain {
                 while_replaying_key,
                 miss_key,
                 single_shard,
+                requesting_shard,
                 tag,
             );
         }
@@ -2442,6 +2510,7 @@ impl Domain {
                         tag,
                         replay_key,
                         unishard,
+                        requesting_shard,
                     } in replay
                     {
                         self.delayed_for_self
@@ -2449,6 +2518,7 @@ impl Domain {
                                 tag,
                                 unishard,
                                 keys: vec![replay_key],
+                                requesting_shard,
                             }));
                     }
                 }

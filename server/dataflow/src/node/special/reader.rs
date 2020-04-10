@@ -138,7 +138,7 @@ impl Reader {
         bytes_freed
     }
 
-    pub(in crate::node) fn on_eviction(&mut self, _key_columns: &[usize], keys: &[Vec<DataType>]) {
+    pub(in crate::node) fn on_eviction(&mut self, keys: &[Vec<DataType>]) {
         // NOTE: *could* be None if reader has been created but its state hasn't been built yet
         if let Some(w) = self.writer.as_mut() {
             for k in keys {
