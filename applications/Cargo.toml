@@ -4,6 +4,7 @@ version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
 publish = false
+doc = false
 
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
@@ -42,54 +43,67 @@ zookeeper = "0.5.3"
 [[bin]]
 name = "vote"
 path = "vote/main.rs"
+doc = false
 
 [[bin]]
 name = "tpc_w"
 path = "tpc_w/tpc_w.rs"
+doc = false
 
 [[bin]]
 name = "hotsoup"
 path = "hotsoup/hotsoup.rs"
+doc = false
 
 [[bin]]
 name = "extract_hotcrp_queries"
 path = "hotsoup/extract_queries.rs"
+doc = false
 
 [[bin]]
 name = "securecrp"
 path = "securecrp/main.rs"
+doc = false
 
 [[bin]]
 name = "piazza"
 path = "piazza/piazza.rs"
+doc = false
 
 [[bin]]
 name = "evict-o-rama"
 path = "evict-o-rama/main.rs"
+doc = false
 
 [[bin]]
 name = "vote-migration"
 path = "vote-migration/main.rs"
+doc = false
 
 [[bin]]
 name = "vote-dbtoaster-style"
 path = "vote-dbtoaster-style/main.rs"
+doc = false
 
 [[bin]]
 name = "vote-purge-stress"
 path = "vote-purge-stress/main.rs"
+doc = false
 
 [[bin]]
 name = "replay"
 path = "replay/main.rs"
+doc = false
 
 [[bin]]
 name = "lobsters-mysql"
 path = "lobsters/mysql/main.rs"
+doc = false
 
 [[bin]]
 name = "lobsters-noria"
 path = "lobsters/noria/main.rs"
+doc = false
 
 #[[bin]]
 #name = "security-mysql"

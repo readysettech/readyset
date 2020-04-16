@@ -4,6 +4,7 @@ version = "0.3.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
 publish = false
+doc = false
 
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
@@ -32,19 +33,24 @@ yansi = "0.5"
 [[bin]]
 name = "vote-distributed"
 path = "src/vote-distributed.rs"
+doc = false
 
 [[bin]]
 name = "vote-eintopf"
 path = "src/eintopf.rs"
+doc = false
 
 [[bin]]
 name = "vote"
 path = "src/vote/main.rs"
+doc = false
 
 [[bin]]
 name = "lobsters-mysql"
 path = "src/lobsters-mysql.rs"
+doc = false
 
 [[bin]]
 name = "lobsters-noria"
 path = "src/lobsters-noria.rs"
+doc = false
