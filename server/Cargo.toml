@@ -25,7 +25,7 @@ generate_mysql_tests = ["default"]
 [dependencies]
 clap = "2.25.0"
 failure = "0.1.1"
-fnv = "1.0.5"
+ahash = "0.3"
 futures-core = "0.3.0"
 futures-util = "0.3.0"
 futures-sink = "0.3.0"

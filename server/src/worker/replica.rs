@@ -3,6 +3,7 @@ const FORCE_INPUT_YIELD_EVERY: usize = 32;
 
 use super::ChannelCoordinator;
 use crate::coordination::CoordinationPayload;
+use ahash::{AHashMap, AHashSet};
 use async_bincode::AsyncDestination;
 use async_timer::Oneshot;
 use bincode;
@@ -12,7 +13,6 @@ use dataflow::{
     Domain, Packet, PollEvent, ProcessResult,
 };
 use failure::{self, ResultExt};
-use fnv::{FnvHashMap, FnvHashSet};
 use futures_util::{
     sink::Sink,
     stream::{futures_unordered::FuturesUnordered, Stream},
@@ -82,7 +82,7 @@ pub(super) struct Replica {
         >,
     >,
 
-    outputs: FnvHashMap<
+    outputs: AHashMap<
         ReplicaAddr,
         (
             Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>,
@@ -429,13 +429,13 @@ struct Outboxes {
     dirty: bool,
 
     // messages for other domains
-    domains: FnvHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+    domains: AHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
 
     // connection state for each stream
     connections: slab::Slab<ConnState>,
 
     // which connections have pending writes
-    pending: FnvHashSet<usize>,
+    pending: AHashSet<usize>,
 
     // for sending messages to the controller
     ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,

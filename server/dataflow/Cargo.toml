@@ -21,7 +21,7 @@ jemallocator = "0.3"
 bincode = "1.0.0"
 evmap = { version = "9.0.0", features = ["indexed"] }
 hashbag = "0.1.2"
-fnv = "1.0.5"
+ahash = "0.3"
 futures-util = "0.3.0"
 itertools = "0.9"
 nom-sql = "0.0.11"

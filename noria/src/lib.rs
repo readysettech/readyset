@@ -316,7 +316,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         DataType::Text(..) | DataType::TinyText(..) => {
             use std::borrow::Cow;
             use std::hash::Hasher;
-            let mut hasher = fnv::FnvHasher::default();
+            let mut hasher = ahash::AHasher::default();
             let s: Cow<'_, str> = dt.into();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
