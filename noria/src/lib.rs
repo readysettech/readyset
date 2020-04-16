@@ -107,8 +107,6 @@
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
-// https://github.com/rust-lang/rust-clippy/issues/5188
-#![allow(clippy::needless_doctest_main)]
 
 #[macro_use]
 extern crate failure;
@@ -186,7 +184,6 @@ mod table;
 mod view;
 
 #[doc(hidden)]
-#[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod channel;
 #[doc(hidden)]
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
