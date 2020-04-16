@@ -69,12 +69,20 @@ impl<T: Serialize> TcpSender<T> {
     }
 
     pub(crate) fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
-        let s = net2::TcpBuilder::new_v4()?
-            .reuse_address(true)?
-            .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
-            .connect(addr)?;
-        s.set_nodelay(true)?;
-        Self::new(s)
+        let f = move || {
+            let s = net2::TcpBuilder::new_v4()?
+                .reuse_address(true)?
+                .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
+                .connect(addr)?;
+            s.set_nodelay(true)?;
+            Self::new(s)
+        };
+
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
     }
 
     pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
@@ -108,11 +116,19 @@ impl<T: Serialize> TcpSender<T> {
             return Err(SendError::Poisoned);
         }
 
-        let size = u32::try_from(bincode::serialized_size(t).unwrap()).unwrap();
-        poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-        poisoning_try!(self, bincode::serialize_into(&mut self.stream, t));
-        poisoning_try!(self, self.stream.flush());
-        Ok(())
+        let mut f = move || {
+            let size = u32::try_from(bincode::serialized_size(t).unwrap()).unwrap();
+            poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
+            poisoning_try!(self, bincode::serialize_into(&mut self.stream, t));
+            poisoning_try!(self, self.stream.flush());
+            Ok(())
+        };
+
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
     }
 
     pub fn reader<'a>(&'a mut self) -> impl io::Read + 'a {

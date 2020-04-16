@@ -402,10 +402,8 @@ impl Replica {
 
         if *this.timed_out {
             *this.timed_out = false;
-            tokio::task::block_in_place(|| {
-                this.domain.on_event(this.out, PollEvent::Timeout);
-                processed = true;
-            });
+            this.domain.on_event(this.out, PollEvent::Timeout);
+            processed = true;
         }
 
         processed
@@ -568,7 +566,7 @@ impl Future for Replica {
                 ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
                     $retry = Some($p);
                     let retry = &mut $retry;
-                    if let ProcessResult::StopPolling = tokio::task::block_in_place(|| {
+                    if let ProcessResult::StopPolling = {
                         let packet = retry.take().unwrap();
                         if let Packet::Input {
                             src: Some(SourceChannelIdentifier { token, epoch, .. }),
@@ -578,7 +576,7 @@ impl Future for Replica {
                             $outbox.saw_input(token, epoch);
                         }
                         $pp(packet)
-                    }) {
+                    } {
                         // domain got a message to quit
                         // TODO: should we finish up remaining work?
                         return Poll::Ready(Ok(()));

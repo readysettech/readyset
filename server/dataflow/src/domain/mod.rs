@@ -965,16 +965,21 @@ impl Domain {
                                 );
 
                                 let mut n = self.nodes[node].borrow_mut();
-                                n.with_reader_mut(|r| {
-                                    assert!(self
-                                        .readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none());
+                                tokio::task::block_in_place(|| {
+                                    n.with_reader_mut(|r| {
+                                        assert!(self
+                                            .readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                r_part
+                                            )
+                                            .is_none());
 
-                                    // make sure Reader is actually prepared to receive state
-                                    r.set_write_handle(w_part)
+                                        // make sure Reader is actually prepared to receive state
+                                        r.set_write_handle(w_part)
+                                    })
                                 })
                                 .unwrap();
                             }
@@ -983,16 +988,21 @@ impl Domain {
                                 let (r_part, w_part) = backlog::new(cols, &key[..]);
 
                                 let mut n = self.nodes[node].borrow_mut();
-                                n.with_reader_mut(|r| {
-                                    assert!(self
-                                        .readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none());
+                                tokio::task::block_in_place(|| {
+                                    n.with_reader_mut(|r| {
+                                        assert!(self
+                                            .readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                r_part
+                                            )
+                                            .is_none());
 
-                                    // make sure Reader is actually prepared to receive state
-                                    r.set_write_handle(w_part)
+                                        // make sure Reader is actually prepared to receive state
+                                        r.set_write_handle(w_part)
+                                    })
                                 })
                                 .unwrap();
                             }
@@ -1038,14 +1048,18 @@ impl Domain {
                                         .unwrap()
                                 };
 
-                                let options = match selection {
-                                    SourceSelection::AllShards(nshards)
-                                    | SourceSelection::KeyShard { nshards, .. } => {
-                                        // we may need to send to any of these shards
-                                        (0..nshards).map(shard).collect()
+                                let options = tokio::task::block_in_place(|| {
+                                    match selection {
+                                        SourceSelection::AllShards(nshards)
+                                        | SourceSelection::KeyShard { nshards, .. } => {
+                                            // we may need to send to any of these shards
+                                            (0..nshards).map(shard).collect()
+                                        }
+                                        SourceSelection::SameShard => {
+                                            vec![shard(self.shard.unwrap())]
+                                        }
                                     }
-                                    SourceSelection::SameShard => vec![shard(self.shard.unwrap())],
-                                };
+                                });
 
                                 TriggerEndpoint::End {
                                     source: selection,

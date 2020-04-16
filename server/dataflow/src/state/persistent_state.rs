@@ -80,7 +80,7 @@ impl State for PersistentState {
         // Sync the writes to RocksDB's WAL:
         let mut opts = rocksdb::WriteOptions::default();
         opts.set_sync(true);
-        self.db.as_ref().unwrap().write_opt(batch, &opts).unwrap();
+        tokio::task::block_in_place(|| self.db.as_ref().unwrap().write_opt(batch, &opts)).unwrap();
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
@@ -90,27 +90,29 @@ impl State for PersistentState {
             .iter()
             .position(|index| &index.columns[..] == columns)
             .expect("lookup on non-indexed column set");
-        let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
-        let prefix = Self::serialize_prefix(&key);
-        let data = if index_id == 0 && self.has_unique_index {
-            // This is a primary key, so we know there's only one row to retrieve
-            // (no need to use prefix_iterator).
-            let raw_row = db.get_cf(cf, &prefix).unwrap();
-            if let Some(raw) = raw_row {
-                let row = bincode::deserialize(&*raw).unwrap();
-                vec![row]
+        tokio::task::block_in_place(|| {
+            let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
+            let prefix = Self::serialize_prefix(&key);
+            let data = if index_id == 0 && self.has_unique_index {
+                // This is a primary key, so we know there's only one row to retrieve
+                // (no need to use prefix_iterator).
+                let raw_row = db.get_cf(cf, &prefix).unwrap();
+                if let Some(raw) = raw_row {
+                    let row = bincode::deserialize(&*raw).unwrap();
+                    vec![row]
+                } else {
+                    vec![]
+                }
             } else {
-                vec![]
-            }
-        } else {
-            // This could correspond to more than one value, so we'll use a prefix_iterator:
-            db.prefix_iterator_cf(cf, &prefix)
-                .unwrap()
-                .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
-                .collect()
-        };
+                // This could correspond to more than one value, so we'll use a prefix_iterator:
+                db.prefix_iterator_cf(cf, &prefix)
+                    .unwrap()
+                    .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
+                    .collect()
+            };
 
-        LookupResult::Some(RecordResult::Owned(data))
+            LookupResult::Some(RecordResult::Owned(data))
+        })
     }
 
     fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
@@ -128,35 +130,38 @@ impl State for PersistentState {
         // We'll store all the pointers (or values if this is index 0) for
         // this index in its own column family:
         let index_id = self.indices.len().to_string();
-        let db = self.db.as_mut().unwrap();
-        db.create_cf(&index_id, &self.db_opts).unwrap();
 
-        // Build the new index for existing values:
-        if !self.indices.is_empty() {
-            let first_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
-            let iter = db
-                .full_iterator_cf(first_cf, rocksdb::IteratorMode::Start)
-                .unwrap();
-            for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
-                let mut batch = WriteBatch::default();
-                for (ref pk, ref value) in chunk {
-                    let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
-                    let index_key = Self::build_key(&row, columns);
-                    let key = Self::serialize_secondary(&index_key, pk);
-                    let cf = db.cf_handle(&index_id).unwrap();
-                    batch.put_cf(cf, &key, value).unwrap();
+        tokio::task::block_in_place(|| {
+            let db = self.db.as_mut().unwrap();
+            db.create_cf(&index_id, &self.db_opts).unwrap();
+
+            // Build the new index for existing values:
+            if !self.indices.is_empty() {
+                let first_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
+                let iter = db
+                    .full_iterator_cf(first_cf, rocksdb::IteratorMode::Start)
+                    .unwrap();
+                for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
+                    let mut batch = WriteBatch::default();
+                    for (ref pk, ref value) in chunk {
+                        let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+                        let index_key = Self::build_key(&row, columns);
+                        let key = Self::serialize_secondary(&index_key, pk);
+                        let cf = db.cf_handle(&index_id).unwrap();
+                        batch.put_cf(cf, &key, value).unwrap();
+                    }
+
+                    db.write(batch).unwrap();
                 }
-
-                db.write(batch).unwrap();
             }
-        }
 
-        self.indices.push(PersistentIndex {
-            columns: cols,
-            column_family: index_id.to_string(),
+            self.indices.push(PersistentIndex {
+                columns: cols,
+                column_family: index_id.to_string(),
+            });
+
+            self.persist_meta();
         });
-
-        self.persist_meta();
     }
 
     fn keys(&self) -> Vec<Vec<usize>> {
@@ -174,14 +179,16 @@ impl State for PersistentState {
 
     // Returns a row count estimate from RocksDB.
     fn rows(&self) -> usize {
-        let db = self.db.as_ref().unwrap();
-        let cf = db.cf_handle("0").unwrap();
-        let total_keys = db
-            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
-            .unwrap()
-            .unwrap() as usize;
+        tokio::task::block_in_place(|| {
+            let db = self.db.as_ref().unwrap();
+            let cf = db.cf_handle("0").unwrap();
+            let total_keys = db
+                .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+                .unwrap()
+                .unwrap() as usize;
 
-        total_keys / self.indices.len()
+            total_keys / self.indices.len()
+        })
     }
 
     fn is_useful(&self) -> bool {
@@ -219,92 +226,94 @@ impl PersistentState {
         primary_key: Option<&[usize]>,
         params: &PersistenceParameters,
     ) -> Self {
-        use rocksdb::{ColumnFamilyDescriptor, DB};
-        let (directory, full_name) = match params.mode {
-            DurabilityMode::Permanent => (None, format!("{}.db", name)),
-            _ => {
-                let dir = tempdir().unwrap();
-                let path = dir.path().join(name.clone());
-                let full_name = format!("{}.db", path.to_str().unwrap());
-                (Some(dir), full_name)
-            }
-        };
-
-        let opts = Self::build_options(&name, params);
-        // We use a column for each index, and one for meta information.
-        // When opening the DB the exact same column families needs to be used,
-        // so we'll have to retrieve the existing ones first:
-        let column_families = match DB::list_cf(&opts, &full_name) {
-            Ok(cfs) => cfs,
-            Err(_err) => vec![DEFAULT_CF.to_string()],
-        };
-
-        let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
-            column_families
-                .iter()
-                .map(|cf| {
-                    ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
-                })
-                .collect()
-        };
-
-        let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
-        for _ in 0..100 {
-            if db.is_ok() {
-                break;
-            }
-            ::std::thread::sleep(::std::time::Duration::from_millis(50));
-            db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
-        }
-        let mut db = db.unwrap();
-        let meta = Self::retrieve_and_update_meta(&db);
-        let indices: Vec<PersistentIndex> = meta
-            .indices
-            .into_iter()
-            .enumerate()
-            .map(|(i, columns)| PersistentIndex {
-                column_family: i.to_string(),
-                columns,
-            })
-            .collect();
-
-        // If there are more column families than indices (-1 to account for the default column
-        // family) we probably crashed while trying to build the last index (in Self::add_key), so
-        // we'll throw away our progress and try re-building it again later:
-        if column_families.len() - 1 > indices.len() {
-            db.drop_cf(&indices.len().to_string()).unwrap();
-        }
-
-        let mut state = Self {
-            seq: 0,
-            indices,
-            has_unique_index: primary_key.is_some(),
-            epoch: meta.epoch,
-            db_opts: opts,
-            db: Some(db),
-            _directory: directory,
-        };
-
-        if primary_key.is_some() && state.indices.is_empty() {
-            // This is the first time we're initializing this PersistentState,
-            // so persist the primary key index right away.
-            state
-                .db
-                .as_mut()
-                .unwrap()
-                .create_cf("0", &state.db_opts)
-                .unwrap();
-
-            let persistent_index = PersistentIndex {
-                column_family: "0".to_string(),
-                columns: primary_key.unwrap().to_vec(),
+        tokio::task::block_in_place(|| {
+            use rocksdb::{ColumnFamilyDescriptor, DB};
+            let (directory, full_name) = match params.mode {
+                DurabilityMode::Permanent => (None, format!("{}.db", name)),
+                _ => {
+                    let dir = tempdir().unwrap();
+                    let path = dir.path().join(name.clone());
+                    let full_name = format!("{}.db", path.to_str().unwrap());
+                    (Some(dir), full_name)
+                }
             };
 
-            state.indices.push(persistent_index);
-            state.persist_meta();
-        }
+            let opts = Self::build_options(&name, params);
+            // We use a column for each index, and one for meta information.
+            // When opening the DB the exact same column families needs to be used,
+            // so we'll have to retrieve the existing ones first:
+            let column_families = match DB::list_cf(&opts, &full_name) {
+                Ok(cfs) => cfs,
+                Err(_err) => vec![DEFAULT_CF.to_string()],
+            };
 
-        state
+            let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
+                column_families
+                    .iter()
+                    .map(|cf| {
+                        ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
+                    })
+                    .collect()
+            };
+
+            let mut db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+            for _ in 0..100 {
+                if db.is_ok() {
+                    break;
+                }
+                ::std::thread::sleep(::std::time::Duration::from_millis(50));
+                db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
+            }
+            let mut db = db.unwrap();
+            let meta = Self::retrieve_and_update_meta(&db);
+            let indices: Vec<PersistentIndex> = meta
+                .indices
+                .into_iter()
+                .enumerate()
+                .map(|(i, columns)| PersistentIndex {
+                    column_family: i.to_string(),
+                    columns,
+                })
+                .collect();
+
+            // If there are more column families than indices (-1 to account for the default column
+            // family) we probably crashed while trying to build the last index (in Self::add_key), so
+            // we'll throw away our progress and try re-building it again later:
+            if column_families.len() - 1 > indices.len() {
+                db.drop_cf(&indices.len().to_string()).unwrap();
+            }
+
+            let mut state = Self {
+                seq: 0,
+                indices,
+                has_unique_index: primary_key.is_some(),
+                epoch: meta.epoch,
+                db_opts: opts,
+                db: Some(db),
+                _directory: directory,
+            };
+
+            if primary_key.is_some() && state.indices.is_empty() {
+                // This is the first time we're initializing this PersistentState,
+                // so persist the primary key index right away.
+                state
+                    .db
+                    .as_mut()
+                    .unwrap()
+                    .create_cf("0", &state.db_opts)
+                    .unwrap();
+
+                let persistent_index = PersistentIndex {
+                    column_family: "0".to_string(),
+                    columns: primary_key.unwrap().to_vec(),
+                };
+
+                state.indices.push(persistent_index);
+                state.persist_meta();
+            }
+
+            state
+        })
     }
 
     fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
@@ -467,66 +476,71 @@ impl PersistentState {
 
         // First insert the actual value for our primary index:
         let serialized_row = bincode::serialize(&r).unwrap();
-        let db = self.db.as_ref().unwrap();
-        let value_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
-        batch
-            .put_cf(value_cf, &serialized_pk, &serialized_row)
-            .unwrap();
 
-        // Then insert primary key pointers for all the secondary indices:
-        for index in self.indices[1..].iter() {
-            // Construct a key with the index values, and serialize it with bincode:
-            let key = Self::build_key(&r, &index.columns);
-            let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
-            let cf = db.cf_handle(&index.column_family).unwrap();
-            batch.put_cf(cf, &serialized_key, &serialized_row).unwrap();
-        }
+        tokio::task::block_in_place(|| {
+            let db = self.db.as_ref().unwrap();
+            let value_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
+            batch
+                .put_cf(value_cf, &serialized_pk, &serialized_row)
+                .unwrap();
+
+            // Then insert primary key pointers for all the secondary indices:
+            for index in self.indices[1..].iter() {
+                // Construct a key with the index values, and serialize it with bincode:
+                let key = Self::build_key(&r, &index.columns);
+                let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
+                let cf = db.cf_handle(&index.column_family).unwrap();
+                batch.put_cf(cf, &serialized_key, &serialized_row).unwrap();
+            }
+        })
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
-        let db = self.db.as_ref().unwrap();
-        let pk_index = &self.indices[0];
-        let value_cf = db.cf_handle(&pk_index.column_family).unwrap();
-        let mut do_remove = move |primary_key: &[u8]| {
-            // Delete the value row first (primary index):
-            batch.delete_cf(value_cf, &primary_key).unwrap();
+        tokio::task::block_in_place(|| {
+            let db = self.db.as_ref().unwrap();
+            let pk_index = &self.indices[0];
+            let value_cf = db.cf_handle(&pk_index.column_family).unwrap();
+            let mut do_remove = move |primary_key: &[u8]| {
+                // Delete the value row first (primary index):
+                batch.delete_cf(value_cf, &primary_key).unwrap();
 
-            // Then delete any references that point _exactly_ to that row:
-            for index in self.indices[1..].iter() {
-                let key = Self::build_key(&r, &index.columns);
-                let serialized_key = Self::serialize_secondary(&key, primary_key);
-                let cf = db.cf_handle(&index.column_family).unwrap();
-                batch.delete_cf(cf, &serialized_key).unwrap();
-            }
-        };
+                // Then delete any references that point _exactly_ to that row:
+                for index in self.indices[1..].iter() {
+                    let key = Self::build_key(&r, &index.columns);
+                    let serialized_key = Self::serialize_secondary(&key, primary_key);
+                    let cf = db.cf_handle(&index.column_family).unwrap();
+                    batch.delete_cf(cf, &serialized_key).unwrap();
+                }
+            };
 
-        let pk = Self::build_key(&r, &pk_index.columns);
-        let prefix = Self::serialize_prefix(&pk);
-        if self.has_unique_index {
-            if cfg!(debug_assertions) {
-                // This would imply that we're trying to delete a different row than the one we
-                // found when we resolved the DeleteRequest in Base. This really shouldn't happen,
-                // but we'll leave a check here in debug mode for now.
-                let raw = db
-                    .get_cf(value_cf, &prefix)
+            let pk = Self::build_key(&r, &pk_index.columns);
+            let prefix = Self::serialize_prefix(&pk);
+            if self.has_unique_index {
+                if cfg!(debug_assertions) {
+                    // This would imply that we're trying to delete a different row than the one we
+                    // found when we resolved the DeleteRequest in Base. This really shouldn't happen,
+                    // but we'll leave a check here in debug mode for now.
+                    let raw = db
+                        .get_cf(value_cf, &prefix)
+                        .unwrap()
+                        .expect("tried removing non-existant primary key row");
+                    let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                    assert_eq!(r, &value[..], "tried removing non-matching primary key row");
+                }
+
+                do_remove(&prefix[..]);
+            } else {
+                let (key, _value) = db
+                    .prefix_iterator_cf(value_cf, &prefix)
                     .unwrap()
-                    .expect("tried removing non-existant primary key row");
-                let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
-                assert_eq!(r, &value[..], "tried removing non-matching primary key row");
-            }
-
-            do_remove(&prefix[..]);
-        } else {
-            let (key, _value) = db
-                .prefix_iterator_cf(value_cf, &prefix)
-                .unwrap()
-                .find(|(_, raw_value)| {
-                    let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
-                    r == &value[..]
-                })
-                .expect("tried removing non-existant row");
-            do_remove(&key[..]);
-        };
+                    .find(|(_, raw_value)| {
+                        let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
+                        r == &value[..]
+                    })
+                    .expect("tried removing non-existant row");
+                do_remove(&key[..]);
+            };
+        })
     }
 }
 
