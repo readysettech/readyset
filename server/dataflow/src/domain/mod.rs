@@ -12,6 +12,7 @@ use std::time;
 use crate::group_commit::GroupCommitQueueSet;
 use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
+use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
@@ -231,7 +232,7 @@ pub struct Domain {
     mode: DomainMode,
     waiting: Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
-    reader_triggered: Map<HashSet<Vec<DataType>>>,
+    reader_triggered: Map<HashSet<Vec<DataType>, RandomState>>,
     timed_purges: VecDeque<TimedPurge>,
 
     replay_paths_by_dst: Map<HashMap<Vec<usize>, Vec<Tag>>>,
@@ -1109,6 +1110,7 @@ impl Domain {
                             })
                             .expect("reader replay requested for non-reader node");
 
+                        // don't requests keys that have been filled since the request was sent
                         self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
@@ -1117,7 +1119,7 @@ impl Domain {
                                     .expect("reader replay requested for non-materialized reader");
 
                                 keys.retain(|key| {
-                                    w.with_key(&key[..])
+                                    w.with_key(&*key)
                                         .try_find_and(|_| ())
                                         .expect("reader replay requested for non-ready reader")
                                         .0
@@ -1458,6 +1460,7 @@ impl Domain {
         }
 
         if top {
+            let mut elapsed_replays = Vec::new();
             loop {
                 while let Some(m) = self.delayed_for_self.pop_front() {
                     trace!(self.log, "handling local transmission");
@@ -1473,32 +1476,29 @@ impl Domain {
                     self.total_replay_time.start();
                     let now = time::Instant::now();
                     let to = self.replay_batch_timeout;
-                    let elapsed_replays: Vec<_> = {
-                        self.buffered_replay_requests
-                            .iter_mut()
-                            .filter_map(
-                                |(
-                                    &(tag, requesting_shard),
-                                    &mut (first, ref mut keys, single_shard),
-                                )| {
-                                    if !keys.is_empty() && now.duration_since(first) > to {
-                                        // will be removed by retain below
-                                        Some((
-                                            tag,
-                                            requesting_shard,
-                                            mem::replace(keys, HashSet::new()),
-                                            single_shard,
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                },
-                            )
-                            .collect()
-                    };
+                    elapsed_replays.extend({
+                        self.buffered_replay_requests.iter_mut().filter_map(
+                            |(
+                                &(tag, requesting_shard),
+                                &mut (first, ref mut keys, single_shard),
+                            )| {
+                                if !keys.is_empty() && now.duration_since(first) > to {
+                                    // will be removed by retain below
+                                    Some((
+                                        tag,
+                                        requesting_shard,
+                                        mem::replace(keys, HashSet::new()),
+                                        single_shard,
+                                    ))
+                                } else {
+                                    None
+                                }
+                            },
+                        )
+                    });
                     self.buffered_replay_requests
                         .retain(|_, (_, ref keys, _)| !keys.is_empty());
-                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays {
+                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays.drain(..) {
                         self.seed_all(tag, requesting_shard, keys, single_shard, executor);
                     }
                     self.total_replay_time.stop();
