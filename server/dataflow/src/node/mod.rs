@@ -10,7 +10,6 @@ mod process;
 pub(crate) use self::process::materialize;
 
 pub mod special;
-pub use self::special::StreamUpdate;
 
 mod ntype;
 pub use self::ntype::NodeType; // crate viz for tests

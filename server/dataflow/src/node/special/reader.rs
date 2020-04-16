@@ -1,38 +1,10 @@
 use crate::backlog;
 use crate::prelude::*;
-use noria::channel;
-
-/// A StreamUpdate reflects the addition or deletion of a row from a reader node.
-#[derive(Clone, Debug, PartialEq)]
-pub enum StreamUpdate {
-    /// Indicates the addition of a new row
-    AddRow(Vec<DataType>),
-    /// Indicates the removal of an existing row
-    DeleteRow(Vec<DataType>),
-}
-
-impl From<Record> for StreamUpdate {
-    fn from(other: Record) -> Self {
-        match other {
-            Record::Positive(u) => StreamUpdate::AddRow(u),
-            Record::Negative(u) => StreamUpdate::DeleteRow(u),
-        }
-    }
-}
-
-impl From<Vec<DataType>> for StreamUpdate {
-    fn from(other: Vec<DataType>) -> Self {
-        StreamUpdate::AddRow(other)
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
     #[serde(skip)]
     writer: Option<backlog::WriteHandle>,
-
-    #[serde(skip)]
-    streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
     for_node: NodeIndex,
     state: Option<Vec<usize>>,
@@ -43,7 +15,6 @@ impl Clone for Reader {
         assert!(self.writer.is_none());
         Reader {
             writer: None,
-            streamers: self.streamers.clone(),
             state: self.state.clone(),
             for_node: self.for_node,
         }
@@ -54,7 +25,6 @@ impl Reader {
     pub fn new(for_node: NodeIndex) -> Self {
         Reader {
             writer: None,
-            streamers: Vec::new(),
             state: None,
             for_node,
         }
@@ -76,21 +46,11 @@ impl Reader {
     }
 
     pub(in crate::node) fn take(&mut self) -> Self {
-        use std::mem;
         Self {
             writer: self.writer.take(),
-            streamers: mem::replace(&mut self.streamers, Vec::new()),
             state: self.state.clone(),
             for_node: self.for_node,
         }
-    }
-
-    pub(crate) fn add_streamer(
-        &mut self,
-        new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
-    ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
-        self.streamers.push(new_streamer);
-        Ok(())
     }
 
     pub fn is_materialized(&self) -> bool {
@@ -200,34 +160,12 @@ impl Reader {
                 });
             }
 
-            if self.streamers.is_empty() {
-                state.add(m.take_data());
-            } else {
-                state.add(m.data().iter().cloned());
-            }
+            state.add(m.take_data());
 
             if swap {
                 // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
-        }
-
-        // TODO: don't send replays to streams?
-
-        if !self.streamers.is_empty() {
-            let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
-            let mut left = self.streamers.len();
-
-            // remove any channels where the receiver has hung up
-            self.streamers.retain(|tx| {
-                left -= 1;
-                if left == 0 {
-                    tx.send(data.take().unwrap().into_iter().map(Into::into).collect())
-                } else {
-                    tx.send(data.clone().unwrap().into_iter().map(Into::into).collect())
-                }
-                .is_ok()
-            });
         }
     }
 }

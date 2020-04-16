@@ -854,11 +854,6 @@ impl Domain {
                             s.add_sharded_child(new_txs.0, new_txs.1);
                         });
                     }
-                    Packet::AddStreamer { node, new_streamer } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap())
-                            .unwrap();
-                    }
                     Packet::StateSizeProbe { node } => {
                         let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
                         let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
