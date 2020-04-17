@@ -110,32 +110,31 @@ where
 
     // also load things that we need to highlight
     if let Some(uid) = acting_as {
-        let mut view = c.view("recent_10").await?;
-        // TODO: multi-lookup
-        for story in &stories {
-            view.ready_and()
-                .await?
-                .lookup(&[uid.into(), story.clone()], true)
-                .await?;
-        }
+        let keys: Vec<_> = stories
+            .iter()
+            .map(|sid| vec![uid.into(), sid.clone()])
+            .collect();
 
-        let mut view = c.view("recent_11").await?;
-        // TODO: multi-lookup
-        for story in &stories {
-            view.ready_and()
-                .await?
-                .lookup(&[uid.into(), story.clone()], true)
-                .await?;
-        }
+        c.view("recent_10")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys.clone(), true)
+            .await?;
 
-        let mut view = c.view("recent_12").await?;
-        // TODO: multi-lookup
-        for story in &stories {
-            view.ready_and()
-                .await?
-                .lookup(&[uid.into(), story.clone()], true)
-                .await?;
-        }
+        c.view("recent_11")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys.clone(), true)
+            .await?;
+
+        c.view("recent_12")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys, true)
+            .await?;
     }
 
     Ok((c, true))

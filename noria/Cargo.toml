@@ -30,7 +30,7 @@ bincode = "1.0.0"
 vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 arccstr = "1.2.0"
-fnv = "1.0.5"
+ahash = "0.3"
 chrono = { version = "0.4.0", features = ["serde"] }
 tower-service = "0.3.0"
 tower-balance = "0.3.0"
@@ -44,7 +44,7 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "0.4.0"
 futures-util = "0.3.0"
-mysql_common = "0.20.2"
+mysql_common = "0.22"
 
 # consensus/
 slog = "2.4.0"

@@ -107,8 +107,6 @@
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
-// https://github.com/rust-lang/rust-clippy/issues/5188
-#![allow(clippy::needless_doctest_main)]
 
 #[macro_use]
 extern crate failure;
@@ -186,7 +184,6 @@ mod table;
 mod view;
 
 #[doc(hidden)]
-#[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod channel;
 #[doc(hidden)]
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
@@ -319,7 +316,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         DataType::Text(..) | DataType::TinyText(..) => {
             use std::borrow::Cow;
             use std::hash::Hasher;
-            let mut hasher = fnv::FnvHasher::default();
+            let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             let s: Cow<'_, str> = dt.into();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards

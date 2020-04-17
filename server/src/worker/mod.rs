@@ -294,14 +294,16 @@ async fn listen_df<'a>(
                 let addr = on.local_addr()?;
 
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let d = d.build(
-                    log.clone(),
-                    readers.clone(),
-                    coord.clone(),
-                    dcaddr,
-                    &valve,
-                    state_size.clone(),
-                );
+                let d = tokio::task::block_in_place(|| {
+                    d.build(
+                        log.clone(),
+                        readers.clone(),
+                        coord.clone(),
+                        dcaddr,
+                        &valve,
+                        state_size.clone(),
+                    )
+                });
 
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 

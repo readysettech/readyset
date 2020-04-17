@@ -7,8 +7,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::{self, Write};
 use std::net::SocketAddr;
-use std::ops::{Deref, DerefMut};
-use std::sync::mpsc::{self, SendError};
 use std::sync::RwLock;
 use std::{
     pin::Pin,
@@ -17,7 +15,6 @@ use std::{
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::io::BufWriter;
 
 pub mod tcp;
@@ -178,83 +175,6 @@ where
         }
     }
 }
-
-#[derive(Debug)]
-pub enum ChannelSender<T> {
-    Local(mpsc::Sender<T>),
-    LocalSync(mpsc::SyncSender<T>),
-}
-
-impl<T> Clone for ChannelSender<T> {
-    fn clone(&self) -> Self {
-        // derive(Clone) uses incorrect bound, so we implement it ourselves. See issue #26925.
-        match *self {
-            ChannelSender::Local(ref s) => ChannelSender::Local(s.clone()),
-            ChannelSender::LocalSync(ref s) => ChannelSender::LocalSync(s.clone()),
-        }
-    }
-}
-
-impl<T> Serialize for ChannelSender<T> {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        unreachable!()
-    }
-}
-
-impl<'de, T> Deserialize<'de> for ChannelSender<T> {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        unreachable!()
-    }
-}
-
-impl<T> ChannelSender<T> {
-    pub fn send(&self, t: T) -> Result<(), SendError<T>> {
-        match *self {
-            ChannelSender::Local(ref s) => s.send(t),
-            ChannelSender::LocalSync(ref s) => s.send(t),
-        }
-    }
-
-    pub fn from_local(local: mpsc::Sender<T>) -> Self {
-        ChannelSender::Local(local)
-    }
-}
-
-mod panic_serialize {
-    use serde::{Deserializer, Serializer};
-    pub fn serialize<S, T>(_t: &T, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        unreachable!()
-    }
-    pub fn deserialize<'de, D, T>(_deserializer: D) -> Result<T, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        unreachable!()
-    }
-}
-
-/// A wrapper around TcpSender that appears to be Serializable, but panics if it is ever serialized.
-#[derive(Serialize, Deserialize)]
-pub struct STcpSender<T>(#[serde(with = "panic_serialize")] pub TcpSender<T>);
-
-impl<T> Deref for STcpSender<T> {
-    type Target = TcpSender<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<T> DerefMut for STcpSender<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub type TraceSender<T> = ChannelSender<T>;
-pub type TransactionReplySender<T> = ChannelSender<T>;
-pub type StreamSender<T> = ChannelSender<T>;
 
 struct ChannelCoordinatorInner<K: Eq + Hash + Clone, T> {
     /// Map from key to remote address.

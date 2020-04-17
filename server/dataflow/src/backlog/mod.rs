@@ -1,6 +1,6 @@
 use crate::prelude::*;
+use ahash::RandomState;
 use common::SizeOf;
-use fnv::FnvBuildHasher;
 use rand::prelude::*;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ fn new_inner(
             use evmap;
             let (r, w) = evmap::Options::default()
                 .with_meta(-1)
-                .with_hasher(FnvBuildHasher::default())
+                .with_hasher(RandomState::default())
                 .construct();
 
             (multir::Handle::$variant(r), multiw::Handle::$variant(w))
@@ -153,7 +153,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 impl<'a> WriteHandleEntry<'a> {
     pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
+        F: FnMut(&evmap::Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle
             .handle
@@ -299,6 +299,16 @@ pub struct SingleReadHandle {
     key: Vec<usize>,
 }
 
+impl std::fmt::Debug for SingleReadHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SingleReadHandle")
+            .field("handle", &self.handle)
+            .field("has_trigger", &self.trigger.is_some())
+            .field("key", &self.key)
+            .finish()
+    }
+}
+
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
     pub fn trigger<'a, I>(&self, keys: I) -> bool
@@ -326,7 +336,7 @@ impl SingleReadHandle {
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
+        F: FnMut(&evmap::Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle
             .meta_get_and(key, &mut then)

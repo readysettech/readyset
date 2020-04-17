@@ -8,5 +8,5 @@ pub struct Source;
 
 pub use self::base::Base;
 pub use self::egress::Egress;
-pub use self::reader::{Reader, StreamUpdate};
+pub use self::reader::Reader;
 pub use self::sharder::Sharder;

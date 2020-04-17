@@ -104,17 +104,31 @@ pub(super) async fn listen(
     }
 }
 
-fn dup<'a>(rs: impl IntoIterator<Item = &'a Vec<DataType>>) -> Vec<Vec<DataType>> {
-    let rs = rs.into_iter();
-    let mut outer = Vec::with_capacity(rs.size_hint().0);
-    for r in rs {
-        let mut inner = Vec::with_capacity(r.len());
-        for v in r {
-            inner.push(v.deep_clone())
-        }
-        outer.push(inner);
-    }
-    outer
+// I _really_ wish we didn't have to do this.
+// I think there exists an allocation-free fast path when you don't miss on anything: in that case
+// you can just serialize the references directly into the response channel while still pinning the
+// evmap handle. That is pretty complicated to achieve without punching through several layers of
+// stack though, so we use this for the time being.
+//
+// NOTE: the bounds here aren't necessary, but we want to make sure that this is as fast as we can
+// possibly make it, so we enforce that as much as we can through the types.
+fn dup<'a, I>(rs: I) -> Vec<Vec<DataType>>
+where
+    I: IntoIterator<Item = &'a Vec<DataType>>,
+    I::IntoIter: ExactSizeIterator,
+{
+    rs.into_iter()
+        .map(|r| {
+            // NOTE: this _should_ pre-allocate the Vec since r: ExactSizeIterator
+            r.into_iter()
+                .map(|v| {
+                    // NOTE: we deep clone here to avoid contending with other threads on the ref
+                    // count in any Arc<String> that may be contained within v.
+                    v.deep_clone()
+                })
+                .collect()
+        })
+        .collect()
 }
 
 fn handle_message(
@@ -275,6 +289,22 @@ struct BlockingRead {
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
     first: time::Instant,
+}
+
+impl std::fmt::Debug for BlockingRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockingRead")
+            .field("tag", &self.tag)
+            .field("target", &self.target)
+            .field("read", &self.read)
+            .field("keys", &self.keys)
+            .field("pending", &self.pending)
+            .field("retry", &self.retry)
+            .field("trigger_timeout", &self.trigger_timeout)
+            .field("next_trigger", &self.next_trigger)
+            .field("first", &self.first)
+            .finish()
+    }
 }
 
 impl Future for BlockingRead {

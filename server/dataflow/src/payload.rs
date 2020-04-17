@@ -2,10 +2,8 @@ use petgraph;
 use serde::{Deserialize, Serialize};
 
 use crate::domain;
-use crate::node;
 use crate::prelude::*;
 use noria;
-use noria::channel;
 use noria::internal::LocalOrNot;
 
 use std::collections::{HashMap, HashSet};
@@ -164,12 +162,6 @@ pub enum Packet {
         new_txs: (LocalNodeIndex, Vec<ReplicaAddr>),
     },
 
-    /// Add a streamer to an existing reader node.
-    AddStreamer {
-        node: LocalNodeIndex,
-        new_streamer: channel::StreamSender<Vec<node::StreamUpdate>>,
-    },
-
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
@@ -301,14 +293,6 @@ impl Packet {
             Packet::ReplayPiece { tag, .. } => Some(tag),
             Packet::EvictKeys { tag, .. } => Some(tag),
             _ => None,
-        }
-    }
-
-    pub(crate) fn data(&self) -> &Records {
-        match *self {
-            Packet::Message { ref data, .. } => data,
-            Packet::ReplayPiece { ref data, .. } => data,
-            _ => unreachable!(),
         }
     }
 

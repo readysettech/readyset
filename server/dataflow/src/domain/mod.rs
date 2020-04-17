@@ -12,6 +12,7 @@ use std::time;
 use crate::group_commit::GroupCommitQueueSet;
 use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
+use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
@@ -231,7 +232,7 @@ pub struct Domain {
     mode: DomainMode,
     waiting: Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
-    reader_triggered: Map<HashSet<Vec<DataType>>>,
+    reader_triggered: Map<HashSet<Vec<DataType>, RandomState>>,
     timed_purges: VecDeque<TimedPurge>,
 
     replay_paths_by_dst: Map<HashMap<Vec<usize>, Vec<Tag>>>,
@@ -854,11 +855,6 @@ impl Domain {
                             s.add_sharded_child(new_txs.0, new_txs.1);
                         });
                     }
-                    Packet::AddStreamer { node, new_streamer } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap())
-                            .unwrap();
-                    }
                     Packet::StateSizeProbe { node } => {
                         let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
                         let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
@@ -970,16 +966,21 @@ impl Domain {
                                 );
 
                                 let mut n = self.nodes[node].borrow_mut();
-                                n.with_reader_mut(|r| {
-                                    assert!(self
-                                        .readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none());
+                                tokio::task::block_in_place(|| {
+                                    n.with_reader_mut(|r| {
+                                        assert!(self
+                                            .readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                r_part
+                                            )
+                                            .is_none());
 
-                                    // make sure Reader is actually prepared to receive state
-                                    r.set_write_handle(w_part)
+                                        // make sure Reader is actually prepared to receive state
+                                        r.set_write_handle(w_part)
+                                    })
                                 })
                                 .unwrap();
                             }
@@ -988,16 +989,21 @@ impl Domain {
                                 let (r_part, w_part) = backlog::new(cols, &key[..]);
 
                                 let mut n = self.nodes[node].borrow_mut();
-                                n.with_reader_mut(|r| {
-                                    assert!(self
-                                        .readers
-                                        .lock()
-                                        .unwrap()
-                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                        .is_none());
+                                tokio::task::block_in_place(|| {
+                                    n.with_reader_mut(|r| {
+                                        assert!(self
+                                            .readers
+                                            .lock()
+                                            .unwrap()
+                                            .insert(
+                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
+                                                r_part
+                                            )
+                                            .is_none());
 
-                                    // make sure Reader is actually prepared to receive state
-                                    r.set_write_handle(w_part)
+                                        // make sure Reader is actually prepared to receive state
+                                        r.set_write_handle(w_part)
+                                    })
                                 })
                                 .unwrap();
                             }
@@ -1043,14 +1049,18 @@ impl Domain {
                                         .unwrap()
                                 };
 
-                                let options = match selection {
-                                    SourceSelection::AllShards(nshards)
-                                    | SourceSelection::KeyShard { nshards, .. } => {
-                                        // we may need to send to any of these shards
-                                        (0..nshards).map(shard).collect()
+                                let options = tokio::task::block_in_place(|| {
+                                    match selection {
+                                        SourceSelection::AllShards(nshards)
+                                        | SourceSelection::KeyShard { nshards, .. } => {
+                                            // we may need to send to any of these shards
+                                            (0..nshards).map(shard).collect()
+                                        }
+                                        SourceSelection::SameShard => {
+                                            vec![shard(self.shard.unwrap())]
+                                        }
                                     }
-                                    SourceSelection::SameShard => vec![shard(self.shard.unwrap())],
-                                };
+                                });
 
                                 TriggerEndpoint::End {
                                     source: selection,
@@ -1100,6 +1110,7 @@ impl Domain {
                             })
                             .expect("reader replay requested for non-reader node");
 
+                        // don't requests keys that have been filled since the request was sent
                         self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut(|r| {
@@ -1108,7 +1119,7 @@ impl Domain {
                                     .expect("reader replay requested for non-materialized reader");
 
                                 keys.retain(|key| {
-                                    w.with_key(&key[..])
+                                    w.with_key(&*key)
                                         .try_find_and(|_| ())
                                         .expect("reader replay requested for non-ready reader")
                                         .0
@@ -1449,6 +1460,7 @@ impl Domain {
         }
 
         if top {
+            let mut elapsed_replays = Vec::new();
             loop {
                 while let Some(m) = self.delayed_for_self.pop_front() {
                     trace!(self.log, "handling local transmission");
@@ -1464,32 +1476,29 @@ impl Domain {
                     self.total_replay_time.start();
                     let now = time::Instant::now();
                     let to = self.replay_batch_timeout;
-                    let elapsed_replays: Vec<_> = {
-                        self.buffered_replay_requests
-                            .iter_mut()
-                            .filter_map(
-                                |(
-                                    &(tag, requesting_shard),
-                                    &mut (first, ref mut keys, single_shard),
-                                )| {
-                                    if !keys.is_empty() && now.duration_since(first) > to {
-                                        // will be removed by retain below
-                                        Some((
-                                            tag,
-                                            requesting_shard,
-                                            mem::replace(keys, HashSet::new()),
-                                            single_shard,
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                },
-                            )
-                            .collect()
-                    };
+                    elapsed_replays.extend({
+                        self.buffered_replay_requests.iter_mut().filter_map(
+                            |(
+                                &(tag, requesting_shard),
+                                &mut (first, ref mut keys, single_shard),
+                            )| {
+                                if !keys.is_empty() && now.duration_since(first) > to {
+                                    // will be removed by retain below
+                                    Some((
+                                        tag,
+                                        requesting_shard,
+                                        mem::replace(keys, HashSet::new()),
+                                        single_shard,
+                                    ))
+                                } else {
+                                    None
+                                }
+                            },
+                        )
+                    });
                     self.buffered_replay_requests
                         .retain(|_, (_, ref keys, _)| !keys.is_empty());
-                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays {
+                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays.drain(..) {
                         self.seed_all(tag, requesting_shard, keys, single_shard, executor);
                     }
                     self.total_replay_time.stop();

@@ -15,4 +15,4 @@ debug=true
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
 # https://github.com/tokio-rs/tokio/pull/2160
 # optional -- just saves us from busy future loops
-tokio = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio = { git = "https://github.com/tokio-rs/tokio.git", branch="more-block-in-place" }

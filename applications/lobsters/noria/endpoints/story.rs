@@ -93,15 +93,17 @@ where
         .await?;
 
     if let Some(uid) = acting_as {
-        let mut view = c.view("story_7").await?;
-        // TODO: multi-lookup
-        for comment in comments {
-            let _ = view
-                .ready_and()
-                .await?
-                .lookup(&[uid.into(), comment.into()], true)
-                .await?;
-        }
+        let keys: Vec<_> = comments
+            .into_iter()
+            .map(|comment| vec![uid.into(), comment])
+            .collect();
+
+        c.view("story_7")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys, true)
+            .await?;
     }
 
     // NOTE: lobste.rs here fetches the user list again. unclear why?

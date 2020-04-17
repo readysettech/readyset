@@ -41,15 +41,17 @@ where
     }
 
     if let Some(uid) = acting_as {
-        let mut cview = c.view("comments_3").await?;
-        // TODO: multi-lookup
-        for story in &stories {
-            cview
-                .ready_and()
-                .await?
-                .lookup(&[uid.into(), story.clone()], true)
-                .await?;
-        }
+        let keys: Vec<_> = stories
+            .iter()
+            .map(|sid| vec![uid.into(), sid.clone()])
+            .collect();
+
+        c.view("comments_3")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys, true)
+            .await?;
     }
 
     let _ = c
@@ -72,15 +74,17 @@ where
         .collect();
 
     if let Some(uid) = acting_as {
-        let mut cview = c.view("comments_6").await?;
-        // TODO: multi-lookup
-        for comment in comments {
-            cview
-                .ready_and()
-                .await?
-                .lookup(&[uid.into(), comment], true)
-                .await?;
-        }
+        let keys: Vec<_> = comments
+            .into_iter()
+            .map(|comment| vec![uid.into(), comment])
+            .collect();
+
+        c.view("comments_6")
+            .await?
+            .ready_and()
+            .await?
+            .multi_lookup(keys, true)
+            .await?;
     }
 
     let _ = c

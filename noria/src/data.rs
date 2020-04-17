@@ -335,6 +335,12 @@ impl From<usize> for DataType {
     }
 }
 
+impl From<f32> for DataType {
+    fn from(f: f32) -> Self {
+        Self::from(f as f64)
+    }
+}
+
 impl From<f64> for DataType {
     fn from(f: f64) -> Self {
         if !f.is_finite() {
@@ -585,6 +591,7 @@ impl TryFrom<mysql_common::value::Value> for DataType {
             Value::Int(v) => Ok(v.into()),
             Value::UInt(v) => Ok(v.into()),
             Value::Float(v) => Ok(v.into()),
+            Value::Double(v) => Ok(v.into()),
             Value::Date(year, month, day, hour, minutes, seconds, micros) => {
                 Ok(DataType::Timestamp(
                     NaiveDate::from_ymd(year.into(), month.into(), day.into()).and_hms_micro(

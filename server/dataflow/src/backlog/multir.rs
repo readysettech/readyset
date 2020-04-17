@@ -1,12 +1,12 @@
+use ahash::RandomState;
 use common::DataType;
 use evmap;
-use fnv::FnvBuildHasher;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(evmap::ReadHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>),
-    Double(evmap::ReadHandle<(DataType, DataType), Vec<DataType>, i64, FnvBuildHasher>),
-    Many(evmap::ReadHandle<Vec<DataType>, Vec<DataType>, i64, FnvBuildHasher>),
+    Single(evmap::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
+    Double(evmap::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
+    Many(evmap::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
 }
 
 impl Handle {
@@ -20,7 +20,7 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
     where
-        F: FnOnce(&evmap::Values<Vec<DataType>, fnv::FnvBuildHasher>) -> T,
+        F: FnOnce(&evmap::Values<Vec<DataType>, RandomState>) -> T,
     {
         match *self {
             Handle::Single(ref h) => {
