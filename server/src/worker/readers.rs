@@ -291,6 +291,22 @@ struct BlockingRead {
     first: time::Instant,
 }
 
+impl std::fmt::Debug for BlockingRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockingRead")
+            .field("tag", &self.tag)
+            .field("target", &self.target)
+            .field("read", &self.read)
+            .field("keys", &self.keys)
+            .field("pending", &self.pending)
+            .field("retry", &self.retry)
+            .field("trigger_timeout", &self.trigger_timeout)
+            .field("next_trigger", &self.next_trigger)
+            .field("first", &self.first)
+            .finish()
+    }
+}
+
 impl Future for BlockingRead {
     type Output = Result<Tagged<ReadReply>, ()>;
 

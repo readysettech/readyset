@@ -2,7 +2,7 @@ use ahash::RandomState;
 use common::DataType;
 use evmap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) enum Handle {
     Single(evmap::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
     Double(evmap::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),

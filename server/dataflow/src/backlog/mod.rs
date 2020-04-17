@@ -299,6 +299,16 @@ pub struct SingleReadHandle {
     key: Vec<usize>,
 }
 
+impl std::fmt::Debug for SingleReadHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SingleReadHandle")
+            .field("handle", &self.handle)
+            .field("has_trigger", &self.trigger.is_some())
+            .field("key", &self.key)
+            .finish()
+    }
+}
+
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
     pub fn trigger<'a, I>(&self, keys: I) -> bool
