@@ -42,7 +42,13 @@ where
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
-        .map(|story| story.into_iter().last().unwrap().take("user_id").unwrap())
+        .filter_map(|story| {
+            // recent_2 filters out some stories with particularly low scores
+            story
+                .into_iter()
+                .last()
+                .map(|mut s| s.take("user_id").unwrap())
+        })
         .collect();
 
     if let Some(uid) = acting_as {

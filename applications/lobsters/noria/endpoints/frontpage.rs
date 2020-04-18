@@ -38,13 +38,12 @@ where
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
-        .map(|story| {
+        .filter_map(|story| {
+            // frontpage_2 filters out some stories with particularly low scores
             story
                 .into_iter()
                 .last()
-                .expect("frontpage stories lookup produced no stories?")
-                .take("user_id")
-                .expect("frontpage story had no author")
+                .map(|mut s| s.take("user_id").unwrap())
         })
         .collect();
 
