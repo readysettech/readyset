@@ -38,7 +38,14 @@ where
         .multi_lookup(stories_multi.clone(), true)
         .await?
         .into_iter()
-        .map(|story| story.into_iter().last().unwrap().take("user_id").unwrap())
+        .map(|story| {
+            story
+                .into_iter()
+                .last()
+                .expect("frontpage stories lookup produced no stories?")
+                .take("user_id")
+                .expect("frontpage story had no author")
+        })
         .collect();
 
     if let Some(uid) = acting_as {
