@@ -327,7 +327,7 @@ impl TableBuilder {
                             .urgency(0.01)
                             .loaded_above(0.2)
                             .underutilized_below(0.000_000_001)
-                            .max_services(Some(crate::MAX_POOL_SIZE))
+                            .max_services(Some(crate::MAX_TABLE_POOL_SIZE))
                             .build(TableEndpoint(addr), ()),
                         crate::BUFFER_TO_POOL,
                     );

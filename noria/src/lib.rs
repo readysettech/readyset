@@ -150,17 +150,35 @@ extern crate slog;
 /// sure this value is high enough.
 pub(crate) const BUFFER_TO_POOL: usize = 256;
 
-/// The maximum number of concurrent connections to a given backend resource.
+/// The maximum number of concurrent connections to a given backend table.
 ///
 /// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
 /// serialization/deserialization in parallel on multiple threads. Nothing else really.
 ///
-/// The value isn't higher, because we only have so many cores. And keep in mind that this value is
-/// used per view/table _address_, so unless _all_ your requests are going to a single address,
-/// you'll be fine.
+/// The value isn't higher for a couple of reasons:
+///
+///  - It is per table, which means it is per shard of a domain. Unless _all_ of your requests go
+///    to a single shard of one table, you should be fine.
+///  - Table operations are generally not bottlenecked on serialization, but on committing.
 ///
 /// The value isn't lower, because we want _some_ concurrency in serialization.
-pub(crate) const MAX_POOL_SIZE: usize = 8;
+pub(crate) const MAX_TABLE_POOL_SIZE: usize = 2;
+
+/// The maximum number of concurrent connections to a given backend view.
+///
+/// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
+/// serialization/deserialization in parallel on multiple threads. Nothing else really.
+///
+/// This value is set higher than the max pool size for tables for a couple of reasons:
+///
+///  - View connections are made per _host_. So, if you query multiple views that happen to be
+///    hosted by a single machine (such as if there is only one Noria worker), this is the total
+///    amount of serialization concurrency you will get.
+///  - Reads are generally bottlenecked on serialization, so devoting more resources to it seems
+///    reasonable.
+///
+/// The value isn't higher because we, _and the server_ only have so many cores.
+pub(crate) const MAX_VIEW_POOL_SIZE: usize = 16;
 
 /// Number of requests that can be pending on any _single_ connection.
 ///

@@ -150,7 +150,7 @@ impl ViewBuilder {
                             .urgency(0.03)
                             .loaded_above(0.2)
                             .underutilized_below(0.000_000_001)
-                            .max_services(Some(crate::MAX_POOL_SIZE))
+                            .max_services(Some(crate::MAX_VIEW_POOL_SIZE))
                             .build(ViewEndpoint(addr), ()),
                         crate::BUFFER_TO_POOL,
                     );
