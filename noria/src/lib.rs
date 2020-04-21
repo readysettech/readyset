@@ -120,7 +120,7 @@ extern crate slog;
 /// We want this to be > 1 so that multiple threads can enqueue requests at the same time without
 /// immediately blocking one another. The exact value is somewhat arbitrary.
 ///
-/// The value isn't higher, because it wouldn't improve performance, just increase latency.
+/// The value isn't higher, because it would unnecessarily consume memory.
 ///
 /// The value isn't lower, because it would mean fewer concurrent enqueues.
 ///
@@ -148,7 +148,7 @@ extern crate slog;
 /// https://github.com/tower-rs/tower/issues/408#issuecomment-593678194. Ultimately, we need
 /// something like https://github.com/tower-rs/tower/issues/408, but for the time being, just make
 /// sure this value is high enough.
-pub(crate) const BUFFER_TO_POOL: usize = 256;
+pub(crate) const BUFFER_TO_POOL: usize = 2048;
 
 /// The maximum number of concurrent connections to a given backend table.
 ///
@@ -182,15 +182,23 @@ pub(crate) const MAX_VIEW_POOL_SIZE: usize = 16;
 
 /// Number of requests that can be pending on any _single_ connection.
 ///
+/// Keep in mind that this is really the number of requests that can be pending to any given shard
+/// of a domain (for tables) or to any given Noria host (for views). The value should arguably be
+/// higher for views than for tables, since views are more likely to share a connection than
+/// tables, but since this is really just a measure for "are we falling over", it can sort of be
+/// arbitrarily high. If the system isn't keeping up, then it will fill up regardless, it'll just
+/// take longer.
+///
 /// We need to limit this since `AsyncBincode` has unlimited buffering, and so will never apply
-/// back-pressure otherwise.
+/// back-pressure otherwise. The backpressure is necessary so that the pool will eventually know
+/// that another connection should be established to help with serialization/deserialization.
 ///
-/// The value isn't higher, because it would inflate latency, and also prevent us from taking
-/// advantage of concurrent serialization/deserialization as much.
+/// The value isn't higher, because it would mean we just allow more data to be buffered internally
+/// in the system before we exhert backpressure.
 ///
-/// The value isn't lower, because lowering it would mean the server has less work at a time, which
-/// means it can batch less work, which means lower overall efficiency.
-pub(crate) const PENDING_PER_CONN: usize = 128;
+/// The value isn't lower, because that give the server less work at a time, which means it can
+/// batch less work, which means lower overall efficiency.
+pub(crate) const PENDING_PER_CONN: usize = 2048;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
