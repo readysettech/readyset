@@ -807,7 +807,7 @@ impl Materializations {
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
                 self.setup(node, &mut index_on, graph, domains, workers, replies);
-                mem::replace(&mut self.log, log);
+                self.log = log;
                 index_on.clear();
             } else {
                 use dataflow::payload::InitialState;
@@ -922,7 +922,7 @@ impl Materializations {
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
         self.setup(ni, index_on, graph, domains, workers, replies);
-        mem::replace(&mut self.log, log);
+        self.log = log;
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
         // wait for the domain to finish replay, which the ready executed by the outer commit()

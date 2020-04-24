@@ -132,7 +132,7 @@ impl Node {
 
                     match i.on_input_raw(ex, from, old_data, replay, nodes, state, log) {
                         RawProcessingResult::Regular(m) => {
-                            mem::replace(data, m.results);
+                            *data = m.results;
                             lookups = m.lookups;
                             misses = m.misses;
                         }
@@ -147,7 +147,7 @@ impl Node {
                             // we already know that m must be a ReplayPiece since only a
                             // ReplayPiece can release a ReplayPiece.
                             // NOTE: no misses or lookups here since this is a union
-                            mem::replace(data, rows);
+                            *data = rows;
                             captured = were_captured;
                             if let Packet::ReplayPiece {
                                 context:
@@ -165,7 +165,7 @@ impl Node {
                         RawProcessingResult::FullReplay(rs, last) => {
                             // we already know that m must be a (full) ReplayPiece since only a
                             // (full) ReplayPiece can release a FullReplay
-                            mem::replace(data, rs);
+                            *data = rs;
                             set_replay_last = Some(last);
                         }
                     }

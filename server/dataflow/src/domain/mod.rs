@@ -2607,7 +2607,7 @@ impl Domain {
             // we're told to continue replay, but nothing is being replayed
             unreachable!();
         };
-        mem::replace(&mut self.mode, was);
+        self.mode = was;
 
         if finished {
             // node is now ready, and should start accepting "real" updates

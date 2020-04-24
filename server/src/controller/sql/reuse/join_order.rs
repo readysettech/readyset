@@ -3,7 +3,6 @@ use super::helpers::predicate_implication::predicate_is_equivalent;
 use super::ReuseType;
 use nom_sql::ConditionTree;
 use std::collections::HashSet;
-use std::mem;
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
@@ -112,7 +111,7 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
     assert_eq!(new_order.len(), order.len());
 
     // replace the current order for the new order
-    mem::replace(order, new_order);
+    *order = new_order;
 }
 
 fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
