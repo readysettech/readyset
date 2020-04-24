@@ -763,6 +763,7 @@ mod tests {
 
     #[test]
     fn mysql_value_to_datatype() {
+        use assert_approx_eq::assert_approx_eq;
         use mysql_common::value::Value;
 
         // Test Value::NULL.
@@ -804,10 +805,12 @@ mod tests {
         assert_eq!(a_dt.unwrap(), DataType::UnsignedBigInt(5));
 
         // Test Value::Float.
-        let a = Value::Float(4.2);
+        let initial_float: f32 = 4.2;
+        let a = Value::Float(initial_float);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
-        assert_eq!(a_dt.unwrap(), DataType::Real(4, 200000000));
+        let converted_float: f64 = a_dt.as_ref().unwrap().into();
+        assert_approx_eq!(converted_float, initial_float as f64);
 
         // Test Value::Date.
         let ts = NaiveDate::from_ymd(1111, 1, 11).and_hms_micro(2, 3, 4, 5);
