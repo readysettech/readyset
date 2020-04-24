@@ -167,7 +167,6 @@ impl Ingredient for Union {
                 ref mut emit_l,
                 ref mut cols_l,
             } => {
-                use std::mem;
                 let mapped_emit = emit
                     .drain()
                     .map(|(mut k, v)| {
@@ -184,8 +183,8 @@ impl Ingredient for Union {
                         (k, v)
                     })
                     .collect();
-                mem::replace(emit, mapped_emit);
-                mem::replace(cols, mapped_cols);
+                *emit = mapped_emit;
+                *cols = mapped_cols;
             }
             Emit::AllFrom(ref mut p, _) => {
                 p.remap(remap);
@@ -686,7 +685,7 @@ impl Ingredient for Union {
                 };
 
                 // and swap back replay pieces
-                mem::replace(&mut self.replay_pieces, replay_pieces_tmp);
+                self.replay_pieces = replay_pieces_tmp;
 
                 // here's another bit that's a little subtle:
                 //
