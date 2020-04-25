@@ -13,6 +13,3 @@ debug=true
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-# https://github.com/tokio-rs/tokio/pull/2409
-# required -- nested block_in_place calls
-tokio = { git = "https://github.com/tokio-rs/tokio.git" }
