@@ -310,7 +310,10 @@ async fn check_query(
                         DataType::BigInt(i) => i.to_string(),
                         DataType::UnsignedBigInt(i) => i.to_string(),
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
-                        DataType::Text(_) | DataType::TinyText(_) => v.into(),
+                        DataType::Text(_) | DataType::TinyText(_) => {
+                            let s: &str = (&v).into();
+                            s.to_string()
+                        }
                         DataType::Timestamp(_) => unimplemented!(),
                     })
                     .collect()

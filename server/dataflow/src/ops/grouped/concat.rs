@@ -90,9 +90,8 @@ impl GroupConcat {
                 }
                 TextComponent::Column(ref i) => match rec[*i] {
                     DataType::Text(..) | DataType::TinyText(..) => {
-                        use std::borrow::Cow;
-                        let text: Cow<str> = (&rec[*i]).into();
-                        s.push_str(&*text);
+                        let text: &str = (&rec[*i]).into();
+                        s.push_str(text);
                     }
                     DataType::Int(ref n) => s.push_str(&n.to_string()),
                     DataType::UnsignedInt(ref n) => s.push_str(&n.to_string()),
@@ -166,9 +165,9 @@ impl GroupedOperation for GroupConcat {
         // supporting efficient add/remove.
 
         use std::borrow::Cow;
-        let current: Cow<str> = match current {
+        let current: &str = match current {
             Some(dt @ &DataType::Text(..)) | Some(dt @ &DataType::TinyText(..)) => dt.into(),
-            None => Cow::Borrowed(""),
+            None => "",
             _ => unreachable!(),
         };
         let clen = current.len();
