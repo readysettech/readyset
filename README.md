@@ -93,10 +93,10 @@ The [`noria` crate](https://crates.io/crates/noria) provides native Rust
 bindings to interact with `noria-server`. See the [`noria`
 documentation](https://jon.thesquareplanet.com/crates/noria/) for detailed
 instructions on how to use the library. You can also take a look at the
-[example Noria program](noria/examples/quickstart-async.rs) using Noria's async client
-API, or the same example using [the synchronous API](noria/examples/quickstart-sync.rs).
-You can also see a self-contained version that embeds `noria-server` (and
-doesn't require ZooKeeper) in [this example](server/examples/local-server.rs).
+[example Noria program](noria/examples/quickstart.rs) using Noria's
+client API. You can also see a self-contained version that embeds
+`noria-server` (and doesn't require ZooKeeper) in [this
+example](server/examples/local-server.rs).
 
 ### MySQL adapter
 
