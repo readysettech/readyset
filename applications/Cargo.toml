@@ -1,6 +1,6 @@
 [package]
 name = "noria-applications"
-version = "0.3.0"
+version = "0.5.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 edition = '2018'
 publish = false
