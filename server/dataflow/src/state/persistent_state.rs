@@ -106,7 +106,6 @@ impl State for PersistentState {
             } else {
                 // This could correspond to more than one value, so we'll use a prefix_iterator:
                 db.prefix_iterator_cf(cf, &prefix)
-                    .unwrap()
                     .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
                     .collect()
             };
@@ -138,9 +137,7 @@ impl State for PersistentState {
             // Build the new index for existing values:
             if !self.indices.is_empty() {
                 let first_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
-                let iter = db
-                    .full_iterator_cf(first_cf, rocksdb::IteratorMode::Start)
-                    .unwrap();
+                let iter = db.full_iterator_cf(first_cf, rocksdb::IteratorMode::Start);
                 for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
                     let mut batch = WriteBatch::default();
                     for (ref pk, ref value) in chunk {
@@ -148,7 +145,7 @@ impl State for PersistentState {
                         let index_key = Self::build_key(&row, columns);
                         let key = Self::serialize_secondary(&index_key, pk);
                         let cf = db.cf_handle(&index_id).unwrap();
-                        batch.put_cf(cf, &key, value).unwrap();
+                        batch.put_cf(cf, &key, value);
                     }
 
                     db.write(batch).unwrap();
@@ -452,7 +449,6 @@ impl PersistentState {
         let db = self.db.as_ref().unwrap();
         let cf = db.cf_handle(&self.indices[0].column_family).unwrap();
         db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .unwrap()
     }
 
     // Puts by primary key first, then retrieves the existing value for each index and appends the
@@ -480,9 +476,7 @@ impl PersistentState {
         tokio::task::block_in_place(|| {
             let db = self.db.as_ref().unwrap();
             let value_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
-            batch
-                .put_cf(value_cf, &serialized_pk, &serialized_row)
-                .unwrap();
+            batch.put_cf(value_cf, &serialized_pk, &serialized_row);
 
             // Then insert primary key pointers for all the secondary indices:
             for index in self.indices[1..].iter() {
@@ -490,7 +484,7 @@ impl PersistentState {
                 let key = Self::build_key(&r, &index.columns);
                 let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
                 let cf = db.cf_handle(&index.column_family).unwrap();
-                batch.put_cf(cf, &serialized_key, &serialized_row).unwrap();
+                batch.put_cf(cf, &serialized_key, &serialized_row);
             }
         })
     }
@@ -502,14 +496,14 @@ impl PersistentState {
             let value_cf = db.cf_handle(&pk_index.column_family).unwrap();
             let mut do_remove = move |primary_key: &[u8]| {
                 // Delete the value row first (primary index):
-                batch.delete_cf(value_cf, &primary_key).unwrap();
+                batch.delete_cf(value_cf, &primary_key);
 
                 // Then delete any references that point _exactly_ to that row:
                 for index in self.indices[1..].iter() {
                     let key = Self::build_key(&r, &index.columns);
                     let serialized_key = Self::serialize_secondary(&key, primary_key);
                     let cf = db.cf_handle(&index.column_family).unwrap();
-                    batch.delete_cf(cf, &serialized_key).unwrap();
+                    batch.delete_cf(cf, &serialized_key);
                 }
             };
 
@@ -532,7 +526,6 @@ impl PersistentState {
             } else {
                 let (key, _value) = db
                     .prefix_iterator_cf(value_cf, &prefix)
-                    .unwrap()
                     .find(|(_, raw_value)| {
                         let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
                         r == &value[..]

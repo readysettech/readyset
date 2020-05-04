@@ -54,7 +54,7 @@ timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
 serde = { version = "1.0.8", features = ["rc"] }
 zookeeper = "0.5.3"
-tokio-tower = "0.3.6"
+tokio-tower = "0.4"
 tower-util = "0.3.0"
 tower = "0.3.0"
 strawpoll = "0.2"

@@ -40,7 +40,7 @@ tempfile = "3.0.2"
 petgraph = { version = "0.5", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = { version = "0.3.2", default-features = false }
-rocksdb = {version = "0.13", default-features = false, features = ["lz4"] }
+rocksdb = {version = "0.14", default-features = false, features = ["lz4"] }
 
 # local deps
 common = { version = "0.5.0", path = "../common", package = "noria-common" }
