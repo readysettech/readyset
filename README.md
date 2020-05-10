@@ -1,6 +1,6 @@
 # Unbounded Interval Tree
 
-A Rust implementation of an interval tree, based on the one described by Cormen et al. (2009, Section 14.3: Interval trees, pp. 348–354). An interval tree is useful to query efficiently a database of intervals. This implementation is generic in that it works with intervals of values implementing `Ord+Clone` traits. The bounds can be inclusive, exclusive, or unbounded. Here are some examples of valid intervals:
+A Rust implementation of an interval tree, based on the one described by Cormen et al., (2009), Introduction to Algorithms (3rd ed., Section 14.3: Interval trees, pp. 348–354). An interval tree is useful to query efficiently a database of intervals. This implementation is generic in that it works with intervals of values implementing `Ord+Clone` traits. The bounds can be inclusive, exclusive, or unbounded. Here are some examples of valid intervals:
 
 * [5, 9] <- inclusive/inclusive integers
 * [-2.3, 18.81) <- inclusive/exclusive floats
