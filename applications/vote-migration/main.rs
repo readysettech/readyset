@@ -72,7 +72,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
     eprintln!("Prepopulating with {} articles", narticles);
     articles
         .perform_all(
-            (0..narticles).map(|i| vec![(i as i32).into(), format!("Article #{}", i + 1).into()]),
+            (0..narticles).map(|i| vec![(i as usize).into(), format!("Article #{}", i + 1).into()]),
         )
         .await
         .unwrap();
@@ -99,7 +99,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                         // always generate both so that we aren't artifically faster with one
                         let id_uniform = rand::thread_rng().gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rand::thread_rng());
-                        let id = if skewed { id_zipf } else { id_uniform };
+                        let id: usize = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into()])
                     }))
                     .await
@@ -128,7 +128,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
             while start.elapsed() < runtime {
                 let id_uniform = rand::thread_rng().gen_range(0, narticles);
                 let id_zipf = zipf.sample(&mut rand::thread_rng());
-                let id = if skewed { id_zipf } else { id_uniform };
+                let id: usize = if skewed { id_zipf } else { id_uniform };
                 read_old.lookup(&[DataType::from(id)], false).await.unwrap();
                 tokio::time::delay_for(time::Duration::from_micros(10)).await;
             }
@@ -180,7 +180,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                     .perform_all((0..WRITE_BATCH_SIZE).map(|i| {
                         let id_uniform = rand::thread_rng().gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rand::thread_rng());
-                        let id = if skewed { id_zipf } else { id_uniform };
+                        let id: usize = if skewed { id_zipf } else { id_uniform };
                         TableOperation::from(vec![DataType::from(id), i.into(), 5.into()])
                     }))
                     .await
@@ -214,7 +214,8 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                     .map(|_| {
                         let id_uniform = rand::thread_rng().gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rand::thread_rng());
-                        vec![DataType::from(if skewed { id_zipf } else { id_uniform })]
+                        let id: usize = if skewed { id_zipf } else { id_uniform };
+                        vec![DataType::from(id)]
                     })
                     .collect();
                 if let Ok(rss) = read_new.multi_lookup(ids, false).await {
