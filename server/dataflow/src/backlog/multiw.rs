@@ -80,9 +80,10 @@ impl Handle {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.read();
+                let map = h.read()?;
                 let v = map.get(&key[0]).map(then);
-                map.meta().cloned().map(move |m| (v, m))
+                let m = *map.meta();
+                Some((v, m))
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
@@ -108,15 +109,17 @@ impl Handle {
                         1,
                     );
                     let stack_key = mem::transmute::<_, &(DataType, DataType)>(&stack_key);
-                    let map = h.read();
+                    let map = h.read()?;
                     let v = map.get(&stack_key).map(then);
-                    map.meta().cloned().map(move |m| (v, m))
+                    let m = *map.meta();
+                    Some((v, m))
                 }
             }
             Handle::Many(ref h) => {
-                let map = h.read();
+                let map = h.read()?;
                 let v = map.get(&key[..]).map(then);
-                map.meta().cloned().map(move |m| (v, m))
+                let m = *map.meta();
+                Some((v, m))
             }
         }
     }
