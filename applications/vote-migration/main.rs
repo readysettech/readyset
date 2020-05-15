@@ -125,11 +125,18 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
             let zipf = ZipfDistribution::new(narticles, 1.08).unwrap();
             barrier.wait().await;
             let start = time::Instant::now();
+            let mut succeeded = false;
             while start.elapsed() < runtime {
                 let id_uniform = rand::thread_rng().gen_range(0, narticles);
                 let id_zipf = zipf.sample(&mut rand::thread_rng());
                 let id: usize = if skewed { id_zipf } else { id_uniform };
-                read_old.lookup(&[DataType::from(id)], false).await.unwrap();
+                let r = read_old.lookup(&[DataType::from(id)], false).await;
+                if succeeded && !r.is_ok() {
+                    // an error occurred after the view became available...
+                    r.unwrap();
+                    return;
+                }
+                succeeded = r.is_ok();
                 tokio::time::delay_for(time::Duration::from_micros(10)).await;
             }
 
