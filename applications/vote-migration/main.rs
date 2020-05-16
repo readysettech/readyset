@@ -252,6 +252,9 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
     stat.send(("FIN", 0.0)).unwrap();
     drop(stat);
     stats.join().unwrap();
+
+    g.graph.shutdown();
+    g.done.await;
 }
 
 #[tokio::main]
