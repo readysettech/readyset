@@ -369,7 +369,7 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(()));
 
         w.swap();
 

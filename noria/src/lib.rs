@@ -224,8 +224,9 @@ pub use nom_sql::ColumnConstraint;
 
 pub use crate::consensus::ZookeeperAuthority;
 use crate::internal::*;
-use std::cell::RefCell;
+use std::future::Future;
 use std::pin::Pin;
+use tokio::task_local;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -246,25 +247,19 @@ pub mod error {
     pub use crate::view::ViewError;
 }
 
-thread_local! {
-    static TRACE_NEXT: RefCell<bool> = RefCell::new(false);
+task_local! {
+    static TRACE_NEXT: ();
 }
+
 fn trace_next_op() -> bool {
-    TRACE_NEXT.with(|tn| {
-        let mut tn = tn.borrow_mut();
-        let yes = *tn;
-        *tn = false;
-        yes
-    })
+    TRACE_NEXT.try_with(|_| true).unwrap_or(false)
 }
 
 /// The next Noria read or write issued from the current thread will be traced using tokio-trace.
 ///
 /// The trace output is visible by setting the environment variable `RUST_LOG=trace`.
-pub fn trace_my_next_op() {
-    TRACE_NEXT.with(|tn| {
-        *tn.borrow_mut() = true;
-    })
+pub async fn trace_ops_in<T>(f: impl Future<Output = T>) -> T {
+    TRACE_NEXT.scope((), f).await
 }
 
 #[derive(Debug, Default)]

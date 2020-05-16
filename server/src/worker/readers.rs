@@ -22,6 +22,7 @@ use std::{
     task::{Context, Poll},
 };
 use stream_cancel::Valve;
+use tokio::task_local;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
 
@@ -33,11 +34,11 @@ const RETRY_TIMEOUT_MS: u64 = 1;
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
 const TRIGGER_TIMEOUT_MS: u64 = 10;
 
-thread_local! {
+task_local! {
     static READERS: RefCell<HashMap<
         (NodeIndex, usize),
         SingleReadHandle,
-    >> = Default::default();
+    >>;
 }
 
 pub(super) async fn listen(
@@ -52,12 +53,14 @@ pub(super) async fn listen(
         BlockingRead,
         tokio::sync::oneshot::Sender<Result<Tagged<ReadReply>, ()>>,
     )>();
-    tokio::spawn(async move {
+
+    let retries = READERS.scope(Default::default(), async move {
         while let Some((blocking, ack)) = rx.next().await {
             // if this errors, the client just went away
             let _ = ack.send(blocking.await);
         }
     });
+    tokio::spawn(retries);
 
     let mut stream = valve.wrap(on.incoming()).into_stream();
     while let Some(stream) = stream.next().await {
@@ -71,35 +74,39 @@ pub(super) async fn listen(
         stream.set_nodelay(true).expect("could not set TCP_NODELAY");
         let alive = alive.clone();
         let mut tx = tx.clone();
-        tokio::spawn(
+        let server = READERS.scope(
+            Default::default(),
             server::Server::new(
                 AsyncBincodeStream::from(stream).for_async(),
                 service_fn(move |req| handle_message(req, &readers, &mut tx)),
-            )
-            .map_err(|e| {
-                match e {
-                    server::Error::Service(()) => {
-                        // server is shutting down -- no need to report this error
-                        return;
-                    }
-                    server::Error::BrokenTransportRecv(ref e)
-                    | server::Error::BrokenTransportSend(ref e) => {
-                        if let bincode::ErrorKind::Io(ref e) = **e {
-                            if e.kind() == std::io::ErrorKind::BrokenPipe
-                                || e.kind() == std::io::ErrorKind::ConnectionReset
-                            {
-                                // client went away
-                                return;
+            ),
+        );
+        tokio::spawn(
+            server
+                .map_err(|e| {
+                    match e {
+                        server::Error::Service(()) => {
+                            // server is shutting down -- no need to report this error
+                            return;
+                        }
+                        server::Error::BrokenTransportRecv(ref e)
+                        | server::Error::BrokenTransportSend(ref e) => {
+                            if let bincode::ErrorKind::Io(ref e) = **e {
+                                if e.kind() == std::io::ErrorKind::BrokenPipe
+                                    || e.kind() == std::io::ErrorKind::ConnectionReset
+                                {
+                                    // client went away
+                                    return;
+                                }
                             }
                         }
                     }
-                }
-                eprintln!("!!! reader client protocol error: {:?}", e);
-            })
-            .map(move |r| {
-                let _ = alive;
-                r
-            }),
+                    eprintln!("!!! reader client protocol error: {:?}", e);
+                })
+                .map(move |r| {
+                    let _ = alive;
+                    r
+                }),
         );
     }
 }
