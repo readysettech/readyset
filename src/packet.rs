@@ -85,7 +85,7 @@ impl<R: Read> PacketReader<R> {
         self.start = self.bytes.len() - self.remaining;
 
         loop {
-            {
+            if self.remaining != 0 {
                 let bytes = {
                     // NOTE: this is all sorts of unfortunate. what we really want to do is to give
                     // &self.bytes[self.start..] to `packet()`, and the lifetimes should all work
