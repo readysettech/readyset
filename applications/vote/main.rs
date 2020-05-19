@@ -499,7 +499,7 @@ where
     });
 
     println!(
-        "pending at exit: {} writes, {} reads",
+        "# pending at exit: {} writes, {} reads",
         nwrite.load(atomic::Ordering::Acquire),
         nread.load(atomic::Ordering::Acquire)
     );
