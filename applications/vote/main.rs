@@ -263,7 +263,7 @@ where
     <C as Service<WriteRequest>>::Future: Send,
     <C as Service<WriteRequest>>::Response: Send,
 {
-    let early_exit = !global_args.is_present("no-early-exit");
+    let early_exit = global_args.is_present("exit-early");
     let runtime = time::Duration::from_secs(value_t_or_exit!(global_args, "runtime", u64));
     let warmup = time::Duration::from_secs(value_t_or_exit!(global_args, "warmup", u64));
 
@@ -652,9 +652,9 @@ fn main() {
                 .help("Indicates that the client should not set up the database"),
         )
         .arg(
-            Arg::with_name("no-early-exit")
-                .long("no-early-exit")
-                .help("Don't stop generating load when clients fall behind."),
+            Arg::with_name("exit-early")
+                .long("exit-early")
+                .help("Stop generating load when clients fall behind. Achieved load will be misreported.")
         )
         .subcommand(
             SubCommand::with_name("netsoup")
