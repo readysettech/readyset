@@ -128,7 +128,7 @@ impl Service<ReadRequest> for LocalNoria {
         let arg = req
             .0
             .into_iter()
-            .map(|article_id| vec![(article_id as usize).into()])
+            .map(|article_id| vec![(article_id as i32).into()])
             .collect();
 
         let fut = self.r.as_mut().unwrap().call((arg, true));
@@ -154,7 +154,7 @@ impl Service<WriteRequest> for LocalNoria {
         let data: Vec<TableOperation> = req
             .0
             .into_iter()
-            .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+            .map(|article_id| vec![(article_id as i32).into(), 0.into()].into())
             .collect();
 
         let fut = self.w.as_mut().unwrap().call(data);

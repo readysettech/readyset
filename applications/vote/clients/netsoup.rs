@@ -67,14 +67,16 @@ impl Service<ReadRequest> for Conn {
         let arg = req
             .0
             .into_iter()
-            .map(|article_id| vec![(article_id as usize).into()])
+            .map(|article_id| vec![(article_id as i32).into()])
             .collect();
 
         let fut = self.r.as_mut().unwrap().call((arg, true));
         async move {
             let rows = fut.await?;
-            // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
             assert_eq!(rows.len(), len);
+            for row in rows {
+                assert_eq!(row.len(), 1);
+            }
             Ok(())
         }
     }
@@ -94,7 +96,7 @@ impl Service<WriteRequest> for Conn {
         let data: Vec<TableOperation> = req
             .0
             .into_iter()
-            .map(|article_id| vec![(article_id as usize).into(), 0.into()].into())
+            .map(|article_id| vec![(article_id as i32).into(), 0.into()].into())
             .collect();
 
         let fut = self.w.as_mut().unwrap().call(data);
