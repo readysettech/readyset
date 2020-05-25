@@ -18,6 +18,7 @@ memcached-rs = "0.4.2"
 mysql_async = "0.23.0"
 nom-sql = "0.0.11"
 noria = { path = "../server", package = "noria-server" }
+num_cpus = "1"
 rand = "0.7"
 rand_distr = "0.2"
 regex = "1.0.0"
