@@ -122,7 +122,7 @@ async fn main() {
         // now time to alternate and measure
         let mut n = 0;
         let start = Instant::now();
-        let mut stats = Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap();
+        let mut stats = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap();
         while start.elapsed() < Duration::from_secs(runtime) {
             for &id in &[1, 2] {
                 let start = Instant::now();

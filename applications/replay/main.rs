@@ -89,7 +89,7 @@ async fn perform_reads(
         eprintln!("Done populating state, now reading articles...");
     }
 
-    let mut hist = Histogram::<u64>::new(4).unwrap();
+    let mut hist = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap();
     let row_ids = if skewed {
         vec![SKEWED_KEY]
     } else {

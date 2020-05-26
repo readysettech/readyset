@@ -18,10 +18,10 @@ use tokio::stream::StreamExt;
 use tower_service::Service;
 
 thread_local! {
-    static SJRN_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
-    static SJRN_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
-    static RMT_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
-    static RMT_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(10, 1_000_000, 4).unwrap());
+    static SJRN_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
+    static SJRN_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
+    static RMT_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
+    static RMT_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
 }
 
 fn throughput(ops: usize, took: time::Duration) -> f64 {
@@ -78,10 +78,10 @@ where
         )
     } else {
         (
-            Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap(),
-            Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap(),
-            Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap(),
-            Histogram::<u64>::new_with_bounds(10, 1_000_000, 4).unwrap(),
+            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
+            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
+            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
+            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
         )
     };
 
