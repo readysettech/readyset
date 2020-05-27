@@ -1052,12 +1052,65 @@ async fn mutator_churn() {
 }
 
 #[tokio::test(threaded_scheduler)]
-async fn connection_churn() {
+async fn view_connection_churn() {
     let authority = Arc::new(LocalAuthority::new());
 
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
+    let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+
+    g.install_recipe(
+        "
+        CREATE TABLE A (id int, PRIMARY KEY(id));
+        QUERY AID: SELECT id FROM A WHERE id = ?;
+    ",
+    )
+    .await
+    .unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    // continuously write to vote with entirely new connections
+    let jhs: Vec<_> = (0..20)
+        .map(|i| {
+            let authority = authority.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut builder = Builder::default();
+                builder.set_sharding(Some(DEFAULT_SHARDING));
+                builder.set_persistence(get_persistence_params("connection_churn"));
+                let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+
+                g.view("AID")
+                    .await
+                    .unwrap()
+                    .lookup(&[DataType::from(i)], true)
+                    .await
+                    .unwrap();
+
+                drop(tx);
+                drop(g);
+                done.await;
+            })
+        })
+        .collect();
+    drop(tx);
+    assert_eq!(rx.recv().await, None);
+    drop(g);
+    done.await;
+    for jh in jhs {
+        jh.await.unwrap();
+    }
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn table_connection_churn() {
+    let authority = Arc::new(LocalAuthority::new());
+
+    let mut builder = Builder::default();
+    builder.set_sharding(Some(DEFAULT_SHARDING));
+    builder.set_persistence(get_persistence_params("connection_churn"));
+    // builder.log_with(crate::logger_pls());
     let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 
     g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
@@ -1066,31 +1119,36 @@ async fn connection_churn() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
     // continuously write to vote with entirely new connections
-    for i in 0..20 {
-        let authority = authority.clone();
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let mut builder = Builder::default();
-            builder.set_sharding(Some(DEFAULT_SHARDING));
-            builder.set_persistence(get_persistence_params("connection_churn"));
-            let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+    let jhs: Vec<_> = (0..20)
+        .map(|i| {
+            let authority = authority.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut builder = Builder::default();
+                builder.set_sharding(Some(DEFAULT_SHARDING));
+                builder.set_persistence(get_persistence_params("connection_churn"));
+                let (mut g, done) = builder.start(authority.clone()).await.unwrap();
 
-            g.table("A")
-                .await
-                .unwrap()
-                .insert(vec![DataType::from(i)])
-                .await
-                .unwrap();
+                g.table("A")
+                    .await
+                    .unwrap()
+                    .insert(vec![DataType::from(i)])
+                    .await
+                    .unwrap();
 
-            drop(tx);
-            drop(g);
-            done.await;
-        });
-    }
+                drop(tx);
+                drop(g);
+                done.await;
+            })
+        })
+        .collect();
     drop(tx);
-    let _ = rx.recv().await;
+    assert_eq!(rx.recv().await, None);
     drop(g);
     done.await;
+    for jh in jhs {
+        jh.await.unwrap();
+    }
 }
 
 #[tokio::test(threaded_scheduler)]
