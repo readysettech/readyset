@@ -18,8 +18,9 @@ use std::task::{Context, Poll};
 use std::{fmt, io};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
-use tower_balance::pool::{self, Pool};
+use tower_balance::p2c::Balance;
 use tower_buffer::Buffer;
+use tower_discover::ServiceStream;
 use tower_limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
 use vec_map::VecMap;
@@ -201,21 +202,21 @@ async fn update_user(users: &mut Table) -> Result<(), TableError> {
 }
 
 #[derive(Debug)]
-#[doc(hidden)]
-// only pub because we use it to figure out the error type for TableError
-pub struct TableEndpoint(SocketAddr);
+struct Endpoint(SocketAddr);
 
-impl Service<()> for TableEndpoint {
-    type Response = ConcurrencyLimit<
-        multiplex::Client<
+type InnerService = ConcurrencyLimit<
+    multiplex::Client<
+        multiplex::MultiplexTransport<Transport, Tagger>,
+        tokio_tower::Error<
             multiplex::MultiplexTransport<Transport, Tagger>,
-            tokio_tower::Error<
-                multiplex::MultiplexTransport<Transport, Tagger>,
-                Tagged<LocalOrNot<Input>>,
-            >,
             Tagged<LocalOrNot<Input>>,
         >,
-    >;
+        Tagged<LocalOrNot<Input>>,
+    >,
+>;
+
+impl Service<()> for Endpoint {
+    type Response = InnerService;
     type Error = tokio::io::Error;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
@@ -241,8 +242,33 @@ impl Service<()> for TableEndpoint {
     }
 }
 
+fn make_table_stream(
+    addr: SocketAddr,
+) -> impl futures_util::stream::TryStream<
+    Ok = tower_discover::Change<usize, InnerService>,
+    Error = tokio::io::Error,
+> {
+    // TODO: use whatever comes out of https://github.com/tower-rs/tower/issues/456 instead of
+    // creating _all_ the connections every time.
+    (0..crate::TABLE_POOL_SIZE)
+        .map(|i| async move {
+            let svc = Endpoint(addr).call(()).await?;
+            Ok(tower_discover::Change::Insert(i, svc))
+        })
+        .collect::<futures_util::stream::FuturesUnordered<_>>()
+}
+
+fn make_table_discover(addr: SocketAddr) -> Discover {
+    ServiceStream::new(make_table_stream(addr))
+}
+
+// Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
+type Discover = impl tower_discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
+    + Unpin
+    + Send;
+
 pub(crate) type TableRpc =
-    Buffer<Pool<TableEndpoint, (), Tagged<LocalOrNot<Input>>>, Tagged<LocalOrNot<Input>>>;
+    Buffer<Balance<Discover, Tagged<LocalOrNot<Input>>>, Tagged<LocalOrNot<Input>>>;
 
 /// A failed [`SyncTable`] operation.
 #[derive(Debug, Fail)]
@@ -323,12 +349,7 @@ impl TableBuilder {
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
-                        pool::Builder::new()
-                            .urgency(0.01)
-                            .loaded_above(0.2)
-                            .underutilized_below(0.000_000_001)
-                            .max_services(Some(crate::MAX_TABLE_POOL_SIZE))
-                            .build(TableEndpoint(addr), ()),
+                        Balance::from_entropy(make_table_discover(addr)),
                         crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;

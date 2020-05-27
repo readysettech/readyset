@@ -150,7 +150,7 @@ extern crate slog;
 /// sure this value is high enough.
 pub(crate) const BUFFER_TO_POOL: usize = 2048;
 
-/// The maximum number of concurrent connections to a given backend table.
+/// The number of concurrent connections to a given backend table.
 ///
 /// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
 /// serialization/deserialization in parallel on multiple threads. Nothing else really.
@@ -162,9 +162,9 @@ pub(crate) const BUFFER_TO_POOL: usize = 2048;
 ///  - Table operations are generally not bottlenecked on serialization, but on committing.
 ///
 /// The value isn't lower, because we want _some_ concurrency in serialization.
-pub(crate) const MAX_TABLE_POOL_SIZE: usize = 2;
+pub(crate) const TABLE_POOL_SIZE: usize = 2;
 
-/// The maximum number of concurrent connections to a given backend view.
+/// The number of concurrent connections to a given backend view.
 ///
 /// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
 /// serialization/deserialization in parallel on multiple threads. Nothing else really.
@@ -178,7 +178,7 @@ pub(crate) const MAX_TABLE_POOL_SIZE: usize = 2;
 ///    reasonable.
 ///
 /// The value isn't higher because we, _and the server_ only have so many cores.
-pub(crate) const MAX_VIEW_POOL_SIZE: usize = 16;
+pub(crate) const VIEW_POOL_SIZE: usize = 16;
 
 /// Number of requests that can be pending on any _single_ connection.
 ///
