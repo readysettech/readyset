@@ -204,15 +204,10 @@ async fn update_user(users: &mut Table) -> Result<(), TableError> {
 #[derive(Debug)]
 struct Endpoint(SocketAddr);
 
-type InnerService = ConcurrencyLimit<
-    multiplex::Client<
-        multiplex::MultiplexTransport<Transport, Tagger>,
-        tokio_tower::Error<
-            multiplex::MultiplexTransport<Transport, Tagger>,
-            Tagged<LocalOrNot<Input>>,
-        >,
-        Tagged<LocalOrNot<Input>>,
-    >,
+type InnerService = multiplex::Client<
+    multiplex::MultiplexTransport<Transport, Tagger>,
+    tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<LocalOrNot<Input>>>,
+    Tagged<LocalOrNot<Input>>,
 >;
 
 impl Service<()> for Endpoint {
@@ -233,11 +228,9 @@ impl Service<()> for Endpoint {
             s.flush().await.unwrap();
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
-            // NOTE: we need to limit concurrency since AsyncBincode does unlimited buffering
-            Ok(ConcurrencyLimit::new(
-                multiplex::Client::with_error_handler(t, |e| panic!("{:?}", e)),
-                crate::PENDING_PER_CONN,
-            ))
+            Ok(multiplex::Client::with_error_handler(t, |e| {
+                eprintln!("table server went away: {}", e)
+            }))
         }
     }
 }
@@ -267,8 +260,10 @@ type Discover = impl tower_discover::Discover<Key = usize, Service = InnerServic
     + Unpin
     + Send;
 
-pub(crate) type TableRpc =
-    Buffer<Balance<Discover, Tagged<LocalOrNot<Input>>>, Tagged<LocalOrNot<Input>>>;
+pub(crate) type TableRpc = Buffer<
+    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<Input>>>>,
+    Tagged<LocalOrNot<Input>>,
+>;
 
 /// A failed [`SyncTable`] operation.
 #[derive(Debug, Fail)]
@@ -349,7 +344,10 @@ impl TableBuilder {
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
-                        Balance::from_entropy(make_table_discover(addr)),
+                        ConcurrencyLimit::new(
+                            Balance::from_entropy(make_table_discover(addr)),
+                            crate::PENDING_LIMIT,
+                        ),
                         crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;

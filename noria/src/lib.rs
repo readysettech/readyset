@@ -180,10 +180,10 @@ pub(crate) const TABLE_POOL_SIZE: usize = 2;
 /// The value isn't higher because we, _and the server_ only have so many cores.
 pub(crate) const VIEW_POOL_SIZE: usize = 16;
 
-/// Number of requests that can be pending on any _single_ connection.
+/// Number of requests that can be pending to any particular target.
 ///
 /// Keep in mind that this is really the number of requests that can be pending to any given shard
-/// of a domain (for tables) or to any given Noria host (for views). The value should arguably be
+/// of a domain (for tables) or to any given Noria worker (for views). The value should arguably be
 /// higher for views than for tables, since views are more likely to share a connection than
 /// tables, but since this is really just a measure for "are we falling over", it can sort of be
 /// arbitrarily high. If the system isn't keeping up, then it will fill up regardless, it'll just
@@ -198,7 +198,7 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 ///
 /// The value isn't lower, because that give the server less work at a time, which means it can
 /// batch less work, which means lower overall efficiency.
-pub(crate) const PENDING_PER_CONN: usize = 2048;
+pub(crate) const PENDING_LIMIT: usize = 1024;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
