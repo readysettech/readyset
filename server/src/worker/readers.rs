@@ -44,48 +44,6 @@ pub(super) async fn listen(
     mut on: tokio::net::TcpListener,
     readers: Readers,
 ) {
-    // future that ensures all blocking reads are handled in FIFO order
-    // and avoid hogging the executors with read retries
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-
-    let retries = READERS.scope(Default::default(), async move {
-        use async_timer::Oneshot;
-        let mut retry = async_timer::oneshot::Timer::new(RETRY_TIMEOUT);
-        let mut pending = None::<(BlockingRead, Ack)>;
-        loop {
-            if let Some((ref mut blocking, _)) = pending {
-                // we have a pending read — see if it can complete
-                if let Poll::Ready(res) = blocking.check() {
-                    // it did! let's tell the caller.
-                    let (_, ack) = pending.take().expect("we matched on Some above");
-                    // if this errors, the client just went away
-                    let _ = ack.send(res);
-                // the loop will take care of looking for the next request
-                } else {
-                    // we have a pending request, but it is still blocked
-                    // time for us to wait...
-                    futures_util::future::poll_fn(|cx| {
-                        // we need the poll_fn so we can get the waker
-                        retry.restart(RETRY_TIMEOUT, cx.waker());
-                        Poll::Ready(())
-                    })
-                    .await;
-                    // we need `(&mut )` here so that we can re-use it
-                    (&mut retry).await;
-                }
-            } else {
-                // no point in waiting for a timer if we've got nothing to wait for
-                // so let's get another request
-                if let Some(read) = rx.next().await {
-                    pending = Some(read);
-                } else {
-                    break;
-                }
-            }
-        }
-    });
-    tokio::spawn(retries);
-
     let mut stream = valve.wrap(on.incoming()).into_stream();
     while let Some(stream) = stream.next().await {
         if let Err(_) = stream {
@@ -97,7 +55,49 @@ pub(super) async fn listen(
         let readers = readers.clone();
         stream.set_nodelay(true).expect("could not set TCP_NODELAY");
         let alive = alive.clone();
-        let mut tx = tx.clone();
+
+        // future that ensures all blocking reads are handled in FIFO order
+        // and avoid hogging the executors with read retries
+        let (mut tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
+
+        let retries = READERS.scope(Default::default(), async move {
+            use async_timer::Oneshot;
+            let mut retry = async_timer::oneshot::Timer::new(RETRY_TIMEOUT);
+            let mut pending = None::<(BlockingRead, Ack)>;
+            loop {
+                if let Some((ref mut blocking, _)) = pending {
+                    // we have a pending read — see if it can complete
+                    if let Poll::Ready(res) = blocking.check() {
+                        // it did! let's tell the caller.
+                        let (_, ack) = pending.take().expect("we matched on Some above");
+                        // if this errors, the client just went away
+                        let _ = ack.send(res);
+                    // the loop will take care of looking for the next request
+                    } else {
+                        // we have a pending request, but it is still blocked
+                        // time for us to wait...
+                        futures_util::future::poll_fn(|cx| {
+                            // we need the poll_fn so we can get the waker
+                            retry.restart(RETRY_TIMEOUT, cx.waker());
+                            Poll::Ready(())
+                        })
+                        .await;
+                        // we need `(&mut )` here so that we can re-use it
+                        (&mut retry).await;
+                    }
+                } else {
+                    // no point in waiting for a timer if we've got nothing to wait for
+                    // so let's get another request
+                    if let Some(read) = rx.next().await {
+                        pending = Some(read);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        });
+        tokio::spawn(retries);
+
         let server = READERS.scope(
             Default::default(),
             server::Server::new(
