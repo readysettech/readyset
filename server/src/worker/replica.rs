@@ -12,7 +12,7 @@ use dataflow::{
     prelude::{DataType, Executor},
     Domain, Packet, PollEvent, ProcessResult,
 };
-use failure::{self, ResultExt};
+use failure::{self, Fail, ResultExt};
 use futures_util::{
     sink::Sink,
     stream::{futures_unordered::FuturesUnordered, Stream},
@@ -324,7 +324,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> io::Result<bool> {
+    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, failure::Error> {
         let mut this = self.project();
 
         if let Poll::Ready(true) = this.valve.poll_closed(cx) {
@@ -333,7 +333,8 @@ impl Replica {
             while let Poll::Ready((stream, _)) = this
                 .incoming
                 .as_mut()
-                .poll_fn(cx, |mut i, cx| i.poll_accept(cx))?
+                .poll_fn(cx, |mut i, cx| i.poll_accept(cx))
+                .map_err(|e| e.context("poll_accept"))?
             {
                 // we know that any new connection to a domain will first send a one-byte
                 // token to indicate whether the connection is from a base or not.
@@ -342,7 +343,24 @@ impl Replica {
             }
         }
 
-        while let Poll::Ready(Some((stream, tag))) = this.first_byte.as_mut().poll_next(cx)? {
+        while let Poll::Ready(Some(r)) = this.first_byte.as_mut().poll_next(cx) {
+            let (stream, tag) = match r {
+                Ok((s, t)) => (s, t),
+                Err(e) => {
+                    if let io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::NotConnected
+                    | io::ErrorKind::UnexpectedEof
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::ConnectionReset = e.kind()
+                    {
+                        // connection went away right after connecting,
+                        // let's not bother the user with it
+                        continue;
+                    }
+                    Err(e).context("poll_next")?;
+                    unreachable!();
+                }
+            };
             let is_base = tag == CONNECTION_FROM_BASE;
 
             debug!(this.log, "established new connection"; "base" => ?is_base);
@@ -524,7 +542,7 @@ impl Future for Replica {
         'process: loop {
             // FIXME: check if we should call update_state_sizes (every evict_every)
 
-            // are there are any new connections?
+            // are there any new connections?
             if !self
                 .as_mut()
                 .try_new(cx)
