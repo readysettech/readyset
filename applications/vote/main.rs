@@ -10,7 +10,7 @@ use rand_distr::Exp;
 use std::cell::RefCell;
 use std::fs;
 use std::mem;
-use std::sync::{atomic, Arc, Barrier, Mutex};
+use std::sync::{atomic, Arc, Mutex};
 use std::task::Poll;
 use std::thread;
 use std::time;
@@ -50,7 +50,6 @@ where
     let ngen = (target as usize + per_generator - 1) / per_generator; // rounded up
     target /= ngen as f64;
 
-    let nthreads = value_t_or_exit!(global_args, "threads", usize);
     let articles = value_t_or_exit!(global_args, "articles", usize);
 
     let params = Parameters {
@@ -89,14 +88,12 @@ where
     let sjrn_r_t = Arc::new(Mutex::new(hists.1));
     let rmt_w_t = Arc::new(Mutex::new(hists.2));
     let rmt_r_t = Arc::new(Mutex::new(hists.3));
-    let finished = Arc::new(Barrier::new(nthreads + ngen));
 
     let ts = (
         sjrn_w_t.clone(),
         sjrn_r_t.clone(),
         rmt_w_t.clone(),
         rmt_r_t.clone(),
-        finished.clone(),
     );
 
     let available_cores = num_cpus::get() - ngen;
@@ -591,14 +588,6 @@ fn main() {
                 .value_name("N")
                 .default_value("100000")
                 .help("Number of articles to prepopulate the database with"),
-        )
-        .arg(
-            Arg::with_name("threads")
-                .short("t")
-                .long("threads")
-                .value_name("N")
-                .default_value("4")
-                .help("Number of client load threads to run"),
         )
         .arg(
             Arg::with_name("runtime")
