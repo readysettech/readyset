@@ -29,7 +29,7 @@ fn throughput(ops: usize, took: time::Duration) -> f64 {
     ops as f64 / took.as_secs_f64()
 }
 
-const MAX_BATCH_TIME: time::Duration = time::Duration::from_millis(1);
+const MAX_BATCH_TIME: time::Duration = time::Duration::from_millis(10);
 
 mod clients;
 use self::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};

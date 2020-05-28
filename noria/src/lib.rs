@@ -148,7 +148,7 @@ extern crate slog;
 /// https://github.com/tower-rs/tower/issues/408#issuecomment-593678194. Ultimately, we need
 /// something like https://github.com/tower-rs/tower/issues/408, but for the time being, just make
 /// sure this value is high enough.
-pub(crate) const BUFFER_TO_POOL: usize = 2048;
+pub(crate) const BUFFER_TO_POOL: usize = 1024;
 
 /// The number of concurrent connections to a given backend table.
 ///
@@ -198,7 +198,7 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 ///
 /// The value isn't lower, because that give the server less work at a time, which means it can
 /// batch less work, which means lower overall efficiency.
-pub(crate) const PENDING_LIMIT: usize = 1024;
+pub(crate) const PENDING_LIMIT: usize = 2048;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
