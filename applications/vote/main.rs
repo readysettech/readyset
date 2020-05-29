@@ -4,7 +4,7 @@ use clap::value_t_or_exit;
 use failure::ResultExt;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use futures_util::stream::futures_unordered::FuturesUnordered;
-use hdrhistogram::Histogram;
+use noria_applications::Timeline;
 use rand::prelude::*;
 use rand_distr::Exp;
 use std::cell::RefCell;
@@ -19,10 +19,7 @@ use tokio::stream::StreamExt;
 use tower_service::Service;
 
 thread_local! {
-    static SJRN_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
-    static SJRN_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
-    static RMT_W: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
-    static RMT_R: RefCell<Histogram<u64>> = RefCell::new(Histogram::new_with_bounds(1, 60_000_000, 3).unwrap());
+    static TIMING: RefCell<(Timeline, Timeline)> = RefCell::new(Default::default());
 }
 
 fn throughput(ops: usize, took: time::Duration) -> f64 {
@@ -64,38 +61,10 @@ where
         _ => unreachable!(),
     };
 
-    let hists = if let Some(mut f) = global_args
-        .value_of("histogram")
-        .and_then(|h| fs::File::open(h).ok())
-    {
-        use hdrhistogram::serialization::Deserializer;
-        let mut deserializer = Deserializer::new();
-        (
-            deserializer.deserialize(&mut f).unwrap(),
-            deserializer.deserialize(&mut f).unwrap(),
-            deserializer.deserialize(&mut f).unwrap(),
-            deserializer.deserialize(&mut f).unwrap(),
-        )
-    } else {
-        (
-            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-        )
-    };
+    let write_t = Arc::new(Mutex::new(Timeline::default()));
+    let read_t = Arc::new(Mutex::new(Timeline::default()));
 
-    let sjrn_w_t = Arc::new(Mutex::new(hists.0));
-    let sjrn_r_t = Arc::new(Mutex::new(hists.1));
-    let rmt_w_t = Arc::new(Mutex::new(hists.2));
-    let rmt_r_t = Arc::new(Mutex::new(hists.3));
-
-    let ts = (
-        sjrn_w_t.clone(),
-        sjrn_r_t.clone(),
-        rmt_w_t.clone(),
-        rmt_r_t.clone(),
-    );
+    let ts = (write_t.clone(), read_t.clone());
 
     let available_cores = num_cpus::get() - ngen;
     let mut rt = tokio::runtime::Builder::new()
@@ -104,18 +73,11 @@ where
         .thread_name("voter")
         .core_threads(available_cores)
         .on_thread_stop(move || {
-            SJRN_W
-                .with(|h| ts.0.lock().unwrap().add(&*h.borrow()))
-                .unwrap();
-            SJRN_R
-                .with(|h| ts.1.lock().unwrap().add(&*h.borrow()))
-                .unwrap();
-            RMT_W
-                .with(|h| ts.2.lock().unwrap().add(&*h.borrow()))
-                .unwrap();
-            RMT_R
-                .with(|h| ts.3.lock().unwrap().add(&*h.borrow()))
-                .unwrap();
+            TIMING.with(|hs| {
+                let hs = hs.borrow();
+                ts.0.lock().unwrap().merge(&hs.0);
+                ts.1.lock().unwrap().merge(&hs.1);
+            })
         })
         .build()
         .unwrap();
@@ -131,6 +93,7 @@ where
 
     eprintln!("setup completed");
 
+    let start = std::time::SystemTime::now();
     let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
     let generators: Vec<_> = (0..ngen)
         .map(|geni| {
@@ -183,27 +146,30 @@ where
     println!("# actual ops/s: {:.2}", wops);
     println!("# op\tpct\tsojourn\tremote");
 
-    let sjrn_w_t = sjrn_w_t.lock().unwrap();
-    let sjrn_r_t = sjrn_r_t.lock().unwrap();
-    let rmt_w_t = rmt_w_t.lock().unwrap();
-    let rmt_r_t = rmt_r_t.lock().unwrap();
+    let write_t = write_t.lock().unwrap();
+    let read_t = read_t.lock().unwrap();
 
     if let Some(h) = global_args.value_of("histogram") {
         match fs::File::create(h) {
             Ok(mut f) => {
-                use hdrhistogram::serialization::Serializer;
+                use hdrhistogram::serialization::interval_log;
                 use hdrhistogram::serialization::V2Serializer;
                 let mut s = V2Serializer::new();
-                s.serialize(&sjrn_w_t, &mut f).unwrap();
-                s.serialize(&sjrn_r_t, &mut f).unwrap();
-                s.serialize(&rmt_w_t, &mut f).unwrap();
-                s.serialize(&rmt_r_t, &mut f).unwrap();
+                let mut w = interval_log::IntervalLogWriterBuilder::new()
+                    .with_base_time(start)
+                    .begin_log_with(&mut f, &mut s)
+                    .unwrap();
+                write_t.write(&mut w).unwrap();
+                read_t.write(&mut w).unwrap();
             }
             Err(e) => {
                 eprintln!("failed to open histogram file for writing: {:?}", e);
             }
         }
     }
+
+    let (rmt_w_t, sjrn_w_t) = write_t.collapse();
+    let (rmt_r_t, sjrn_r_t) = read_t.collapse();
 
     println!(
         "write\t50\t{:.2}\t{:.2}\t(all µs)",
@@ -266,11 +232,7 @@ where
     <C as Service<WriteRequest>>::Response: Send,
 {
     let runtime = time::Duration::from_secs(value_t_or_exit!(global_args, "runtime", u64));
-    let warmup = time::Duration::from_secs(value_t_or_exit!(global_args, "warmup", u64));
     let every = value_t_or_exit!(global_args, "ratio", u32);
-
-    let start = time::Instant::now();
-    let end = start + warmup + runtime;
 
     let interarrival = Exp::new(target * 1e-9).unwrap();
     let mut next = time::Instant::now();
@@ -290,6 +252,9 @@ where
         .basic_scheduler()
         .build()
         .unwrap();
+
+    let start = time::Instant::now();
+    let end = start + runtime;
 
     // we *could* use a rayon::scope here to safely access stack variables from inside each job,
     // but that would *also* force us to place the load generators *on* the thread pool (because of
@@ -341,33 +306,24 @@ where
                 nread.fetch_sub(n, atomic::Ordering::AcqRel);
             }
 
-            if sent.duration_since(start) > warmup {
+            TIMING.with(|timing| {
+                let mut timing = timing.borrow_mut();
+                let timing = &mut *timing;
+                let timing = if write { &mut timing.0 } else { &mut timing.1 };
+                let hist = timing.histogram_for(sent.duration_since(start));
+
                 let remote_t = done.duration_since(sent);
-                let rmt = if write { &RMT_W } else { &RMT_R };
                 let us =
                     remote_t.as_secs() * 1_000_000 + u64::from(remote_t.subsec_nanos()) / 1_000;
-                rmt.with(|h| {
-                    let mut h = h.borrow_mut();
-                    if h.record(us).is_err() {
-                        let m = h.high();
-                        h.record(m).unwrap();
-                    }
-                });
+                hist.processing(us);
 
-                let sjrn = if write { &SJRN_W } else { &SJRN_R };
                 for started in queued {
                     let sjrn_t = done.duration_since(started);
                     let us =
                         sjrn_t.as_secs() * 1_000_000 + u64::from(sjrn_t.subsec_nanos()) / 1_000;
-                    sjrn.with(|h| {
-                        let mut h = h.borrow_mut();
-                        if h.record(us).is_err() {
-                            let m = h.high();
-                            h.record(m).unwrap();
-                        }
-                    });
+                    hist.sojourn(us);
                 }
-            }
+            })
         });
 
         let th = ex.spawn(async move {
@@ -384,7 +340,6 @@ where
         }
     };
 
-    let mut worker_ops = None;
     while next < end {
         let now = time::Instant::now();
         // only queue a new request if we're told to. if this is not the case, we've
@@ -451,14 +406,6 @@ where
             }
         }
 
-        // keep track of when warmup finished
-        if worker_ops.is_none() {
-            let now = time::Instant::now();
-            if now.duration_since(start) > warmup {
-                worker_ops = Some((now, ndone.load(atomic::Ordering::Acquire)));
-            }
-        }
-
         atomic::spin_loop_hint();
     }
 
@@ -518,17 +465,12 @@ where
 
     // only now is it acceptable to measure throughput
     let gen = throughput(ops, start.elapsed());
-    let worker_ops = worker_ops.map(|(measured, start)| {
-        throughput(
-            ndone.load(atomic::Ordering::Acquire) - start,
-            measured.elapsed(),
-        )
-    });
+    let worker_ops = throughput(ndone.load(atomic::Ordering::Acquire), start.elapsed());
 
     // need to drop the pool before waiting so that workers will exit
     // and thus hit the barrier
     drop(handle);
-    (gen, worker_ops.unwrap_or(0.0))
+    (gen, worker_ops)
 }
 
 fn main() {
@@ -552,13 +494,6 @@ fn main() {
                 .value_name("N")
                 .default_value("30")
                 .help("Benchmark runtime in seconds"),
-        )
-        .arg(
-            Arg::with_name("warmup")
-                .long("warmup")
-                .takes_value(true)
-                .default_value("10")
-                .help("Warmup time in seconds"),
         )
         .arg(
             Arg::with_name("distribution")

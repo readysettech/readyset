@@ -40,6 +40,9 @@ zookeeper = "0.5.3"
 # futures-state-stream = "0.1"
 # tiberius = "0.3.1"
 
+[lib]
+path = "lib.rs"
+
 [[bin]]
 name = "vote"
 path = "vote/main.rs"
