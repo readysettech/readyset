@@ -153,8 +153,8 @@ where
         match fs::File::create(h) {
             Ok(mut f) => {
                 use hdrhistogram::serialization::interval_log;
-                use hdrhistogram::serialization::V2Serializer;
-                let mut s = V2Serializer::new();
+                use hdrhistogram::serialization::V2DeflateSerializer;
+                let mut s = V2DeflateSerializer::new();
                 let mut w = interval_log::IntervalLogWriterBuilder::new()
                     .with_base_time(start)
                     .begin_log_with(&mut f, &mut s)
