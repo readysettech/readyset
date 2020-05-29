@@ -265,11 +265,7 @@ fn main() {
                 .long("histogram")
                 .help("Use file-based serialized HdrHistograms")
                 .takes_value(true)
-                .long_help(
-                    "If the file already exists, the existing histogram is extended.\
-                     There are two histograms, written out in order: \
-                     sojourn and remote.",
-                ),
+                .long_help("There are multiple histograms, two for each lobsters request."),
         )
         .arg(
             Arg::with_name("zookeeper")
