@@ -133,10 +133,12 @@ where
 
     let mut ops = 0.0;
     let mut wops = 0.0;
+    let mut duration = time::Duration::new(0, 0);
     for gen in generators {
-        let (gen, completed) = gen.join().unwrap();
+        let (gen, completed, took) = gen.join().unwrap();
         ops += gen;
         wops += completed;
+        duration = duration.max(took);
     }
     drop(handle);
     drop(rt);
@@ -146,8 +148,11 @@ where
     println!("# actual ops/s: {:.2}", wops);
     println!("# op\tpct\tsojourn\tremote");
 
-    let write_t = write_t.lock().unwrap();
-    let read_t = read_t.lock().unwrap();
+    let mut write_t = write_t.lock().unwrap();
+    let mut read_t = read_t.lock().unwrap();
+
+    write_t.set_total_duration(duration);
+    read_t.set_total_duration(duration);
 
     if let Some(h) = global_args.value_of("histogram") {
         match fs::File::create(h) {
@@ -220,7 +225,7 @@ fn run_generator<C, R>(
     id_rng: R,
     target: f64,
     global_args: clap::ArgMatches,
-) -> (f64, f64)
+) -> (f64, f64, time::Duration)
 where
     C: VoteClient + Unpin + 'static,
     R: rand::distributions::Distribution<usize>,
@@ -464,13 +469,14 @@ where
     }
 
     // only now is it acceptable to measure throughput
-    let gen = throughput(ops, start.elapsed());
-    let worker_ops = throughput(ndone.load(atomic::Ordering::Acquire), start.elapsed());
+    let took = start.elapsed();
+    let gen = throughput(ops, took);
+    let worker_ops = throughput(ndone.load(atomic::Ordering::Acquire), took);
 
     // need to drop the pool before waiting so that workers will exit
     // and thus hit the barrier
     drop(handle);
-    (gen, worker_ops)
+    (gen, worker_ops, took)
 }
 
 fn main() {

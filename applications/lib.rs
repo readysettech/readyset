@@ -1,11 +1,13 @@
 use hdrhistogram::serialization::interval_log;
 use hdrhistogram::Histogram;
+use std::time::Duration;
 
 #[derive(Default, Clone)]
 pub struct Timeline {
     // these are logarithmically spaced
     // the first histogram is 0-1s after start, the second 1-2s after start, then 2-4s, etc.
     histograms: Vec<Histograms>,
+    total_duration: Duration,
 }
 
 #[derive(Clone)]
@@ -39,7 +41,11 @@ impl Histograms {
 }
 
 impl Timeline {
-    pub fn histogram_for(&mut self, issued_at: std::time::Duration) -> &mut Histograms {
+    pub fn set_total_duration(&mut self, total: Duration) {
+        self.total_duration = total;
+    }
+
+    pub fn histogram_for(&mut self, issued_at: Duration) -> &mut Histograms {
         let hist = ((issued_at.as_secs_f64() + 0.000000000001).ceil() as usize)
             .next_power_of_two()
             .trailing_zeros() as usize;
@@ -67,8 +73,11 @@ impl Timeline {
         let proc_tag = interval_log::Tag::new("processing").unwrap();
         let sjrn_tag = interval_log::Tag::new("sojourn").unwrap();
         for (i, hs) in self.histograms.iter().enumerate() {
-            let start = std::time::Duration::from_secs((1 << i) >> 1);
-            let dur = std::time::Duration::from_secs(1 << i) - start;
+            let start = Duration::from_secs((1 << i) >> 1);
+            let mut dur = Duration::from_secs(1 << i) - start;
+            if self.total_duration != Duration::new(0, 0) && start + dur > self.total_duration {
+                dur = self.total_duration - start;
+            }
             w.write_histogram(&hs.processing, start, dur, Some(proc_tag))?;
             w.write_histogram(&hs.sojourn, start, dur, Some(sjrn_tag))?;
         }
