@@ -2896,7 +2896,7 @@ impl Domain {
             })
             .sum();
 
-        self.state_size.store(total as usize, Ordering::Relaxed);
+        self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
     }
 

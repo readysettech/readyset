@@ -378,7 +378,7 @@ async fn do_eviction(
         state_sizes
             .iter()
             .map(|(ds, sa)| {
-                let size = sa.load(Ordering::Relaxed);
+                let size = sa.load(Ordering::Acquire);
                 trace!(
                     log,
                     "domain {}.{} state size is {} bytes",
