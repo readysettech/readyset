@@ -13,6 +13,7 @@ pub use noria::DataType;
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
     fn size_of(&self) -> u64;
+    fn is_empty(&self) -> bool;
 }
 
 impl SizeOf for DataType {
@@ -33,6 +34,10 @@ impl SizeOf for DataType {
         // doesn't include data if stored externally
         size_of::<DataType>() as u64
     }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 impl SizeOf for Vec<DataType> {
@@ -46,6 +51,10 @@ impl SizeOf for Vec<DataType> {
         use std::mem::{size_of, size_of_val};
 
         size_of_val(self) as u64 + size_of::<DataType>() as u64 * self.len() as u64
+    }
+
+    fn is_empty(&self) -> bool {
+        false
     }
 }
 

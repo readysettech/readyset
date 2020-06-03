@@ -256,25 +256,24 @@ impl WriteHandle {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes that will be freed once the underlying `evmap` applies the operation.
-    pub(crate) fn evict_random_key(&mut self, rng: &mut ThreadRng) -> u64 {
+    pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, mut n: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             if self.handle.is_empty() {
                 unreachable!("mem size is {}, but map is empty", self.mem_size);
             }
 
-            match self.handle.empty_at_index(rng.gen()) {
-                None => (),
-                Some(vs) => {
-                    let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
-                    bytes_to_be_freed += size;
-                }
-            }
-            self.mem_size = self
-                .mem_size
-                .checked_sub(bytes_to_be_freed as usize)
-                .unwrap();
+            self.handle.empty_random_for_each(rng, n, |vs| {
+                let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
+                bytes_to_be_freed += size;
+                n -= 1;
+            });
         }
+
+        self.mem_size = self
+            .mem_size
+            .checked_sub(bytes_to_be_freed as usize)
+            .unwrap();
         bytes_to_be_freed
     }
 }
@@ -288,6 +287,10 @@ impl SizeOf for WriteHandle {
 
     fn deep_size_of(&self) -> u64 {
         self.mem_size as u64
+    }
+
+    fn is_empty(&self) -> bool {
+        self.handle.is_empty()
     }
 }
 

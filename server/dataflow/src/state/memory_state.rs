@@ -24,6 +24,10 @@ impl SizeOf for MemoryState {
     fn deep_size_of(&self) -> u64 {
         self.mem_size
     }
+
+    fn is_empty(&self) -> bool {
+        self.state[0].is_empty()
+    }
 }
 
 impl State for MemoryState {

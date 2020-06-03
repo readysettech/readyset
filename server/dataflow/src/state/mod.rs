@@ -94,6 +94,9 @@ impl SizeOf for Row {
     fn deep_size_of(&self) -> u64 {
         (*self.0).deep_size_of()
     }
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 /// An std::borrow::Cow-like wrapper around a collection of rows.

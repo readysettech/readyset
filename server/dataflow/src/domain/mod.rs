@@ -2765,13 +2765,16 @@ impl Domain {
                         if n.is_dropped() {
                             break; // Node was dropped. Give up.
                         } else if n.is_reader() {
-                            // we can only evict one key a time here because the freed memory
-                            // calculation is based on the key that *will* be evicted. We may count
-                            // the same individual key twice if we batch evictions here.
-                            let freed_now = n.with_reader_mut(|r| r.evict_random_key()).unwrap();
+                            let freed_now =
+                                n.with_reader_mut(|r| r.evict_random_keys(100)).unwrap();
 
                             freed += freed_now;
-                            if freed_now == 0 {
+                            if n.with_reader(|r| r.is_empty()).unwrap() {
+                                trace!(
+                                    self.log,
+                                    "done evicting from now-empty reader node {:?}",
+                                    n
+                                );
                                 break;
                             }
                         } else {
@@ -2781,24 +2784,27 @@ impl Domain {
                             };
                             freed += bytes;
 
-                            trigger_downstream_evictions(
-                                &self.log,
-                                &key_columns[..],
-                                &keys[..],
-                                node,
-                                ex,
-                                &self.not_ready,
-                                &self.replay_paths,
-                                self.shard,
-                                &mut self.state,
-                                &self.nodes,
-                            );
-
-                            if self.state[node].deep_size_of() == 0 {
+                            if !keys.is_empty() {
+                                trigger_downstream_evictions(
+                                    &self.log,
+                                    &key_columns[..],
+                                    &keys[..],
+                                    node,
+                                    ex,
+                                    &self.not_ready,
+                                    &self.replay_paths,
+                                    self.shard,
+                                    &mut self.state,
+                                    &self.nodes,
+                                );
+                            }
+                            if self.state[node].is_empty() {
+                                trace!(self.log, "done evicting from now-empty node {:?}", n);
                                 break;
                             }
                         }
                     }
+                    debug!(self.log, "evicted {} from node {:?}", freed, n);
                 }
             }
             (Packet::EvictKeys {

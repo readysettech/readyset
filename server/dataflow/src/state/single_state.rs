@@ -264,6 +264,9 @@ impl SingleState {
     pub(super) fn rows(&self) -> usize {
         self.rows
     }
+    pub(super) fn is_empty(&self) -> bool {
+        self.rows == 0
+    }
     pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
             LookupResult::Some(RecordResult::Borrowed(rs))

@@ -600,6 +600,14 @@ impl SizeOf for PersistentState {
             .unwrap()
             .unwrap()
     }
+
+    fn is_empty(&self) -> bool {
+        let db = self.db.as_ref().unwrap();
+        db.property_int_value("rocksdb.estimate-num-keys")
+            .unwrap()
+            .unwrap()
+            == 0
+    }
 }
 
 #[cfg(test)]

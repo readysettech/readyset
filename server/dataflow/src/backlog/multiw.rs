@@ -48,14 +48,16 @@ impl Handle {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes freed.
-    pub fn empty_at_index(
+    pub fn empty_random_for_each(
         &mut self,
-        index: usize,
-    ) -> Option<&evmap::Values<Vec<DataType>, RandomState>> {
+        rng: &mut impl rand::Rng,
+        n: usize,
+        mut f: impl FnMut(&evmap::Values<Vec<DataType>, RandomState>),
+    ) {
         match *self {
-            Handle::Single(ref mut h) => h.empty_at_index(index).map(|r| r.1),
-            Handle::Double(ref mut h) => h.empty_at_index(index).map(|r| r.1),
-            Handle::Many(ref mut h) => h.empty_at_index(index).map(|r| r.1),
+            Handle::Single(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
+            Handle::Double(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
+            Handle::Many(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
         }
     }
 
