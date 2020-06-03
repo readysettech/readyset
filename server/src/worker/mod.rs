@@ -4,7 +4,7 @@ use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
 use futures_util::{future::FutureExt, future::TryFutureExt, sink::SinkExt, stream::StreamExt};
-use noria::channel::{self, TcpSender};
+use noria::channel;
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
 use noria::ControllerDescriptor;
@@ -266,6 +266,7 @@ async fn listen_df<'a>(
     let state_sizes = Arc::new(Mutex::new(HashMap::new()));
     if let Some(evict_every) = evict_every {
         let log = log.clone();
+        let coord = coord.clone();
         let mut domain_senders = HashMap::new();
         let state_sizes = state_sizes.clone();
         let mut timer = valve.wrap(tokio::time::interval_at(
@@ -276,7 +277,14 @@ async fn listen_df<'a>(
         tokio::spawn(async move {
             let _alive = a;
             while let Some(_) = timer.next().await {
-                do_eviction(&log, memory_limit, &mut domain_senders, &state_sizes).await;
+                do_eviction(
+                    &log,
+                    memory_limit,
+                    &mut domain_senders,
+                    &coord,
+                    &state_sizes,
+                )
+                .await;
             }
         });
     }
@@ -366,7 +374,11 @@ async fn listen_df<'a>(
 async fn do_eviction(
     log: &slog::Logger,
     memory_limit: Option<usize>,
-    domain_senders: &mut HashMap<(DomainIndex, usize), TcpSender<Box<Packet>>>,
+    domain_senders: &mut HashMap<
+        (DomainIndex, usize),
+        Box<dyn futures_sink::Sink<Box<Packet>, Error = Box<bincode::ErrorKind>> + Send + Unpin>,
+    >,
+    coord: &ChannelCoordinator,
     state_sizes: &Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
 ) {
     use std::cmp;
@@ -407,14 +419,26 @@ async fn do_eviction(
                         (largest.0).0.index(),
                     );
 
-                let tx = domain_senders.get_mut(&largest.0).unwrap();
-                tokio::task::block_in_place(|| {
-                    tx.send(Box::new(Packet::Evict {
+                let tx = domain_senders.entry(largest.0).or_insert_with(|| {
+                    tokio::task::block_in_place(|| {
+                        coord
+                            .builder_for(&largest.0)
+                            .unwrap()
+                            .build_async()
+                            .unwrap()
+                    })
+                });
+                let r = tx
+                    .send(Box::new(Packet::Evict {
                         node: None,
                         num_bytes: cmp::min(largest.1, total - limit),
                     }))
-                    .unwrap()
-                });
+                    .await;
+
+                if let Err(e) = r {
+                    // probably exiting?
+                    warn!(log, "failed to evict from {}: {}", (largest.0).0.index(), e);
+                }
             }
         }
     }
