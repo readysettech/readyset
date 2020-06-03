@@ -2651,7 +2651,7 @@ impl Domain {
             replay_paths: &HashMap<Tag, ReplayPath>,
             shard: Option<usize>,
             state: &mut StateMap,
-            nodes: &mut DomainNodes,
+            nodes: &DomainNodes,
         ) {
             // TODO: this is a linear walk of replay paths -- we should make that not linear
             for (tag, ref path) in replay_paths {
@@ -2708,7 +2708,7 @@ impl Domain {
             keys: &mut Vec<Vec<DataType>>,
             tag: Tag,
             shard: Option<usize>,
-            nodes: &mut DomainNodes,
+            nodes: &DomainNodes,
             executor: &mut dyn Executor,
         ) {
             let mut from = path[0].node;
@@ -2735,14 +2735,14 @@ impl Domain {
                             let local_index = n.local_addr();
 
                             if n.is_reader() {
-                                let mut size = 0;
+                                let mut size = None;
                                 n.with_reader(|r| {
                                     if r.is_partial() {
-                                        size = r.state_size().unwrap_or(0)
+                                        size = r.state_size();
                                     }
                                 })
                                 .unwrap();
-                                Some((local_index, size))
+                                size.map(|s| (local_index, s))
                             } else {
                                 self.state
                                     .get(local_index)
@@ -2760,17 +2760,15 @@ impl Domain {
 
                 if let Some((node, num_bytes)) = node {
                     let mut freed = 0u64;
+                    let mut n = self.nodes[node].borrow_mut();
                     while freed < num_bytes as u64 {
-                        if self.nodes[node].borrow().is_dropped() {
+                        if n.is_dropped() {
                             break; // Node was dropped. Give up.
-                        } else if self.nodes[node].borrow().is_reader() {
+                        } else if n.is_reader() {
                             // we can only evict one key a time here because the freed memory
                             // calculation is based on the key that *will* be evicted. We may count
                             // the same individual key twice if we batch evictions here.
-                            let freed_now = self.nodes[node]
-                                .borrow_mut()
-                                .with_reader_mut(|r| r.evict_random_key())
-                                .unwrap();
+                            let freed_now = n.with_reader_mut(|r| r.evict_random_key()).unwrap();
 
                             freed += freed_now;
                             if freed_now == 0 {
@@ -2793,7 +2791,7 @@ impl Domain {
                                 &self.replay_paths,
                                 self.shard,
                                 &mut self.state,
-                                &mut self.nodes,
+                                &self.nodes,
                             );
 
                             if self.state[node].deep_size_of() == 0 {
