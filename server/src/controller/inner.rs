@@ -1151,49 +1151,43 @@ impl ControllerInner {
             leaf.index()
         );
 
-        if self
+        let nchildren = self
             .ingredients
             .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-            .count()
-            > 0
-        {
+            .count();
+        if nchildren > 0 {
             // This query leaf node has children -- typically, these are readers, but they can also
-            // include egress nodes or other, dependent queries.
-            let mut has_non_reader_children = false;
-            let readers: Vec<_> = self
-                .ingredients
-                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-                .filter(|ni| {
-                    if self.ingredients[*ni].is_reader() {
-                        true
-                    } else {
-                        has_non_reader_children = true;
-                        false
-                    }
-                })
-                .collect();
-            if has_non_reader_children {
-                // should never happen, since we remove nodes in reverse topological order
+            // include egress nodes or other, dependent queries. We need to find the actual reader,
+            // and remove that.
+            if nchildren != 1 {
                 crit!(
                     self.log,
-                    "not removing node {} yet, as it still has non-reader children",
+                    "cannot remove node {}, as it still has multiple children",
                     leaf.index()
                 );
                 unreachable!();
             }
+
+            let mut readers = Vec::new();
+            let mut bfs = Bfs::new(&self.ingredients, leaf);
+            while let Some(child) = bfs.next(&self.ingredients) {
+                let n = &self.ingredients[child];
+                if n.with_reader(|r| r.is_for() == leaf) == Ok(true) {
+                    readers.push(child);
+                }
+            }
+
             // nodes can have only one reader attached
-            assert!(readers.len() <= 1);
+            assert_eq!(readers.len(), 1);
+            let reader = readers[0];
             debug!(
                 self.log,
                 "Removing query leaf \"{}\"", self.ingredients[leaf].name();
                 "node" => leaf.index(),
+                "really" => reader.index(),
             );
-            if !readers.is_empty() {
-                removals.push(readers[0]);
-                leaf = readers[0];
-            } else {
-                unreachable!();
-            }
+            removals.push(reader);
+            leaf = reader;
         }
 
         // `node` now does not have any children any more
