@@ -71,9 +71,9 @@ fn main() {
             Arg::with_name("memory_check_freq")
                 .long("memory-check-every")
                 .takes_value(true)
-                .default_value("10")
+                .default_value("1")
                 .requires("memory")
-                .help("Frequency at which to check the state size against the memory limit [in milliseconds]."),
+                .help("Frequency at which to check the state size against the memory limit [in seconds]."),
         )
         .arg(
             Arg::with_name("noreuse")
@@ -131,7 +131,7 @@ fn main() {
     let mut builder = Builder::default();
     builder.set_listen_addr(listen_addr);
     if memory > 0 {
-        builder.set_memory_limit(memory, Duration::from_millis(memory_check_freq));
+        builder.set_memory_limit(memory, Duration::from_secs(memory_check_freq));
     }
     builder.set_sharding(sharding);
     builder.set_quorum(quorum);

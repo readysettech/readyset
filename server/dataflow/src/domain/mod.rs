@@ -2762,11 +2762,11 @@ impl Domain {
                     let mut freed = 0u64;
                     let mut n = self.nodes[node].borrow_mut();
                     while freed < num_bytes as u64 {
+                        // TODO: use (num_bytes - freed) / SOMETHING to compute # keys to evict
                         if n.is_dropped() {
                             break; // Node was dropped. Give up.
                         } else if n.is_reader() {
-                            let freed_now =
-                                n.with_reader_mut(|r| r.evict_random_keys(100)).unwrap();
+                            let freed_now = n.with_reader_mut(|r| r.evict_random_keys(16)).unwrap();
 
                             freed += freed_now;
                             if n.with_reader(|r| r.is_empty()).unwrap() {
@@ -2779,7 +2779,7 @@ impl Domain {
                             }
                         } else {
                             let (key_columns, keys, bytes) = {
-                                let k = self.state[node].evict_random_keys(100);
+                                let k = self.state[node].evict_random_keys(16);
                                 (k.0.to_vec(), k.1, k.2)
                             };
                             freed += bytes;
@@ -2805,6 +2805,7 @@ impl Domain {
                         }
                     }
                     debug!(self.log, "evicted {} from node {:?}", freed, n);
+                    self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
                 }
             }
             (Packet::EvictKeys {

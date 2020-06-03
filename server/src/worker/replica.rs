@@ -128,7 +128,7 @@ impl Replica {
             timeout: Strawpoll::from(async_timer::oneshot::Timer::new(time::Duration::from_secs(
                 3600,
             ))),
-            refresh_sizes: tokio::time::interval(time::Duration::from_secs(1)),
+            refresh_sizes: tokio::time::interval(time::Duration::from_millis(500)),
             timed_out: false,
         }
     }
@@ -583,6 +583,7 @@ impl Future for Replica {
             let out = this.out;
 
             if let Poll::Ready(Some(_)) = this.refresh_sizes.poll_next(cx) {
+                // TODO: keep the state size up-to-date continuously?
                 d.update_state_sizes();
             }
 
