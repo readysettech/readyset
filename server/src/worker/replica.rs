@@ -62,6 +62,9 @@ pub(super) struct Replica {
     retry: Option<Box<Packet>>,
 
     #[pin]
+    refresh_sizes: tokio::time::Interval,
+
+    #[pin]
     valve: Valve,
 
     #[pin]
@@ -125,6 +128,7 @@ impl Replica {
             timeout: Strawpoll::from(async_timer::oneshot::Timer::new(time::Duration::from_secs(
                 3600,
             ))),
+            refresh_sizes: tokio::time::interval(time::Duration::from_secs(1)),
             timed_out: false,
         }
     }
@@ -540,8 +544,6 @@ impl Future for Replica {
     type Output = Result<(), failure::Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         'process: loop {
-            // FIXME: check if we should call update_state_sizes (every evict_every)
-
             // are there any new connections?
             if !self
                 .as_mut()
@@ -579,6 +581,10 @@ impl Future for Replica {
             let mut this = self.as_mut().project();
             let d = this.domain;
             let out = this.out;
+
+            if let Poll::Ready(Some(_)) = this.refresh_sizes.poll_next(cx) {
+                d.update_state_sizes();
+            }
 
             macro_rules! process {
                 ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
