@@ -30,6 +30,14 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                 return next_domain();
             }
 
+            if n.is_reader() {
+                // readers always re-materialize, so sharing a domain doesn't help them much.
+                // having them in their own domain also means that they get to aggregate reader
+                // replay requests in their own little thread, and not interfere as much with other
+                // internal traffic.
+                return next_domain();
+            }
+
             if n.is_base() {
                 // bases are in a little bit of an awkward position becuase they can't just blindly
                 // join in domains of other bases in the face of sharding. consider the case of two
