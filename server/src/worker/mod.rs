@@ -438,6 +438,8 @@ async fn do_eviction(
                 if let Err(e) = r {
                     // probably exiting?
                     warn!(log, "failed to evict from {}: {}", (largest.0).0.index(), e);
+                    // remove sender so we don't try to use it again
+                    domain_senders.remove(&largest.0);
                 }
             }
         }
