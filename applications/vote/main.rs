@@ -91,6 +91,8 @@ where
         rt.block_on(async move { C::new(params, local_args).await.unwrap() })
     };
 
+    rt.block_on(async { tokio::time::delay_for(time::Duration::from_secs(1)).await });
+
     eprintln!("setup completed");
 
     let start = std::time::SystemTime::now();
