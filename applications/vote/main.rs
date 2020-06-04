@@ -416,6 +416,12 @@ where
         atomic::spin_loop_hint();
     }
 
+    eprintln!(
+        "# missing after main run: {} writes, {} reads",
+        nwrite.load(atomic::Ordering::Acquire),
+        nread.load(atomic::Ordering::Acquire)
+    );
+
     // force the client to also complete their queue
     rt.block_on(async {
         // both poll_ready calls need &mut C, so the borrow checker will get mad. but since we're
