@@ -35,34 +35,38 @@ impl KeyedState {
     /// the number of bytes freed. Returns `None` if map is empty.
     pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(u64, Vec<DataType>)> {
         let (rs, key) = match *self {
-            KeyedState::Single(ref mut m) => {
+            KeyedState::Single(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]))
             }
-            KeyedState::Double(ref mut m) => {
+            KeyedState::Double(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, vec![k.0, k.1]))
             }
-            KeyedState::Tri(ref mut m) => {
+            KeyedState::Tri(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2]))
             }
-            KeyedState::Quad(ref mut m) => {
+            KeyedState::Quad(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3]))
             }
-            KeyedState::Quin(ref mut m) => {
+            KeyedState::Quin(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4]))
             }
-            KeyedState::Sex(ref mut m) => {
+            KeyedState::Sex(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5]))
+            }
+            _ => {
+                // map must be empty, so no point in trying to evict from it.
+                return None;
             }
         }?;
         Some((
