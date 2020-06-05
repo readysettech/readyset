@@ -1,6 +1,6 @@
 [package]
 name = "noria-common"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2018"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 arccstr = "1.2.0"
-noria = { version = "0.5.0", path = "../../noria" }
+noria = { version = "0.6.0", path = "../../noria" }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde_derive = "1.0.8"
 serde = { version = "1.0.8", features = ["rc"] }
