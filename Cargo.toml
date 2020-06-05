@@ -3,7 +3,6 @@ members = [
 	"noria",
 	"server",
 	"applications",
-	"orchestration",
 ]
 
 [profile.release]
