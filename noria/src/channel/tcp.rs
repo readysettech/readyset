@@ -9,7 +9,7 @@ use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
 use futures_util::{sink::Sink, stream::Stream};
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use std::{
     pin::Pin,
@@ -156,7 +156,7 @@ pub enum RecvError {
     DeserializationError(bincode::Error),
 }
 
-#[pin_project]
+#[pin_project(project = DualTcpStreamProj)]
 pub enum DualTcpStream<S, T, T2, D> {
     Passthrough(#[pin] AsyncBincodeStream<S, T, Tagged<()>, D>),
     Upgrade(
@@ -194,39 +194,31 @@ where
 {
     type Error = bincode::Error;
 
-    #[project]
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        #[project]
         match self.project() {
-            DualTcpStream::Passthrough(abs) => abs.poll_ready(cx),
-            DualTcpStream::Upgrade(abs, _) => abs.poll_ready(cx),
+            DualTcpStreamProj::Passthrough(abs) => abs.poll_ready(cx),
+            DualTcpStreamProj::Upgrade(abs, _) => abs.poll_ready(cx),
         }
     }
 
-    #[project]
     fn start_send(self: Pin<&mut Self>, item: Tagged<()>) -> Result<(), Self::Error> {
-        #[project]
         match self.project() {
-            DualTcpStream::Passthrough(abs) => abs.start_send(item),
-            DualTcpStream::Upgrade(abs, _) => abs.start_send(item),
+            DualTcpStreamProj::Passthrough(abs) => abs.start_send(item),
+            DualTcpStreamProj::Upgrade(abs, _) => abs.start_send(item),
         }
     }
 
-    #[project]
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        #[project]
         match self.project() {
-            DualTcpStream::Passthrough(abs) => abs.poll_flush(cx),
-            DualTcpStream::Upgrade(abs, _) => abs.poll_flush(cx),
+            DualTcpStreamProj::Passthrough(abs) => abs.poll_flush(cx),
+            DualTcpStreamProj::Upgrade(abs, _) => abs.poll_flush(cx),
         }
     }
 
-    #[project]
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        #[project]
         match self.project() {
-            DualTcpStream::Passthrough(abs) => abs.poll_close(cx),
-            DualTcpStream::Upgrade(abs, _) => abs.poll_close(cx),
+            DualTcpStreamProj::Passthrough(abs) => abs.poll_close(cx),
+            DualTcpStreamProj::Upgrade(abs, _) => abs.poll_close(cx),
         }
     }
 }
@@ -241,14 +233,12 @@ where
 {
     type Item = Result<T, bincode::Error>;
 
-    #[project]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // https://github.com/rust-lang/rust-clippy/issues/3071
-        #[project]
         #[allow(clippy::redundant_closure)]
         match self.project() {
-            DualTcpStream::Passthrough(abr) => abr.poll_next(cx),
-            DualTcpStream::Upgrade(abr, upgrade) => {
+            DualTcpStreamProj::Passthrough(abr) => abr.poll_next(cx),
+            DualTcpStreamProj::Upgrade(abr, upgrade) => {
                 Poll::Ready(ready!(abr.poll_next(cx)).transpose()?.map(upgrade).map(Ok))
             }
         }
