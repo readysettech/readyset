@@ -58,7 +58,10 @@ where
     type Response = hyper::body::Bytes;
     type Error = failure::Error;
 
+    #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    #[cfg(doc)]
+    type Future = crate::doc_mock::Future<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -172,7 +175,10 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
+#[cfg(not(doc))]
 type RpcFuture<A, R> = impl Future<Output = Result<R, failure::Error>>;
+#[cfg(doc)]
+type RpcFuture<A, R> = crate::doc_mock::FutureWithExtra<Result<R, failure::Error>, A>;
 
 // Needed b/c of https://github.com/rust-lang/rust/issues/65442
 async fn finalize<R, E>(

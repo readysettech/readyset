@@ -213,7 +213,11 @@ type InnerService = multiplex::Client<
 impl Service<()> for Endpoint {
     type Response = InnerService;
     type Error = tokio::io::Error;
+
+    #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    #[cfg(doc)]
+    type Future = crate::doc_mock::Future<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -256,16 +260,19 @@ fn make_table_discover(addr: SocketAddr) -> Discover {
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
+#[cfg(not(doc))]
 type Discover = impl tower_discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
     + Unpin
     + Send;
+#[cfg(doc)]
+type Discover = crate::doc_mock::Discover<InnerService>;
 
 pub(crate) type TableRpc = Buffer<
     ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<Input>>>>,
     Tagged<LocalOrNot<Input>>,
 >;
 
-/// A failed [`SyncTable`] operation.
+/// A failed [`Table`] operation.
 #[derive(Debug, Fail)]
 pub enum TableError {
     /// The wrong number of columns was given when inserting a row.
@@ -577,7 +584,11 @@ impl Table {
 impl Service<Vec<TableOperation>> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
+
+    #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
+    #[cfg(doc)]
+    type Future = crate::doc_mock::Future<Result<Tagged<()>, TableError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {

@@ -11,4 +11,5 @@ debug=true
 [patch.crates-io]
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
+# comment this out if you want cargo doc to work!
 tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
