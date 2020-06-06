@@ -48,7 +48,7 @@ tokio = { version = "0.2.0", features = ["full"] }
 async-bincode = "0.5.0"
 tracing = "0.1"
 streamunordered = "0.5.0"
-stream-cancel = "0.5.1"
+stream-cancel = "0.6.1"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
