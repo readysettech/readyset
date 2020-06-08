@@ -24,3 +24,4 @@ pub(crate) mod memcached;
 //pub(crate) mod mssql;
 pub(crate) mod mysql;
 pub(crate) mod netsoup;
+pub(crate) mod redis;

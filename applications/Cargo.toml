@@ -21,6 +21,7 @@ noria = { path = "../server", package = "noria-server" }
 num_cpus = "1"
 rand = "0.7"
 rand_distr = "0.2"
+redis = { version = "0.16", features = ["tokio-rt-core"] }
 regex = "1.0.0"
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
