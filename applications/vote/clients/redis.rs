@@ -54,8 +54,13 @@ impl Service<ReadRequest> for Conn {
         let len = req.0.len();
         let mut conn = self.c.clone();
         async move {
-            let rows: Vec<i32> = conn.get(req.0).await?;
-            assert_eq!(rows.len(), len);
+            if req.0.len() == 1 {
+                // https://github.com/mitsuhiko/redis-rs/issues/336
+                let _: i32 = conn.get(req.0[0]).await?;
+            } else {
+                let rows: Vec<i32> = conn.get(&req.0[..]).await?;
+                assert_eq!(rows.len(), len);
+            }
             Ok(())
         }
     }
