@@ -8,7 +8,8 @@ use tower_service::Service;
 
 #[derive(Clone)]
 pub(crate) struct Conn {
-    c: redis::aio::MultiplexedConnection,
+    // concurrency limit is per load generator!
+    svc: tower_limit::ConcurrencyLimit<ActualConn>,
 }
 
 impl VoteClient for Conn {
@@ -35,7 +36,11 @@ impl VoteClient for Conn {
                     .context("failed to do article prepopulation")?;
             }
 
-            Ok(Conn { c: conn })
+            // we need to provide _some_ backpressure, otherwise the load generator won't start to
+            // batch (which we want to improve throughput). the choice of 2048 is semi-random. it's
+            // the same as noria is using at time of writing.
+            let svc = tower_limit::ConcurrencyLimit::new(ActualConn { c: conn }, 2048);
+            Ok(Conn { svc })
         }
     }
 }
@@ -43,10 +48,42 @@ impl VoteClient for Conn {
 impl Service<ReadRequest> for Conn {
     type Response = ();
     type Error = failure::Error;
+    type Future = <tower_limit::ConcurrencyLimit<ActualConn> as Service<ReadRequest>>::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::<ReadRequest>::poll_ready(&mut self.svc, cx)
+    }
+
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
+        Service::<ReadRequest>::call(&mut self.svc, req)
+    }
+}
+
+impl Service<WriteRequest> for Conn {
+    type Response = ();
+    type Error = failure::Error;
+    type Future = <tower_limit::ConcurrencyLimit<ActualConn> as Service<WriteRequest>>::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::<WriteRequest>::poll_ready(&mut self.svc, cx)
+    }
+
+    fn call(&mut self, req: WriteRequest) -> Self::Future {
+        Service::<WriteRequest>::call(&mut self.svc, req)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ActualConn {
+    c: redis::aio::MultiplexedConnection,
+}
+
+impl Service<ReadRequest> for ActualConn {
+    type Response = ();
+    type Error = failure::Error;
     type Future = impl Future<Output = Result<(), failure::Error>> + Send;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // no backpressure, so queueing will happen internally in the library probably.
         Poll::Ready(Ok(()))
     }
 
@@ -66,7 +103,7 @@ impl Service<ReadRequest> for Conn {
     }
 }
 
-impl Service<WriteRequest> for Conn {
+impl Service<WriteRequest> for ActualConn {
     type Response = ();
     type Error = failure::Error;
     type Future = impl Future<Output = Result<(), failure::Error>> + Send;

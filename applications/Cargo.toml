@@ -29,6 +29,7 @@ slog-term = "2.4.0"
 tokio = { version = "0.2.0", features = ["full"] }
 tokio-test = "0.2.0"
 tower-service = "0.3.0"
+tower-limit = "0.3.1"
 # need 0.3.1 for https://github.com/tower-rs/tower/pull/427
 tower-util = "0.3.1"
 trawler = "0.11.0-alpha.2"
