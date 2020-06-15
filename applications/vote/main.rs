@@ -347,22 +347,37 @@ where
         }
     };
 
-    while next < end {
+    'gen: while next < end {
         let now = time::Instant::now();
         // only queue a new request if we're told to. if this is not the case, we've
         // just been woken up so we can realize we need to send a batch
         // NOTE: while, not if, in case we start falling behind
         while next <= now {
             let id = id_rng.sample(&mut rng) as i32;
-            let (batches, cap_hint) = if rng.gen_bool(1.0 / f64::from(every)) {
-                (&mut queued_w, &mut w_capacity)
+            let (batches, cap_hint, read) = if rng.gen_bool(1.0 / f64::from(every)) {
+                (&mut queued_w, &mut w_capacity, false)
             } else {
-                (&mut queued_r, &mut r_capacity)
+                (&mut queued_r, &mut r_capacity, true)
             };
 
             if batches.is_empty() {
                 // there is no pending batch, so start one
                 batches.push_back((Vec::with_capacity(*cap_hint), Vec::with_capacity(*cap_hint)));
+            }
+
+            if batches.len() > 1_000
+                && now - batches.front().unwrap().1[0] > time::Duration::from_secs(60)
+            {
+                // we're falling behind by _a lot_. if we keep running, we may even run out of
+                // memory from the infinite queueing we're doing, if load is high enough.
+                // to mitigate that, we're going to terminate early.
+                eprintln!(
+                    "# fell too far behind -- {:?} worth of {} pending in {} batches",
+                    now - batches.front().unwrap().1[0],
+                    if read { "reads" } else { "writes" },
+                    batches.len(),
+                );
+                break 'gen;
             }
 
             let (keys, times) = batches.back_mut().expect("push if is_empty");
