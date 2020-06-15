@@ -200,7 +200,7 @@ impl ViewBuilder {
         Ok(View {
             node,
             schema,
-            columns: Arc::from(columns),
+            columns,
             shard_addrs: addrs,
             shards: conns,
             tracer,
@@ -215,7 +215,7 @@ impl ViewBuilder {
 #[derive(Clone)]
 pub struct View {
     node: NodeIndex,
-    columns: Arc<[String]>,
+    columns: Vec<String>,
     schema: Option<Vec<ColumnSpecification>>,
 
     shards: Vec<ViewRpc>,
@@ -264,7 +264,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
             None
         };
 
-        let columns = Arc::clone(&self.columns);
+        let columns = Arc::from(&self.columns[..]);
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
