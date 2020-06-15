@@ -380,36 +380,34 @@ where
             next += time::Duration::new(0, interarrival.sample(&mut rng) as u32);
         }
 
-        // try to send some batches
-        while !queued_w.is_empty() || !queued_r.is_empty() {
-            if !queued_w.is_empty() {
-                if let Poll::Ready(r) = rt.block_on(async {
-                    futures_util::poll!(futures_util::future::poll_fn(|cx| {
-                        Service::<WriteRequest>::poll_ready(&mut handle, cx)
-                    }))
-                }) {
-                    r.unwrap();
-                    let (keys, times) = queued_w.pop_front().expect("!is_empty");
-                    ops += keys.len();
-                    enqueue(&mut handle, times, keys, true, None);
-                } else {
-                    // we can't send the request yet -- keep generating batches
-                }
+        // try to send batches
+        if !queued_w.is_empty() {
+            if let Poll::Ready(r) = rt.block_on(async {
+                futures_util::poll!(futures_util::future::poll_fn(|cx| {
+                    Service::<WriteRequest>::poll_ready(&mut handle, cx)
+                }))
+            }) {
+                r.unwrap();
+                let (keys, times) = queued_w.pop_front().expect("!is_empty");
+                ops += keys.len();
+                enqueue(&mut handle, times, keys, true, None);
+            } else {
+                // we can't send the request yet -- keep generating batches
             }
+        }
 
-            if !queued_r.is_empty() {
-                if let Poll::Ready(r) = rt.block_on(async {
-                    futures_util::poll!(futures_util::future::poll_fn(|cx| {
-                        Service::<ReadRequest>::poll_ready(&mut handle, cx)
-                    }))
-                }) {
-                    r.unwrap();
-                    let (keys, times) = queued_r.pop_front().expect("!is_empty");
-                    ops += keys.len();
-                    enqueue(&mut handle, times, keys, false, None);
-                } else {
-                    // we can't send the request yet -- keep generating batches
-                }
+        if !queued_r.is_empty() {
+            if let Poll::Ready(r) = rt.block_on(async {
+                futures_util::poll!(futures_util::future::poll_fn(|cx| {
+                    Service::<ReadRequest>::poll_ready(&mut handle, cx)
+                }))
+            }) {
+                r.unwrap();
+                let (keys, times) = queued_r.pop_front().expect("!is_empty");
+                ops += keys.len();
+                enqueue(&mut handle, times, keys, false, None);
+            } else {
+                // we can't send the request yet -- keep generating batches
             }
         }
 
