@@ -414,6 +414,10 @@ where
         atomic::spin_loop_hint();
     }
 
+    // we're done _generating_ requests, so we can measure generation throughput
+    let took = start.elapsed();
+    let gen = throughput(ops, took);
+
     eprintln!(
         "# missing after main run: {} writes, {} reads",
         nwrite.load(atomic::Ordering::Acquire),
@@ -474,9 +478,8 @@ where
         std::thread::yield_now();
     }
 
-    // only now is it acceptable to measure throughput
+    // only now is it acceptable to measure _achieved_ throughput
     let took = start.elapsed();
-    let gen = throughput(ops, took);
     let worker_ops = throughput(ndone.load(atomic::Ordering::Acquire), took);
 
     // need to drop the pool before waiting so that workers will exit
