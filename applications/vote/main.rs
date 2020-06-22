@@ -114,7 +114,7 @@ where
                             handle,
                             errd,
                             ex,
-                            zipf::ZipfDistribution::new(articles, 1.08).unwrap(),
+                            zipf::ZipfDistribution::new(articles, 1.15).unwrap(),
                             target,
                             global_args,
                         )

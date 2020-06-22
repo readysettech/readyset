@@ -88,7 +88,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
         let done = done.clone();
         let barrier = barrier.clone();
         tokio::spawn(async move {
-            let zipf = ZipfDistribution::new(narticles, 1.08).unwrap();
+            let zipf = ZipfDistribution::new(narticles, 1.15).unwrap();
             barrier.wait().await;
 
             let mut reporter = Reporter::new(every);
@@ -122,7 +122,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
         let done = done.clone();
         let barrier = barrier.clone();
         tokio::spawn(async move {
-            let zipf = ZipfDistribution::new(narticles, 1.08).unwrap();
+            let zipf = ZipfDistribution::new(narticles, 1.15).unwrap();
             barrier.wait().await;
             let start = time::Instant::now();
             let mut succeeded = false;
@@ -178,7 +178,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
         let stat = stat.clone();
         let barrier = barrier.clone();
         tokio::spawn(async move {
-            let zipf = ZipfDistribution::new(narticles, 1.08).unwrap();
+            let zipf = ZipfDistribution::new(narticles, 1.15).unwrap();
             barrier.wait().await;
 
             let mut reporter = Reporter::new(every);
@@ -213,7 +213,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
         tokio::spawn(async move {
             let n = 100;
             let mut hits = 0;
-            let zipf = ZipfDistribution::new(narticles, 1.08).unwrap();
+            let zipf = ZipfDistribution::new(narticles, 1.15).unwrap();
             let mut reporter = Reporter::new(every);
             barrier.wait().await;
             while start.elapsed() < runtime {
@@ -358,7 +358,7 @@ async fn main() {
             true,
             &args,
             Some(
-                fs::File::create(format!("vote-no-partial-stupid-{}M.zipf1.08.log", mills))
+                fs::File::create(format!("vote-no-partial-stupid-{}M.zipf1.15.log", mills))
                     .unwrap(),
             ),
         )
@@ -380,7 +380,7 @@ async fn main() {
             &s,
             true,
             &args,
-            Some(fs::File::create(format!("vote-partial-reuse-{}M.zipf1.08.log", mills)).unwrap()),
+            Some(fs::File::create(format!("vote-partial-reuse-{}M.zipf1.15.log", mills)).unwrap()),
         )
         .await;
 
@@ -421,7 +421,7 @@ async fn main() {
             true,
             &args,
             Some(
-                fs::File::create(format!("vote-no-partial-reuse-{}M.zipf1.08.log", mills)).unwrap(),
+                fs::File::create(format!("vote-no-partial-reuse-{}M.zipf1.15.log", mills)).unwrap(),
             ),
         )
         .await;
@@ -442,7 +442,7 @@ async fn main() {
             &s,
             true,
             &args,
-            Some(fs::File::create(format!("vote-partial-stupid-{}M.zipf1.08.log", mills)).unwrap()),
+            Some(fs::File::create(format!("vote-partial-stupid-{}M.zipf1.15.log", mills)).unwrap()),
         )
         .await;
     } else {
