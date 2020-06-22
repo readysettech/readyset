@@ -175,49 +175,51 @@ where
         }
     }
 
-    let (rmt_w_t, sjrn_w_t) = write_t.last().unwrap();
-    let (rmt_r_t, sjrn_r_t) = read_t.last().unwrap();
-
-    println!(
-        "write\t50\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_w_t.value_at_quantile(0.5),
-        rmt_w_t.value_at_quantile(0.5)
-    );
-    println!(
-        "read\t50\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_r_t.value_at_quantile(0.5),
-        rmt_r_t.value_at_quantile(0.5)
-    );
-    println!(
-        "write\t95\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_w_t.value_at_quantile(0.95),
-        rmt_w_t.value_at_quantile(0.95)
-    );
-    println!(
-        "read\t95\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_r_t.value_at_quantile(0.95),
-        rmt_r_t.value_at_quantile(0.95)
-    );
-    println!(
-        "write\t99\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_w_t.value_at_quantile(0.99),
-        rmt_w_t.value_at_quantile(0.99)
-    );
-    println!(
-        "read\t99\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_r_t.value_at_quantile(0.99),
-        rmt_r_t.value_at_quantile(0.99)
-    );
-    println!(
-        "write\t100\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_w_t.max(),
-        rmt_w_t.max()
-    );
-    println!(
-        "read\t100\t{:.2}\t{:.2}\t(all µs)",
-        sjrn_r_t.max(),
-        rmt_r_t.max()
-    );
+    // these may be None for priming, or otherwise very short runtime
+    if let Some((rmt_w_t, sjrn_w_t)) = write_t.last() {
+        println!(
+            "write\t50\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_w_t.value_at_quantile(0.5),
+            rmt_w_t.value_at_quantile(0.5)
+        );
+        println!(
+            "write\t95\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_w_t.value_at_quantile(0.95),
+            rmt_w_t.value_at_quantile(0.95)
+        );
+        println!(
+            "write\t99\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_w_t.value_at_quantile(0.99),
+            rmt_w_t.value_at_quantile(0.99)
+        );
+        println!(
+            "write\t100\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_w_t.max(),
+            rmt_w_t.max()
+        );
+    }
+    if let Some((rmt_r_t, sjrn_r_t)) = read_t.last() {
+        println!(
+            "read\t50\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_r_t.value_at_quantile(0.5),
+            rmt_r_t.value_at_quantile(0.5)
+        );
+        println!(
+            "read\t95\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_r_t.value_at_quantile(0.95),
+            rmt_r_t.value_at_quantile(0.95)
+        );
+        println!(
+            "read\t99\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_r_t.value_at_quantile(0.99),
+            rmt_r_t.value_at_quantile(0.99)
+        );
+        println!(
+            "read\t100\t{:.2}\t{:.2}\t(all µs)",
+            sjrn_r_t.max(),
+            rmt_r_t.max()
+        );
+    }
 }
 
 fn run_generator<C, R>(
