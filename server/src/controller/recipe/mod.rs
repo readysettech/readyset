@@ -680,7 +680,13 @@ impl Recipe {
         let qid = qid.unwrap();
 
         self.aliases.remove(qname);
-        self.expressions.remove(&qid).is_some() && self.expression_order.remove_item(&qid).is_some()
+        if self.expressions.remove(&qid).is_some() {
+            if let Some(i) = self.expression_order.iter().position(|&q| q == qid) {
+                self.expression_order.remove(i);
+                return true;
+            }
+        }
+        false
     }
 
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only

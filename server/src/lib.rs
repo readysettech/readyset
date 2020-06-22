@@ -343,7 +343,6 @@
 //! + [id=1, title=Hello world, votes=43]
 //! ```
 #![feature(type_alias_impl_trait)]
-#![feature(vec_remove_item)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 //#![deny(unreachable_pub)]
