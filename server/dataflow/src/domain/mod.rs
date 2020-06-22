@@ -2726,9 +2726,15 @@ impl Domain {
         }
 
         match (*m,) {
-            (Packet::Evict { node, num_bytes },) => {
-                let node = node.map(|n| (n, num_bytes)).or_else(|| {
-                    self.nodes
+            (Packet::Evict {
+                node,
+                mut num_bytes,
+            },) => {
+                let nodes = if let Some(node) = node {
+                    vec![(node, num_bytes)]
+                } else {
+                    let mut candidates: Vec<_> = self
+                        .nodes
                         .values()
                         .filter_map(|nd| {
                             let n = &*nd.borrow();
@@ -2751,14 +2757,47 @@ impl Domain {
                             }
                         })
                         .filter(|&(_, s)| s > 0)
-                        .max_by_key(|&(_, s)| s)
-                        .map(|(n, s)| {
-                            trace!(self.log, "chose to evict from node {:?} with size {}", n, s);
-                            (n, cmp::min(num_bytes, s as usize))
-                        })
-                });
+                        .map(|(x, s)| (x, s as usize))
+                        .collect();
 
-                if let Some((node, num_bytes)) = node {
+                    // we want to spread the eviction across the nodes,
+                    // rather than emptying out one node completely.
+                    // -1* so we sort in descending order
+                    // TODO: be smarter than 3 here
+                    candidates.sort_unstable_by_key(|&(_, s)| -1 * (s as i64));
+                    candidates.truncate(3);
+
+                    // don't evict from tiny things (< 10% of max)
+                    if let Some(too_small_i) = candidates
+                        .iter()
+                        .position(|&(_, s)| s < candidates[0].1 / 10)
+                    {
+                        // everything beyond this is smaller, so also too small
+                        candidates.truncate(too_small_i);
+                    }
+
+                    let mut n = candidates.len();
+                    // rev to start with the smallest of the n domains
+                    for (_, size) in candidates.iter_mut().rev() {
+                        // TODO: should this be evenly divided, or weighted by the size of the domains?
+                        let share = (num_bytes + n - 1) / n;
+                        // we're only willing to evict at most half the state in each node
+                        // unless this is the only node left to evict from
+                        *size = if n > 1 {
+                            cmp::min(*size / 2, share)
+                        } else {
+                            assert_eq!(share, num_bytes);
+                            share
+                        };
+                        num_bytes -= *size;
+                        trace!(self.log, "chose to evict {}b from node {:?}", *size, n);
+                        n -= 1;
+                    }
+
+                    candidates
+                };
+
+                for (node, num_bytes) in nodes {
                     let mut freed = 0u64;
                     let mut n = self.nodes[node].borrow_mut();
                     while freed < num_bytes as u64 {

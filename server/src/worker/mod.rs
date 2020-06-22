@@ -385,7 +385,7 @@ async fn do_eviction(
 
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
-    let sizes: Vec<((DomainIndex, usize), usize)> = tokio::task::block_in_place(|| {
+    let mut sizes: Vec<((DomainIndex, usize), usize)> = tokio::task::block_in_place(|| {
         let state_sizes = state_sizes.lock().unwrap();
         state_sizes
             .iter()
@@ -409,37 +409,69 @@ async fn do_eviction(
         None => (),
         Some(limit) => {
             if total >= limit {
-                // evict from the largest domain
-                let largest = sizes.into_iter().max_by_key(|&(_, s)| s).unwrap();
-                debug!(
-                        log,
-                        "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
-                        total,
-                        limit,
-                        (largest.0).0.index(),
-                    );
+                let mut over = total - limit;
 
-                let tx = domain_senders.entry(largest.0).or_insert_with(|| {
-                    tokio::task::block_in_place(|| {
-                        coord
-                            .builder_for(&largest.0)
-                            .unwrap()
-                            .build_async()
-                            .unwrap()
-                    })
-                });
-                let r = tx
-                    .send(Box::new(Packet::Evict {
-                        node: None,
-                        num_bytes: cmp::min(largest.1, total - limit),
-                    }))
-                    .await;
+                // we are! time to evict.
+                // here's how we're going to proceed.
+                // we don't want to _empty_ any views if we can avoid it.
+                // and we also need to be aware that evicting something from one place may cause a
+                // number of downstream evictions.
 
-                if let Err(e) = r {
-                    // probably exiting?
-                    warn!(log, "failed to evict from {}: {}", (largest.0).0.index(), e);
-                    // remove sender so we don't try to use it again
-                    domain_senders.remove(&largest.0);
+                // we want to spread the eviction impact across multiple nodes where possible,
+                // so we distribute how much we're over the limit across the 3 largest nodes.
+                // -1* so we sort in descending order
+                // TODO: be smarter than 3 here
+                sizes.sort_unstable_by_key(|&(_, s)| -1 * (s as i64));
+                sizes.truncate(3);
+
+                // don't evict from tiny things (< 10% of max)
+                if let Some(too_small_i) = sizes.iter().position(|&(_, s)| s < sizes[0].1 / 10) {
+                    // everything beyond this is smaller, so also too small
+                    sizes.truncate(too_small_i);
+                }
+
+                // starting with the smallest of the n domains
+                let mut n = sizes.len();
+                for &(target, size) in sizes.iter().rev() {
+                    // TODO: should this be evenly divided, or weighted by the size of the domains?
+                    let share = (over + n - 1) / n;
+                    // we're only willing to evict at most half the state in each domain
+                    // unless this is the only domain left to evict from
+                    let evict = if n > 1 {
+                        cmp::min(size / 2, share)
+                    } else {
+                        assert_eq!(share, over);
+                        share
+                    };
+                    over -= evict;
+                    n -= 1;
+
+                    debug!(
+                            log,
+                            "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
+                            total,
+                            limit,
+                            target.0.index(),
+                        );
+
+                    let tx = domain_senders.entry(target).or_insert_with(|| {
+                        tokio::task::block_in_place(|| {
+                            coord.builder_for(&target).unwrap().build_async().unwrap()
+                        })
+                    });
+                    let r = tx
+                        .send(Box::new(Packet::Evict {
+                            node: None,
+                            num_bytes: evict,
+                        }))
+                        .await;
+
+                    if let Err(e) = r {
+                        // probably exiting?
+                        warn!(log, "failed to evict from {}: {}", target.0.index(), e);
+                        // remove sender so we don't try to use it again
+                        domain_senders.remove(&target);
+                    }
                 }
             }
         }
