@@ -32,7 +32,7 @@ tower-service = "0.3.0"
 tower-limit = "0.3.1"
 # need 0.3.1 for https://github.com/tower-rs/tower/pull/427
 tower-util = "0.3.1"
-trawler = "0.11.0-alpha.2"
+trawler = "0.11.0-alpha.3"
 vec_map = { version = "0.8.0" }
 zipf = "6"
 zookeeper = "0.5.3"

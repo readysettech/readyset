@@ -175,8 +175,8 @@ where
         }
     }
 
-    let (rmt_w_t, sjrn_w_t) = write_t.collapse();
-    let (rmt_r_t, sjrn_r_t) = read_t.collapse();
+    let (rmt_w_t, sjrn_w_t) = write_t.last().unwrap();
+    let (rmt_r_t, sjrn_r_t) = read_t.last().unwrap();
 
     println!(
         "write\t50\t{:.2}\t{:.2}\t(all µs)",

@@ -84,6 +84,10 @@ impl Timeline {
         Ok(())
     }
 
+    pub fn last(&self) -> Option<(&Histogram<u64>, &Histogram<u64>)> {
+        self.histograms.last().map(|h| (&h.processing, &h.sojourn))
+    }
+
     pub fn collapse(&self) -> (Histogram<u64>, Histogram<u64>) {
         let mut hists = self.histograms.iter();
         if let Some(hs) = hists.next() {
