@@ -9,7 +9,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use noria::{ReadQuery, Tagged};
+use noria::{ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -36,7 +36,8 @@ task_local! {
     >>;
 }
 
-type Ack = tokio::sync::oneshot::Sender<Result<Tagged<SerializedReadReply>, ()>>;
+type SerializedReadReplyBatch = Vec<u8>;
+type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>>;
 
 pub(super) async fn listen(
     alive: tokio::sync::mpsc::Sender<()>,
@@ -153,23 +154,13 @@ where
             + std::mem::size_of::<u64>(/* seq.len */),
     );
 
-    struct X<I>(I);
-    impl<'a, I> bincode::SerializerAcceptor for X<I>
-    where
-        I: Iterator<Item = &'a Vec<DataType>>,
-        I: ExactSizeIterator,
-    {
-        type Output = ();
-        fn accept<T: serde::Serializer>(self, ser: T) -> Self::Output {
-            use serde::ser::SerializeSeq;
-            let mut seq = ser.serialize_seq(Some(self.0.len())).unwrap();
-            for r in self.0 {
-                seq.serialize_element(r).unwrap();
-            }
-            seq.end().unwrap();
-        }
+    use serde::ser::{SerializeSeq, Serializer};
+    let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
+    let mut seq = ser.serialize_seq(Some(it.len())).unwrap();
+    for r in it {
+        seq.serialize_element(r).unwrap();
     }
-    bincode::with_serializer(&mut v, X(it));
+    seq.end().unwrap();
     v
 }
 
@@ -177,7 +168,7 @@ fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-) -> impl Future<Output = Result<Tagged<SerializedReadReply>, ()>> + Send {
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let tag = m.tag;
     match m.v {
         ReadQuery::Normal {
@@ -229,7 +220,7 @@ fn handle_message(
                 if !ready {
                     return Ok(Tagged {
                         tag,
-                        v: SerializedReadReply::Normal(Err(())),
+                        v: ReadReply::Normal(Err(())),
                     });
                 }
 
@@ -238,7 +229,7 @@ fn handle_message(
                     assert!(pending.is_empty());
                     return Ok(Tagged {
                         tag,
-                        v: SerializedReadReply::Normal(Ok(ret)),
+                        v: ReadReply::Normal(Ok(ret)),
                     });
                 }
 
@@ -254,7 +245,7 @@ fn handle_message(
                     if !block {
                         Either::Left(Either::Left(future::ready(Ok(Tagged {
                             tag,
-                            v: SerializedReadReply::Normal(Ok(ret)),
+                            v: ReadReply::Normal(Ok(ret)),
                         }))))
                     } else {
                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -299,7 +290,7 @@ fn handle_message(
 
             Either::Right(future::ready(Ok(Tagged {
                 tag,
-                v: SerializedReadReply::Size(size),
+                v: ReadReply::Size(size),
             })))
         }
     }
@@ -338,7 +329,7 @@ impl std::fmt::Debug for BlockingRead {
 }
 
 impl BlockingRead {
-    fn check(&mut self) -> Poll<Result<Tagged<SerializedReadReply>, ()>> {
+    fn check(&mut self) -> Poll<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> {
         READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
@@ -409,7 +400,7 @@ impl BlockingRead {
         if self.keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
-                v: SerializedReadReply::Normal(Ok(mem::take(&mut self.read))),
+                v: ReadReply::Normal(Ok(mem::take(&mut self.read))),
             }))
         } else {
             Poll::Pending
@@ -417,55 +408,33 @@ impl BlockingRead {
     }
 }
 
-// this is ReadReply, but with each resultset pre-serialized
-#[derive(Debug)]
-enum SerializedReadReply {
-    // this is really
-    // Vec<Vec<DataType>>
-    // represented as
-    // Vec<u8>
-    // where the Vec<u8> is a pre-serialized Vec<Vec<DataType>>
-    // this will be fixed up by the deserializer
-    Normal(Result<Vec<Vec<u8>>, ()>),
-    Size(usize),
-}
-
-use serde::ser::{Serialize, Serializer};
-impl Serialize for SerializedReadReply {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // XXX XXX XXX: we're _super_ cheating here!
-        match self {
-            SerializedReadReply::Normal(r) => {
-                serializer.serialize_newtype_variant("ReadReply", 0, "Normal", r)
-            }
-            SerializedReadReply::Size(s) => {
-                serializer.serialize_newtype_variant("ReadReply", 1, "Size", s)
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod readreply {
-    use super::SerializedReadReply;
-    use noria::{DataType, ReadReply};
+    use super::SerializedReadReplyBatch;
+    use noria::{DataType, ReadReply, Tagged};
 
     fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
-        let got: ReadReply = bincode::deserialize(
-            &bincode::serialize(&SerializedReadReply::Normal(Ok(data
-                .iter()
-                .map(|d| bincode::serialize(d).unwrap())
-                .collect())))
+        let got: Tagged<ReadReply> = bincode::deserialize(
+            &bincode::serialize(&Tagged {
+                tag: 32,
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
+                    .iter()
+                    .map(|d| bincode::serialize(d).unwrap())
+                    .collect())),
+            })
             .unwrap(),
         )
         .unwrap();
 
         match got {
-            ReadReply::Normal(Ok(got)) => {
-                assert_eq!(&*got, &data);
+            Tagged {
+                v: ReadReply::Normal(Ok(got)),
+                tag: 32,
+            } => {
+                assert_eq!(got.len(), data.len());
+                for (got, expected) in got.into_iter().zip(data.into_iter()) {
+                    assert_eq!(&*got, &expected);
+                }
             }
             r => panic!("{:?}", r),
         }
@@ -473,13 +442,20 @@ mod readreply {
 
     #[test]
     fn rtt_normal_empty() {
-        let got: ReadReply = bincode::deserialize(
-            &bincode::serialize(&SerializedReadReply::Normal(Ok(Vec::new()))).unwrap(),
+        let got: Tagged<ReadReply> = bincode::deserialize(
+            &bincode::serialize(&Tagged {
+                tag: 32,
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(Vec::new())),
+            })
+            .unwrap(),
         )
         .unwrap();
 
         match got {
-            ReadReply::Normal(Ok(data)) => {
+            Tagged {
+                v: ReadReply::Normal(Ok(data)),
+                tag: 32,
+            } => {
                 assert!(data.is_empty());
             }
             r => panic!("{:?}", r),
@@ -528,18 +504,40 @@ mod readreply {
 
     #[test]
     fn rtt_normal_err() {
-        let got: ReadReply = bincode::deserialize(
-            &bincode::serialize(&SerializedReadReply::Normal(Err(()))).unwrap(),
+        let got: Tagged<ReadReply> = bincode::deserialize(
+            &bincode::serialize(&Tagged {
+                tag: 32,
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Err(())),
+            })
+            .unwrap(),
         )
         .unwrap();
-        assert!(matches!(got, ReadReply::Normal(Err(()))));
+
+        assert!(matches!(
+            got,
+            Tagged {
+                tag: 32,
+                v: ReadReply::Normal(Err(()))
+            }
+        ));
     }
 
     #[test]
     fn rtt_size() {
-        let got: ReadReply =
-            bincode::deserialize(&bincode::serialize(&SerializedReadReply::Size(42)).unwrap())
-                .unwrap();
-        assert!(matches!(got, ReadReply::Size(42)));
+        let got: Tagged<ReadReply> = bincode::deserialize(
+            &bincode::serialize(&Tagged {
+                tag: 32,
+                v: ReadReply::Size::<SerializedReadReplyBatch>(42),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            got,
+            Tagged {
+                tag: 32,
+                v: ReadReply::Size(42)
+            }
+        ));
     }
 }

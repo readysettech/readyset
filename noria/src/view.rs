@@ -132,11 +132,10 @@ pub enum ReadQuery {
 }
 
 #[doc(hidden)]
-#[derive(Deserialize, Debug)]
-// NOTE: DO NOT MODIFY THIS TYPE WITHOUT CHECKING SerializedReadReply
-pub enum ReadReply {
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ReadReply<D = ReadReplyBatch> {
     /// Errors if view isn't ready yet.
-    Normal(Result<ReadReplyBatches, ()>),
+    Normal(Result<Vec<D>, ()>),
     /// Read size of view
     Size(usize),
 }
@@ -284,7 +283,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                         match reply.v {
                             ReadReply::Normal(Ok(rows)) => Ok(rows
                                 .into_iter()
-                                .map(|rows| Results::new(rows, Arc::clone(&columns)))
+                                .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
                                 .collect()),
                             ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
                             _ => unreachable!(),
@@ -352,7 +351,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                 .try_concat()
                 .map_ok(move |rows| {
                     rows.into_iter()
-                        .map(|rows| Results::new(rows, Arc::clone(&columns)))
+                        .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
                         .collect()
                 }),
         )
@@ -438,19 +437,18 @@ impl View {
     }
 }
 
-#[doc(hidden)]
 #[derive(Debug, Default)]
+#[doc(hidden)]
 #[repr(transparent)]
-pub struct ReadReplyBatches(Vec<Vec<Vec<DataType>>>);
+pub struct ReadReplyBatch(Vec<Vec<DataType>>);
 
-use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, SeqAccess, Visitor};
-impl<'de> Deserialize<'de> for ReadReplyBatches {
+use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, Visitor};
+impl<'de> Deserialize<'de> for ReadReplyBatch {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct Elem;
-        struct Batch;
 
         impl<'de> Visitor<'de> for Elem {
             type Value = Vec<Vec<DataType>>;
@@ -478,66 +476,53 @@ impl<'de> Deserialize<'de> for ReadReplyBatches {
             }
         }
 
-        impl<'de> Visitor<'de> for Batch {
-            type Value = ReadReplyBatches;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("Vec<Vec<Vec<DataType>>>")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let mut vec = Vec::with_capacity(seq.size_hint().unwrap());
-                while let Some(elem) = seq.next_element_seed(Elem)? {
-                    vec.push(elem);
-                }
-                Ok(ReadReplyBatches(vec))
-            }
-        }
-
-        deserializer.deserialize_seq(Batch)
+        deserializer.deserialize_bytes(Elem).map(ReadReplyBatch)
     }
 }
 
-impl Into<Vec<Vec<Vec<DataType>>>> for ReadReplyBatches {
-    fn into(self) -> Vec<Vec<Vec<DataType>>> {
+impl Into<Vec<Vec<DataType>>> for ReadReplyBatch {
+    fn into(self) -> Vec<Vec<DataType>> {
         self.0
     }
 }
 
-impl IntoIterator for ReadReplyBatches {
-    type Item = Vec<Vec<DataType>>;
+impl From<Vec<Vec<DataType>>> for ReadReplyBatch {
+    fn from(v: Vec<Vec<DataType>>) -> Self {
+        Self(v)
+    }
+}
+
+impl IntoIterator for ReadReplyBatch {
+    type Item = Vec<DataType>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl Extend<Vec<Vec<DataType>>> for ReadReplyBatches {
+impl Extend<Vec<DataType>> for ReadReplyBatch {
     fn extend<T>(&mut self, iter: T)
     where
-        T: IntoIterator<Item = Vec<Vec<DataType>>>,
+        T: IntoIterator<Item = Vec<DataType>>,
     {
         self.0.extend(iter)
     }
 }
 
-impl AsRef<[Vec<Vec<DataType>>]> for ReadReplyBatches {
-    fn as_ref(&self) -> &[Vec<Vec<DataType>>] {
+impl AsRef<[Vec<DataType>]> for ReadReplyBatch {
+    fn as_ref(&self) -> &[Vec<DataType>] {
         &self.0[..]
     }
 }
 
-impl std::ops::Deref for ReadReplyBatches {
-    type Target = Vec<Vec<Vec<DataType>>>;
+impl std::ops::Deref for ReadReplyBatch {
+    type Target = Vec<Vec<DataType>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl std::ops::DerefMut for ReadReplyBatches {
+impl std::ops::DerefMut for ReadReplyBatch {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
