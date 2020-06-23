@@ -461,7 +461,10 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
             where
                 E: de::Error,
             {
-                bincode::deserialize(bytes).map_err(de::Error::custom)
+                use bincode::Options;
+                bincode::options()
+                    .deserialize(bytes)
+                    .map_err(de::Error::custom)
             }
         }
 

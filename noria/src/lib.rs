@@ -285,8 +285,8 @@ impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> f
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tagged<T> {
-    pub tag: u32,
     pub v: T,
+    pub tag: u32,
 }
 
 impl<T> From<T> for Tagged<T> {

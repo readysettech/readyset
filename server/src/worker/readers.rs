@@ -136,7 +136,7 @@ pub(super) async fn listen(
     }
 }
 
-fn serialize<'a, I>(rs: I) -> Vec<u8>
+fn serialize<'a, I>(rs: I) -> SerializedReadReplyBatch
 where
     I: IntoIterator<Item = &'a Vec<DataType>>,
     I::IntoIter: ExactSizeIterator,
@@ -154,13 +154,9 @@ where
             + std::mem::size_of::<u64>(/* seq.len */),
     );
 
-    use serde::ser::{SerializeSeq, Serializer};
+    use serde::ser::Serializer;
     let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
-    let mut seq = ser.serialize_seq(Some(it.len())).unwrap();
-    for r in it {
-        seq.serialize_element(r).unwrap();
-    }
-    seq.end().unwrap();
+    ser.collect_seq(it).unwrap();
     v
 }
 
@@ -301,7 +297,7 @@ struct BlockingRead {
     tag: u32,
     target: (NodeIndex, usize),
     // serialized records for keys we have already read
-    read: Vec<Vec<u8>>,
+    read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read
     keys: Vec<Vec<DataType>>,
     // index in self.read that each entyr in keys corresponds to
@@ -419,7 +415,7 @@ mod readreply {
                 tag: 32,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
                     .iter()
-                    .map(|d| bincode::serialize(d).unwrap())
+                    .map(|d| super::serialize(d))
                     .collect())),
             })
             .unwrap(),
@@ -539,5 +535,60 @@ mod readreply {
                 v: ReadReply::Size(42)
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn async_bincode_rtt() {
+        let data = vec![
+            vec![
+                vec![DataType::from(1), DataType::from(42)],
+                vec![DataType::from(43), DataType::from(2)],
+            ],
+            vec![
+                vec![DataType::from(2), DataType::from(43)],
+                vec![DataType::from(44), DataType::from(3)],
+            ],
+            vec![vec![]],
+            vec![],
+        ];
+
+        use futures_util::{SinkExt, StreamExt};
+
+        let mut z = Vec::new();
+        let mut w = async_bincode::AsyncBincodeWriter::from(&mut z).for_async();
+
+        for tag in 0..10 {
+            w.send(Tagged {
+                tag,
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
+                    .iter()
+                    .map(|d| super::serialize(d))
+                    .collect())),
+            })
+            .await
+            .unwrap();
+        }
+
+        let mut r = async_bincode::AsyncBincodeReader::<_, Tagged<ReadReply>>::from(
+            std::io::Cursor::new(&z[..]),
+        );
+
+        for tag in 0..10 {
+            let got: Tagged<ReadReply> = r.next().await.unwrap().unwrap();
+
+            match got {
+                Tagged {
+                    v: ReadReply::Normal(Ok(got)),
+                    tag: t,
+                } => {
+                    assert_eq!(tag, t);
+                    assert_eq!(got.len(), data.len());
+                    for (got, expected) in got.into_iter().zip(data.iter()) {
+                        assert_eq!(&*got, expected);
+                    }
+                }
+                r => panic!("{:?}", r),
+            }
+        }
     }
 }
