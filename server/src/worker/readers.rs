@@ -9,7 +9,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use noria::{ReadQuery, ReadReply, Tagged};
+use noria::{ReadQuery, Tagged};
 use pin_project::pin_project;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -36,7 +36,7 @@ task_local! {
     >>;
 }
 
-type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply>, ()>>;
+type Ack = tokio::sync::oneshot::Sender<Result<Tagged<SerializedReadReply>, ()>>;
 
 pub(super) async fn listen(
     alive: tokio::sync::mpsc::Sender<()>,
@@ -135,38 +135,49 @@ pub(super) async fn listen(
     }
 }
 
-// I _really_ wish we didn't have to do this.
-// I think there exists an allocation-free fast path when you don't miss on anything: in that case
-// you can just serialize the references directly into the response channel while still pinning the
-// evmap handle. That is pretty complicated to achieve without punching through several layers of
-// stack though, so we use this for the time being.
-//
-// NOTE: the bounds here aren't necessary, but we want to make sure that this is as fast as we can
-// possibly make it, so we enforce that as much as we can through the types.
-fn dup<'a, I>(rs: I) -> Vec<Vec<DataType>>
+fn serialize<'a, I>(rs: I) -> Vec<u8>
 where
     I: IntoIterator<Item = &'a Vec<DataType>>,
     I::IntoIter: ExactSizeIterator,
 {
-    rs.into_iter()
-        .map(|r| {
-            // NOTE: this _should_ pre-allocate the Vec since r: ExactSizeIterator
-            r.into_iter()
-                .map(|v| {
-                    // NOTE: we deep clone here to avoid contending with other threads on the ref
-                    // count in any Arc<String> that may be contained within v.
-                    v.deep_clone()
-                })
-                .collect()
-        })
-        .collect()
+    let mut it = rs.into_iter().peekable();
+    let ln = it.len();
+    let fst = it.peek();
+    let mut v = Vec::with_capacity(
+        fst.as_ref()
+            .map(|fst| {
+                // assume all rows are the same length
+                ln * fst.len() * std::mem::size_of::<DataType>()
+            })
+            .unwrap_or(0)
+            + std::mem::size_of::<u64>(/* seq.len */),
+    );
+
+    struct X<I>(I);
+    impl<'a, I> bincode::SerializerAcceptor for X<I>
+    where
+        I: Iterator<Item = &'a Vec<DataType>>,
+        I: ExactSizeIterator,
+    {
+        type Output = ();
+        fn accept<T: serde::Serializer>(self, ser: T) -> Self::Output {
+            use serde::ser::SerializeSeq;
+            let mut seq = ser.serialize_seq(Some(self.0.len())).unwrap();
+            for r in self.0 {
+                seq.serialize_element(r).unwrap();
+            }
+            seq.end().unwrap();
+        }
+    }
+    bincode::with_serializer(&mut v, X(it));
+    v
 }
 
 fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-) -> impl Future<Output = Result<Tagged<ReadReply>, ()>> + Send {
+) -> impl Future<Output = Result<Tagged<SerializedReadReply>, ()>> + Send {
     let tag = m.tag;
     match m.v {
         ReadQuery::Normal {
@@ -193,7 +204,7 @@ fn handle_message(
                         ret.push(Vec::new());
                         return false;
                     }
-                    let rs = reader.try_find_and(key, |rs| dup(rs)).map(|r| r.0);
+                    let rs = reader.try_find_and(key, |rs| serialize(rs)).map(|r| r.0);
                     match rs {
                         Ok(Some(rs)) => {
                             // immediate hit!
@@ -218,7 +229,7 @@ fn handle_message(
                 if !ready {
                     return Ok(Tagged {
                         tag,
-                        v: ReadReply::Normal(Err(())),
+                        v: SerializedReadReply::Normal(Err(())),
                     });
                 }
 
@@ -227,7 +238,7 @@ fn handle_message(
                     assert!(pending.is_empty());
                     return Ok(Tagged {
                         tag,
-                        v: ReadReply::Normal(Ok(ret)),
+                        v: SerializedReadReply::Normal(Ok(ret)),
                     });
                 }
 
@@ -243,7 +254,7 @@ fn handle_message(
                     if !block {
                         Either::Left(Either::Left(future::ready(Ok(Tagged {
                             tag,
-                            v: ReadReply::Normal(Ok(ret)),
+                            v: SerializedReadReply::Normal(Ok(ret)),
                         }))))
                     } else {
                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -288,7 +299,7 @@ fn handle_message(
 
             Either::Right(future::ready(Ok(Tagged {
                 tag,
-                v: ReadReply::Size(size),
+                v: SerializedReadReply::Size(size),
             })))
         }
     }
@@ -298,8 +309,8 @@ fn handle_message(
 struct BlockingRead {
     tag: u32,
     target: (NodeIndex, usize),
-    // records for keys we have already read
-    read: Vec<Vec<Vec<DataType>>>,
+    // serialized records for keys we have already read
+    read: Vec<Vec<u8>>,
     // keys we have yet to read
     keys: Vec<Vec<DataType>>,
     // index in self.read that each entyr in keys corresponds to
@@ -327,7 +338,7 @@ impl std::fmt::Debug for BlockingRead {
 }
 
 impl BlockingRead {
-    fn check(&mut self) -> Poll<Result<Tagged<ReadReply>, ()>> {
+    fn check(&mut self) -> Poll<Result<Tagged<SerializedReadReply>, ()>> {
         READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
@@ -350,7 +361,7 @@ impl BlockingRead {
 
             while let Some(read_i) = self.pending.pop() {
                 let key = self.keys.pop().expect("pending.len() == keys.len()");
-                match reader.try_find_and(&key, |rs| dup(rs)).map(|r| r.0) {
+                match reader.try_find_and(&key, |rs| serialize(rs)).map(|r| r.0) {
                     Ok(Some(rs)) => {
                         read[read_i] = rs;
                     }
@@ -398,10 +409,137 @@ impl BlockingRead {
         if self.keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
-                v: ReadReply::Normal(Ok(mem::replace(&mut self.read, Vec::new()))),
+                v: SerializedReadReply::Normal(Ok(mem::take(&mut self.read))),
             }))
         } else {
             Poll::Pending
         }
+    }
+}
+
+// this is ReadReply, but with each resultset pre-serialized
+#[derive(Debug)]
+enum SerializedReadReply {
+    // this is really
+    // Vec<Vec<DataType>>
+    // represented as
+    // Vec<u8>
+    // where the Vec<u8> is a pre-serialized Vec<Vec<DataType>>
+    // this will be fixed up by the deserializer
+    Normal(Result<Vec<Vec<u8>>, ()>),
+    Size(usize),
+}
+
+use serde::ser::{Serialize, Serializer};
+impl Serialize for SerializedReadReply {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // XXX XXX XXX: we're _super_ cheating here!
+        match self {
+            SerializedReadReply::Normal(r) => {
+                serializer.serialize_newtype_variant("ReadReply", 0, "Normal", r)
+            }
+            SerializedReadReply::Size(s) => {
+                serializer.serialize_newtype_variant("ReadReply", 1, "Size", s)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod readreply {
+    use super::SerializedReadReply;
+    use noria::{DataType, ReadReply};
+
+    fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
+        let got: ReadReply = bincode::deserialize(
+            &bincode::serialize(&SerializedReadReply::Normal(Ok(data
+                .iter()
+                .map(|d| bincode::serialize(d).unwrap())
+                .collect())))
+            .unwrap(),
+        )
+        .unwrap();
+
+        match got {
+            ReadReply::Normal(Ok(got)) => {
+                assert_eq!(&*got, &data);
+            }
+            r => panic!("{:?}", r),
+        }
+    }
+
+    #[test]
+    fn rtt_normal_empty() {
+        let got: ReadReply = bincode::deserialize(
+            &bincode::serialize(&SerializedReadReply::Normal(Ok(Vec::new()))).unwrap(),
+        )
+        .unwrap();
+
+        match got {
+            ReadReply::Normal(Ok(data)) => {
+                assert!(data.is_empty());
+            }
+            r => panic!("{:?}", r),
+        }
+    }
+
+    #[test]
+    fn rtt_normal_one() {
+        rtt_ok(vec![vec![vec![DataType::from(1)]]]);
+    }
+
+    #[test]
+    fn rtt_normal_multifield() {
+        rtt_ok(vec![vec![vec![DataType::from(1), DataType::from(42)]]]);
+    }
+
+    #[test]
+    fn rtt_normal_multirow() {
+        rtt_ok(vec![vec![
+            vec![DataType::from(1)],
+            vec![DataType::from(42)],
+        ]]);
+    }
+
+    #[test]
+    fn rtt_normal_multibatch() {
+        rtt_ok(vec![
+            vec![vec![DataType::from(1)]],
+            vec![vec![DataType::from(42)]],
+        ]);
+    }
+
+    #[test]
+    fn rtt_normal_multi() {
+        rtt_ok(vec![
+            vec![
+                vec![DataType::from(1), DataType::from(42)],
+                vec![DataType::from(43), DataType::from(2)],
+            ],
+            vec![
+                vec![DataType::from(2), DataType::from(43)],
+                vec![DataType::from(44), DataType::from(3)],
+            ],
+        ]);
+    }
+
+    #[test]
+    fn rtt_normal_err() {
+        let got: ReadReply = bincode::deserialize(
+            &bincode::serialize(&SerializedReadReply::Normal(Err(()))).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(got, ReadReply::Normal(Err(()))));
+    }
+
+    #[test]
+    fn rtt_size() {
+        let got: ReadReply =
+            bincode::deserialize(&bincode::serialize(&SerializedReadReply::Size(42)).unwrap())
+                .unwrap();
+        assert!(matches!(got, ReadReply::Size(42)));
     }
 }

@@ -132,10 +132,11 @@ pub enum ReadQuery {
 }
 
 #[doc(hidden)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
+// NOTE: DO NOT MODIFY THIS TYPE WITHOUT CHECKING SerializedReadReply
 pub enum ReadReply {
     /// Errors if view isn't ready yet.
-    Normal(Result<Vec<Vec<Vec<DataType>>>, ()>),
+    Normal(Result<ReadReplyBatches, ()>),
     /// Read size of view
     Size(usize),
 }
@@ -434,5 +435,110 @@ impl View {
         // TODO: Optimized version of this function?
         let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
         Ok(rs.into_iter().next().unwrap().into_iter().next())
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug, Default)]
+#[repr(transparent)]
+pub struct ReadReplyBatches(Vec<Vec<Vec<DataType>>>);
+
+use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, SeqAccess, Visitor};
+impl<'de> Deserialize<'de> for ReadReplyBatches {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Elem;
+        struct Batch;
+
+        impl<'de> Visitor<'de> for Elem {
+            type Value = Vec<Vec<DataType>>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("Vec<Vec<DataType>>")
+            }
+
+            fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                bincode::deserialize(bytes).map_err(de::Error::custom)
+            }
+        }
+
+        impl<'de> DeserializeSeed<'de> for Elem {
+            type Value = Vec<Vec<DataType>>;
+
+            fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_bytes(self)
+            }
+        }
+
+        impl<'de> Visitor<'de> for Batch {
+            type Value = ReadReplyBatches;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("Vec<Vec<Vec<DataType>>>")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut vec = Vec::with_capacity(seq.size_hint().unwrap());
+                while let Some(elem) = seq.next_element_seed(Elem)? {
+                    vec.push(elem);
+                }
+                Ok(ReadReplyBatches(vec))
+            }
+        }
+
+        deserializer.deserialize_seq(Batch)
+    }
+}
+
+impl Into<Vec<Vec<Vec<DataType>>>> for ReadReplyBatches {
+    fn into(self) -> Vec<Vec<Vec<DataType>>> {
+        self.0
+    }
+}
+
+impl IntoIterator for ReadReplyBatches {
+    type Item = Vec<Vec<DataType>>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Extend<Vec<Vec<DataType>>> for ReadReplyBatches {
+    fn extend<T>(&mut self, iter: T)
+    where
+        T: IntoIterator<Item = Vec<Vec<DataType>>>,
+    {
+        self.0.extend(iter)
+    }
+}
+
+impl AsRef<[Vec<Vec<DataType>>]> for ReadReplyBatches {
+    fn as_ref(&self) -> &[Vec<Vec<DataType>>] {
+        &self.0[..]
+    }
+}
+
+impl std::ops::Deref for ReadReplyBatches {
+    type Target = Vec<Vec<Vec<DataType>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for ReadReplyBatches {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
