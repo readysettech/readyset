@@ -23,6 +23,10 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
             let graph = &*graph;
             let n = &graph[node];
 
+            // TODO: the code below is probably _too_ good at keeping things in one domain.
+            // having all bases in one domain (e.g., if sharding is disabled) isn't great because
+            // write performance will suffer terribly.
+
             if n.is_shard_merger() {
                 // shard mergers are always in their own domain.
                 // we *could* use the same domain for multiple separate shard mergers
