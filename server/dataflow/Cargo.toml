@@ -1,6 +1,6 @@
 [package]
 name = "noria-dataflow"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2018"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 license = "MIT OR Apache-2.0"
@@ -43,5 +43,5 @@ timekeeper = { version = "0.3.2", default-features = false }
 rocksdb = {version = "0.14", default-features = false, features = ["lz4"] }
 
 # local deps
-common = { version = "0.6.0", path = "../common", package = "noria-common" }
-noria = { version = "0.6.0", path = "../../noria" }
+common = { version = "0.7.0", path = "../common", package = "noria-common" }
+noria = { version = "0.7.0", path = "../../noria" }

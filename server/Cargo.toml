@@ -1,6 +1,6 @@
 [package]
 name = "noria-server"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2018"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 license = "MIT OR Apache-2.0"
@@ -60,10 +60,10 @@ tower = "0.3.0"
 strawpoll = "0.2"
 
 # local deps
-dataflow = { version = "0.6.0", path = "dataflow", package = "noria-dataflow" }
-mir = { version = "0.6.0", path = "mir", package = "noria-mir" }
-common = { version = "0.6.0", path = "common", package = "noria-common" }
-noria = { version = "0.6.0", path = "../noria" }
+dataflow = { version = "0.7.0", path = "dataflow", package = "noria-dataflow" }
+mir = { version = "0.7.0", path = "mir", package = "noria-mir" }
+common = { version = "0.7.0", path = "common", package = "noria-common" }
+noria = { version = "0.7.0", path = "../noria" }
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
