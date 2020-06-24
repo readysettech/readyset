@@ -198,7 +198,7 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 ///
 /// The value isn't lower, because that give the server less work at a time, which means it can
 /// batch less work, which means lower overall efficiency.
-pub(crate) const PENDING_LIMIT: usize = 2048;
+pub(crate) const PENDING_LIMIT: usize = 8192;
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
