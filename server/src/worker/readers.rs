@@ -36,7 +36,23 @@ task_local! {
     >>;
 }
 
-type SerializedReadReplyBatch = Vec<u8>;
+#[derive(Serialize, Debug)]
+#[repr(transparent)]
+#[serde(transparent)]
+struct SerializedReadReplyBatch(Vec<u8>);
+
+impl SerializedReadReplyBatch {
+    fn empty() -> Self {
+        serialize(&[])
+    }
+}
+
+impl From<Vec<u8>> for SerializedReadReplyBatch {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+}
+
 type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>>;
 
 pub(super) async fn listen(
@@ -157,7 +173,7 @@ where
     use serde::ser::Serializer;
     let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
     ser.collect_seq(it).unwrap();
-    v
+    SerializedReadReplyBatch(v)
 }
 
 fn handle_message(
@@ -188,7 +204,7 @@ fn handle_message(
                 keys.retain(|key| {
                     i += 1;
                     if !ready {
-                        ret.push(Vec::new());
+                        ret.push(SerializedReadReplyBatch::empty());
                         return false;
                     }
                     let rs = reader.try_find_and(key, |rs| serialize(rs)).map(|r| r.0);
@@ -201,13 +217,13 @@ fn handle_message(
                         Err(()) => {
                             // map not yet ready
                             ready = false;
-                            ret.push(Vec::new());
+                            ret.push(SerializedReadReplyBatch::empty());
                             false
                         }
                         Ok(None) => {
                             // need to trigger partial replay for this key
                             pending.push(i as usize);
-                            ret.push(Vec::new());
+                            ret.push(SerializedReadReplyBatch::empty());
                             true
                         }
                     }
@@ -537,21 +553,7 @@ mod readreply {
         ));
     }
 
-    #[tokio::test]
-    async fn async_bincode_rtt() {
-        let data = vec![
-            vec![
-                vec![DataType::from(1), DataType::from(42)],
-                vec![DataType::from(43), DataType::from(2)],
-            ],
-            vec![
-                vec![DataType::from(2), DataType::from(43)],
-                vec![DataType::from(44), DataType::from(3)],
-            ],
-            vec![vec![]],
-            vec![],
-        ];
-
+    async fn async_bincode_rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
         use futures_util::{SinkExt, StreamExt};
 
         let mut z = Vec::new();
@@ -590,5 +592,37 @@ mod readreply {
                 r => panic!("{:?}", r),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn async_bincode_rtt_empty() {
+        async_bincode_rtt_ok(vec![]).await;
+    }
+
+    #[tokio::test]
+    async fn async_bincode_rtt_one_empty() {
+        async_bincode_rtt_ok(vec![vec![]]).await;
+    }
+
+    #[tokio::test]
+    async fn async_bincode_rtt_one_one_empty() {
+        async_bincode_rtt_ok(vec![vec![vec![]]]).await;
+    }
+
+    #[tokio::test]
+    async fn async_bincode_rtt_multi() {
+        async_bincode_rtt_ok(vec![
+            vec![
+                vec![DataType::from(1), DataType::from(42)],
+                vec![DataType::from(43), DataType::from(2)],
+            ],
+            vec![
+                vec![DataType::from(2), DataType::from(43)],
+                vec![DataType::from(44), DataType::from(3)],
+            ],
+            vec![vec![]],
+            vec![],
+        ])
+        .await;
     }
 }
