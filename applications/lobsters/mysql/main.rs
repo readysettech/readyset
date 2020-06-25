@@ -1,16 +1,9 @@
-extern crate mysql_async as my;
+#![feature(type_alias_impl_trait)]
 
-// https://github.com/rust-lang/rust/pull/64856
-macro_rules! format {
-    ($($arg:tt)*) => {{
-        let res = std::format!($($arg)*);
-        res
-    }}
-}
+extern crate mysql_async as my;
 
 use clap::value_t_or_exit;
 use clap::{App, Arg};
-use futures_util::future::{Either, TryFutureExt};
 use my::prelude::*;
 use std::future::Future;
 use std::pin::Pin;
@@ -33,7 +26,6 @@ enum Variant {
 struct MysqlTrawlerBuilder {
     opts: my::OptsBuilder,
     variant: Variant,
-    simulate_shards: Option<u32>,
 }
 
 enum MaybeConn {
@@ -46,8 +38,6 @@ struct MysqlTrawler {
     c: my::Pool,
     next_conn: MaybeConn,
     variant: Variant,
-    simulate_shards: Option<u32>,
-    reset: bool,
 }
 /*
 impl Drop for MysqlTrawler {
@@ -68,7 +58,6 @@ impl Service<bool> for MysqlTrawlerBuilder {
     }
     fn call(&mut self, priming: bool) -> Self::Future {
         let orig_opts = self.opts.clone();
-        let simulate_shards = self.simulate_shards;
         let variant = self.variant;
 
         if priming {
@@ -114,8 +103,6 @@ impl Service<bool> for MysqlTrawlerBuilder {
                     c: my::Pool::new(orig_opts.clone()),
                     next_conn: MaybeConn::None,
                     variant,
-                    simulate_shards,
-                    reset: false,
                 })
             })
         } else {
@@ -124,8 +111,6 @@ impl Service<bool> for MysqlTrawlerBuilder {
                     c: my::Pool::new(orig_opts.clone()),
                     next_conn: MaybeConn::None,
                     variant,
-                    simulate_shards,
-                    reset: false,
                 })
             })
         }
@@ -135,8 +120,8 @@ impl Service<bool> for MysqlTrawlerBuilder {
 impl Service<TrawlerRequest> for MysqlTrawler {
     type Response = ();
     type Error = my::error::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send>>;
-    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         loop {
             match self.next_conn {
                 MaybeConn::None => {
@@ -172,18 +157,6 @@ impl Service<TrawlerRequest> for MysqlTrawler {
         };
         let c = futures_util::future::ready(Ok(c));
 
-        // Give shim a heads up that we have finished priming.
-        let c = if !priming {
-            if !self.reset {
-                self.reset = true;
-                Either::Right(c.and_then(|c| c.drop_query("SET @primed = 1")))
-            } else {
-                Either::Left(c)
-            }
-        } else {
-            Either::Left(c)
-        };
-
         // TODO: traffic management
         // https://github.com/lobsters/lobsters/blob/master/app/controllers/application_controller.rb#L37
         /*
@@ -218,7 +191,7 @@ impl Service<TrawlerRequest> for MysqlTrawler {
         */
 
         macro_rules! handle_req {
-            ($module:tt, $req:expr, $sim_shards:ident) => {{
+            ($module:tt, $req:expr) => {{
                 match req {
                     LobstersRequest::User(uid) => {
                         endpoints::$module::user::handle(c, acting_as, uid).await
@@ -255,7 +228,7 @@ impl Service<TrawlerRequest> for MysqlTrawler {
                     }
                     LobstersRequest::Logout => Ok((c.await?, false)),
                     LobstersRequest::Story(id) => {
-                        endpoints::$module::story::handle(c, acting_as, $sim_shards, id).await
+                        endpoints::$module::story::handle(c, acting_as, id).await
                     }
                     LobstersRequest::StoryVote(story, v) => {
                         endpoints::$module::story_vote::handle(c, acting_as, story, v).await
@@ -277,13 +250,12 @@ impl Service<TrawlerRequest> for MysqlTrawler {
         };
 
         let variant = self.variant;
-        let simulate_shards = self.simulate_shards;
         Box::pin(async move {
             let inner = async move {
                 let (c, with_notifications) = match variant {
-                    Variant::Original => handle_req!(original, req, simulate_shards),
-                    Variant::Noria => handle_req!(noria, req, simulate_shards),
-                    Variant::Natural => handle_req!(natural, req, simulate_shards),
+                    Variant::Original => handle_req!(original, req),
+                    Variant::Noria => handle_req!(noria, req),
+                    Variant::Natural => handle_req!(natural, req),
                 }?;
 
                 // notifications
@@ -312,12 +284,12 @@ impl Service<TrawlerRequest> for MysqlTrawler {
 }
 
 impl trawler::AsyncShutdown for MysqlTrawler {
-    type Future = Pin<Box<dyn Future<Output = ()>>>;
+    type Future = impl Future<Output = ()>;
     fn shutdown(mut self) -> Self::Future {
         let _ = std::mem::replace(&mut self.next_conn, MaybeConn::None);
-        Box::pin(async move {
+        async move {
             let _ = self.c.disconnect().await.unwrap();
-        })
+        }
     }
 }
 
@@ -362,21 +334,11 @@ fn main() {
                 .help("Benchmark runtime in seconds"),
         )
         .arg(
-            Arg::with_name("fakeshards")
-                .long("simulate-shards")
-                .takes_value(true)
-                .help("Simulate if read_ribbons base had N shards"),
-        )
-        .arg(
             Arg::with_name("histogram")
                 .long("histogram")
                 .help("Use file-based serialized HdrHistograms")
                 .takes_value(true)
-                .long_help(
-                    "If the file already exists, the existing histogram is extended.\
-                     There are two histograms, written out in order: \
-                     sojourn and remote.",
-                ),
+                .long_help("There are multiple histograms, two for each lobsters request."),
         )
         .arg(
             Arg::with_name("dbn")
@@ -393,9 +355,6 @@ fn main() {
         "natural" => Variant::Natural,
         _ => unreachable!(),
     };
-    let simulate_shards = args
-        .value_of("fakeshards")
-        .map(|_| value_t_or_exit!(args, "fakeshards", u32));
     let in_flight = value_t_or_exit!(args, "in-flight", usize);
 
     let mut wl = trawler::WorkloadBuilder::default();
@@ -418,7 +377,6 @@ fn main() {
     let s = MysqlTrawlerBuilder {
         variant,
         opts: opts.into(),
-        simulate_shards,
     };
 
     wl.run(s, args.is_present("prime"));

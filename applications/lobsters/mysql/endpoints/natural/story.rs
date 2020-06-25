@@ -6,75 +6,9 @@ use std::future::Future;
 use std::iter;
 use trawler::{StoryId, UserId};
 
-const NUM_STORIES: u32 = 40650;
-
-#[inline]
-fn slug_to_id(slug: &[u8; 6]) -> u32 {
-    // convert id to unique string
-    // 36 possible characters (a-z0-9)
-    let mut id = 0;
-    let mut mult = 1;
-    for i in 0..slug.len() {
-        let i = slug.len() - i - 1;
-        let digit = if slug[i] >= b'0' && slug[i] <= b'9' {
-            slug[i] - b'0'
-        } else {
-            slug[i] - b'a' + 10
-        } as u32;
-        id += digit * mult;
-        mult *= 36;
-    }
-    id
-}
-
-#[test]
-fn slug_conversion() {
-    fn id_to_slug(mut id: u32) -> [u8; 6] {
-        // convert id to unique string
-        // 36 possible characters (a-z0-9)
-        let mut slug = [0; 6];
-        let mut digit: u8;
-        digit = (id % 36) as u8;
-        slug[5] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        digit = (id % 36) as u8;
-        slug[4] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        digit = (id % 36) as u8;
-        slug[3] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        digit = (id % 36) as u8;
-        slug[2] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        digit = (id % 36) as u8;
-        slug[1] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        digit = (id % 36) as u8;
-        slug[0] = digit + if digit < 10 { b'0' } else { b'a' - 10 };
-        id /= 36;
-        debug_assert_eq!(id, 0);
-        slug
-    }
-
-    assert_eq!(slug_to_id(&id_to_slug(0)), 0);
-    assert_eq!(slug_to_id(&id_to_slug(1 << 2)), 1 << 2);
-    assert_eq!(slug_to_id(&id_to_slug(9)), 9);
-    assert_eq!(slug_to_id(&id_to_slug(10)), 10);
-    assert_eq!(slug_to_id(&id_to_slug(35)), 35);
-    assert_eq!(slug_to_id(&id_to_slug(36)), 36);
-    assert_eq!(slug_to_id(&id_to_slug(37)), 37);
-    assert_eq!(slug_to_id(&id_to_slug(1 << 8)), 1 << 8);
-    assert_eq!(slug_to_id(&id_to_slug(1 << 12)), 1 << 12);
-    assert_eq!(slug_to_id(&id_to_slug(1 << 16)), 1 << 16);
-    assert_eq!(slug_to_id(&id_to_slug(12492)), 12492);
-    assert_eq!(slug_to_id(&id_to_slug(1943)), 1943);
-    assert_eq!(slug_to_id(&id_to_slug(NUM_STORIES - 1)), NUM_STORIES - 1);
-}
-
 pub(crate) async fn handle<F>(
     c: F,
     acting_as: Option<UserId>,
-    simulate_shards: Option<u32>,
     id: StoryId,
 ) -> Result<(my::Conn, bool), my::error::Error>
 where
@@ -103,51 +37,38 @@ where
         .await?;
     // NOTE: technically this happens before the select from user...
     if let Some(uid) = acting_as {
-        let mut pick = simulate_shards.is_none();
-        if let Some(shards) = simulate_shards {
-            let id = slug_to_id(&id);
-
-            // worst shard is the one that gets the most popular story
-            let worst_sharding_mod = (NUM_STORIES - 1) % shards;
-            if id % shards == worst_sharding_mod {
-                pick = true;
-            }
-        }
-
-        if pick {
-            // keep track of when the user last saw this story
-            // NOTE: *technically* the update only happens at the end...
-            let (x, rr) = c
-                .first_exec::<_, _, my::Row>(
-                    "SELECT  `read_ribbons`.* \
+        // keep track of when the user last saw this story
+        // NOTE: *technically* the update only happens at the end...
+        let (x, rr) = c
+            .first_exec::<_, _, my::Row>(
+                "SELECT  `read_ribbons`.* \
                      FROM `read_ribbons` \
                      WHERE `read_ribbons`.`user_id` = ? \
                      AND `read_ribbons`.`story_id` = ?",
-                    (&uid, &story),
-                )
-                .await?;
-            let now = chrono::Local::now().naive_local();
-            c = match rr {
-                None => {
-                    x.drop_exec(
-                        "INSERT INTO `read_ribbons` \
+                (&uid, &story),
+            )
+            .await?;
+        let now = chrono::Local::now().naive_local();
+        c = match rr {
+            None => {
+                x.drop_exec(
+                    "INSERT INTO `read_ribbons` \
                          (`created_at`, `updated_at`, `user_id`, `story_id`) \
                          VALUES (?, ?, ?, ?)",
-                        (now, now, uid, story),
-                    )
-                    .await?
-                }
-                Some(rr) => {
-                    x.drop_exec(
-                        "UPDATE `read_ribbons` \
+                    (now, now, uid, story),
+                )
+                .await?
+            }
+            Some(rr) => {
+                x.drop_exec(
+                    "UPDATE `read_ribbons` \
                          SET `read_ribbons`.`updated_at` = ? \
                          WHERE `read_ribbons`.`id` = ?",
-                        (now, rr.get::<u32, _>("id").unwrap()),
-                    )
-                    .await?
-                }
-            };
-        }
+                    (now, rr.get::<u32, _>("id").unwrap()),
+                )
+                .await?
+            }
+        };
     }
 
     // XXX: probably not drop here, but we know we have no merged stories
