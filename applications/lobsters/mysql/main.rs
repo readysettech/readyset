@@ -72,7 +72,7 @@ impl Service<bool> for MysqlTrawlerBuilder {
                 .to_string();
             opts.db_name(None::<String>);
             opts.prefer_socket(false);
-            let db_drop = format!("DROP DATABASE {} IF EXISTS", db);
+            let db_drop = format!("DROP DATABASE IF EXISTS {}", db);
             let db_create = format!("CREATE DATABASE {}", db);
             let db_use = format!("USE {}", db);
             Box::pin(async move {
