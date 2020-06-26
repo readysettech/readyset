@@ -70,12 +70,13 @@ impl Service<bool> for MysqlTrawlerBuilder {
                 .get_db_name()
                 .unwrap()
                 .to_string();
-            let c = my::Pool::new(opts);
-            let db_drop = format!("DROP DATABASE {}", db);
+            opts.db_name(None::<String>);
+            opts.prefer_socket(false);
+            let db_drop = format!("DROP DATABASE {} IF EXISTS", db);
             let db_create = format!("CREATE DATABASE {}", db);
             let db_use = format!("USE {}", db);
             Box::pin(async move {
-                let mut c = c.get_conn().await?;
+                let mut c = my::Conn::new(opts).await?;
                 c = c.drop_query(&db_drop).await?;
                 c = c.drop_query(&db_create).await?;
                 c = c.drop_query(&db_use).await?;
