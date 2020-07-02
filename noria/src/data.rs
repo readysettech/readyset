@@ -47,7 +47,7 @@ pub enum DataType {
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            DataType::None => write!(f, "*"),
+            DataType::None => write!(f, "NULL"),
             DataType::Text(..) | DataType::TinyText(..) => {
                 let text: &str = self.into();
                 // TODO: do we really want to produce quoted strings?
