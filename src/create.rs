@@ -6,7 +6,7 @@ use std::str::FromStr;
 use column::{Column, ColumnConstraint, ColumnSpecification};
 use common::{
     column_identifier_no_alias, parse_comment, sql_identifier, statement_terminator,
-    table_reference, type_identifier, ws_sep_comma, Literal, Real, SqlType, TableKey,
+    schema_table_reference, type_identifier, ws_sep_comma, Literal, Real, SqlType, TableKey,
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create_table_options::table_options;
@@ -347,7 +347,7 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
             multispace1,
             tag_no_case("table"),
             multispace1,
-            table_reference,
+            schema_table_reference,
             multispace0,
             tag("("),
             multispace0,
@@ -518,6 +518,23 @@ mod tests {
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("t"),
+                fields: vec![ColumnSpecification::new(
+                    Column::from("t.x"),
+                    SqlType::Int(32)
+                ),],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn create_tablename_with_schema() {
+        let qstring = "CREATE TABLE db1.t(x integer);";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from(("db1","t")),
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
                     SqlType::Int(32)

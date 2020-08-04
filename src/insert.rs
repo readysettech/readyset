@@ -4,7 +4,7 @@ use std::str;
 
 use column::Column;
 use common::{
-    assignment_expr_list, field_list, statement_terminator, table_reference, value_list,
+    assignment_expr_list, field_list, statement_terminator, schema_table_reference, value_list,
     ws_sep_comma, FieldValueExpression, Literal,
 };
 use keywords::escape_if_keyword;
@@ -89,7 +89,7 @@ pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
             multispace1,
             tag_no_case("into"),
             multispace1,
-            table_reference,
+            schema_table_reference,
             multispace0,
             opt(fields),
             tag_no_case("values"),
@@ -129,6 +129,22 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn simple_insert_schema() {
+        let qstring = "INSERT INTO db1.users VALUES (42, \"test\");";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from(("db1","users")),
                 fields: None,
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()

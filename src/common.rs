@@ -838,7 +838,7 @@ pub fn field_definition_expr(i: &[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpr
 // Parse list of table names.
 // XXX(malte): add support for aliases
 pub fn table_list(i: &[u8]) -> IResult<&[u8], Vec<Table>> {
-    many0(terminated(table_reference, opt(ws_sep_comma)))(i)
+    many0(terminated(schema_table_reference, opt(ws_sep_comma)))(i)
 }
 
 // Integer literal value
@@ -959,8 +959,28 @@ pub fn value_list(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
     many0(delimited(multispace0, literal, opt(ws_sep_comma)))(i)
 }
 
+// Parse a reference to a named schema.table, with an optional alias
+pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
+    map(
+		tuple((
+			opt(pair(sql_identifier, tag("."))),
+			sql_identifier,
+			opt(as_alias)
+		)),
+	|tup| Table {
+        name: String::from(str::from_utf8(tup.1).unwrap()),
+        alias: match tup.2 {
+            Some(a) => Some(String::from(a)),
+            None => None,
+        },
+        schema: match tup.0 {
+            Some((schema, _)) => Some(String::from(str::from_utf8(schema).unwrap())),
+            None => None,
+        },
+    })(i)
+}
+
 // Parse a reference to a named table, with an optional alias
-// TODO(malte): add support for schema.table notation
 pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
     map(pair(sql_identifier, opt(as_alias)), |tup| Table {
         name: String::from(str::from_utf8(tup.0).unwrap()),
@@ -968,6 +988,7 @@ pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
             Some(a) => Some(String::from(a)),
             None => None,
         },
+		schema: None,
     })(i)
 }
 
