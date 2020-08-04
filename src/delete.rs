@@ -1,7 +1,7 @@
 use nom::character::complete::multispace1;
 use std::{fmt, str};
 
-use common::{statement_terminator, table_reference};
+use common::{statement_terminator, schema_table_reference};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use nom::bytes::complete::tag_no_case;
@@ -33,7 +33,7 @@ pub fn deletion(i: &[u8]) -> IResult<&[u8], DeleteStatement> {
     let (remaining_input, (_, _, table, where_clause, _)) = tuple((
         tag_no_case("delete"),
         delimited(multispace1, tag_no_case("from"), multispace1),
-        table_reference,
+        schema_table_reference,
         opt(where_clause),
         statement_terminator,
     ))(i)?;
@@ -65,6 +65,19 @@ mod tests {
             res.unwrap().1,
             DeleteStatement {
                 table: Table::from("users"),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn simple_delete_schema() {
+        let qstring = "DELETE FROM db1.users;";
+        let res = deletion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            DeleteStatement {
+                table: Table::from(("db1","users")),
                 ..Default::default()
             }
         );

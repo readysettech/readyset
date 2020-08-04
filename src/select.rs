@@ -510,6 +510,28 @@ mod tests {
                 tables: vec![Table {
                     name: String::from("PaperTag"),
                     alias: Some(String::from("t")),
+					schema: None,
+                },],
+                fields: vec![FieldDefinitionExpression::All],
+                ..Default::default()
+            }
+        );
+        // let res2 = selection(qstring2.as_bytes());
+        // assert_eq!(res1.unwrap().1, res2.unwrap().1);
+    }
+
+    #[test]
+    fn table_schema() {
+        let qstring1 = "select * from db1.PaperTag as t;";
+
+        let res1 = selection(qstring1.as_bytes());
+        assert_eq!(
+            res1.clone().unwrap().1,
+            SelectStatement {
+                tables: vec![Table {
+                    name: String::from("PaperTag"),
+                    alias: Some(String::from("t")),
+					schema: Some(String::from("db1")),
                 },],
                 fields: vec![FieldDefinitionExpression::All],
                 ..Default::default()

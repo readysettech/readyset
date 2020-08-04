@@ -4,6 +4,10 @@ select a + 2 from c;
 select a+ 2 from c;
 select a+2 from c;
 
+select a from db1.table1;
+select table1.a from db1.table1;
+select table1.a from db1.table1 as d;
+
 SELECT n+10 FROM tens WHERE n+10 >= 100;
 SELECT n+10 FROM tens WHERE n+10 < 100;
 SELECT n+10 FROM tens WHERE n+10 > 100;
