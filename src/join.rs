@@ -44,6 +44,7 @@ pub enum JoinOperator {
     Join,
     LeftJoin,
     LeftOuterJoin,
+    RightJoin,
     InnerJoin,
     CrossJoin,
     StraightJoin,
@@ -55,6 +56,7 @@ impl fmt::Display for JoinOperator {
             JoinOperator::Join => write!(f, "JOIN")?,
             JoinOperator::LeftJoin => write!(f, "LEFT JOIN")?,
             JoinOperator::LeftOuterJoin => write!(f, "LEFT OUTER JOIN")?,
+            JoinOperator::RightJoin => write!(f, "RIGHT JOIN")?,
             JoinOperator::InnerJoin => write!(f, "INNER JOIN")?,
             JoinOperator::CrossJoin => write!(f, "CROSS JOIN")?,
             JoinOperator::StraightJoin => write!(f, "STRAIGHT JOIN")?,
@@ -95,6 +97,7 @@ pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
         map(tag_no_case("left outer join"), |_| {
             JoinOperator::LeftOuterJoin
         }),
+        map(tag_no_case("right join"), |_| JoinOperator::RightJoin),
         map(tag_no_case("inner join"), |_| JoinOperator::InnerJoin),
         map(tag_no_case("cross join"), |_| JoinOperator::CrossJoin),
         map(tag_no_case("straight_join"), |_| JoinOperator::StraightJoin),
