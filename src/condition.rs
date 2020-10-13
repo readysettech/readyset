@@ -221,9 +221,35 @@ fn is_null(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
     ))
 }
 
+fn in_operation(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+    map(
+        separated_pair(
+            opt(terminated(tag_no_case("not"), multispace1)),
+            terminated(tag_no_case("in"), multispace0),
+            alt((
+                map(delimited(tag("("), nested_selection, tag(")")), |s| {
+                    ConditionBase::NestedSelect(Box::new(s))
+                }),
+                map(delimited(tag("("), value_list, tag(")")), |vs| {
+                    ConditionBase::LiteralList(vs)
+                }),
+            )),
+        ),
+        |p| {
+            let nested = ConditionExpression::Base(p.1);
+            if (p.0).is_some() {
+                (Operator::NotIn, nested)
+            } else {
+                (Operator::In, nested)
+            }
+        },
+    )(i)
+}
+
 fn boolean_primary_rest(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
     alt((
         is_null,
+        in_operation,
         separated_pair(binary_comparison_operator, multispace0, predicate),
     ))(i)
 }
@@ -245,36 +271,6 @@ fn boolean_primary(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
 }
 
 fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
-    let nested_sel_pred = map(
-        separated_pair(
-            opt(preceded(multispace0, tag_no_case("not"))),
-            delimited(multispace1, tag_no_case("in"), multispace1),
-            nested_selection,
-        ),
-        |p| {
-            let nested = ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(p.1)));
-            if (p.0).is_some() {
-                ConditionExpression::NegationOp(Box::new(nested))
-            } else {
-                nested
-            }
-        },
-    );
-    let in_list_pred = map(
-        separated_pair(
-            opt(preceded(multispace0, tag_no_case("not"))),
-            delimited(multispace1, tag_no_case("in"), multispace1),
-            delimited(tag("("), value_list, tag(")")),
-        ),
-        |p| {
-            let list = ConditionExpression::Base(ConditionBase::LiteralList(p.1));
-            if (p.0).is_some() {
-                ConditionExpression::NegationOp(Box::new(list))
-            } else {
-                list
-            }
-        },
-    );
     let nested_exists = map(
         tuple((
             opt(delimited(multispace0, tag_no_case("not"), multispace1)),
@@ -296,17 +292,7 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     );
 
     alt((
-        map(
-            pair(simple_expr, opt(alt((nested_sel_pred, in_list_pred)))),
-            |p| match p.1 {
-                Some(right) => ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: Operator::In,
-                    left: Box::new(p.0),
-                    right: Box::new(right),
-                }),
-                None => p.0,
-            },
-        ),
+        simple_expr,
         nested_exists,
     ))(i)
 }
@@ -959,5 +945,24 @@ mod tests {
         });
         let res = res.unwrap().1;
         assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn not_in_comparison() {
+        use ConditionBase::*;
+
+        let qs1 = b"id not in (1,2)";
+        let res1 = condition_expr(qs1);
+
+        let c1 = res1.unwrap().1;
+        let expected1 = flat_condition_tree(
+            Operator::NotIn,
+            Field("id".into()),
+            LiteralList(vec![1.into(), 2.into()]),
+        );
+        assert_eq!(c1, expected1);
+
+        let expected1 = "id NOT IN (1, 2)";
+        assert_eq!(format!("{}", c1), expected1);
     }
 }
