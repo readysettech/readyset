@@ -1,0 +1,11 @@
+FROM debian:buster
+
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -yq curl clang libclang-dev libssl-dev liblz4-dev build-essential zookeeper sudo git
+
+RUN useradd --create-home --shell /bin/bash readyset
+USER readyset
+WORKDIR /home/readyset
+
+# Install the latest rustup with default settings
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN ~/.cargo/bin/rustup update nightly

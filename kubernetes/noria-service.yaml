@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: noria
+spec:
+  selector:
+    app: noria
+  ports:
+    - protocol: TCP
+      port: 6033
+      targetPort: 6033

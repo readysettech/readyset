@@ -1,0 +1,8 @@
+FROM readyset-base:latest
+
+RUN git clone https://github.com/mit-pdos/noria-mysql.git && \
+        git clone https://github.com/mit-pdos/noria-mysql.git && \
+        git clone https://github.com/mit-pdos/noria-ui.git
+
+RUN cd noria-mysql && ~/.cargo/bin/cargo build --release --bin noria-server noria-zk
+CMD ~/.cargo/bin/cargo r --release --bin noria-server -- --deployment myapp --no-reuse --address 0.0.0.0 --shards 3 -z zookeeper:2181
