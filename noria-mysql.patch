@@ -1,0 +1,16 @@
+12c12
+< noria = "0.4"
+---
+> noria = "0.7"
+30c30
+< noria-server = "0.4"
+---
+> noria-server = "0.7"
+41,44c41,42
+< noria = { git = "https://github.com/mit-pdos/noria.git" }
+< noria-server = { git = "https://github.com/mit-pdos/noria.git" }
+< # noria = { path = "../noria/noria/" }
+< # noria-server = { path = "../noria/server/" }
+---
+> noria = { path = "../noria/noria/" }
+> noria-server = { path = "../noria/server/" }

@@ -1,8 +1,22 @@
 FROM readyset-base:latest
 
-RUN git clone https://github.com/mit-pdos/noria-mysql.git && \
+RUN git clone https://github.com/mit-pdos/noria.git && \
         git clone https://github.com/mit-pdos/noria-mysql.git && \
         git clone https://github.com/mit-pdos/noria-ui.git
 
-RUN cd noria-mysql && ~/.cargo/bin/cargo build --release --bin noria-server noria-zk
-CMD ~/.cargo/bin/cargo r --release --bin noria-server -- --deployment myapp --no-reuse --address 0.0.0.0 --shards 3 -z zookeeper:2181
+RUN cd noria && ~/.cargo/bin/cargo build --release
+ADD noria-mysql.patch noria-mysql/Cargo.toml.patch
+RUN cd noria-mysql && \
+    cat Cargo.toml.patch | patch Cargo.toml && \
+    sed -i 's%noria::trace_my_next_op%// noria::trace_my_next_op%g' src/backend.rs && \
+    rm Cargo.lock && \
+    ~/.cargo/bin/cargo build --release
+
+RUN curl -o miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash miniconda.sh -b -p /home/readyset/miniconda3 && \
+    miniconda3/bin/conda create -n readyset python=3 && \
+    miniconda3/bin/conda init bash
+
+RUN miniconda3/bin/conda run -n readyset pip install pystache
+RUN cd noria-ui && ~/miniconda3/bin/conda run -n readyset make
+
