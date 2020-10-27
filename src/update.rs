@@ -185,12 +185,12 @@ mod tests {
             )))),
             operator: Operator::Equal,
         }));
-        let expected_ae = ArithmeticExpression {
-            op: ArithmeticOperator::Add,
-            left: ArithmeticBase::Column(Column::from("karma")),
-            right: ArithmeticBase::Scalar(1.into()),
-            alias: None,
-        };
+        let expected_ae = ArithmeticExpression::new(
+            ArithmeticOperator::Add,
+            ArithmeticBase::Column(Column::from("karma")),
+            ArithmeticBase::Scalar(1.into()),
+            None,
+        );
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
@@ -210,12 +210,12 @@ mod tests {
         let qstring = "UPDATE users SET karma = karma + 1;";
 
         let res = updating(qstring.as_bytes());
-        let expected_ae = ArithmeticExpression {
-            op: ArithmeticOperator::Add,
-            left: ArithmeticBase::Column(Column::from("karma")),
-            right: ArithmeticBase::Scalar(1.into()),
-            alias: None,
-        };
+        let expected_ae = ArithmeticExpression::new(
+            ArithmeticOperator::Add,
+            ArithmeticBase::Column(Column::from("karma")),
+            ArithmeticBase::Scalar(1.into()),
+            None,
+        );
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {

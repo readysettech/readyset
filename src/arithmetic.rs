@@ -1,15 +1,23 @@
-use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
-use column::Column;
-use common::{
-    as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
+use nom::{
+    branch::alt,
+    bytes::complete::{tag, tag_no_case},
+    character::complete::{multispace0, multispace1},
+    combinator::{map, opt},
+    lib::std::fmt::Formatter,
+    multi::many0,
+    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
+    Err::Error,
+    IResult,
 };
-use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::{map, opt};
-use nom::sequence::{terminated, tuple};
-use nom::IResult;
+
+use crate::{
+    column::Column,
+    common::{
+        as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
+    },
+};
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
@@ -23,13 +31,35 @@ pub enum ArithmeticOperator {
 pub enum ArithmeticBase {
     Column(Column),
     Scalar(Literal),
+    Bracketed(Box<Arithmetic>),
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum ArithmeticItem {
+    Base(ArithmeticBase),
+    Expr(Box<Arithmetic>),
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct Arithmetic {
+    pub op: ArithmeticOperator,
+    pub left: ArithmeticItem,
+    pub right: ArithmeticItem,
+}
+
+impl Arithmetic {
+    pub fn new(op: ArithmeticOperator, left: ArithmeticBase, right: ArithmeticBase) -> Self {
+        Self {
+            op,
+            left: ArithmeticItem::Base(left),
+            right: ArithmeticItem::Base(right),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ArithmeticExpression {
-    pub op: ArithmeticOperator,
-    pub left: ArithmeticBase,
-    pub right: ArithmeticBase,
+    pub ari: Arithmetic,
     pub alias: Option<String>,
 }
 
@@ -41,9 +71,11 @@ impl ArithmeticExpression {
         alias: Option<String>,
     ) -> Self {
         Self {
-            op,
-            left,
-            right,
+            ari: Arithmetic {
+                op,
+                left: ArithmeticItem::Base(left),
+                right: ArithmeticItem::Base(right),
+            },
             alias,
         }
     }
@@ -65,15 +97,31 @@ impl fmt::Display for ArithmeticBase {
         match *self {
             ArithmeticBase::Column(ref col) => write!(f, "{}", col),
             ArithmeticBase::Scalar(ref lit) => write!(f, "{}", lit.to_string()),
+            ArithmeticBase::Bracketed(ref ari) => write!(f, "({})", ari),
         }
+    }
+}
+
+impl fmt::Display for ArithmeticItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ArithmeticItem::Base(ref b) => write!(f, "{}", b),
+            ArithmeticItem::Expr(ref expr) => write!(f, "{}", expr),
+        }
+    }
+}
+
+impl fmt::Display for Arithmetic {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.left, self.op, self.right)
     }
 }
 
 impl fmt::Display for ArithmeticExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.alias {
-            Some(ref alias) => write!(f, "{} {} {} AS {}", self.left, self.op, self.right, alias),
-            None => write!(f, "{} {} {}", self.left, self.op, self.right),
+            Some(ref alias) => write!(f, "{} AS {}", self.ari, alias),
+            None => write!(f, "{}", self.ari),
         }
     }
 }
@@ -102,12 +150,15 @@ pub fn arithmetic_cast(i: &[u8]) -> IResult<&[u8], (ArithmeticBase, Option<SqlTy
     alt((arithmetic_cast_helper, map(arithmetic_base, |v| (v, None))))(i)
 }
 
-// Parse standard math operators.
-// TODO(malte): this doesn't currently observe operator precedence.
-pub fn arithmetic_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
+pub fn add_sub_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
     alt((
         map(tag("+"), |_| ArithmeticOperator::Add),
         map(tag("-"), |_| ArithmeticOperator::Subtract),
+    ))(i)
+}
+
+pub fn mul_div_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
+    alt((
         map(tag("*"), |_| ArithmeticOperator::Multiply),
         map(tag("/"), |_| ArithmeticOperator::Divide),
     ))(i)
@@ -116,49 +167,94 @@ pub fn arithmetic_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
 // Base case for nested arithmetic expressions: column name or literal.
 pub fn arithmetic_base(i: &[u8]) -> IResult<&[u8], ArithmeticBase> {
     alt((
-        map(integer_literal, |il| ArithmeticBase::Scalar(il)),
-        map(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci)),
+        map(integer_literal, ArithmeticBase::Scalar),
+        map(column_identifier_no_alias, ArithmeticBase::Column),
+        map(
+            delimited(
+                terminated(tag("("), multispace0),
+                arithmetic,
+                preceded(multispace0, tag(")")),
+            ),
+            |ari| ArithmeticBase::Bracketed(Box::new(ari)),
+        ),
     ))(i)
 }
 
+fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
+    let res = expr(i)?;
+    match res.1 {
+        ArithmeticItem::Base(ArithmeticBase::Column(_))
+        | ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => {
+            Err(Error((res.0, nom::error::ErrorKind::Tag)))
+        } // no operator
+        ArithmeticItem::Base(ArithmeticBase::Bracketed(expr)) => Ok((res.0, *expr)),
+        ArithmeticItem::Expr(expr) => Ok((res.0, *expr)),
+    }
+}
+
+fn expr(i: &[u8]) -> IResult<&[u8], ArithmeticItem> {
+    map(pair(term, many0(expr_rest)), |(item, rs)| {
+        rs.into_iter().fold(item, |acc, (o, r)| {
+            ArithmeticItem::Expr(Box::new(Arithmetic {
+                op: o,
+                left: acc,
+                right: r,
+            }))
+        })
+    })(i)
+}
+
+fn expr_rest(i: &[u8]) -> IResult<&[u8], (ArithmeticOperator, ArithmeticItem)> {
+    separated_pair(preceded(multispace0, add_sub_operator), multispace0, term)(i)
+}
+
+fn term(i: &[u8]) -> IResult<&[u8], ArithmeticItem> {
+    map(pair(arithmetic_cast, many0(term_rest)), |(b, rs)| {
+        rs.into_iter()
+            .fold(ArithmeticItem::Base(b.0), |acc, (o, r)| {
+                ArithmeticItem::Expr(Box::new(Arithmetic {
+                    op: o,
+                    left: acc,
+                    right: r,
+                }))
+            })
+    })(i)
+}
+
+fn term_rest(i: &[u8]) -> IResult<&[u8], (ArithmeticOperator, ArithmeticItem)> {
+    separated_pair(
+        preceded(multispace0, mul_div_operator),
+        multispace0,
+        map(arithmetic_cast, |b| ArithmeticItem::Base(b.0)),
+    )(i)
+}
+
 // Parse simple arithmetic expressions combining literals, and columns and literals.
-// TODO(malte): this doesn't currently support nested expressions.
 pub fn arithmetic_expression(i: &[u8]) -> IResult<&[u8], ArithmeticExpression> {
-    let (remaining_input, (left, _, op, _, right, opt_alias)) = tuple((
-        arithmetic_cast,
-        multispace0,
-        arithmetic_operator,
-        multispace0,
-        arithmetic_cast,
-        opt(as_alias),
-    ))(i)?;
-
-    let alias = match opt_alias {
-        None => None,
-        Some(a) => Some(String::from(a)),
-    };
-
-    Ok((
-        remaining_input,
+    map(pair(arithmetic, opt(as_alias)), |(ari, opt_alias)| {
         ArithmeticExpression {
-            left: left.0,
-            right: right.0,
-            op,
-            alias,
-        },
-    ))
+            ari,
+            alias: opt_alias.map(String::from),
+        }
+    })(i)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::arithmetic::{
+        ArithmeticBase::Scalar,
+        ArithmeticOperator::{Add, Divide, Multiply, Subtract},
+    };
+
     use super::*;
 
     #[test]
     fn it_parses_arithmetic_expressions() {
-        use super::ArithmeticBase::Column as ABColumn;
-        use super::ArithmeticBase::Scalar;
-        use super::ArithmeticOperator::*;
-        use column::{FunctionArguments, FunctionExpression};
+        use super::{
+            ArithmeticBase::{Column as ABColumn, Scalar},
+            ArithmeticOperator::*,
+        };
+        use crate::column::{FunctionArguments, FunctionExpression};
 
         let lit_ae = [
             "5 + 42",
@@ -233,9 +329,10 @@ mod tests {
 
     #[test]
     fn it_displays_arithmetic_expressions() {
-        use super::ArithmeticBase::Column as ABColumn;
-        use super::ArithmeticBase::Scalar;
-        use super::ArithmeticOperator::*;
+        use super::{
+            ArithmeticBase::{Column as ABColumn, Scalar},
+            ArithmeticOperator::*,
+        };
 
         let expressions = [
             ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
@@ -263,9 +360,10 @@ mod tests {
 
     #[test]
     fn it_parses_arithmetic_casts() {
-        use super::ArithmeticBase::Column as ABColumn;
-        use super::ArithmeticBase::Scalar;
-        use super::ArithmeticOperator::*;
+        use super::{
+            ArithmeticBase::{Column as ABColumn, Scalar},
+            ArithmeticOperator::*,
+        };
 
         let exprs = [
             "CAST(`t`.`foo` AS signed int) + CAST(`t`.`bar` AS signed int) ",
@@ -294,6 +392,67 @@ mod tests {
             let res = arithmetic_expression(e.as_bytes());
             assert!(res.is_ok(), "{} failed to parse", e);
             assert_eq!(res.unwrap().1, expected[i]);
+        }
+    }
+
+    #[test]
+    fn nested_arithmetic() {
+        let qs = [
+            "1 + 1",
+            "1 + 2 - 3",
+            "1 + 2 * 3",
+            "2 * 3 - 1 / 3",
+            "3 * (1 + 2)",
+        ];
+
+        let expects =
+            [
+                Arithmetic::new(Add, Scalar(1.into()), Scalar(1.into())),
+                Arithmetic {
+                    op: Subtract,
+                    left: ArithmeticItem::Expr(Box::new(Arithmetic::new(
+                        Add,
+                        Scalar(1.into()),
+                        Scalar(2.into()),
+                    ))),
+                    right: ArithmeticItem::Base(Scalar(3.into())),
+                },
+                Arithmetic {
+                    op: Add,
+                    left: ArithmeticItem::Base(Scalar(1.into())),
+                    right: ArithmeticItem::Expr(Box::new(Arithmetic::new(
+                        Multiply,
+                        Scalar(2.into()),
+                        Scalar(3.into()),
+                    ))),
+                },
+                Arithmetic {
+                    op: Subtract,
+                    left: ArithmeticItem::Expr(Box::new(Arithmetic::new(
+                        Multiply,
+                        Scalar(2.into()),
+                        Scalar(3.into()),
+                    ))),
+                    right: ArithmeticItem::Expr(Box::new(Arithmetic::new(
+                        Divide,
+                        Scalar(1.into()),
+                        Scalar(3.into()),
+                    ))),
+                },
+                Arithmetic {
+                    op: Multiply,
+                    left: ArithmeticItem::Base(Scalar(3.into())),
+                    right: ArithmeticItem::Base(ArithmeticBase::Bracketed(Box::new(
+                        Arithmetic::new(Add, Scalar(1.into()), Scalar(2.into())),
+                    ))),
+                },
+            ];
+
+        for (i, e) in qs.iter().enumerate() {
+            let res = arithmetic(e.as_bytes());
+            let ari = res.unwrap().1;
+            assert_eq!(ari, expects[i]);
+            assert_eq!(format!("{}", ari), qs[i]);
         }
     }
 }

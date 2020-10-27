@@ -251,12 +251,12 @@ mod tests {
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
         let res = insertion(qstring.as_bytes());
-        let expected_ae = ArithmeticExpression {
-            op: ArithmeticOperator::Add,
-            left: ArithmeticBase::Column(Column::from("value")),
-            right: ArithmeticBase::Scalar(1.into()),
-            alias: None,
-        };
+        let expected_ae = ArithmeticExpression::new(
+            ArithmeticOperator::Add,
+            ArithmeticBase::Column(Column::from("value")),
+            ArithmeticBase::Scalar(1.into()),
+            None,
+        );
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
