@@ -185,7 +185,7 @@ fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
     match res.1 {
         ArithmeticItem::Base(ArithmeticBase::Column(_))
         | ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => {
-            Err(Error((res.0, nom::error::ErrorKind::Tag)))
+            Err(Error((i, nom::error::ErrorKind::Tag)))
         } // no operator
         ArithmeticItem::Base(ArithmeticBase::Bracketed(expr)) => Ok((res.0, *expr)),
         ArithmeticItem::Expr(expr) => Ok((res.0, *expr)),
@@ -247,6 +247,8 @@ mod tests {
     };
 
     use super::*;
+    use nom::error::ErrorKind;
+    use nom::AsBytes;
 
     #[test]
     fn it_parses_arithmetic_expressions() {
@@ -454,5 +456,13 @@ mod tests {
             assert_eq!(ari, expects[i]);
             assert_eq!(format!("{}", ari), qs[i]);
         }
+    }
+
+    #[test]
+    fn arithmetic_scalar(){
+        let qs = "56";
+        let res = arithmetic(qs.as_bytes());
+        assert!(res.is_err());
+        assert_eq!(nom::Err::Error((qs.as_bytes(), ErrorKind::Tag)), res.err().unwrap());
     }
 }
