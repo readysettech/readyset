@@ -1272,10 +1272,9 @@ mod tests {
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Value(
-                FieldValueExpression::Arithmetic(ArithmeticExpression {
-                    alias: None,
-                    op: ArithmeticOperator::Subtract,
-                    left: ArithmeticBase::Column(Column {
+                FieldValueExpression::Arithmetic(ArithmeticExpression::new(
+                    ArithmeticOperator::Subtract,
+                    ArithmeticBase::Column(Column {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
@@ -1283,8 +1282,9 @@ mod tests {
                             FunctionArguments::Column("o_id".into()),
                         ))),
                     }),
-                    right: ArithmeticBase::Scalar(3333.into()),
-                }),
+                    ArithmeticBase::Scalar(3333.into()),
+                    None,
+                )),
             )],
             ..Default::default()
         };
@@ -1302,10 +1302,9 @@ mod tests {
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Value(
-                FieldValueExpression::Arithmetic(ArithmeticExpression {
-                    alias: Some(String::from("double_max")),
-                    op: ArithmeticOperator::Multiply,
-                    left: ArithmeticBase::Column(Column {
+                FieldValueExpression::Arithmetic(ArithmeticExpression::new(
+                    ArithmeticOperator::Multiply,
+                    ArithmeticBase::Column(Column {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
@@ -1313,8 +1312,9 @@ mod tests {
                             FunctionArguments::Column("o_id".into()),
                         ))),
                     }),
-                    right: ArithmeticBase::Scalar(2.into()),
-                }),
+                    ArithmeticBase::Scalar(2.into()),
+                    Some(String::from("double_max")),
+                )),
             )],
             ..Default::default()
         };

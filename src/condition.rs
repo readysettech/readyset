@@ -299,9 +299,6 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
 
 fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     alt((
-        map(arithmetic_expression, |e| {
-            ConditionExpression::Arithmetic(Box::new(e))
-        }),
         map(
             delimited(
                 terminated(tag("("), multispace0),
@@ -314,6 +311,9 @@ fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
                 ))))
             },
         ),
+        map(arithmetic_expression, |e| {
+            ConditionExpression::Arithmetic(Box::new(e))
+        }),
         map(literal, |lit| {
             ConditionExpression::Base(ConditionBase::Literal(lit))
         }),
