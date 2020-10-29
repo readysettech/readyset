@@ -9,7 +9,7 @@ arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
 msql-srv = "0.8.7"
-noria = "0.4"
+noria = "0.7"
 futures-executor = "0.3.0"
 futures-util = "0.3.0"
 lazy_static = "1.0.0"
@@ -27,7 +27,7 @@ tracing-timing = { version = "0.4.0", features = ["layer"] }
 [dev-dependencies]
 mysql = "18"
 zookeeper = "0.5.4"
-noria-server = "0.4"
+noria-server = "0.7"
 tokio = { version = "0.2.0", features = ["full"] }
 
 [profile.release]
@@ -38,10 +38,8 @@ path = "src/lib.rs"
 
 [patch.crates-io]
 # prefer noria from git
-noria = { git = "https://github.com/mit-pdos/noria.git" }
-noria-server = { git = "https://github.com/mit-pdos/noria.git" }
-# noria = { path = "../noria/noria/" }
-# noria-server = { path = "../noria/server/" }
+noria = { path = "../noria/noria/" }
+noria-server = { path = "../noria/server/" }
 # optional overrides:
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
