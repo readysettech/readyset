@@ -46,15 +46,15 @@ pub struct FunctionArguments {
 
 impl Display for FunctionArguments {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut first = true;
-        for argument in self.arguments.iter() {
-            if !first {
-                write!(f, ",")?;
-            } else {
-                first = false;
-            }
-            write!(f, "{}", argument)?;
-        }
+        write!(
+            f,
+            "{}",
+            self.arguments
+                .iter()
+                .map(|arg| format!("{}", arg))
+                .collect::<Vec<String>>()
+                .join(",")
+        )?;
         Ok(())
     }
 }
