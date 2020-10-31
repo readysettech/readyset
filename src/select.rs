@@ -310,7 +310,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 mod tests {
     use super::*;
     use case::{CaseWhenExpression, ColumnOrLiteral};
-    use column::{Column, FunctionArgument, FunctionExpression};
+    use column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
     use common::{
         FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal, Operator,
     };
@@ -972,26 +972,54 @@ mod tests {
 
     #[test]
     fn generic_function_query() {
-        let qstring = "SELECT coalesce(a, b,c),d FROM sometable;";
+        let qstring = "SELECT coalesce(a, b,c) as x,d FROM sometable;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::CountStar;
+        let agg_expr = FunctionExpression::Generic(
+            String::from("coalesce"),
+            FunctionArguments {
+                arguments: vec![
+                    FunctionArgument::Column(Column {
+                        name: String::from("a"),
+                        alias: None,
+                        table: None,
+                        function: None,
+                    }),
+                    FunctionArgument::Column(Column {
+                        name: String::from("b"),
+                        alias: None,
+                        table: None,
+                        function: None,
+                    }),
+                    FunctionArgument::Column(Column {
+                        name: String::from("c"),
+                        alias: None,
+                        table: None,
+                        function: None,
+                    }),
+                ],
+            },
+        );
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("sometable")],
-            fields: vec![FieldDefinitionExpression::Col(Column {
-                name: String::from("count(*)"),
-                alias: None,
-                table: None,
-                function: Some(Box::new(agg_expr)),
-            }), FieldDefinitionExpression::Col(Column {
-                name: String::from("d"),
-                ..Default::default()
-            })],
+            fields: vec![
+                FieldDefinitionExpression::Col(Column {
+                    name: String::from("x"),
+                    alias: Some(String::from("x")),
+                    table: None,
+                    function: Some(Box::new(agg_expr)),
+                }),
+                FieldDefinitionExpression::Col(Column {
+                    name: String::from("d"),
+                    alias: None,
+                    table: None,
+                    function: None,
+                }),
+            ],
             ..Default::default()
         };
         assert_eq!(res.unwrap().1, expected_stmt);
     }
-
 
     #[test]
     fn moderately_complex_selection() {
