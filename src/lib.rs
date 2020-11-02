@@ -312,6 +312,19 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         w,
                     )?;
                 }
+                Command::ResetStmtData(stmt) => {
+                    stmts
+                        .get_mut(&stmt)
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("got reset data packet for unknown statement {}", stmt),
+                            )
+                        })?
+                        .long_data
+                        .clear();
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+                }
                 Command::Execute { stmt, params } => {
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
                         io::Error::new(
