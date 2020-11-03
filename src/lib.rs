@@ -253,8 +253,34 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
         self.writer.flush()?;
 
         {
-            let (seq, handshake) = self.reader.next()?.unwrap();
-            let _handshake = commands::client_handshake(&handshake).unwrap().1;
+            let (seq, handshake) = self.reader.next()?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "peer terminated connection",
+                )
+            })?;
+            let _handshake = commands::client_handshake(&handshake)
+                .map_err(|e| match e {
+                    nom::Err::Incomplete(_) => io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "client sent incomplete handshake",
+                    ),
+                    nom::Err::Failure((input, nom_e_kind))
+                    | nom::Err::Error((input, nom_e_kind)) => {
+                        if let nom::error::ErrorKind::Eof = nom_e_kind {
+                            io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                format!("client did not complete handshake; got {:?}", input),
+                            )
+                        } else {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("bad client handshake; got {:?} ({:?})", input, nom_e_kind),
+                            )
+                        }
+                    }
+                })?
+                .1;
             self.writer.set_seq(seq + 1);
         }
 
