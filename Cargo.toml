@@ -40,6 +40,7 @@ path = "src/lib.rs"
 # prefer noria from git
 noria = { path = "../noria/noria/" }
 noria-server = { path = "../noria/server/" }
+msql-srv = { path = "../msql-srv/" }
 # optional overrides:
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
