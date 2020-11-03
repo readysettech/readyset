@@ -305,6 +305,21 @@ fn handle_message(
                 v: ReadReply::Size(size),
             })))
         }
+        ReadQuery::Keys { target } => {
+            let keys = READERS.with(|readers_cache| {
+                let mut readers_cache = readers_cache.borrow_mut();
+                let reader = readers_cache.entry(target).or_insert_with(|| {
+                    let readers = s.lock().unwrap();
+                    readers.get(&target).unwrap().clone()
+                });
+
+                reader.keys()
+            });
+            Either::Right(future::ready(Ok(Tagged {
+                tag,
+                v: ReadReply::Keys(keys),
+            })))
+        }
     }
 }
 
