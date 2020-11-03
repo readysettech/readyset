@@ -213,7 +213,7 @@ async fn main() {
         .arg(
             Arg::with_name("private")
                 .long("private")
-                .default_value("0.1")
+                .default_value("0.0")
                 .help("Percentage of private posts"),
         )
         .get_matches();
@@ -230,12 +230,16 @@ async fn main() {
     let shard = args.is_present("shard");
     let reuse = args.value_of("reuse").unwrap();
     let populate = args.value_of("populate").unwrap_or("nopopulate");
-    let nusers = value_t_or_exit!(args, "nusers", i32);
-    let nlogged = value_t_or_exit!(args, "nlogged", i32);
-    let nclasses = value_t_or_exit!(args, "nclasses", i32);
-    let nposts = value_t_or_exit!(args, "nposts", i32);
+    // let nusers = value_t_or_exit!(args, "nusers", i32);
+    // let nlogged = value_t_or_exit!(args, "nlogged", i32);
+    // let nclasses = value_t_or_exit!(args, "nclasses", i32);
+    // let nposts = value_t_or_exit!(args, "nposts", i32);
     let private = value_t_or_exit!(args, "private", f32);
-
+    let nusers = 5; 
+    let nlogged = 5;
+    let nclasses = 1;
+    let nposts = 100;
+    
     assert!(
         nlogged <= nusers,
         "nusers must be greater or equal to nlogged"
@@ -248,9 +252,9 @@ async fn main() {
     // Initiliaze backend application with some queries and policies
     println!("Initiliazing database schema...");
     let mut backend = Backend::new(partial, shard, reuse).await;
-    backend.migrate(sloc, None).await.unwrap();
+    // backend.migrate(sloc, None).await.unwrap();
 
-    backend.set_security_config(ploc).await;
+    // backend.set_security_config(ploc).await;
     backend.migrate(sloc, Some(qloc)).await.unwrap();
 
     let populate = match populate {
@@ -260,7 +264,6 @@ async fn main() {
     };
 
     let mut p = Populate::new(nposts, nusers, nclasses, private);
-
     p.enroll_students();
     let roles = p.get_roles();
     let users = p.get_users();
@@ -274,82 +277,18 @@ async fn main() {
     backend.populate("User", users).await;
     backend.populate("Class", classes).await;
 
-    if populate == PopulateType::Before {
-        backend.populate("Post", posts.clone()).await;
-        println!("Waiting for posts to propagate...");
-        tokio::time::delay_for(time::Duration::from_millis((nposts / 10) as u64)).await;
-    }
+   
+    backend.populate("Post", posts.clone()).await;
+    println!("Waiting for posts to propagate...");
+    tokio::time::delay_for(time::Duration::from_millis((nposts / 10) as u64)).await;
+    
 
     println!("Finished writing! Sleeping for 2 seconds...");
-    tokio::time::delay_for(time::Duration::from_secs(2)).await;
-
-    // if partial, read 25% of the keys
-    if partial {
-        let leaf = "posts".to_string();
-        let mut getter = backend.g.view(&leaf).await.unwrap();
-        for author in 0..nusers / 4 {
-            getter.lookup(&[author.into()], false).await.unwrap();
-        }
-    }
-
-    // Login a user
-    println!("Login in users...");
-    for i in 0..nlogged {
-        let start = time::Instant::now();
-        let _ = backend.login(make_user(i)).await.is_ok();
-        let dur = start.elapsed().as_secs_f64();
-        println!("Migration {} took {:.2}s!", i, dur,);
-
-        // if partial, read 25% of the keys
-        if partial {
-            let leaf = format!("posts_u{}", i);
-            let mut getter = backend.g.view(&leaf).await.unwrap();
-            for author in 0..nusers / 4 {
-                getter.lookup(&[author.into()], false).await.unwrap();
-            }
-        }
-
-        if iloc.is_some() && i % 50 == 0 {
-            use std::fs;
-            let fname = format!("{}-{}", iloc.unwrap(), i);
-            fs::copy("/proc/self/status", fname).unwrap();
-        }
-    }
-
-    if populate == PopulateType::After {
-        backend.populate("Post", posts).await;
-    }
-
-    if !partial {
-        let mut dur = time::Duration::from_millis(0);
-        for uid in 0..nlogged {
-            let leaf = format!("posts_u{}", uid);
-            let mut getter = backend.g.view(&leaf).await.unwrap();
-            let start = time::Instant::now();
-            for author in 0..nusers {
-                getter.lookup(&[author.into()], true).await.unwrap();
-            }
-            dur += start.elapsed();
-        }
-
-        let dur = dur.as_secs_f64();
-
-        println!(
-            "Read {} keys in {:.2}s ({:.2} GETs/sec)!",
-            nlogged * nusers,
-            dur,
-            f64::from(nlogged * nusers) / dur,
-        );
-    }
-
-    println!("Done with benchmark.");
-
-    if gloc.is_some() {
-        let graph_fname = gloc.unwrap();
-        let mut gf = File::create(graph_fname).unwrap();
-        assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
-    }
-
-    drop(backend.g);
-    backend.done.await;
+    tokio::time::delay_for(time::Duration::from_secs(10)).await;
+    let leaf = "posts".to_string();
+    let mut getter = backend.g.view(&leaf).await.unwrap();
+    
+    let res = getter.lookup(&[0.into()], false).await.unwrap(); // query by cid
+    println!("result: {:?}", res);
+    
 }
