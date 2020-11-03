@@ -68,4 +68,13 @@ impl Handle {
             }
         }
     }
+
+
+    pub(super) fn keys(&self) -> Vec<Vec<DataType>> {
+        match *self {
+            Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
+            Handle::Double(ref h) => h.map_into(|(k1, k2), _| vec![k1.clone(), k2.clone()]),
+            Handle::Many(ref h) => h.map_into(|ks, _| ks.clone()),
+        }
+    }
 }

@@ -359,6 +359,10 @@ impl SingleReadHandle {
     pub fn is_empty(&self) -> bool {
         self.handle.len() == 0
     }
+
+    pub fn keys(&self) -> Vec<Vec<DataType>> {
+        self.handle.keys()
+    }
 }
 
 #[cfg(test)]

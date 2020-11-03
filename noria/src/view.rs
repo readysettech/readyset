@@ -129,6 +129,12 @@ pub enum ReadQuery {
         /// Where to read from
         target: (NodeIndex, usize),
     },
+    /// Read all keys from a leaf view (for debugging)
+    /// TODO(alex): queries with this value are not totally implemented, and might not actually work
+    Keys {
+        /// Where to read from
+        target: (NodeIndex, usize),
+    },
 }
 
 #[doc(hidden)]
@@ -138,6 +144,8 @@ pub enum ReadReply<D = ReadReplyBatch> {
     Normal(Result<Vec<D>, ()>),
     /// Read size of view
     Size(usize),
+    // Read keys of view
+    Keys(Vec<Vec<DataType>>),
 }
 
 #[doc(hidden)]
@@ -399,6 +407,35 @@ impl View {
 
         Ok(nrows)
     }
+
+    /// Get the current keys of this view. For debugging only.
+    pub async fn keys(&mut self) -> Result<Vec<Vec<DataType>>, ViewError> {
+        future::poll_fn(|cx| self.poll_ready(cx)).await?;
+
+        let node = self.node;
+        let mut rsps = self
+            .shards
+            .iter_mut()
+            .enumerate()
+            .map(|(shardi, shard)| {
+                shard.call(Tagged::from(ReadQuery::Keys {
+                    target: (node, shardi),
+                }))
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        let mut vec = vec![];
+        while let Some(reply) = rsps.next().await.transpose()? {
+            if let ReadReply::Keys(mut keys) = reply.v {
+                vec.append(&mut keys);
+            } else {
+                unreachable!();
+            }
+        }
+
+        Ok(vec)
+    }
+
 
     /// Retrieve the query results for the given parameter values.
     ///
