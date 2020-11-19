@@ -51,7 +51,7 @@ impl<'a> ToDataType for Value<'a> {
     fn to_datatype(self) -> DataType {
         match self.into_inner() {
             ValueInner::NULL => DataType::None,
-            ValueInner::Bytes(b) => DataType::Text(ArcCStr::try_from(b).unwrap()),
+            ValueInner::Bytes(b) => DataType::try_from(b).unwrap(),
             ValueInner::Int(i) => i.into(),
             ValueInner::UInt(i) => (i as i32).into(),
             ValueInner::Double(f) => f.into(),
