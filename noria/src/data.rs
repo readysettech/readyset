@@ -20,7 +20,7 @@ const TINYTEXT_WIDTH: usize = 15;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Eq, Clone)]
 #[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
@@ -197,8 +197,6 @@ impl PartialEq for DataType {
         }
     }
 }
-
-impl Eq for DataType {}
 
 use std::cmp::Ordering;
 impl PartialOrd for DataType {

@@ -206,6 +206,7 @@ use tokio_tower::multiplex;
 
 mod controller;
 mod data;
+mod data_serde;
 mod table;
 mod view;
 
