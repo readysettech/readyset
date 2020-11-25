@@ -36,6 +36,7 @@ trawler = "0.11.0-alpha.4"
 vec_map = { version = "0.8.0" }
 zipf = "6"
 zookeeper = "0.5.3"
+mysql = "*"
 
 # mssql
 # disabled due to lack of async/await support
@@ -108,6 +109,11 @@ doc = false
 [[bin]]
 name = "lobsters-noria"
 path = "lobsters/noria/main.rs"
+doc = false
+
+[[bin]]
+name = "basic-benchmarking"
+path = "basic-benchmarking/main.rs"
 doc = false
 
 #[[bin]]
