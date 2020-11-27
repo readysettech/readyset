@@ -1,13 +1,17 @@
 FROM readyset-base:latest
 
-RUN git clone https://github.com/mit-pdos/noria.git && \
-        git clone https://github.com/mit-pdos/noria-mysql.git && \
-        git clone https://github.com/mit-pdos/noria-ui.git
+
+COPY --chown=readyset:readyset keys /tmp/keys
+COPY --chown=readyset:readyset known_hosts /home/readyset/.ssh/known_hosts
+RUN eval `ssh-agent`; \
+    for project in noria noria-mysql noria-ui msql-srv; do \
+        ssh-add -D; \
+        ssh-add "/tmp/keys/readyset_deploy_${project}"; \
+        git clone git@github.com:readysettech/${project}.git; \
+    done
 
 RUN cd noria && ~/.cargo/bin/cargo build --release
-ADD noria-mysql.patch noria-mysql/Cargo.toml.patch
 RUN cd noria-mysql && \
-    cat Cargo.toml.patch | patch Cargo.toml && \
     sed -i 's%noria::trace_my_next_op%// noria::trace_my_next_op%g' src/backend.rs && \
     rm Cargo.lock && \
     ~/.cargo/bin/cargo build --release
