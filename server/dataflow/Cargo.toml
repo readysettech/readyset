@@ -19,7 +19,7 @@ jemallocator = "0.3"
 
 [dependencies]
 bincode = "1.0.0"
-evmap = { version = "11.0.0-alpha.1", features = ["eviction"] }
+evmap = { version = "<11.0.0-alpha.2", features = ["eviction"] }
 hashbag = "0.1.2"
 ahash = "0.3"
 futures-util = "0.3.0"
