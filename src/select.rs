@@ -342,6 +342,13 @@ mod tests {
     }
 
     #[test]
+    fn select_without_table() {
+        let qstring = "SELECT * FROM;";
+        let res = selection(qstring.as_bytes());
+        assert!(res.is_err(), "!{:?}.is_err()", res);
+    }
+
+    #[test]
     fn more_involved_select() {
         let qstring = "SELECT users.id, users.name FROM users;";
 
