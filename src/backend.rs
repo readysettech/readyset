@@ -1226,11 +1226,10 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
 
                         (q, use_params)
                     }
-                    Err(_e) => {
+                    Err(e) => {
                         // if nom-sql rejects the query, there is no chance Noria will like it
                         error!("query can't be parsed");
-                        return results.completed(0, 0);
-                        //return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                        return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                     }
                 }
             }
