@@ -890,7 +890,7 @@ pub fn field_definition_expr(i: &[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpr
 // Parse list of table names.
 // XXX(malte): add support for aliases
 pub fn table_list(i: &[u8]) -> IResult<&[u8], Vec<Table>> {
-    many0(terminated(schema_table_reference, opt(ws_sep_comma)))(i)
+    many1(terminated(schema_table_reference, opt(ws_sep_comma)))(i)
 }
 
 // Integer literal value
