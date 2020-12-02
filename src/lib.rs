@@ -16,8 +16,8 @@ pub use self::column::{
     Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionExpression,
 };
 pub use self::common::{
-    FieldDefinitionExpression, FieldValueExpression, Literal, LiteralExpression, Operator, Real,
-    SqlType, TableKey,
+    FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression,
+    Operator, Real, SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
