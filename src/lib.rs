@@ -36,6 +36,7 @@ pub mod parser;
 
 #[macro_use]
 mod keywords;
+mod alter;
 mod arithmetic;
 mod case;
 mod column;
