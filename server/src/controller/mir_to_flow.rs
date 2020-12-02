@@ -803,12 +803,14 @@ fn make_project_node(
 
     let projected_arithmetic: Vec<ProjectExpression> = arithmetic
         .iter()
-        .map(|&(_, ref e)| {
-            ProjectExpression::new(
-                e.op.clone(),
-                generate_projection_base(&parent, &e.left),
-                generate_projection_base(&parent, &e.right),
-            )
+        .map(|&(_, ref e)| ProjectExpression::Op {
+            op: e.op.clone(),
+            left: Box::new(ProjectExpression::Base(generate_projection_base(
+                &parent, &e.left,
+            ))),
+            right: Box::new(ProjectExpression::Base(generate_projection_base(
+                &parent, &e.right,
+            ))),
         })
         .collect();
 

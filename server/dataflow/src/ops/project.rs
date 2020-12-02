@@ -13,20 +13,13 @@ pub enum ProjectExpressionBase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectExpression {
-    op: ArithmeticOperator,
-    left: ProjectExpressionBase,
-    right: ProjectExpressionBase,
-}
-
-impl ProjectExpression {
-    pub fn new(
+pub enum ProjectExpression {
+    Base(ProjectExpressionBase),
+    Op {
         op: ArithmeticOperator,
-        left: ProjectExpressionBase,
-        right: ProjectExpressionBase,
-    ) -> ProjectExpression {
-        ProjectExpression { op, left, right }
-    }
+        left: Box<ProjectExpression>,
+        right: Box<ProjectExpression>,
+    },
 }
 
 impl fmt::Display for ProjectExpressionBase {
@@ -40,14 +33,18 @@ impl fmt::Display for ProjectExpressionBase {
 
 impl fmt::Display for ProjectExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let op = match self.op {
-            ArithmeticOperator::Add => "+",
-            ArithmeticOperator::Subtract => "-",
-            ArithmeticOperator::Divide => "/",
-            ArithmeticOperator::Multiply => "*",
-        };
-
-        write!(f, "{} {} {}", self.left, op, self.right)
+        match self {
+            ProjectExpression::Base(base) => write!(f, "{}", base),
+            ProjectExpression::Op { op, left, right } => {
+                let op = match op {
+                    ArithmeticOperator::Add => "+",
+                    ArithmeticOperator::Subtract => "-",
+                    ArithmeticOperator::Divide => "/",
+                    ArithmeticOperator::Multiply => "*",
+                };
+                write!(f, "({} {} {})", left, op, right)
+            }
+        }
     }
 }
 
@@ -101,21 +98,21 @@ impl Project {
 }
 
 fn eval_expression(expression: &ProjectExpression, record: &[DataType]) -> DataType {
-    let left = match expression.left {
-        ProjectExpressionBase::Column(i) => &record[i],
-        ProjectExpressionBase::Literal(ref data) => data,
-    };
+    use ProjectExpressionBase::{Column, Literal};
+    match expression {
+        ProjectExpression::Base(Column(i)) => record[*i].clone(),
+        ProjectExpression::Base(Literal(ref data)) => data.clone(),
+        ProjectExpression::Op { op, left, right } => {
+            let left_val = eval_expression(left, record);
+            let right_val = eval_expression(right, record);
 
-    let right = match expression.right {
-        ProjectExpressionBase::Column(i) => &record[i],
-        ProjectExpressionBase::Literal(ref data) => data,
-    };
-
-    match expression.op {
-        ArithmeticOperator::Add => left + right,
-        ArithmeticOperator::Subtract => left - right,
-        ArithmeticOperator::Multiply => left * right,
-        ArithmeticOperator::Divide => left / right,
+            match op {
+                ArithmeticOperator::Add => &left_val + &right_val,
+                ArithmeticOperator::Subtract => &left_val - &right_val,
+                ArithmeticOperator::Multiply => &left_val * &right_val,
+                ArithmeticOperator::Divide => &left_val / &right_val,
+            }
+        }
     }
 }
 
@@ -351,9 +348,9 @@ mod tests {
     }
 
     fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
-        let expression = ProjectExpression {
-            left: ProjectExpressionBase::Column(0),
-            right: ProjectExpressionBase::Column(1),
+        let expression = ProjectExpression::Op {
+            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
+            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
             op,
         };
 
@@ -372,7 +369,7 @@ mod tests {
     #[test]
     fn it_describes_arithmetic() {
         let p = setup_column_arithmetic(ArithmeticOperator::Add);
-        assert_eq!(p.node().description(true), "π[0, 1, 0 + 1]");
+        assert_eq!(p.node().description(true), "π[0, 1, (0 + 1)]");
     }
 
     #[test]
@@ -473,9 +470,11 @@ mod tests {
     #[test]
     fn it_forwards_arithmetic_w_literals() {
         let number: DataType = 40.into();
-        let expression = ProjectExpression {
-            left: ProjectExpressionBase::Column(0),
-            right: ProjectExpressionBase::Literal(number),
+        let expression = ProjectExpression::Op {
+            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
+            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(
+                number,
+            ))),
             op: ArithmeticOperator::Multiply,
         };
 
@@ -491,9 +490,9 @@ mod tests {
     fn it_forwards_arithmetic_w_only_literals() {
         let a: DataType = 80.into();
         let b: DataType = 40.into();
-        let expression = ProjectExpression {
-            left: ProjectExpressionBase::Literal(a),
-            right: ProjectExpressionBase::Literal(b),
+        let expression = ProjectExpression::Op {
+            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(a))),
+            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(b))),
             op: ArithmeticOperator::Divide,
         };
 
@@ -617,9 +616,9 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![ProjectExpression {
-            left: ProjectExpressionBase::Column(0),
-            right: ProjectExpressionBase::Column(1),
+        let expressions = Some(vec![ProjectExpression::Op {
+            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
+            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
             op: ArithmeticOperator::Add,
         }]);
 
@@ -632,9 +631,9 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![ProjectExpression {
-            left: ProjectExpressionBase::Column(0),
-            right: ProjectExpressionBase::Column(1),
+        let expressions = Some(vec![ProjectExpression::Op {
+            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
+            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
             op: ArithmeticOperator::Add,
         }]);
 
@@ -646,6 +645,31 @@ mod tests {
 
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
+        assert_query_through(p, 0, 2.into(), states, expected);
+    }
+
+    #[test]
+    fn it_queries_nested_expressions() {
+        use ProjectExpression::{Base, Op};
+        use ProjectExpressionBase::{Column, Literal};
+        let expression = Op {
+            op: ArithmeticOperator::Multiply,
+            left: Box::new(Op {
+                left: Box::new(Base(Column(0))),
+                right: Box::new(Base(Column(1))),
+                op: ArithmeticOperator::Add,
+            }),
+            right: Box::new(Base(Literal(DataType::Int(2)))),
+        };
+
+        let state = Box::new(PersistentState::new(
+            String::from("it_queries_nested_expressions"),
+            None,
+            &PersistenceParameters::default(),
+        ));
+
+        let (p, states) = setup_query_through(state, &[1], None, Some(vec![expression]));
+        let expected: Vec<DataType> = vec![2.into(), ((1 + 2) * 2).into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
