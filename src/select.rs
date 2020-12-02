@@ -274,15 +274,15 @@ pub fn selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 }
 
 pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
-    let (
-        remaining_input,
-        (_, _, distinct, _, fields, _, tables, join, where_clause, group_by, order, limit),
-    ) = tuple((
+    let (remaining_input, (_, _, distinct, _, fields)) = tuple((
         tag_no_case("select"),
         multispace1,
         opt(tag_no_case("distinct")),
         multispace0,
         field_definition_expr,
+    ))(i)?;
+
+    let (remaining_input, from_clause) = opt(tuple((
         delimited(multispace0, tag_no_case("from"), multispace0),
         table_list,
         many0(join_clause),
@@ -290,20 +290,24 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
         opt(group_by_clause),
         opt(order_clause),
         opt(limit_clause),
-    ))(i)?;
-    Ok((
-        remaining_input,
-        SelectStatement {
-            tables,
-            distinct: distinct.is_some(),
-            fields,
-            join,
-            where_clause,
-            group_by,
-            order,
-            limit,
-        },
-    ))
+    )))(remaining_input)?;
+
+    let mut result = SelectStatement {
+        distinct: distinct.is_some(),
+        fields,
+        ..Default::default()
+    };
+
+    if let Some((_, tables, join, where_clause, group_by, order, limit)) = from_clause {
+        result.tables = tables;
+        result.join = join;
+        result.where_clause = where_clause;
+        result.group_by = group_by;
+        result.order = order;
+        result.limit = limit;
+    }
+
+    Ok((remaining_input, result))
 }
 
 #[cfg(test)]
@@ -540,7 +544,7 @@ mod tests {
                 tables: vec![Table {
                     name: String::from("PaperTag"),
                     alias: Some(String::from("t")),
-					schema: None,
+                    schema: None,
                 },],
                 fields: vec![FieldDefinitionExpression::All],
                 ..Default::default()
@@ -561,7 +565,7 @@ mod tests {
                 tables: vec![Table {
                     name: String::from("PaperTag"),
                     alias: Some(String::from("t")),
-					schema: Some(String::from("db1")),
+                    schema: Some(String::from("db1")),
                 },],
                 fields: vec![FieldDefinitionExpression::All],
                 ..Default::default()
