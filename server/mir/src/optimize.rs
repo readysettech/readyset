@@ -88,12 +88,12 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     candidate = true;
 
                     // But wait -- need to check if the filter is on the aggregation result
-                    use nom_sql::FunctionArguments;
+                    use nom_sql::FunctionArgument;
                     use nom_sql::FunctionExpression::{Count, Sum};
                     for (i, col) in child.columns.iter().enumerate() {
                         match col.function.as_deref() {
-                            Some(Count(FunctionArguments::Column(ref col), _))
-                            | Some(Sum(FunctionArguments::Column(ref col), _))
+                            Some(Count(FunctionArgument::Column(ref col), _))
+                            | Some(Sum(FunctionArgument::Column(ref col), _))
                                 if col.name == on.name =>
                             {
                                 // this column may be the aggregation result

@@ -3,7 +3,7 @@ use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::{Column, MirNodeRef};
 use nom_sql::FunctionExpression::*;
 use nom_sql::{
-    self, CaseWhenExpression, ColumnOrLiteral, ConditionExpression, FunctionArguments,
+    self, CaseWhenExpression, ColumnOrLiteral, ConditionExpression, FunctionArgument,
     FunctionExpression,
 };
 use std::collections::{HashMap, HashSet};
@@ -13,26 +13,26 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
     use nom_sql::FunctionExpression::*;
 
     match *computed_col.function.as_ref().unwrap().deref() {
-        Avg(FunctionArguments::Column(ref col), _)
-        | Count(FunctionArguments::Column(ref col), _)
+        Avg(FunctionArgument::Column(ref col), _)
+        | Count(FunctionArgument::Column(ref col), _)
         | Count(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(ref col),
                 ..
             }),
             _,
         )
-        | GroupConcat(FunctionArguments::Column(ref col), _)
-        | Max(FunctionArguments::Column(ref col))
-        | Min(FunctionArguments::Column(ref col))
+        | GroupConcat(FunctionArgument::Column(ref col), _)
+        | Max(FunctionArgument::Column(ref col))
+        | Min(FunctionArgument::Column(ref col))
         | Sum(
-            FunctionArguments::Conditional(CaseWhenExpression {
+            FunctionArgument::Conditional(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(ref col),
                 ..
             }),
             _,
         )
-        | Sum(FunctionArguments::Column(ref col), _) => Column::from(col),
+        | Sum(FunctionArgument::Column(ref col), _) => Column::from(col),
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
@@ -118,33 +118,33 @@ pub(super) fn make_grouped(
                 let computed_col = if is_reconcile {
                     let func = computed_col.function.as_ref().unwrap();
                     let new_func = match *func.deref() {
-                        Sum(FunctionArguments::Column(ref col), b) => {
+                        Sum(FunctionArgument::Column(ref col), b) => {
                             let colname =
                                 format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
                             FunctionExpression::Sum(
-                                FunctionArguments::Column(nom_sql::Column::from(colname.as_ref())),
+                                FunctionArgument::Column(nom_sql::Column::from(colname.as_ref())),
                                 b,
                             )
                         }
-                        Count(FunctionArguments::Column(ref col), b) => {
+                        Count(FunctionArgument::Column(ref col), b) => {
                             let colname =
                                 format!("{}.count({})", col.clone().table.unwrap(), col.name);
                             FunctionExpression::Sum(
-                                FunctionArguments::Column(nom_sql::Column::from(colname.as_ref())),
+                                FunctionArgument::Column(nom_sql::Column::from(colname.as_ref())),
                                 b,
                             )
                         }
-                        Max(FunctionArguments::Column(ref col)) => {
+                        Max(FunctionArgument::Column(ref col)) => {
                             let colname =
                                 format!("{}.max({})", col.clone().table.unwrap(), col.name);
-                            FunctionExpression::Max(FunctionArguments::Column(
+                            FunctionExpression::Max(FunctionArgument::Column(
                                 nom_sql::Column::from(colname.as_ref()),
                             ))
                         }
-                        Min(FunctionArguments::Column(ref col)) => {
+                        Min(FunctionArgument::Column(ref col)) => {
                             let colname =
                                 format!("{}.min({})", col.clone().table.unwrap(), col.name);
-                            FunctionExpression::Min(FunctionArguments::Column(
+                            FunctionExpression::Min(FunctionArgument::Column(
                                 nom_sql::Column::from(colname.as_ref()),
                             ))
                         }

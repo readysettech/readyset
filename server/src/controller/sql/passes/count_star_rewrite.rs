@@ -1,6 +1,6 @@
 use nom_sql::{
     Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
-    FunctionArguments, SqlQuery, Table,
+    FunctionArgument, SqlQuery, Table,
 };
 
 use std::collections::HashMap;
@@ -38,6 +38,7 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
         ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner),
         ConditionExpression::Base(_) => unreachable!(),
         ConditionExpression::Arithmetic(_) => unimplemented!(),
+        ConditionExpression::ExistsOp(_) => unimplemented!(),
     }
 }
 
@@ -63,7 +64,7 @@ impl CountStarRewrite for SqlQuery {
                     }
 
                     c.function = Some(Box::new(Count(
-                        FunctionArguments::Column(Column {
+                        FunctionArgument::Column(Column {
                             name: bogo_column.clone(),
                             alias: None,
                             table: Some(bogo_table.name.clone()),
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     fn it_expands_count_star() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionArguments, FunctionExpression};
+        use nom_sql::{FunctionArgument, FunctionExpression};
 
         // SELECT COUNT(*) FROM users;
         // -->
@@ -136,7 +137,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            FunctionArguments::Column(Column::from("users.id")),
+                            FunctionArgument::Column(Column::from("users.id")),
                             false,
                         ))),
                     })]
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn it_expands_count_star_with_group_by() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionArguments, FunctionExpression};
+        use nom_sql::{FunctionArgument, FunctionExpression};
 
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
@@ -172,7 +173,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            FunctionArguments::Column(Column::from("users.name")),
+                            FunctionArgument::Column(Column::from("users.name")),
                             false,
                         ))),
                     })]

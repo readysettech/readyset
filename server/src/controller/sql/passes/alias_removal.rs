@@ -195,8 +195,8 @@ impl AliasRemoval for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::AliasRemoval;
-    use nom_sql::SelectStatement;
     use nom_sql::{Column, FieldDefinitionExpression, Literal, SqlQuery, Table};
+    use nom_sql::{ItemPlaceholder, SelectStatement};
     use std::collections::HashMap;
 
     #[test]
@@ -208,12 +208,15 @@ mod tests {
             tables: vec![Table {
                 name: String::from("PaperTag"),
                 alias: Some(String::from("t")),
+                schema: None,
             }],
             fields: vec![FieldDefinitionExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
-                right: wrap(ConditionBase::Literal(Literal::Placeholder)),
+                right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                ))),
             })),
             ..Default::default()
         };
@@ -232,7 +235,9 @@ mod tests {
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
                         operator: Operator::Equal,
                         left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
-                        right: wrap(ConditionBase::Literal(Literal::Placeholder)),
+                        right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                            ItemPlaceholder::QuestionMark
+                        ))),
                     }))
                 );
             }
