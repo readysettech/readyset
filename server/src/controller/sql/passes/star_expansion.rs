@@ -67,6 +67,7 @@ mod tests {
             tables: vec![Table {
                 name: String::from("PaperTag"),
                 alias: None,
+                schema: None,
             }],
             fields: vec![FieldDefinitionExpression::All],
             ..Default::default()

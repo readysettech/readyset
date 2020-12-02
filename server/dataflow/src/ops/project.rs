@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::prelude::*;
+use ProjectExpressionBase::{Column, Literal};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectExpressionBase {
@@ -98,7 +99,6 @@ impl Project {
 }
 
 fn eval_expression(expression: &ProjectExpression, record: &[DataType]) -> DataType {
-    use ProjectExpressionBase::{Column, Literal};
     match expression {
         ProjectExpression::Base(Column(i)) => record[*i].clone(),
         ProjectExpression::Base(Literal(ref data)) => data.clone(),
@@ -306,6 +306,8 @@ impl Ingredient for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ProjectExpression::{Base, Op};
+    use ProjectExpressionBase::{Column, Literal};
 
     use crate::ops;
 
@@ -650,8 +652,6 @@ mod tests {
 
     #[test]
     fn it_queries_nested_expressions() {
-        use ProjectExpression::{Base, Op};
-        use ProjectExpressionBase::{Column, Literal};
         let expression = Op {
             op: ArithmeticOperator::Multiply,
             left: Box::new(Op {

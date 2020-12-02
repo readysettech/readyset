@@ -18,7 +18,7 @@ use ::mir::reuse as mir_reuse;
 use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
-use nom_sql::parser as sql_parser;
+use nom_sql::{parser as sql_parser, ArithmeticItem};
 use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use petgraph::graph::NodeIndex;
@@ -271,11 +271,15 @@ impl SqlIncorporator {
                         OutputColumn::Literal(_) => true,
                         OutputColumn::Arithmetic(ref ac) => {
                             let mut is_function = false;
-                            if let ArithmeticBase::Column(ref c) = ac.expression.left {
+                            if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) =
+                                ac.expression.ari.left
+                            {
                                 is_function = is_function || c.function.is_some();
                             }
 
-                            if let ArithmeticBase::Column(ref c) = ac.expression.right {
+                            if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) =
+                                ac.expression.ari.right
+                            {
                                 is_function = is_function || c.function.is_some();
                             }
 
@@ -819,6 +823,7 @@ impl SqlIncorporator {
                             JoinRightSide::Table(Table {
                                 name: qfp.name.clone(),
                                 alias: None,
+                                schema: None,
                             })
                         }
                         _ => unreachable!(),
@@ -976,7 +981,7 @@ mod tests {
     use crate::integration;
     use dataflow::prelude::*;
     use nom_sql::{
-        CaseWhenExpression, Column, ColumnOrLiteral, FunctionArguments, FunctionExpression, Literal,
+        CaseWhenExpression, Column, ColumnOrLiteral, FunctionArgument, FunctionExpression, Literal,
     };
 
     /// Helper to grab a reference to a named view.
@@ -1181,7 +1186,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                FunctionArguments::Column(Column::from("votes.userid")),
+                FunctionArgument::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1457,7 +1462,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check project helper node
             let f = Box::new(FunctionExpression::Count(
-                FunctionArguments::Column(Column::from("votes.userid")),
+                FunctionArgument::Column(Column::from("votes.userid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1513,7 +1518,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                FunctionArguments::Column(Column::from("votes.aid")),
+                FunctionArgument::Column(Column::from("votes.aid")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1566,7 +1571,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                FunctionArguments::Conditional(CaseWhenExpression{
+                FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: Operator::Equal,
@@ -1629,7 +1634,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                FunctionArguments::Conditional(CaseWhenExpression{
+                FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: Operator::Equal,
@@ -1692,7 +1697,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                FunctionArguments::Conditional(CaseWhenExpression{
+                FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: Operator::Equal,
@@ -1758,7 +1763,7 @@ mod tests {
             assert!(res.is_ok());
             // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
             let f = Box::new(FunctionExpression::Sum(
-                FunctionArguments::Column(Column::from("votes.sign")),
+                FunctionArgument::Column(Column::from("votes.sign")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1850,7 +1855,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                FunctionArguments::Column(Column::from("votes.sign")),
+                FunctionArgument::Column(Column::from("votes.sign")),
                 false,
             ));
             let qid = query_id_hash(
@@ -1923,7 +1928,7 @@ mod tests {
                 operator: Operator::And,
             });
             let f = Box::new(FunctionExpression::Count(
-                FunctionArguments::Conditional(CaseWhenExpression{
+                FunctionArgument::Conditional(CaseWhenExpression{
                     condition: filter_cond,
                     then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
                     else_expr: None,

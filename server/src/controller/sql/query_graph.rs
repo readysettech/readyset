@@ -1,8 +1,8 @@
 use nom_sql::SelectStatement;
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, Column, ConditionBase, ConditionExpression,
-    ConditionTree, FieldDefinitionExpression, FieldValueExpression, JoinConstraint, JoinOperator,
-    JoinRightSide, Literal, Operator, Table,
+    ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
+    ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator, Table,
 };
 
 use std::cmp::Ordering;
@@ -402,7 +402,7 @@ fn classify_conditionals(
                             }
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
-                        ConditionBase::Literal(Literal::Placeholder) => {
+                        ConditionBase::Literal(Literal::Placeholder(_)) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 params.push(lf.clone());
                             }
@@ -452,6 +452,7 @@ fn classify_conditionals(
             panic!("negation should have been removed earlier");
         }
         ConditionExpression::Arithmetic(_) => unimplemented!(),
+        ConditionExpression::ExistsOp(_) => unimplemented!(),
     }
 }
 
@@ -747,11 +748,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }));
             }
             FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref a)) => {
-                if let ArithmeticBase::Column(ref c) = a.left {
+                if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.left {
                     add_computed_column(&mut qg, c);
                 }
 
-                if let ArithmeticBase::Column(ref c) = a.right {
+                if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.right {
                     add_computed_column(&mut qg, c);
                 }
 

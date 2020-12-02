@@ -1,5 +1,6 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ColumnConstraint, ColumnSpecification, Literal, OrderType,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ColumnConstraint,
+    ColumnSpecification, Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -765,19 +766,43 @@ fn make_latest_node(
     FlowNode::New(na)
 }
 
-// Converts a nom_sql::ArithmeticBase into a project::ProjectExpressionBase:
-fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
-    match *base {
-        ArithmeticBase::Column(ref column) => {
+/// Converts a nom_sql ArithmeticItem into a ProjectExpression
+/// TODO(grfn): the mismatch here between the nom-sql ast structure and our
+/// ProjectExpression's ast structure is a little akward, we should update
+/// nom-sql's to be more in-line eventually
+fn arithmetic_item_to_project_expression(
+    parent: &MirNodeRef,
+    arithmetic_item: &ArithmeticItem,
+) -> ProjectExpression {
+    match arithmetic_item {
+        ArithmeticItem::Base(ArithmeticBase::Column(ref column)) => {
             let column_id = parent
                 .borrow()
                 .column_id_for_column(&Column::from(column), None);
-            ProjectExpressionBase::Column(column_id)
+            ProjectExpression::Base(ProjectExpressionBase::Column(column_id))
         }
-        ArithmeticBase::Scalar(ref literal) => {
-            let data: DataType = literal.into();
-            ProjectExpressionBase::Literal(data)
+        ArithmeticItem::Base(ArithmeticBase::Scalar(ref literal)) => {
+            ProjectExpression::Base(ProjectExpressionBase::Literal(literal.into()))
         }
+        ArithmeticItem::Base(ArithmeticBase::Bracketed(ref arithmetic)) => {
+            generate_project_expression(parent, arithmetic)
+        }
+        ArithmeticItem::Expr(arithmetic) => generate_project_expression(parent, arithmetic),
+    }
+}
+
+/// Converts a nom_sql Arithmetic expression into a ProjectExpression
+fn generate_project_expression(parent: &MirNodeRef, arithmetic: &Arithmetic) -> ProjectExpression {
+    ProjectExpression::Op {
+        op: arithmetic.op.clone(),
+        left: Box::new(arithmetic_item_to_project_expression(
+            parent,
+            &arithmetic.left,
+        )),
+        right: Box::new(arithmetic_item_to_project_expression(
+            parent,
+            &arithmetic.right,
+        )),
     }
 }
 
@@ -803,15 +828,7 @@ fn make_project_node(
 
     let projected_arithmetic: Vec<ProjectExpression> = arithmetic
         .iter()
-        .map(|&(_, ref e)| ProjectExpression::Op {
-            op: e.op.clone(),
-            left: Box::new(ProjectExpression::Base(generate_projection_base(
-                &parent, &e.left,
-            ))),
-            right: Box::new(ProjectExpression::Base(generate_projection_base(
-                &parent, &e.right,
-            ))),
-        })
+        .map(|&(_, ref e)| generate_project_expression(&parent, &e.ari))
         .collect();
 
     let n = mig.add_ingredient(

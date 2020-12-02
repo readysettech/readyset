@@ -991,7 +991,7 @@ impl SqlToMirConverter {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::grouped::filteraggregate::FilterAggregation;
-        use nom_sql::FunctionArguments;
+        use nom_sql::FunctionArgument;
         use nom_sql::FunctionExpression::*;
 
         let mut out_nodes = Vec::new();
@@ -1032,7 +1032,7 @@ impl SqlToMirConverter {
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
-            Sum(FunctionArguments::Column(ref col), distinct) => mknode(
+            Sum(FunctionArgument::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
@@ -1040,7 +1040,7 @@ impl SqlToMirConverter {
                 None,
             ),
             Sum(
-                FunctionArguments::Conditional(CaseWhenExpression {
+                FunctionArgument::Conditional(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
@@ -1054,7 +1054,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Sum(
-                FunctionArguments::Conditional(CaseWhenExpression {
+                FunctionArgument::Conditional(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: None,
@@ -1067,7 +1067,7 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
-            Count(FunctionArguments::Column(ref col), distinct) => mknode(
+            Count(FunctionArgument::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
@@ -1084,7 +1084,7 @@ impl SqlToMirConverter {
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
             Count(
-                FunctionArguments::Conditional(CaseWhenExpression {
+                FunctionArgument::Conditional(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
@@ -1098,7 +1098,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Count(
-                FunctionArguments::Conditional(CaseWhenExpression {
+                FunctionArgument::Conditional(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: None,
@@ -1111,21 +1111,21 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
-            Max(FunctionArguments::Column(ref col)) => mknode(
+            Max(FunctionArgument::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
                 None,
             ),
-            Min(FunctionArguments::Column(ref col)) => mknode(
+            Min(FunctionArgument::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
                 None,
             ),
-            GroupConcat(FunctionArguments::Column(ref col), ref separator) => mknode(
+            GroupConcat(FunctionArgument::Column(ref col), ref separator) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::GroupConcat(separator.clone()),
@@ -1199,6 +1199,7 @@ impl SqlToMirConverter {
                     NegationOp(_) => unreachable!("negation should have been removed earlier"),
                     Base(_) => unreachable!("dangling base predicate"),
                     Arithmetic(_) => unimplemented!(),
+                    ExistsOp(_) => unimplemented!(),
                 };
                 MirNode::new(
                     name,
@@ -1482,7 +1483,7 @@ impl SqlToMirConverter {
                             nc + left.len(),
                         );
 
-                        debug!(self.log, "Creating union node for `or` predicate");
+                        debug!(self.log, "Creating union node for Symbol’s value as variable is void: or predicate");
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
@@ -1512,6 +1513,7 @@ impl SqlToMirConverter {
             NegationOp(_) => unreachable!("negation should have been removed earlier"),
             Base(_) => unreachable!("dangling base predicate"),
             Arithmetic(_) => unimplemented!(),
+            ExistsOp(_) => unimplemented!(),
         }
 
         pred_nodes

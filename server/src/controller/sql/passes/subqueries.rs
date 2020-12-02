@@ -27,6 +27,7 @@ fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subque
             _ => vec![],
         },
         Arithmetic(_) => unimplemented!(),
+        ExistsOp(_) => unimplemented!(),
     }
 }
 

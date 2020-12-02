@@ -1,5 +1,6 @@
 use nom_sql::{
-    ConditionBase, ConditionExpression, ConditionTree, JoinConstraint, Literal, Operator, SqlQuery,
+    ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder, JoinConstraint, Literal,
+    Operator, SqlQuery,
 };
 
 use std::mem;
@@ -50,7 +51,9 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             let inner = if let ConditionExpression::NegationOp(ref mut inner) = *ce {
                 mem::replace(
                     &mut **inner,
-                    ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+                    ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
+                        ItemPlaceholder::QuestionMark,
+                    ))),
                 )
             } else {
                 unreachable!()
@@ -63,6 +66,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         }
         ConditionExpression::Base(_) => {}
         ConditionExpression::Arithmetic(_) => unimplemented!(),
+        ConditionExpression::ExistsOp(_) => unimplemented!(),
     }
 }
 

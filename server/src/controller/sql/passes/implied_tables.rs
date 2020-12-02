@@ -1,7 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, CaseWhenExpression, Column, ColumnOrLiteral, ConditionExpression,
-    ConditionTree, FieldDefinitionExpression, FieldValueExpression, FunctionArguments,
-    JoinRightSide, SelectStatement, SqlQuery, Table,
+    ArithmeticBase, ArithmeticItem, CaseWhenExpression, Column, ColumnOrLiteral,
+    ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
+    FunctionArgument, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use std::collections::HashMap;
@@ -140,26 +140,26 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match **f {
-                            Avg(FunctionArguments::Column(ref mut fe), _)
+                            Avg(FunctionArgument::Column(ref mut fe), _)
                             | Count(
-                                FunctionArguments::Conditional(CaseWhenExpression {
+                                FunctionArgument::Conditional(CaseWhenExpression {
                                     then_expr: ColumnOrLiteral::Column(ref mut fe),
                                     ..
                                 }),
                                 _,
                             )
-                            | Count(FunctionArguments::Column(ref mut fe), _)
+                            | Count(FunctionArgument::Column(ref mut fe), _)
                             | Sum(
-                                FunctionArguments::Conditional(CaseWhenExpression {
+                                FunctionArgument::Conditional(CaseWhenExpression {
                                     then_expr: ColumnOrLiteral::Column(ref mut fe),
                                     ..
                                 }),
                                 _,
                             )
-                            | Sum(FunctionArguments::Column(ref mut fe), _)
-                            | Min(FunctionArguments::Column(ref mut fe))
-                            | Max(FunctionArguments::Column(ref mut fe))
-                            | GroupConcat(FunctionArguments::Column(ref mut fe), _) => {
+                            | Sum(FunctionArgument::Column(ref mut fe), _)
+                            | Min(FunctionArgument::Column(ref mut fe))
+                            | Max(FunctionArgument::Column(ref mut fe))
+                            | GroupConcat(FunctionArgument::Column(ref mut fe), _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
@@ -192,11 +192,11 @@ fn rewrite_selection(
             FieldDefinitionExpression::AllInTable(_) => panic!(err),
             FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
             FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
-                if let ArithmeticBase::Column(ref mut c) = e.left {
+                if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = e.ari.left {
                     *c = expand_columns(c.clone(), &tables);
                 }
 
-                if let ArithmeticBase::Column(ref mut c) = e.right {
+                if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = e.ari.right {
                     *c = expand_columns(c.clone(), &tables);
                 }
             }
@@ -206,14 +206,14 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => match **f {
                         Count(
-                            FunctionArguments::Conditional(CaseWhenExpression {
+                            FunctionArgument::Conditional(CaseWhenExpression {
                                 ref mut condition,
                                 ..
                             }),
                             _,
                         )
                         | Sum(
-                            FunctionArguments::Conditional(CaseWhenExpression {
+                            FunctionArgument::Conditional(CaseWhenExpression {
                                 ref mut condition,
                                 ..
                             }),
