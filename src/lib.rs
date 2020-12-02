@@ -8,7 +8,9 @@ extern crate serde_derive;
 #[macro_use]
 extern crate pretty_assertions;
 
-pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+pub use self::arithmetic::{
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
+};
 pub use self::case::{CaseWhenExpression, ColumnOrLiteral};
 pub use self::column::{
     Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionExpression,
