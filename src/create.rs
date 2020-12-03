@@ -3,16 +3,16 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use column::{Column, ColumnConstraint, ColumnSpecification};
+use column::{column_specification, Column, ColumnSpecification};
 use common::{
-    column_identifier_no_alias, parse_comment, sql_identifier, statement_terminator,
-    schema_table_reference, type_identifier, ws_sep_comma, Literal, Real, SqlType, TableKey,
+    column_identifier_no_alias, schema_table_reference, sql_identifier, statement_terminator,
+    ws_sep_comma, TableKey,
 };
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create_table_options::table_options;
 use keywords::escape_if_keyword;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case, take_until};
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::{many0, many1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -215,128 +215,12 @@ pub fn key_specification_list(i: &[u8]) -> IResult<&[u8], Vec<TableKey>> {
     many1(terminated(key_specification, opt(ws_sep_comma)))(i)
 }
 
-fn field_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
-    let (remaining_input, (column, field_type, constraints, comment, _)) = tuple((
-        column_identifier_no_alias,
-        opt(delimited(multispace1, type_identifier, multispace0)),
-        many0(column_constraint),
-        opt(parse_comment),
-        opt(ws_sep_comma),
-    ))(i)?;
-
-    let sql_type = match field_type {
-        None => SqlType::Text,
-        Some(ref t) => t.clone(),
-    };
-    Ok((
-        remaining_input,
-        ColumnSpecification {
-            column,
-            sql_type,
-            constraints: constraints.into_iter().filter_map(|m| m).collect(),
-            comment,
-        },
-    ))
-}
-
 // Parse rule for a comma-separated list.
 pub fn field_specification_list(i: &[u8]) -> IResult<&[u8], Vec<ColumnSpecification>> {
-    many1(field_specification)(i)
+    many1(terminated(column_specification, opt(ws_sep_comma)))(i)
 }
 
 // Parse rule for a column definition constraint.
-pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
-    let not_null = map(
-        delimited(multispace0, tag_no_case("not null"), multispace0),
-        |_| Some(ColumnConstraint::NotNull),
-    );
-    let null = map(
-        delimited(multispace0, tag_no_case("null"), multispace0),
-        |_| None,
-    );
-    let auto_increment = map(
-        delimited(multispace0, tag_no_case("auto_increment"), multispace0),
-        |_| Some(ColumnConstraint::AutoIncrement),
-    );
-    let primary_key = map(
-        delimited(multispace0, tag_no_case("primary key"), multispace0),
-        |_| Some(ColumnConstraint::PrimaryKey),
-    );
-    let unique = map(
-        delimited(multispace0, tag_no_case("unique"), multispace0),
-        |_| Some(ColumnConstraint::Unique),
-    );
-    let character_set = map(
-        preceded(
-            delimited(multispace0, tag_no_case("character set"), multispace1),
-            sql_identifier,
-        ),
-        |cs| {
-            let char_set = str::from_utf8(cs).unwrap().to_owned();
-            Some(ColumnConstraint::CharacterSet(char_set))
-        },
-    );
-    let collate = map(
-        preceded(
-            delimited(multispace0, tag_no_case("collate"), multispace1),
-            sql_identifier,
-        ),
-        |c| {
-            let collation = str::from_utf8(c).unwrap().to_owned();
-            Some(ColumnConstraint::Collation(collation))
-        },
-    );
-
-    alt((
-        not_null,
-        null,
-        auto_increment,
-        default,
-        primary_key,
-        unique,
-        character_set,
-        collate,
-    ))(i)
-}
-
-fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
-    let (remaining_input, (i, _, f)) = tuple((digit1, tag("."), digit1))(i)?;
-
-    Ok((
-        remaining_input,
-        Literal::FixedPoint(Real {
-            integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
-            fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap(),
-        }),
-    ))
-}
-
-fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
-    let (remaining_input, (_, _, _, def, _)) = tuple((
-        multispace0,
-        tag_no_case("default"),
-        multispace1,
-        alt((
-            map(
-                delimited(tag("'"), take_until("'"), tag("'")),
-                |s: &[u8]| Literal::String(String::from_utf8(s.to_vec()).unwrap()),
-            ),
-            fixed_point,
-            map(digit1, |d| {
-                let d_i64 = i64::from_str(str::from_utf8(d).unwrap()).unwrap();
-                Literal::Integer(d_i64)
-            }),
-            map(tag("''"), |_| Literal::String(String::from(""))),
-            map(tag_no_case("null"), |_| Literal::Null),
-            map(tag_no_case("current_timestamp"), |_| {
-                Literal::CurrentTimestamp
-            }),
-        )),
-        multispace0,
-    ))(i)?;
-
-    Ok((remaining_input, Some(ColumnConstraint::DefaultValue(def))))
-}
 
 // Parse rule for a SQL CREATE TABLE query.
 // TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
@@ -452,6 +336,8 @@ pub fn view_creation(i: &[u8]) -> IResult<&[u8], CreateViewStatement> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
+
     use super::*;
     use column::Column;
     use table::Table;
@@ -534,7 +420,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from(("db1","t")),
+                table: Table::from(("db1", "t")),
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
                     SqlType::Int(32)
