@@ -1,0 +1,47 @@
+steps:
+  - label: ':docker: Build build image'
+    key: build-image
+    commands:
+    - 'echo --- :docker: Building image'
+    - >-
+      docker build -f build/Dockerfile \
+        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        .
+    - 'echo --- :docker: Pushing image'
+    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
+  - label: ':rust: Build'
+    key: build
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cargo build -v --workspace
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+      - ecr#v2.2.0:
+          login: true
+
+
+  - label: ':rust: Test'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cargo test -v --workspace
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+      - ecr#v2.2.0:
+          login: true
