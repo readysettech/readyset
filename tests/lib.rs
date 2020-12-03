@@ -216,3 +216,10 @@ fn parse_select() {
     assert_eq!(fail, 1);
     assert_eq!(ok, 27);
 }
+
+#[test]
+fn parse_alter_table() {
+    let (ok, fail) = parse_file("tests/alter-table.txt");
+    assert_eq!(fail, 3);
+    assert_eq!(ok, 8);
+}
