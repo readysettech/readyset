@@ -26,10 +26,21 @@ steps:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
           - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
       - ecr#v2.2.0:
           login: true
 
+  - label: ':rust: Check rustfmt'
+    command: cargo fmt -- --check
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+      - ecr#v2.2.0:
+          login: true
 
   - label: ':rust: Test'
     command:
@@ -37,6 +48,7 @@ steps:
     - cargo test -v --workspace
     depends_on:
     - build-image
+    - build
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'

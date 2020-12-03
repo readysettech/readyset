@@ -436,7 +436,6 @@ impl View {
         Ok(vec)
     }
 
-
     /// Retrieve the query results for the given parameter values.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
