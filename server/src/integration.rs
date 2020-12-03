@@ -1645,6 +1645,7 @@ async fn migrate_added_columns() {
 }
 
 #[tokio::test(threaded_scheduler)]
+#[ignore]
 async fn migrate_drop_columns() {
     let id: DataType = "x".into();
 
