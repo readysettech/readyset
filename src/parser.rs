@@ -1,6 +1,7 @@
 use std::fmt;
 use std::str;
 
+use alter::{alter_table_statement, AlterTableStatement};
 use compound_select::{compound_selection, CompoundSelectStatement};
 use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use delete::{deletion, DeleteStatement};
@@ -17,6 +18,7 @@ use update::{updating, UpdateStatement};
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
+    AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
     Select(SelectStatement),
@@ -37,7 +39,8 @@ impl fmt::Display for SqlQuery {
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
             SqlQuery::Set(ref set) => write!(f, "{}", set),
-            _ => unimplemented!(),
+            SqlQuery::AlterTable(ref alter) => write!(f, "{}", alter),
+            SqlQuery::CompoundSelect(ref compound) => write!(f, "{}", compound),
         }
     }
 }
@@ -53,6 +56,7 @@ pub fn sql_query(i: &[u8]) -> IResult<&[u8], SqlQuery> {
         map(updating, |u| SqlQuery::Update(u)),
         map(set, |s| SqlQuery::Set(s)),
         map(view_creation, |vc| SqlQuery::CreateView(vc)),
+        map(alter_table_statement, |vc| SqlQuery::AlterTable(vc)),
     ))(i)
 }
 
