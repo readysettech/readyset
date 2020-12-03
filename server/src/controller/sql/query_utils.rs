@@ -8,6 +8,7 @@ impl ReferredTables for SqlQuery {
     fn referred_tables(&self) -> Vec<Table> {
         match *self {
             SqlQuery::CreateTable(ref ctq) => vec![ctq.table.clone()],
+            SqlQuery::AlterTable(ref atq) => vec![atq.table.clone()],
             SqlQuery::Insert(ref iq) => vec![iq.table.clone()],
             SqlQuery::Select(ref sq) => sq.tables.to_vec(),
             SqlQuery::CompoundSelect(ref csq) => {
