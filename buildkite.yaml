@@ -14,21 +14,6 @@ steps:
       ecr#v2.2.0:
         login: true
 
-  - label: ':rust: Build'
-    key: build
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - cargo build -v --workspace
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-      - ecr#v2.2.0:
-          login: true
-
   - label: ':rust: Check rustfmt'
     command: cargo fmt -- --check
     depends_on:
@@ -38,7 +23,24 @@ steps:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
           - 'target:/workdir/target'
+          - './nom-sql:/nom-sql'
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Build'
+    key: build
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cargo build --workspace
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
+          - './nom-sql:/nom-sql'
       - ecr#v2.2.0:
           login: true
 
@@ -55,5 +57,6 @@ steps:
           volumes:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
+          - './nom-sql:/nom-sql'
       - ecr#v2.2.0:
           login: true
