@@ -4,7 +4,9 @@
 use std::{fmt, str};
 
 use nom::character::complete::{multispace0, multispace1};
-use nom::{alt, do_parse, map_res, named, opt, preceded, separated_list, tag_no_case, terminated};
+use nom::{
+    alt, complete, do_parse, map_res, named, opt, preceded, separated_list, tag_no_case, terminated,
+};
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{
@@ -190,7 +192,7 @@ named!(
 
 named!(
     pub alter_table_statement<AlterTableStatement>,
-    do_parse!(
+    complete!(do_parse!(
         tag_no_case!("alter")
             >> multispace1
             >> tag_no_case!("table")
@@ -201,7 +203,7 @@ named!(
             >> multispace0
             >> statement_terminator
             >> (AlterTableStatement { table, definitions })
-    )
+    ))
 );
 
 #[cfg(test)]
