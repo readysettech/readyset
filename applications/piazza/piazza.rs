@@ -235,11 +235,11 @@ async fn main() {
     // let nclasses = value_t_or_exit!(args, "nclasses", i32);
     // let nposts = value_t_or_exit!(args, "nposts", i32);
     let private = value_t_or_exit!(args, "private", f32);
-    let nusers = 5; 
+    let nusers = 5;
     let nlogged = 5;
     let nclasses = 1;
     let nposts = 100;
-    
+
     assert!(
         nlogged <= nusers,
         "nusers must be greater or equal to nlogged"
@@ -277,18 +277,15 @@ async fn main() {
     backend.populate("User", users).await;
     backend.populate("Class", classes).await;
 
-   
     backend.populate("Post", posts.clone()).await;
     println!("Waiting for posts to propagate...");
     tokio::time::delay_for(time::Duration::from_millis((nposts / 10) as u64)).await;
-    
 
     println!("Finished writing! Sleeping for 2 seconds...");
     tokio::time::delay_for(time::Duration::from_secs(10)).await;
     let leaf = "posts".to_string();
     let mut getter = backend.g.view(&leaf).await.unwrap();
-    
+
     let res = getter.lookup(&[0.into()], false).await.unwrap(); // query by cid
     println!("result: {:?}", res);
-    
 }

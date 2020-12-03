@@ -69,7 +69,6 @@ impl Handle {
         }
     }
 
-
     pub(super) fn keys(&self) -> Vec<Vec<DataType>> {
         match *self {
             Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
