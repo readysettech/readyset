@@ -3,9 +3,10 @@ use std::collections::HashSet;
 use crate::convert::ToDataType;
 use msql_srv::ParamParser;
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ArithmeticOperator, Column, ColumnConstraint,
-    ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement, FieldValueExpression,
-    Literal, LiteralExpression, Operator, SelectStatement, SqlQuery, TableKey, UpdateStatement,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator, Column,
+    ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
+    FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression, Operator, SelectStatement,
+    SqlQuery, TableKey, UpdateStatement,
 };
 use noria::{DataType, Modification, Operation};
 use regex::Regex;
@@ -226,11 +227,17 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
     match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+            right:
+                box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                ))),
             operator: Operator::Equal,
         })
         | ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)),
+            left:
+                box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                ))),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             operator: Operator::Equal,
         }) => vec![c],
@@ -238,7 +245,12 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
             operator: Operator::In,
-        }) if (|| literals.iter().all(|l| *l == Literal::Placeholder))() => {
+        }) if (|| {
+            literals
+                .iter()
+                .all(|l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+        })() =>
+        {
             // the weird extra closure above is due to
             // https://github.com/rust-lang/rfcs/issues/1006
             vec![c; literals.len()]
@@ -297,7 +309,9 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, v)| match *v {
-                    Literal::Placeholder => Some(&query.fields.as_ref().unwrap()[i]),
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark) => {
+                        Some(&query.fields.as_ref().unwrap()[i])
+                    }
                     _ => None,
                 })
                 .collect()
@@ -305,7 +319,7 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
         SqlQuery::Update(ref query) => {
             let field_params = query.fields.iter().filter_map(|f| {
                 if let FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder,
+                    value: Literal::Placeholder(ItemPlaceholder::QuestionMark),
                     alias: None,
                 }) = f.1
                 {
@@ -339,7 +353,7 @@ fn walk_update_where(
             right: box ConditionExpression::Base(ConditionBase::Literal(l)),
         }) => {
             let v = match l {
-                Literal::Placeholder => params
+                Literal::Placeholder(ItemPlaceholder::QuestionMark) => params
                     .as_mut()
                     .expect("Found placeholder in ad-hoc query")
                     .next()
@@ -377,7 +391,7 @@ pub(crate) fn extract_update_params_and_fields(
         {
             match q.fields.swap_remove(sets).1 {
                 FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder,
+                    value: Literal::Placeholder(ItemPlaceholder::QuestionMark),
                     alias: None,
                 }) => {
                     let v = params
@@ -396,11 +410,16 @@ pub(crate) fn extract_update_params_and_fields(
                 }
                 FieldValueExpression::Arithmetic(ref ae) => {
                     // we only support "column = column +/- literal"
+                    // TODO(grfn): Handle nested arithmetic
+                    // (https://app.clubhouse.io/readysettech/story/41)
                     match ae {
                         ArithmeticExpression {
-                            op,
-                            left: ArithmeticBase::Column(ref c),
-                            right: ArithmeticBase::Scalar(ref l),
+                            ari:
+                                Arithmetic {
+                                    op,
+                                    left: ArithmeticItem::Base(ArithmeticBase::Column(ref c)),
+                                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(ref l)),
+                                },
                             alias: None,
                         } => {
                             assert_eq!(c, &field.column);

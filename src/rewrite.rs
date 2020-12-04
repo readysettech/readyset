@@ -1,4 +1,6 @@
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, SqlQuery};
+use nom_sql::{
+    ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder, Literal, Operator, SqlQuery,
+};
 
 use std::mem;
 
@@ -9,7 +11,9 @@ fn collapse_where_in_recursive(
 ) -> Option<(usize, Vec<Literal>)> {
     match *expr {
         ConditionExpression::Arithmetic(_) => unimplemented!(),
-        ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder)) => {
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
+            ItemPlaceholder::QuestionMark,
+        ))) => {
             *leftmost_param_index += 1;
             None
         }
@@ -21,7 +25,10 @@ fn collapse_where_in_recursive(
             }
         }
         ConditionExpression::Base(ConditionBase::LiteralList(ref list)) => {
-            *leftmost_param_index += list.iter().filter(|&l| *l == Literal::Placeholder).count();
+            *leftmost_param_index += list
+                .iter()
+                .filter(|&l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+                .count();
             None
         }
         ConditionExpression::Base(_) => None,
@@ -58,7 +65,11 @@ fn collapse_where_in_recursive(
                 if let ConditionExpression::Base(ConditionBase::LiteralList(ref mut list)) =
                     *ct.right
                 {
-                    if rewrite_literals || list.iter().all(|l| *l == Literal::Placeholder) {
+                    if rewrite_literals
+                        || list
+                            .iter()
+                            .all(|l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+                    {
                         do_it = true;
                         mem::replace(list, Vec::new())
                     } else {
@@ -91,7 +102,7 @@ fn collapse_where_in_recursive(
             let c = mem::replace(
                 &mut ct.left,
                 Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Placeholder,
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
                 ))),
             );
 
@@ -101,7 +112,7 @@ fn collapse_where_in_recursive(
                     operator: Operator::Equal,
                     left: c,
                     right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                        Literal::Placeholder,
+                        Literal::Placeholder(ItemPlaceholder::QuestionMark),
                     ))),
                 },
             );
@@ -112,6 +123,7 @@ fn collapse_where_in_recursive(
 
             Some((*leftmost_param_index, literals))
         }
+        ConditionExpression::ExistsOp(_) => unimplemented!(),
     }
 }
 

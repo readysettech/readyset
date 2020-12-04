@@ -42,7 +42,7 @@ impl ToDataType for Literal {
             Literal::CurrentTime | Literal::CurrentTimestamp => {
                 DataType::Timestamp(chrono::Local::now().naive_local())
             }
-            Literal::Placeholder => unreachable!(),
+            Literal::Placeholder(_) => unreachable!(),
         }
     }
 }

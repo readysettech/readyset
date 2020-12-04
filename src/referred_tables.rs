@@ -33,6 +33,7 @@ impl ReferredTables for SqlQuery {
             // that's okay since we only support primary key deletes at this point.
             SqlQuery::Delete(ref dq) => vec![dq.table.clone()],
             SqlQuery::Update(ref uq) => vec![uq.table.clone()],
+            SqlQuery::AlterTable(ref atq) => vec![atq.table.clone()],
         }
     }
 }
