@@ -26,6 +26,7 @@ steps:
           - './nom-sql:/nom-sql'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
 
@@ -45,6 +46,7 @@ steps:
           - './nom-sql:/nom-sql'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
 
