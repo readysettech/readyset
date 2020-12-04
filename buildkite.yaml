@@ -62,16 +62,11 @@ steps:
     - build-image
     - build
     plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          - './noria:/noria'
-          - './msql-srv:/msql-srv'
-          - './nom-sql:/nom-sql'
-          environment:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
           - SCCACHE_BUCKET=readyset-sccache
+          config: build/docker-compose.yaml
       - ecr#v2.2.0:
           login: true
     env:

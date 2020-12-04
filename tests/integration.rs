@@ -55,17 +55,22 @@ fn sleep() {
     thread::sleep(Duration::from_millis(200));
 }
 
+fn zk_addr() -> String {
+    format!(
+        "{}:{}",
+        env::var("ZOOKEEPER_HOST").unwrap_or("127.0.0.1".into()),
+        env::var("ZOOKEEPER_PORT").unwrap_or("2181".into()),
+    )
+}
+
 // Initializes a Noria worker and starts processing MySQL queries against it.
 fn setup(deployment: &Deployment) -> mysql::Opts {
-    let zk_addr = "127.0.0.1:2181";
     // Run with VERBOSE=1 for log output.
-    let verbose = match env::var("VERBOSE") {
-        Ok(value) => {
-            let i: u32 = value.parse().unwrap();
-            i == 1
-        }
-        Err(_) => false,
-    };
+    let verbose = env::var("VERBOSE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .iter()
+        .any(|i| i == 1);
 
     let logger = if verbose {
         noria_server::logger_pls()
@@ -79,7 +84,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     let n = deployment.name.clone();
     let b = barrier.clone();
     thread::spawn(move || {
-        let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, n)).unwrap();
+        let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
         let mut builder = Builder::default();
         authority.log_with(l.clone());
         builder.log_with(l);
@@ -100,7 +105,8 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment.name)).unwrap();
+    let mut zk_auth =
+        ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap();
     zk_auth.log_with(logger.clone());
 
     debug!(logger, "Connecting to Noria...",);
