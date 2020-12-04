@@ -24,6 +24,8 @@ steps:
           volumes:
           - 'target:/workdir/target'
           - './nom-sql:/nom-sql'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
       - ecr#v2.2.0:
           login: true
 
@@ -41,6 +43,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           - './nom-sql:/nom-sql'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
       - ecr#v2.2.0:
           login: true
 
@@ -58,5 +62,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           - './nom-sql:/nom-sql'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
       - ecr#v2.2.0:
           login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
