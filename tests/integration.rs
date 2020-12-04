@@ -471,7 +471,7 @@ fn update_basic_prepared() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("Bob"));
+    assert_eq!(name, String::from("\"Bob\""));
 }
 
 #[test]
