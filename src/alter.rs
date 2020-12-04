@@ -311,7 +311,6 @@ mod tests {
             }],
         };
         let result = alter_table_statement(qstring.as_bytes());
-        print_trace!();
         assert_eq!(result.unwrap().1, expected);
     }
 
@@ -348,7 +347,6 @@ mod tests {
             }],
         };
         let result = alter_table_statement(qstring.as_bytes());
-        print_trace!();
         assert_eq!(result.unwrap().1, expected);
     }
 
@@ -367,7 +365,6 @@ mod tests {
             }],
         };
         let result = alter_table_statement(qstring.as_bytes());
-        print_trace!();
         assert_eq!(result.unwrap().1, expected);
     }
 }
