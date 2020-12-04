@@ -41,6 +41,7 @@ path = "src/lib.rs"
 noria = { path = "../noria/noria/" }
 noria-server = { path = "../noria/server/" }
 msql-srv = { path = "../msql-srv/" }
+nom-sql = { path = "../nom-sql/" }
 # optional overrides:
 # https://github.com/tower-rs/tokio-tower/pull/6
 # optional -- just a perf optimization
