@@ -1,7 +1,7 @@
 use nom::character::complete::multispace1;
 use std::{fmt, str};
 
-use common::{statement_terminator, schema_table_reference};
+use common::{schema_table_reference, statement_terminator};
 use condition::ConditionExpression;
 use keywords::escape_if_keyword;
 use nom::bytes::complete::tag_no_case;
@@ -77,7 +77,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Table::from(("db1","users")),
+                table: Table::from(("db1", "users")),
                 ..Default::default()
             }
         );
