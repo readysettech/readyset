@@ -459,10 +459,13 @@ mod tests {
     }
 
     #[test]
-    fn arithmetic_scalar(){
+    fn arithmetic_scalar() {
         let qs = "56";
         let res = arithmetic(qs.as_bytes());
         assert!(res.is_err());
-        assert_eq!(nom::Err::Error((qs.as_bytes(), ErrorKind::Tag)), res.err().unwrap());
+        assert_eq!(
+            nom::Err::Error((qs.as_bytes(), ErrorKind::Tag)),
+            res.err().unwrap()
+        );
     }
 }

@@ -4,7 +4,7 @@ use std::str;
 
 use column::Column;
 use common::{
-    assignment_expr_list, field_list, statement_terminator, schema_table_reference, value_list,
+    assignment_expr_list, field_list, schema_table_reference, statement_terminator, value_list,
     ws_sep_comma, FieldValueExpression, Literal,
 };
 use keywords::escape_if_keyword;
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
-                table: Table::from(("db1","users")),
+                table: Table::from(("db1", "users")),
                 fields: None,
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()

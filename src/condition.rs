@@ -291,10 +291,7 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
         },
     );
 
-    alt((
-        simple_expr,
-        nested_exists,
-    ))(i)
+    alt((simple_expr, nested_exists))(i)
 }
 
 fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
