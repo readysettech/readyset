@@ -2185,7 +2185,7 @@ mod tests {
             assert_eq!(edge.fields(), &["2 * users.age", "twenty", "bogokey"]);
             assert_eq!(
                 edge.description(true),
-                "π[(lit: 2) * 1, (lit: 2) * (lit: 10), lit: 0]"
+                "π[((lit: 2) * 1), ((lit: 2) * (lit: 10)), lit: 0]"
             );
         })
         .await;
