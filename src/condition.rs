@@ -1,4 +1,3 @@
-use nom::character::complete::{multispace0, multispace1};
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
@@ -14,6 +13,11 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::IResult;
+use nom::{
+    alt,
+    character::complete::{multispace0, multispace1},
+    delimited, do_parse, map, named, preceded, tag, tag_no_case, terminated,
+};
 use select::{nested_selection, SelectStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -93,6 +97,11 @@ pub enum ConditionExpression {
     Base(ConditionBase),
     Arithmetic(Box<ArithmeticExpression>),
     Bracketed(Box<ConditionExpression>),
+    Between {
+        operand: Box<ConditionExpression>,
+        min: Box<ConditionExpression>,
+        max: Box<ConditionExpression>,
+    },
 }
 
 impl fmt::Display for ConditionExpression {
@@ -105,6 +114,13 @@ impl fmt::Display for ConditionExpression {
             ConditionExpression::Bracketed(ref expr) => write!(f, "({})", expr),
             ConditionExpression::Base(ref base) => write!(f, "{}", base),
             ConditionExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
+            ConditionExpression::Between {
+                ref operand,
+                ref min,
+                ref max,
+            } => {
+                write!(f, "{} BETWEEN {} AND {}", operand, min, max)
+            }
         }
     }
 }
@@ -126,7 +142,7 @@ pub fn condition_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
         },
     );
 
-    alt((cond, and_expr))(i)
+    alt((between_expr, cond, and_expr))(i)
 }
 
 pub fn and_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
@@ -294,41 +310,53 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     alt((simple_expr, nested_exists))(i)
 }
 
-fn simple_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
-    alt((
-        map(
-            delimited(
-                terminated(tag("("), multispace0),
-                arithmetic_expression,
-                preceded(multispace0, tag(")")),
-            ),
-            |e| {
-                ConditionExpression::Bracketed(Box::new(ConditionExpression::Arithmetic(Box::new(
-                    e,
-                ))))
-            },
-        ),
-        map(arithmetic_expression, |e| {
-            ConditionExpression::Arithmetic(Box::new(e))
-        }),
-        map(literal, |lit| {
-            ConditionExpression::Base(ConditionBase::Literal(lit))
-        }),
-        map(column_identifier, |f| {
-            ConditionExpression::Base(ConditionBase::Field(f))
-        }),
-        map(delimited(tag("("), nested_selection, tag(")")), |s| {
-            ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(s)))
-        }),
-    ))(i)
-}
+named!(
+    simple_expr<ConditionExpression>,
+    alt!(
+        delimited!(
+            terminated!(tag!("("), multispace0),
+            arithmetic_expression,
+            preceded!(multispace0, tag!(")"))
+        ) => { |e|
+          ConditionExpression::Bracketed(Box::new(ConditionExpression::Arithmetic(Box::new(
+            e,
+          ))))
+        } |
+        arithmetic_expression => { |e| ConditionExpression::Arithmetic(Box::new(e)) } |
+        literal => { |lit| ConditionExpression::Base(ConditionBase::Literal(lit)) } |
+        column_identifier => { |f| ConditionExpression::Base(ConditionBase::Field(f)) } |
+        delimited!(tag!("("), nested_selection, tag!(")")) => {
+            |s| ConditionExpression::Base(ConditionBase::NestedSelect(Box::new(s)))
+        }
+    )
+);
+
+named!(
+    between_expr<ConditionExpression>,
+    do_parse!(
+        operand: map!(simple_expr, Box::new)
+            >> multispace1
+            >> tag_no_case!("between")
+            >> multispace1
+            >> min: map!(simple_expr, Box::new)
+            >> multispace1
+            >> tag_no_case!("and")
+            >> multispace1
+            >> max: map!(simple_expr, Box::new)
+            >> (ConditionExpression::Between { operand, min, max })
+    )
+);
 
 #[cfg(test)]
 mod tests {
+    use crate::ArithmeticItem;
+
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticOperator};
     use column::Column;
     use common::{FieldDefinitionExpression, ItemPlaceholder, Literal, Operator};
+    use ConditionBase::*;
+    use ConditionExpression::*;
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -961,5 +989,47 @@ mod tests {
 
         let expected1 = "id NOT IN (1, 2)";
         assert_eq!(format!("{}", c1), expected1);
+    }
+
+    #[test]
+    fn between_simple() {
+        let qs = b"foo between 1 and 2";
+        let expected = Between {
+            operand: Box::new(Base(Field("foo".into()))),
+            min: Box::new(Base(Literal(1.into()))),
+            max: Box::new(Base(Literal(2.into()))),
+        };
+        let (remaining, result) = condition_expr(qs).unwrap();
+        assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn between_with_arithmetic() {
+        let qs = b"foo between (1 + 2) and 3 + 5";
+        let expected = Between {
+            operand: Box::new(Base(Field("foo".into()))),
+            min: Box::new(Bracketed(Box::new(Arithmetic(Box::new(
+                ArithmeticExpression {
+                    ari: crate::arithmetic::Arithmetic {
+                        op: ArithmeticOperator::Add,
+                        left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(1))),
+                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(2))),
+                    },
+                    alias: None,
+                },
+            ))))),
+            max: Box::new(Arithmetic(Box::new(ArithmeticExpression {
+                ari: crate::arithmetic::Arithmetic {
+                    op: ArithmeticOperator::Add,
+                    left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(3))),
+                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(5))),
+                },
+                alias: None,
+            }))),
+        };
+        let (remaining, result) = condition_expr(qs).unwrap();
+        assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+        assert_eq!(result, expected);
     }
 }
