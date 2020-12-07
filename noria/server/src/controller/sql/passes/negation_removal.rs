@@ -67,6 +67,9 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         ConditionExpression::Base(_) => {}
         ConditionExpression::Arithmetic(_) => unimplemented!(),
         ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::Between { .. } => {
+            unreachable!("BETWEEN should have been removed earlier")
+        }
     }
 }
 

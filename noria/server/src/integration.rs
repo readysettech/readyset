@@ -2934,6 +2934,121 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn between() {
+    let mut g = start_simple("between_query").await;
+    g.install_recipe("CREATE TABLE things (bigness INT);")
+        .await
+        .unwrap();
+
+    g.extend_recipe("QUERY between: SELECT bigness FROM things WHERE bigness BETWEEN 3 and 5;")
+        .await
+        .unwrap();
+
+    let mut things = g.table("things").await.unwrap();
+
+    for i in 1..10 {
+        things.insert(vec![i.into()]).await.unwrap();
+    }
+
+    let mut between_query = g.view("between").await.unwrap();
+
+    sleep().await;
+
+    let expected: Vec<Vec<DataType>> = (3..6)
+        .map(|i| vec![DataType::from(i), DataType::from(0)])
+        .collect();
+    let res = between_query.lookup(&[0.into()], true).await.unwrap();
+    let rows: Vec<Vec<DataType>> = res.into();
+    assert_eq!(rows, expected);
+}
+
+// TODO(grfn): This doesn't work because of some weird stuff we don't understand
+// with multi-param queries - should look into thihs further in the future
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn between_parametrized() {
+    let mut g = start_simple("between_query").await;
+    g.install_recipe("CREATE TABLE things (bigness INT);")
+        .await
+        .unwrap();
+
+    g.extend_recipe(
+        "
+      QUERY one_param: SELECT bigness FROM things WHERE bigness BETWEEN 3 and ?;
+      QUERY two_param: SELECT bigness FROM things WHERE bigness BETWEEN ? and ?; ",
+    )
+    .await
+    .unwrap();
+
+    let mut things = g.table("things").await.unwrap();
+
+    for i in 1..10 {
+        things.insert(vec![i.into()]).await.unwrap();
+    }
+
+    let mut one_param_query = g.view("one_param").await.unwrap();
+    let mut two_param_query = g.view("two_param").await.unwrap();
+
+    sleep().await;
+
+    let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
+    let res = one_param_query
+        .multi_lookup(vec![vec![DataType::from(5)]], true)
+        .await
+        .unwrap();
+    let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();
+    assert_eq!(rows, expected);
+
+    let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
+    let res = two_param_query
+        .multi_lookup(vec![vec![DataType::from(3), DataType::from(5)]], true)
+        .await
+        .unwrap();
+    let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();
+    assert_eq!(rows, expected);
+}
+
+// TODO(grfn): This doesn't work because top-level disjunction between
+// parameters doesn't work, and the query gets rewritten to:
+//   SELECT bigness FROM things WHERE bigness < ? OR bigness > ?
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn not_between() {
+    let mut g = start_simple_unsharded("things").await;
+    println!("Installing recipes");
+    g.install_recipe(
+        "CREATE TABLE things (bigness INT);
+
+         QUERY not_between:
+         SELECT bigness FROM things WHERE NOT (bigness BETWEEN ? and ?);",
+    )
+    .await
+    .unwrap();
+
+    let mut things = g.table("things").await.unwrap();
+    let mut not_between_query = g.view("not_between").await.unwrap();
+
+    for i in 1..10 {
+        things.insert(vec![i.into()]).await.unwrap();
+    }
+
+    sleep().await;
+
+    let res = not_between_query
+        .lookup(&[3.into(), 5.into()], true)
+        .await
+        .unwrap();
+    let rows: Vec<Vec<DataType>> = res.into();
+    assert_eq!(
+        rows,
+        (1..2)
+            .chain(6..10)
+            .map(|i| vec![DataType::from(i)])
+            .collect::<Vec<Vec<DataType>>>()
+    );
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 

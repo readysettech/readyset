@@ -3,13 +3,13 @@ use nom_sql::{
     FunctionArgument, SqlQuery, Table,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub trait CountStarRewrite {
     fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
 }
 
-fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
+fn extract_condition_columns(ce: &ConditionExpression) -> HashSet<Column> {
     match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
             ref left,
@@ -24,12 +24,12 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
             ref right,
             ..
         }) => {
-            let mut cols = vec![];
+            let mut cols = HashSet::new();
             if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **left {
-                cols.push(f.clone());
+                cols.insert(f.clone());
             }
             if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **right {
-                cols.push(f.clone());
+                cols.insert(f.clone());
             }
 
             cols
@@ -39,6 +39,16 @@ fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
         ConditionExpression::Base(_) => unreachable!(),
         ConditionExpression::Arithmetic(_) => unimplemented!(),
         ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::Between {
+            ref operand,
+            ref min,
+            ref max,
+        } => {
+            let mut res = extract_condition_columns(operand);
+            res.extend(extract_condition_columns(min));
+            res.extend(extract_condition_columns(max));
+            res
+        }
     }
 }
 
