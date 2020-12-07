@@ -783,6 +783,7 @@ impl SqlIncorporator {
         use passes::implied_tables::ImpliedTableExpansion;
         use passes::key_def_coalescing::KeyDefinitionCoalescing;
         use passes::negation_removal::NegationRemoval;
+        use passes::rewrite_between::RewriteBetween;
         use passes::star_expansion::StarExpansion;
         use passes::subqueries::SubQueries;
         use query_utils::ReferredTables;
@@ -861,6 +862,7 @@ impl SqlIncorporator {
         // as we no longer have to consider complications like aliases.
         Ok(fq
             .expand_table_aliases(mig.context())
+            .rewrite_between()
             .remove_negation()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)

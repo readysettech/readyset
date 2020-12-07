@@ -28,6 +28,19 @@ fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subque
         },
         Arithmetic(_) => unimplemented!(),
         ExistsOp(_) => unimplemented!(),
+        Between {
+            ref mut operand,
+            ref mut min,
+            ref mut max,
+        } => {
+            let ob = extract_subqueries_from_condition(operand);
+            let minb = extract_subqueries_from_condition(min);
+            let maxb = extract_subqueries_from_condition(max);
+            ob.into_iter()
+                .chain(minb.into_iter())
+                .chain(maxb.into_iter())
+                .collect()
+        }
     }
 }
 

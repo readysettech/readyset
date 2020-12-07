@@ -1200,6 +1200,7 @@ impl SqlToMirConverter {
                     Base(_) => unreachable!("dangling base predicate"),
                     Arithmetic(_) => unimplemented!(),
                     ExistsOp(_) => unimplemented!(),
+                    Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
                 };
                 MirNode::new(
                     name,
@@ -1512,6 +1513,7 @@ impl SqlToMirConverter {
             }
             NegationOp(_) => unreachable!("negation should have been removed earlier"),
             Base(_) => unreachable!("dangling base predicate"),
+            Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
             Arithmetic(_) => unimplemented!(),
             ExistsOp(_) => unimplemented!(),
         }

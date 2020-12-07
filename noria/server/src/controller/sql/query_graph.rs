@@ -446,13 +446,16 @@ fn classify_conditionals(
         ConditionExpression::Base(_) => {
             // don't expect to see a base here: we ought to exit when classifying its
             // parent selection predicate
-            panic!("encountered unexpected standalone base of condition expression");
+            unreachable!("encountered unexpected standalone base of condition expression");
         }
         ConditionExpression::NegationOp(_) => {
-            panic!("negation should have been removed earlier");
+            unreachable!("negation should have been removed earlier");
         }
         ConditionExpression::Arithmetic(_) => unimplemented!(),
         ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::Between { .. } => {
+            unreachable!("Between should have been removed earlier")
+        }
     }
 }
 
