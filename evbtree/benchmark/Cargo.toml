@@ -1,0 +1,23 @@
+[workspace]
+# don't include in the left-right/evmap workspace
+
+[package]
+name = "concurrent-map-bench"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+evmap = { version = "11.0.0-alpha.3", path = "../" }
+chashmap = "2.1.0"
+clap = "2.20.3"
+zipf = "6"
+rand = "0.7"
+parking_lot = "0.10.1"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+debug = false
