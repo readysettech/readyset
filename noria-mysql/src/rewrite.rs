@@ -124,6 +124,17 @@ fn collapse_where_in_recursive(
             Some((*leftmost_param_index, literals))
         }
         ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::Between {
+            ref mut operand,
+            ref mut min,
+            ref mut max,
+        } => collapse_where_in_recursive(leftmost_param_index, &mut *operand, rewrite_literals)
+            .or_else(|| {
+                collapse_where_in_recursive(leftmost_param_index, &mut *min, rewrite_literals)
+            })
+            .or_else(|| {
+                collapse_where_in_recursive(leftmost_param_index, &mut *max, rewrite_literals)
+            }),
     }
 }
 
