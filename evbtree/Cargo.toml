@@ -1,0 +1,16 @@
+[package]
+name = "evbtree"
+version = "0.1.0"
+authors = ["Readyset"]
+edition = "2018"
+
+[dependencies]
+smallvec = "1.0.0"
+hashbag = "0.1.2"
+rand = { version = "0.7", default-features = false, features = ["alloc"], optional = true }
+left-right = "0.9.1"
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
+rand = "0.7"
