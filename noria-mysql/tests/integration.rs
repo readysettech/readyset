@@ -970,6 +970,30 @@ fn order_by_basic() {
 }
 
 #[test]
+fn order_by_limit_basic() {
+    let d = Deployment::new("order_by_limit_basic");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (1, 3)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (2, 4)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
+    let rows: Vec<(i32, i32)> = conn
+        .exec("SELECT * FROM test ORDER BY x DESC LIMIT 3", ())
+        .unwrap();
+    assert_eq!(rows, vec![(4, 2), (2, 4), (1, 3)]);
+}
+
+#[test]
 #[ignore] // why doesn't this work?
 fn exec_insert() {
     let d = Deployment::new("exec_insert");

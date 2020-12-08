@@ -549,20 +549,11 @@ impl NoriaConnector {
                             } else {
                                 info!(query = %q, name = %qname, "adding ad-hoc query");
                             }
-                            // HACK(eta): unless a TopK operator would be made, null out the ORDER
-                            // BY clause in order to get around the issue PR #11 was trying to fix
-                            let q_noria = if q.order.is_some() && !q.limit.is_some() {
-                                let mut q_hack = q.clone();
-                                q_hack.order = None;
-                                q_hack
-                            } else {
-                                q.clone()
-                            };
                             if let Err(e) = block_on!(
                                 self.inner,
                                 self.inner
                                     .noria
-                                    .extend_recipe(&format!("QUERY {}: {};", qname, q_noria))
+                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             ) {
                                 error!(error = %e, "add query failed");
                                 return Err(io::Error::new(io::ErrorKind::Other, e));
