@@ -1,15 +1,15 @@
-use nom_sql::SelectStatement;
 use nom_sql::{
     ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator, Column, ConditionBase,
     ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
     JoinConstraint, JoinOperator, JoinRightSide, Literal, Table,
 };
+use nom_sql::{OrderType, SelectStatement};
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
+use std::{cmp::Ordering, num::NonZeroU64};
+use std::{collections::HashMap, convert::TryInto};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -150,6 +150,13 @@ pub enum QueryGraphEdge {
     GroupBy(Vec<Column>),
 }
 
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct Pagination {
+    pub order: Vec<(Column, OrderType)>,
+    pub limit: Option<u64>,
+    pub offset: Option<NonZeroU64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraph {
     /// Relations mentioned in the query.
@@ -164,17 +171,13 @@ pub struct QueryGraph {
     pub join_order: Vec<JoinRef>,
     /// Global predicates (not associated with a particular relation)
     pub global_predicates: Vec<ConditionExpression>,
+    /// The pagination (order, limit, offset) for the query, if any
+    pub pagination: Option<Pagination>,
 }
 
 impl QueryGraph {
-    fn new() -> QueryGraph {
-        QueryGraph {
-            relations: HashMap::new(),
-            edges: HashMap::new(),
-            columns: Vec::new(),
-            join_order: Vec::new(),
-            global_predicates: Vec::new(),
-        }
+    fn new() -> Self {
+        Default::default()
     }
 
     /// Returns the set of columns on which this query is parameterized. They can come from
@@ -198,6 +201,19 @@ impl QueryGraph {
     }
 }
 
+impl Default for QueryGraph {
+    fn default() -> Self {
+        QueryGraph {
+            relations: HashMap::new(),
+            edges: HashMap::new(),
+            columns: Vec::new(),
+            join_order: Vec::new(),
+            global_predicates: Vec::new(),
+            pagination: None,
+        }
+    }
+}
+
 #[allow(clippy::derive_hash_xor_eq)]
 impl Hash for QueryGraph {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -216,6 +232,7 @@ impl Hash for QueryGraph {
         self.columns.hash(state);
         self.join_order.hash(state);
         self.global_predicates.hash(state);
+        self.pagination.hash(state);
     }
 }
 
@@ -476,8 +493,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     .iter()
                     .filter_map(|field| match *field {
                         // unreachable because SQL rewrite passes will have expanded these already
-                        FieldDefinitionExpression::All => unreachable!(),
-                        FieldDefinitionExpression::AllInTable(_) => unreachable!(),
+                        FieldDefinitionExpression::All => {
+                            unreachable!("* should have been expanded already")
+                        }
+                        FieldDefinitionExpression::AllInTable(_) => {
+                            unreachable!("<table>.* should have been expanded already")
+                        }
                         // No need to do anything for literals and arithmetic expressions here, as they
                         // aren't associated with a relation (and thus have no QGN)
                         FieldDefinitionExpression::Value(_) => None,
@@ -796,6 +817,14 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
             }
         }
+    }
+
+    if let Some(ref order) = st.order {
+        qg.pagination = Some(Pagination {
+            order: order.columns.clone(),
+            limit: st.limit.clone().map(|lim| lim.limit),
+            offset: st.limit.clone().and_then(|lim| lim.offset.try_into().ok()),
+        })
     }
 
     // create initial join order

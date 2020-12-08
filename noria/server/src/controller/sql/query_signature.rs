@@ -114,6 +114,7 @@ impl Signature for QueryGraph {
                 }
             }
         }
+
         for e in self.edges.values() {
             match *e {
                 QueryGraphEdge::Join(ref join_predicates)
@@ -173,7 +174,20 @@ impl Signature for QueryGraph {
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::{parse_query, SqlQuery};
+
+    use crate::controller::sql::query_graph::to_query_graph;
+
     use super::*;
+
+    /// Parse a SQL query that is expected to be a SelectQuery. Returns None if
+    /// parsing fails *or* if the query is something other than a Select
+    pub fn parse_select<T: AsRef<str>>(input: T) -> Option<nom_sql::SelectStatement> {
+        match parse_query(input) {
+            Ok(SqlQuery::Select(sel)) => Some(sel),
+            _ => None,
+        }
+    }
 
     #[test]
     fn it_does_subsets() {
@@ -283,5 +297,23 @@ mod tests {
         assert_eq!(qsc, qsd);
         // ... but not if additional predicates exist
         assert_ne!(qsa, qsc);
+    }
+
+    #[test]
+    fn topk_hashes_are_inequal() {
+        use std::collections::hash_map::DefaultHasher;
+
+        let without_topk = parse_select("SELECT a.id FROM a").unwrap();
+        let with_topk = parse_select("SELECT a.id FROM a ORDER BY n LIMIT 3").unwrap();
+
+        let without_topk_qg = to_query_graph(&without_topk).unwrap();
+        let with_topk_qg = to_query_graph(&with_topk).unwrap();
+
+        let mut h1 = DefaultHasher::new();
+        let mut h2 = DefaultHasher::new();
+        without_topk_qg.hash(&mut h1);
+        with_topk_qg.hash(&mut h2);
+
+        assert_ne!(h1.finish(), h2.finish());
     }
 }
