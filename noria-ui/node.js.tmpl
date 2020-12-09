@@ -1,0 +1,76 @@
+    <script>
+      // https://stackoverflow.com/a/21903119
+      var getUrlParameter = function getUrlParameter(sParam) {
+          var sPageURL = decodeURIComponent(window.location.search.substring(1)),
+              sURLVariables = sPageURL.split('&'),
+              sParameterName,
+              i;
+
+          for (i = 0; i < sURLVariables.length; i++) {
+              sParameterName = sURLVariables[i].split('=');
+
+              if (sParameterName[0] === sParam) {
+                  return sParameterName[1] === undefined ? true : sParameterName[1];
+              }
+          }
+      };
+
+      function update() {
+        var node = getUrlParameter("n");
+        var stats_url = "http://" + controller_addr + "/get_statistics";
+        var nodes_url = "http://" + controller_addr + "/nodes";
+
+        var node_data = {};
+
+        $.ajax({
+          url: nodes_url,
+          dataType: "json",
+          success: function(data) {
+            $.each(data, function (i, rec) {
+              node_data[rec[0]] = { "name": rec[1], "type": rec[2] };
+            })
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+
+        $.ajax({
+          url: stats_url,
+          dataType: "json",
+          success: function(data) {
+            $("#error-msg").removeClass("show");
+            // rather inelegant iteration over all domains and vertices
+            $.each(data["domains"], function (idx, domain) {
+              $.each(domain[1], function (ni, stats) {
+                if (ni == node) {
+                  $("#node-id").text(ni);
+                  $("#node-name").text(node_data[ni]["name"]);
+                  $("#desc").text(stats["desc"]);
+                  mat_stats = stats["materialized"];
+                  if (mat_stats == "Not" || mat_stats == "Full") {
+                    $("#mat-status").text(mat_stats);
+                  } else if ("Partial" in mat_stats) {
+                    if (mat_stats["beyond_materialization_frontier"]) {
+                      $("#mat-status").text("Partial (beyond materialization frontier)");
+                    } else {
+                      $("#mat-status").text("Partial");
+                    }
+                  }
+                  $("#mem-size").text(filesize(stats["mem_size"]));
+                  $("#probe-data").text(JSON.stringify(stats["probe_result"]));
+                  $("#process-time").text(readableNanosecondFormatter(stats["process_time"]));
+                  $("#process-ptime").text(readableNanosecondFormatter(stats["process_ptime"]));
+                }
+              });
+            });
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+      }
+
+      update();
+      setInterval(update, 1000);
+    </script>

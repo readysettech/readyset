@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.10.1/bootstrap-table.min.css">
+
+    <!-- Custom styles for dashboard-->
+    <link href="dashboard.css" rel="stylesheet">
+
+    <!-- Formatting functions, need to go early as some page-specific JS uses them directly -->
+    <script src="js/formatters.js"></script>
+
+    <title>Noria</title>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-dark sticky-top bg-dark flex-md-nowrap p-0">
+      <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="#">Noria</a>
+      <ul class="navbar-nav px-3">
+        <li class="nav-item text-nowrap">
+          <div class="nav-link" id="controller-addr"></div>
+          <div class="input-group input-group-sm mb-3 d-none" style="height: 1.1em;" id="controller-addr-edit">
+            <input type="text" placeholder="Controller IP:PORT" class="form-control" id="controller-addr-input" aria-describedby="controller-addr-label">
+            <div class="input-group-append">
+              <button class="btn btn-secondary" type="button" id="controller-addr-connect">Connect</button>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="container-fluid">
+      <div class="row">
+{{{NAVBAR}}}
+
+{{{MAIN}}}
+      </div>
+    </div>
+
+    <!-- Icons -->
+    <script src="https://unpkg.com/feather-icons/dist/feather.min.js"></script>
+    <script>
+      feather.replace()
+    </script>
+
+    <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js" integrity="sha384-xBuQ/xzmlsLoJpyjoggmTEz8OWUFM0/RC5BsqQBDX2v5cMvDHcMakNTNrHIW2I5f" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.10.1/bootstrap-table.min.js"></script>
+
+    <!-- human-readably byte sizes -->
+    <script src="https://cdn.filesizejs.com/filesize.min.js"></script>
+
+    <script src="js/connect.js"></script>
+{{{PAGE_JS}}}
+  </body>
+</html>

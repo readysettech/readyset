@@ -1,0 +1,21 @@
+    <script>
+      $("#instance-table").bootstrapTable();
+
+      function update() {
+        $.ajax({
+          url: "http://" + controller_addr + "/instances",
+          dataType: "json",
+          success: function(data) {
+            $("#error-msg").removeClass("show");
+            $("#instance-table").bootstrapTable('load', data);
+            feather.replace()
+          },
+          error: function(e) {
+            $("#error-msg").html("AJAX request to controller API failed: " + e.statusText).addClass("show");
+          }
+        });
+      }
+
+      update();
+      setInterval(update, 1000);
+    </script>
