@@ -1,0 +1,121 @@
+[package]
+name = "noria-applications"
+version = "0.6.0"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+edition = '2018'
+publish = false
+
+[dependencies]
+chrono = { version = "0.4.0", features = ["serde"] }
+clap = "2.25.0"
+failure = "0.1"
+flurry = "0.3"
+futures-core = "0.3.0"
+futures-util = "0.3.0"
+hdrhistogram = "7"
+itertools = "0.9"
+memcached-rs = "0.4.2"
+mysql_async = "0.23.0"
+nom-sql = "0.0.11"
+noria = { path = "../server", package = "noria-server" }
+num_cpus = "1"
+rand = "0.7"
+rand_distr = "0.2"
+redis = { version = "0.16", features = ["tokio-rt-core"] }
+regex = "1.0.0"
+slog = "2.4.0"
+#slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.4.0"
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-test = "0.2.0"
+tower-service = "0.3.0"
+tower-limit = "0.3.1"
+# need 0.3.1 for https://github.com/tower-rs/tower/pull/427
+tower-util = "0.3.1"
+trawler = "0.11.0-alpha.4"
+vec_map = { version = "0.8.0" }
+zipf = "6"
+zookeeper = "0.5.3"
+mysql = "*"
+
+# mssql
+# disabled due to lack of async/await support
+# futures-state-stream = "0.1"
+# tiberius = "0.3.1"
+
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "vote"
+path = "vote/main.rs"
+doc = false
+
+[[bin]]
+name = "tpc_w"
+path = "tpc_w/tpc_w.rs"
+doc = false
+
+[[bin]]
+name = "hotsoup"
+path = "hotsoup/hotsoup.rs"
+doc = false
+
+[[bin]]
+name = "extract_hotcrp_queries"
+path = "hotsoup/extract_queries.rs"
+doc = false
+
+[[bin]]
+name = "securecrp"
+path = "securecrp/main.rs"
+doc = false
+
+[[bin]]
+name = "piazza"
+path = "piazza/piazza.rs"
+doc = false
+
+[[bin]]
+name = "evict-o-rama"
+path = "evict-o-rama/main.rs"
+doc = false
+
+[[bin]]
+name = "vote-migration"
+path = "vote-migration/main.rs"
+doc = false
+
+[[bin]]
+name = "vote-dbtoaster-style"
+path = "vote-dbtoaster-style/main.rs"
+doc = false
+
+[[bin]]
+name = "vote-purge-stress"
+path = "vote-purge-stress/main.rs"
+doc = false
+
+[[bin]]
+name = "replay"
+path = "replay/main.rs"
+doc = false
+
+[[bin]]
+name = "lobsters-mysql"
+path = "lobsters/mysql/main.rs"
+doc = false
+
+[[bin]]
+name = "lobsters-noria"
+path = "lobsters/noria/main.rs"
+doc = false
+
+[[bin]]
+name = "basic-benchmarking"
+path = "basic-benchmarking/main.rs"
+doc = false
+
+#[[bin]]
+#name = "security-mysql"
+#path = "piazza/mysql.rs"

@@ -1,0 +1,25 @@
+[package]
+name = "noria-mir"
+version = "0.7.0"
+edition = "2018"
+authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
+license = "MIT OR Apache-2.0"
+
+description = "Internal noria-server crate"
+repository = "https://github.com/mit-pdos/noria.git"
+homepage = "https://pdos.csail.mit.edu/noria"
+
+keywords = ["internal"]
+
+[badges]
+maintenance = { status = "experimental" }
+
+[dependencies]
+nom-sql = "0.0.11"
+regex = "1.0.0"
+slog = "2.4.0"
+petgraph = { version = "0.5", features = ["serde-1"] }
+
+# local deps
+common = { version = "0.7.0", path = "../common", package = "noria-common" }
+dataflow = { version = "0.7.0", path = "../dataflow", package = "noria-dataflow" }

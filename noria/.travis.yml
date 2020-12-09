@@ -1,0 +1,17 @@
+dist: trusty
+language: rust
+cache: false
+rust:
+  - nightly
+env:
+  - SETTLE_TIME=2000
+script:
+  - cargo check --all --all-targets
+  - cargo test --all -- --test-threads=1
+addons:
+  apt:
+    packages:
+    - liblz4-dev
+before_cache:
+  - rm -rf /home/travis/.cargo/registry
+  - rm -rf $TRAVIS_BUILD_DIR/target/incremental
