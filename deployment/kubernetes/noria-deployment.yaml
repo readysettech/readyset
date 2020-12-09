@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noria
+  labels:
+    app: noria
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: noria
+  template:
+    metadata:
+      labels:
+        app: noria
+    spec:
+      containers:
+      - name: noria
+        imagePullPolicy: Never
+        image: readyset-deploy:latest
+        command: ["/home/readyset/readyset/target/release/noria-server", "--deployment", "noria", "--address", "noria", "--shards", "3", "-z", "zookeeper:2181"]
+        ports:
+          - containerPort: 6033
+          - containerPort: 38117
+          - containerPort: 45555
