@@ -1,7 +1,13 @@
 version: '2'
 
 volumes:
-  target:
+  noria-target:
+    external: true
+  noria-mysql-target:
+    external: true
+  nom-sql-target:
+    external: true
+  msql-srv-target:
     external: true
   cargo-registry:
     external: true
@@ -11,17 +17,18 @@ services:
     image: zookeeper
   app:
     build:
-      context: .
+      context: ../..
+      dockerfile: build/Dockerfile
       cache_from:
       - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql-build:latest
-    working_dir: /app
+    working_dir: /workdir
     volumes:
-    - 'target:/workdir/target'
+    - 'noria-target:/workdir/noria/target'
+    - 'noria-mysql-target:/workdir/noria-mysql/target'
+    - 'nom-sql-target:/workdir/nom-sql/target'
+    - 'msql-srv-target:/workdir/msql-srv/target'
     - 'cargo-registry:/usr/local/cargo/registry'
-    - '..:/app'
-    - '../noria:/noria'
-    - '../msql-srv:/msql-srv'
-    - '../nom-sql:/nom-sql'
+    - '../..:/workdir'
     environment:
     - ZOOKEEPER_HOST=zookeeper
     depends_on:
