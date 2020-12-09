@@ -1,0 +1,16 @@
+dist: trusty
+language: rust
+rust:
+  - nightly
+cache: cargo
+script:
+  - cargo check --all --all-targets
+  - cargo test --verbose --all
+services:
+  zookeeper
+addons:
+  apt:
+    packages:
+    - libhwloc-dev
+    - zookeeperd
+    - liblz4-dev

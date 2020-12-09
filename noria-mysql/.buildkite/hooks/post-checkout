@@ -1,0 +1,15 @@
+#!/bin/bash
+set -eo pipefail
+
+for sibling_repo in noria msql-srv nom-sql; do
+    echo "--- :git: Cloning $sibling_repo"
+    (
+        if [ !  -d "$sibling_repo" ]; then
+            git clone "git@github.com:readysettech/$sibling_repo.git"
+        fi
+        cd "$sibling_repo"
+        git fetch -v --prune -- origin master
+        git checkout -f FETCH_HEAD
+        git clean -ffxdq
+    )
+done
