@@ -1,0 +1,38 @@
+[package]
+name = "msql-srv"
+version = "0.8.8"
+edition = "2018"
+
+description = "Bindings for emulating a MySQL/MariaDB server"
+readme = "README.md"
+
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+documentation = "https://docs.rs/msql-srv"
+homepage = "https://github.com/jonhoo/msql-srv"
+repository = "https://github.com/jonhoo/msql-srv.git"
+
+keywords = ["api-bindings", "database", "sql", "mock"]
+categories = ["api-bindings", "network-programming", "database-implementations"]
+
+license = "MIT/Apache-2.0"
+
+[badges]
+travis-ci = { repository = "jonhoo/msql-srv" }
+codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
+maintenance = { status = "experimental" }
+
+[dependencies]
+nom = "5.0.0"
+mysql_common = "0.19"
+byteorder = "1"
+chrono = "0.4"
+time = "=0.2.7"
+
+[dev-dependencies]
+postgres = "0.15.2"
+mysql = "17.0.0"
+mysql_async = "0.20.0"
+slab = "0.4.2"
+tokio = "0.1.19"
+futures = "0.1.26"
