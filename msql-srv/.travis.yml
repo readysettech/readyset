@@ -1,0 +1,64 @@
+language: rust
+cache: cargo
+rust:
+  - stable
+  - beta
+  - nightly
+os: linux
+
+# always test things that aren't pushes (like PRs)
+# never test tags or pushes to non-master branches (wait for PR)
+# https://github.com/travis-ci/travis-ci/issues/2200#issuecomment-441395545)
+if: type != push OR (tag IS blank AND branch = master)
+
+jobs:
+  allow_failures:
+    - rust: nightly
+  include:
+    - &check
+      stage: check # do a pre-screen to make sure this is even worth testing
+      script: cargo check --all-targets
+      rust: stable
+      # <1.32.0 doesn't work because of associated items on type aliases
+    - <<: *check # also test oldest known-good stable
+      rust: 1.32.0
+    - stage: test
+      rust: stable
+      os: osx
+    - rust: stable
+      os: windows
+    - stage: lint # we lint on beta to future-proof
+      name: "Rust: beta, rustfmt"
+      rust: beta
+      script:
+        - rustup component add rustfmt-preview
+        - cargo fmt -v -- --check
+    - name: "Rust: nightly, rustfmt" # and on nightly with allow_fail
+      rust: nightly
+      script:
+        - rustup component add rustfmt-preview
+        - cargo fmt -v -- --check
+    - name: "Rust: beta, clippy"
+      rust: beta
+      script:
+        - rustup component add clippy-preview
+        - touch ./src/lib.rs && cargo clippy -- -D warnings
+    - name: "Rust: nightly, clippy"
+      rust: nightly
+      script:
+        - rustup component add clippy-preview
+        - touch ./src/lib.rs && cargo clippy -- -D warnings
+    - stage: coverage
+      sudo: required
+      dist: trusty
+      cache: false
+      services:
+        - docker
+      script:
+        - docker run --security-opt seccomp=unconfined -v "$PWD:/volume" xd009642/tarpaulin:latest sh -c "cargo tarpaulin --out Xml"
+        - bash <(curl -s https://codecov.io/bash)
+stages:
+ - check
+ - test
+ - lint
+ - coverage
