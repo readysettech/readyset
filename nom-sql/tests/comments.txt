@@ -1,0 +1,35 @@
+--
+-- Table structure for table `admin_assert`
+--
+
+DROP TABLE IF EXISTS `admin_assert`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `admin_assert` (
+  `assert_id` int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Assert ID',
+  `assert_type` varchar(20) DEFAULT NULL COMMENT 'Assert Type',
+  `assert_data` text COMMENT 'Assert Data',
+  PRIMARY KEY (`assert_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `admin_role`
+--
+
+DROP TABLE IF EXISTS `admin_role`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `admin_role` (
+  `role_id` int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Role ID',
+  `parent_id` int(10) unsigned NOT NULL DEFAULT '0' COMMENT 'Parent Role ID',
+  `tree_level` smallint(5) unsigned NOT NULL DEFAULT '0' COMMENT 'Role Tree Level',
+  `sort_order` smallint(5) unsigned NOT NULL DEFAULT '0' COMMENT 'Role Sort Order',
+  `role_type` varchar(1) NOT NULL DEFAULT '0' COMMENT 'Role Type',
+  `user_id` int(10) unsigned NOT NULL DEFAULT '0' COMMENT 'User ID',
+  `role_name` varchar(50) DEFAULT NULL COMMENT 'Role Name',
+  PRIMARY KEY (`role_id`),
+  KEY `IDX_ADMIN_ROLE_PARENT_ID_SORT_ORDER` (`parent_id`,`sort_order`),
+  KEY `IDX_ADMIN_ROLE_TREE_LEVEL` (`tree_level`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Admin Role Table';
+/*!40101 SET character_set_client = @saved_cs_client */;

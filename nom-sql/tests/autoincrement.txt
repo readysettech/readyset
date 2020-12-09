@@ -1,0 +1,7 @@
+CREATE TABLE `postcode_city` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Id',
+  `country_code` varchar(5) NOT NULL COMMENT 'Country Code',
+  `postcode` varchar(20) NOT NULL COMMENT 'Postcode',
+  `city` text NOT NULL COMMENT 'City',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=52142 DEFAULT CHARSET=utf8 COMMENT='Postcode -> City';

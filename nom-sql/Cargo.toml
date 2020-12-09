@@ -1,0 +1,20 @@
+[package]
+name = "nom-sql"
+version = "0.0.11"
+authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
+
+documentation = "https://docs.rs/nom-sql"
+homepage = "https://github.com/ms705/nom-sql"
+repository = "https://github.com/ms705/nom-sql.git"
+
+description = "A SQL parser written using nom."
+
+license = "MIT"
+
+[dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+nom = "5.0.1"
+
+[dev-dependencies]
+pretty_assertions = "0.5.1"
