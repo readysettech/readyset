@@ -5,6 +5,19 @@ use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
 
+/// The results of running a forward pass on a node
+#[derive(Debug, PartialEq, Eq, Default)]
+pub(crate) struct NodeProcessingResult {
+    /// The values that we failed to lookup
+    pub(crate) misses: Vec<Miss>,
+
+    /// The lookups that were performed during processing
+    pub(crate) lookups: Vec<Lookup>,
+
+    /// The results of the processing
+    pub(crate) captured: HashSet<Vec<DataType>>,
+}
+
 impl Node {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process(
@@ -18,7 +31,7 @@ impl Node {
         replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
         log: &Logger,
-    ) -> (Vec<Miss>, Vec<Lookup>, HashSet<Vec<DataType>>) {
+    ) -> NodeProcessingResult {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
         match self.inner {
@@ -246,7 +259,11 @@ impl Node {
                     }
                 }
 
-                return (misses, lookups, captured);
+                return NodeProcessingResult {
+                    misses,
+                    lookups,
+                    captured,
+                };
             }
             NodeType::Dropped => {
                 *m = None;

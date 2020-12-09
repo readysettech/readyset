@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time;
 
 use crate::group_commit::GroupCommitQueueSet;
+use crate::node::NodeProcessingResult;
 use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use ahash::RandomState;
@@ -584,7 +585,9 @@ impl Domain {
             self.process_times.start(me);
             self.process_ptimes.start(me);
             let mut m = Some(m);
-            let (misses, _, captured) = n.process(
+            let NodeProcessingResult {
+                misses, captured, ..
+            } = n.process(
                 &mut m,
                 None,
                 &mut self.state,
@@ -1988,7 +1991,11 @@ impl Domain {
                         }
 
                         // process the current message in this node
-                        let (mut misses, lookups, captured) = n.process(
+                        let NodeProcessingResult {
+                            mut misses,
+                            lookups,
+                            captured,
+                        } = n.process(
                             &mut m,
                             segment.partial_key.as_ref(),
                             &mut self.state,

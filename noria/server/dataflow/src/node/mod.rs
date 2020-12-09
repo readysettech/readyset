@@ -8,6 +8,7 @@ use std::ops::{Deref, DerefMut};
 mod process;
 #[cfg(test)]
 pub(crate) use self::process::materialize;
+pub(crate) use self::process::NodeProcessingResult;
 
 pub mod special;
 
