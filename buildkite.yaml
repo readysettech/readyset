@@ -1,0 +1,177 @@
+steps:
+  - label: ':docker: Build build image'
+    key: build-image
+    commands:
+    - 'echo --- :docker: Building image'
+    - >-
+      docker build -f build/Dockerfile \
+        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        .
+    - 'echo --- :docker: Pushing image'
+    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
+  - label: ':rust: Check rustfmt'
+    commands:
+    - "( cd noria; echo '--- :rust: Checking noria'; cargo fmt -- --check )"
+    - "( cd noria-mysql; echo '--- :rust: Checking noria-mysql'; cargo fmt -- --check )"
+    - "( cd nom-sql; echo '--- :rust: Checking nom-sql' cargo fmt -- --check )"
+    - "( cd msql-srv; echo '--- :rust: Checking msql-srv' cargo fmt -- --check )"
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Build nom-sql'
+    key: build-nom-sql
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cd nom-sql
+    - cargo build -v --workspace
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test nom-sql'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cd nom-sql
+    - cargo test -v --workspace
+    depends_on:
+    - build-image
+    - build-nom-sql
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+
+
+  - label: ':rust: Build noria'
+    key: build-noria
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cd noria
+    - cargo build -v --workspace
+    depends_on:
+    - build-image
+    - build-nom-sql
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test noria'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cd noria
+    - cargo test -v --workspace
+    depends_on:
+    - build-image
+    - build-noria
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+
+  - label: ':rust: Build noria-mysql'
+    key: build-noria-mysql
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cd noria-mysql
+    - cargo build -v --workspace
+    depends_on:
+    - build-noria
+    - build-nom-sql
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'noria-target:/workdir/noria/target'
+          - 'noria-mysql-target:/workdir/noria-mysql/target'
+          - 'nom-sql-target:/workdir/nom-sql/target'
+          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test noria-mysql'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cd noria-mysql
+    - cargo test -v --workspace
+    depends_on:
+    - build-image
+    - build-noria-mysql
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readyset-sccache
+          config: noria-mysql/build/docker-compose.yaml
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
