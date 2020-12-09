@@ -57,7 +57,7 @@ pub(crate) struct Lookup {
     pub(crate) key: Vec<DataType>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct ProcessingResult {
     pub(crate) results: Records,
     pub(crate) misses: Vec<Miss>,
