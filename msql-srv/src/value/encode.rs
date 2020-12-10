@@ -22,9 +22,10 @@ pub trait ToMysqlValue {
 macro_rules! mysql_text_trivial {
     () => {
         fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
-            w.write_lenenc_str(format!("{}", self).as_bytes()).map(|_| ())
+            w.write_lenenc_str(format!("{}", self).as_bytes())
+                .map(|_| ())
         }
-    }
+    };
 }
 
 use std::fmt;
