@@ -10,31 +10,36 @@ impl serde::ser::Serialize for DataType {
     {
         match &self {
             DataType::None => serializer.serialize_unit_variant("DataType", 0, "None"),
-            DataType::Int(v) => serializer.serialize_newtype_variant("DataType", 1, "Int", &v),
+            DataType::Int(v) => {
+                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
+            }
             DataType::UnsignedInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 2, "UnsignedInt", &v)
+                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
             }
             DataType::BigInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 3, "BigInt", &v)
+                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
             }
             DataType::UnsignedBigInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 4, "UnsignedBigInt", &v)
+                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
             }
             DataType::Real(v1, v2) => {
-                let mut tv = serializer.serialize_tuple_variant("DataType", 5, "Real", 2)?;
+                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Real", 2)?;
                 tv.serialize_field(&v1)?;
                 tv.serialize_field(&v2)?;
                 tv.end()
             }
             DataType::Text(v) => {
-                serializer.serialize_newtype_variant("DataType", 6, "Text", v.to_bytes())
+                serializer.serialize_newtype_variant("DataType", 3, "Text", v.to_bytes())
             }
             DataType::TinyText(v) => {
-                let v: &[u8] = v;
-                serializer.serialize_newtype_variant("DataType", 6, "Text", &v)
+                let vu8 = match v.iter().position(|&i| i == 0) {
+                    Some(null) => &v[0..null],
+                    None => v,
+                };
+                serializer.serialize_newtype_variant("DataType", 3, "Text", &vu8)
             }
             DataType::Timestamp(v) => {
-                serializer.serialize_newtype_variant("DataType", 7, "Timestamp", &v)
+                serializer.serialize_newtype_variant("DataType", 4, "Timestamp", &v)
             }
         }
     }
@@ -52,9 +57,6 @@ impl<'de> serde::Deserialize<'de> for DataType {
             __field2,
             __field3,
             __field4,
-            __field5,
-            __field6,
-            __field7,
         }
         struct __FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for __FieldVisitor {
@@ -75,12 +77,9 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     2u64 => serde::export::Ok(__Field::__field2),
                     3u64 => serde::export::Ok(__Field::__field3),
                     4u64 => serde::export::Ok(__Field::__field4),
-                    5u64 => serde::export::Ok(__Field::__field5),
-                    6u64 => serde::export::Ok(__Field::__field6),
-                    7u64 => serde::export::Ok(__Field::__field7),
                     _ => serde::export::Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(__value),
-                        &"variant index 0 <= i < 8",
+                        &"variant index 0 <= i < 5",
                     )),
                 }
             }
@@ -91,12 +90,9 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 match __value {
                     "None" => serde::export::Ok(__Field::__field0),
                     "Int" => serde::export::Ok(__Field::__field1),
-                    "UnsignedInt" => serde::export::Ok(__Field::__field2),
-                    "BigInt" => serde::export::Ok(__Field::__field3),
-                    "UnsignedBigInt" => serde::export::Ok(__Field::__field4),
-                    "Real" => serde::export::Ok(__Field::__field5),
-                    "Text" => serde::export::Ok(__Field::__field6),
-                    "Timestamp" => serde::export::Ok(__Field::__field7),
+                    "Real" => serde::export::Ok(__Field::__field2),
+                    "Text" => serde::export::Ok(__Field::__field3),
+                    "Timestamp" => serde::export::Ok(__Field::__field4),
                     _ => serde::export::Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
                 }
             }
@@ -107,12 +103,9 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 match __value {
                     b"None" => serde::export::Ok(__Field::__field0),
                     b"Int" => serde::export::Ok(__Field::__field1),
-                    b"UnsignedInt" => serde::export::Ok(__Field::__field2),
-                    b"BigInt" => serde::export::Ok(__Field::__field3),
-                    b"UnsignedBigInt" => serde::export::Ok(__Field::__field4),
-                    b"Real" => serde::export::Ok(__Field::__field5),
-                    b"Text" => serde::export::Ok(__Field::__field6),
-                    b"Timestamp" => serde::export::Ok(__Field::__field7),
+                    b"Real" => serde::export::Ok(__Field::__field2),
+                    b"Text" => serde::export::Ok(__Field::__field3),
+                    b"Timestamp" => serde::export::Ok(__Field::__field4),
                     _ => {
                         let __value = &serde::export::from_utf8_lossy(__value);
                         serde::export::Err(serde::de::Error::unknown_variant(__value, VARIANTS))
@@ -159,23 +152,17 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         };
                         serde::export::Ok(DataType::None)
                     }
-                    (__Field::__field1, __variant) => serde::export::Result::map(
-                        serde::de::VariantAccess::newtype_variant::<i32>(__variant),
-                        DataType::Int,
-                    ),
-                    (__Field::__field2, __variant) => serde::export::Result::map(
-                        serde::de::VariantAccess::newtype_variant::<u32>(__variant),
-                        DataType::UnsignedInt,
-                    ),
-                    (__Field::__field3, __variant) => serde::export::Result::map(
-                        serde::de::VariantAccess::newtype_variant::<i64>(__variant),
-                        DataType::BigInt,
-                    ),
-                    (__Field::__field4, __variant) => serde::export::Result::map(
-                        serde::de::VariantAccess::newtype_variant::<u64>(__variant),
-                        DataType::UnsignedBigInt,
-                    ),
-                    (__Field::__field5, __variant) => {
+                    (__Field::__field1, __variant) => {
+                        serde::de::VariantAccess::newtype_variant::<i128>(__variant).and_then(|x| {
+                            DataType::try_from(x).map_err(|_| {
+                                serde::de::Error::invalid_value(
+                                    serde::de::Unexpected::Other(format!("{}", x).as_str()),
+                                    &"integer (i128)",
+                                )
+                            })
+                        })
+                    }
+                    (__Field::__field2, __variant) => {
                         struct __Visitor;
                         impl<'de> serde::de::Visitor<'de> for __Visitor {
                             type Value = DataType;
@@ -237,13 +224,18 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         }
                         serde::de::VariantAccess::tuple_variant(__variant, 2usize, __Visitor)
                     }
-                    (__Field::__field6, __variant) => {
-                        match serde::de::VariantAccess::newtype_variant::<&'_ [u8]>(__variant) {
-                            Ok(v) => Ok(DataType::try_from(v).unwrap()),
-                            Err(e) => Err(e),
-                        }
-                    }
-                    (__Field::__field7, __variant) => serde::export::Result::map(
+                    (__Field::__field3, __variant) => serde::de::VariantAccess::newtype_variant::<
+                        &'_ [u8],
+                    >(__variant)
+                    .and_then(|x| {
+                        DataType::try_from(x).map_err(|_| {
+                            serde::de::Error::invalid_value(
+                                serde::de::Unexpected::Bytes(x),
+                                &"valid utf-8 or short TinyText",
+                            )
+                        })
+                    }),
+                    (__Field::__field4, __variant) => serde::export::Result::map(
                         serde::de::VariantAccess::newtype_variant::<NaiveDateTime>(__variant),
                         DataType::Timestamp,
                     ),

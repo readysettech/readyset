@@ -20,6 +20,10 @@ const TINYTEXT_WIDTH: usize = 15;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
+///
+/// Also note that DataType uses a custom implementation of the Serialize trait, which must be
+/// manually updated if the DataType enum changes:
+/// https://www.notion.so/Text-TinyText-Serialization-Deserialization-9dff56b6974b4bcdae28f236882783a8
 #[derive(Eq, Clone)]
 #[warn(variant_size_differences)]
 pub enum DataType {
@@ -911,9 +915,10 @@ mod tests {
         assert_eq!(format!("{}", big_int), "5");
     }
 
-    #[test]
-    #[allow(clippy::cognitive_complexity)]
-    fn data_type_fungibility() {
+    fn _data_type_fungibility_test_eq<T>(f: &dyn for<'a> Fn(&'a DataType) -> T)
+    where
+        T: PartialEq + fmt::Debug,
+    {
         use std::convert::TryFrom;
 
         let txt1: DataType = "hi".into();
@@ -934,187 +939,121 @@ mod tests {
         let ulong = DataType::UnsignedBigInt(5);
         let ulong6 = DataType::UnsignedBigInt(6);
 
-        assert_eq!(txt1, txt1);
-        assert_eq!(txt2, txt2);
-        assert_eq!(text, text);
-        assert_eq!(shrt, shrt);
-        assert_eq!(long, long);
-        assert_eq!(ushrt, ushrt);
-        assert_eq!(ulong, ulong);
-        assert_eq!(real, real);
-        assert_eq!(time, time);
+        assert_eq!(f(&txt1), f(&txt1));
+        assert_eq!(f(&txt2), f(&txt2));
+        assert_eq!(f(&text), f(&text));
+        assert_eq!(f(&shrt), f(&shrt));
+        assert_eq!(f(&long), f(&long));
+        assert_eq!(f(&ushrt), f(&ushrt));
+        assert_eq!(f(&ulong), f(&ulong));
+        assert_eq!(f(&real), f(&real));
+        assert_eq!(f(&time), f(&time));
 
         // coercion
-        assert_eq!(txt1, txt2);
-        assert_eq!(txt2, txt1);
-        assert_eq!(shrt, long);
-        assert_eq!(long, shrt);
-        assert_eq!(ushrt, shrt);
-        assert_eq!(shrt, ushrt);
-        assert_eq!(ulong, long);
-        assert_eq!(long, ulong);
-        assert_eq!(shrt, ulong);
-        assert_eq!(ulong, shrt);
-        assert_eq!(ushrt, long);
-        assert_eq!(long, ushrt);
-        assert_eq!(ushrt, ulong);
-        assert_eq!(ulong, ushrt);
+        assert_eq!(f(&txt1), f(&txt2));
+        assert_eq!(f(&txt2), f(&txt1));
+        assert_eq!(f(&shrt), f(&long));
+        assert_eq!(f(&long), f(&shrt));
+        assert_eq!(f(&ushrt), f(&shrt));
+        assert_eq!(f(&shrt), f(&ushrt));
+        assert_eq!(f(&ulong), f(&long));
+        assert_eq!(f(&long), f(&ulong));
+        assert_eq!(f(&shrt), f(&ulong));
+        assert_eq!(f(&ulong), f(&shrt));
+        assert_eq!(f(&ushrt), f(&long));
+        assert_eq!(f(&long), f(&ushrt));
+        assert_eq!(f(&ushrt), f(&ulong));
+        assert_eq!(f(&ulong), f(&ushrt));
 
         // negation
-        assert_ne!(txt1, txt12);
-        assert_ne!(txt1, text);
-        assert_ne!(txt1, real);
-        assert_ne!(txt1, time);
-        assert_ne!(txt1, shrt);
-        assert_ne!(txt1, long);
-        assert_ne!(txt1, ushrt);
-        assert_ne!(txt1, ulong);
+        assert_ne!(f(&txt1), f(&txt12));
+        assert_ne!(f(&txt1), f(&text));
+        assert_ne!(f(&txt1), f(&real));
+        assert_ne!(f(&txt1), f(&time));
+        assert_ne!(f(&txt1), f(&shrt));
+        assert_ne!(f(&txt1), f(&long));
+        assert_ne!(f(&txt1), f(&ushrt));
+        assert_ne!(f(&txt1), f(&ulong));
 
-        assert_ne!(txt2, txt12);
-        assert_ne!(txt2, text);
-        assert_ne!(txt2, real);
-        assert_ne!(txt2, time);
-        assert_ne!(txt2, shrt);
-        assert_ne!(txt2, long);
-        assert_ne!(txt2, ushrt);
-        assert_ne!(txt2, ulong);
+        assert_ne!(f(&txt2), f(&txt12));
+        assert_ne!(f(&txt2), f(&text));
+        assert_ne!(f(&txt2), f(&real));
+        assert_ne!(f(&txt2), f(&time));
+        assert_ne!(f(&txt2), f(&shrt));
+        assert_ne!(f(&txt2), f(&long));
+        assert_ne!(f(&txt2), f(&ushrt));
+        assert_ne!(f(&txt2), f(&ulong));
 
-        assert_ne!(text, text2);
-        assert_ne!(text, txt1);
-        assert_ne!(text, txt2);
-        assert_ne!(text, real);
-        assert_ne!(text, time);
-        assert_ne!(text, shrt);
-        assert_ne!(text, long);
-        assert_ne!(text, ushrt);
-        assert_ne!(text, ulong);
+        assert_ne!(f(&text), f(&text2));
+        assert_ne!(f(&text), f(&txt1));
+        assert_ne!(f(&text), f(&txt2));
+        assert_ne!(f(&text), f(&real));
+        assert_ne!(f(&text), f(&time));
+        assert_ne!(f(&text), f(&shrt));
+        assert_ne!(f(&text), f(&long));
+        assert_ne!(f(&text), f(&ushrt));
+        assert_ne!(f(&text), f(&ulong));
 
-        assert_ne!(real, real2);
-        assert_ne!(real, txt1);
-        assert_ne!(real, txt2);
-        assert_ne!(real, text);
-        assert_ne!(real, time);
-        assert_ne!(real, shrt);
-        assert_ne!(real, long);
-        assert_ne!(real, ushrt);
-        assert_ne!(real, ulong);
+        assert_ne!(f(&real), f(&real2));
+        assert_ne!(f(&real), f(&txt1));
+        assert_ne!(f(&real), f(&txt2));
+        assert_ne!(f(&real), f(&text));
+        assert_ne!(f(&real), f(&time));
+        assert_ne!(f(&real), f(&shrt));
+        assert_ne!(f(&real), f(&long));
+        assert_ne!(f(&real), f(&ushrt));
+        assert_ne!(f(&real), f(&ulong));
 
-        assert_ne!(time, time2);
-        assert_ne!(time, txt1);
-        assert_ne!(time, txt2);
-        assert_ne!(time, text);
-        assert_ne!(time, real);
-        assert_ne!(time, shrt);
-        assert_ne!(time, long);
-        assert_ne!(time, ushrt);
-        assert_ne!(time, ulong);
+        assert_ne!(f(&time), f(&time2));
+        assert_ne!(f(&time), f(&txt1));
+        assert_ne!(f(&time), f(&txt2));
+        assert_ne!(f(&time), f(&text));
+        assert_ne!(f(&time), f(&real));
+        assert_ne!(f(&time), f(&shrt));
+        assert_ne!(f(&time), f(&long));
+        assert_ne!(f(&time), f(&ushrt));
+        assert_ne!(f(&time), f(&ulong));
 
-        assert_ne!(shrt, shrt6);
-        assert_ne!(shrt, txt1);
-        assert_ne!(shrt, txt2);
-        assert_ne!(shrt, text);
-        assert_ne!(shrt, real);
-        assert_ne!(shrt, time);
-        assert_ne!(shrt, long6);
+        assert_ne!(f(&shrt), f(&shrt6));
+        assert_ne!(f(&shrt), f(&txt1));
+        assert_ne!(f(&shrt), f(&txt2));
+        assert_ne!(f(&shrt), f(&text));
+        assert_ne!(f(&shrt), f(&real));
+        assert_ne!(f(&shrt), f(&time));
+        assert_ne!(f(&shrt), f(&long6));
 
-        assert_ne!(long, long6);
-        assert_ne!(long, txt1);
-        assert_ne!(long, txt2);
-        assert_ne!(long, text);
-        assert_ne!(long, real);
-        assert_ne!(long, time);
-        assert_ne!(long, shrt6);
+        assert_ne!(f(&long), f(&long6));
+        assert_ne!(f(&long), f(&txt1));
+        assert_ne!(f(&long), f(&txt2));
+        assert_ne!(f(&long), f(&text));
+        assert_ne!(f(&long), f(&real));
+        assert_ne!(f(&long), f(&time));
+        assert_ne!(f(&long), f(&shrt6));
 
-        assert_ne!(ushrt, ushrt6);
-        assert_ne!(ushrt, txt1);
-        assert_ne!(ushrt, txt2);
-        assert_ne!(ushrt, text);
-        assert_ne!(ushrt, real);
-        assert_ne!(ushrt, time);
-        assert_ne!(ushrt, ulong6);
-        assert_ne!(ushrt, shrt6);
-        assert_ne!(ushrt, long6);
+        assert_ne!(f(&ushrt), f(&ushrt6));
+        assert_ne!(f(&ushrt), f(&txt1));
+        assert_ne!(f(&ushrt), f(&txt2));
+        assert_ne!(f(&ushrt), f(&text));
+        assert_ne!(f(&ushrt), f(&real));
+        assert_ne!(f(&ushrt), f(&time));
+        assert_ne!(f(&ushrt), f(&ulong6));
+        assert_ne!(f(&ushrt), f(&shrt6));
+        assert_ne!(f(&ushrt), f(&long6));
 
-        assert_ne!(ulong, ulong6);
-        assert_ne!(ulong, txt1);
-        assert_ne!(ulong, txt2);
-        assert_ne!(ulong, text);
-        assert_ne!(ulong, real);
-        assert_ne!(ulong, time);
-        assert_ne!(ulong, ushrt6);
-        assert_ne!(ulong, shrt6);
-        assert_ne!(ulong, long6);
+        assert_ne!(f(&ulong), f(&ulong6));
+        assert_ne!(f(&ulong), f(&txt1));
+        assert_ne!(f(&ulong), f(&txt2));
+        assert_ne!(f(&ulong), f(&text));
+        assert_ne!(f(&ulong), f(&real));
+        assert_ne!(f(&ulong), f(&time));
+        assert_ne!(f(&ulong), f(&ushrt6));
+        assert_ne!(f(&ulong), f(&shrt6));
+        assert_ne!(f(&ulong), f(&long6));
+    }
 
-        use std::cmp::Ordering;
-        assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
-        assert_eq!(txt2.cmp(&txt2), Ordering::Equal);
-        assert_eq!(text.cmp(&text), Ordering::Equal);
-        assert_eq!(shrt.cmp(&shrt), Ordering::Equal);
-        assert_eq!(long.cmp(&long), Ordering::Equal);
-        assert_eq!(real.cmp(&real), Ordering::Equal);
-        assert_eq!(time.cmp(&time), Ordering::Equal);
-
-        // coercion
-        assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
-        assert_eq!(txt2.cmp(&txt1), Ordering::Equal);
-        assert_eq!(shrt.cmp(&long), Ordering::Equal);
-        assert_eq!(long.cmp(&shrt), Ordering::Equal);
-
-        // negation
-        assert_ne!(txt1.cmp(&txt12), Ordering::Equal);
-        assert_ne!(txt1.cmp(&text), Ordering::Equal);
-        assert_ne!(txt1.cmp(&real), Ordering::Equal);
-        assert_ne!(txt1.cmp(&time), Ordering::Equal);
-        assert_ne!(txt1.cmp(&shrt), Ordering::Equal);
-        assert_ne!(txt1.cmp(&long), Ordering::Equal);
-
-        assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
-        assert_ne!(txt2.cmp(&text), Ordering::Equal);
-        assert_ne!(txt2.cmp(&real), Ordering::Equal);
-        assert_ne!(txt2.cmp(&time), Ordering::Equal);
-        assert_ne!(txt2.cmp(&shrt), Ordering::Equal);
-        assert_ne!(txt2.cmp(&long), Ordering::Equal);
-
-        assert_ne!(text.cmp(&text2), Ordering::Equal);
-        assert_ne!(text.cmp(&txt1), Ordering::Equal);
-        assert_ne!(text.cmp(&txt2), Ordering::Equal);
-        assert_ne!(text.cmp(&real), Ordering::Equal);
-        assert_ne!(text.cmp(&time), Ordering::Equal);
-        assert_ne!(text.cmp(&shrt), Ordering::Equal);
-        assert_ne!(text.cmp(&long), Ordering::Equal);
-
-        assert_ne!(real.cmp(&real2), Ordering::Equal);
-        assert_ne!(real.cmp(&txt1), Ordering::Equal);
-        assert_ne!(real.cmp(&txt2), Ordering::Equal);
-        assert_ne!(real.cmp(&text), Ordering::Equal);
-        assert_ne!(real.cmp(&time), Ordering::Equal);
-        assert_ne!(real.cmp(&shrt), Ordering::Equal);
-        assert_ne!(real.cmp(&long), Ordering::Equal);
-
-        assert_ne!(time.cmp(&time2), Ordering::Equal);
-        assert_ne!(time.cmp(&txt1), Ordering::Equal);
-        assert_ne!(time.cmp(&txt2), Ordering::Equal);
-        assert_ne!(time.cmp(&text), Ordering::Equal);
-        assert_ne!(time.cmp(&real), Ordering::Equal);
-        assert_ne!(time.cmp(&shrt), Ordering::Equal);
-        assert_ne!(time.cmp(&long), Ordering::Equal);
-
-        assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
-        assert_ne!(shrt.cmp(&txt1), Ordering::Equal);
-        assert_ne!(shrt.cmp(&txt2), Ordering::Equal);
-        assert_ne!(shrt.cmp(&text), Ordering::Equal);
-        assert_ne!(shrt.cmp(&real), Ordering::Equal);
-        assert_ne!(shrt.cmp(&time), Ordering::Equal);
-        assert_ne!(shrt.cmp(&long6), Ordering::Equal);
-
-        assert_ne!(long.cmp(&long6), Ordering::Equal);
-        assert_ne!(long.cmp(&txt1), Ordering::Equal);
-        assert_ne!(long.cmp(&txt2), Ordering::Equal);
-        assert_ne!(long.cmp(&text), Ordering::Equal);
-        assert_ne!(long.cmp(&real), Ordering::Equal);
-        assert_ne!(long.cmp(&time), Ordering::Equal);
-        assert_ne!(long.cmp(&shrt6), Ordering::Equal);
-
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn data_type_fungibility() {
         let hash = |dt: &DataType| {
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
@@ -1122,74 +1061,143 @@ mod tests {
             dt.hash(&mut s);
             s.finish()
         };
+        let json_serialize = |dt: &DataType| serde_json::to_string(dt).unwrap();
+        let bincode_serialize = |dt: &DataType| bincode::serialize(dt).unwrap();
+        _data_type_fungibility_test_eq(&|x: &DataType| x.clone());
+        _data_type_fungibility_test_eq(&hash);
+        _data_type_fungibility_test_eq(&json_serialize);
+        _data_type_fungibility_test_eq(&bincode_serialize);
 
-        assert_eq!(hash(&txt1), hash(&txt1));
-        assert_eq!(hash(&txt2), hash(&txt2));
-        assert_eq!(hash(&text), hash(&text));
-        assert_eq!(hash(&shrt), hash(&shrt));
-        assert_eq!(hash(&long), hash(&long));
-        assert_eq!(hash(&real), hash(&real));
-        assert_eq!(hash(&time), hash(&time));
+        use std::convert::TryFrom;
+
+        let txt1: DataType = "hi".into();
+        let txt12: DataType = "no".into();
+        let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
+        let text: DataType = "this is a very long text indeed".into();
+        let text2: DataType = "this is another long text".into();
+        let real: DataType = (-0.05).into();
+        let real2: DataType = (-0.06).into();
+        let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
+        let shrt = DataType::Int(5);
+        let shrt6 = DataType::Int(6);
+        let long = DataType::BigInt(5);
+        let long6 = DataType::BigInt(6);
+        let ushrt = DataType::UnsignedInt(5);
+        let ushrt6 = DataType::UnsignedInt(6);
+        let ulong = DataType::UnsignedBigInt(5);
+        let ulong6 = DataType::UnsignedBigInt(6);
+
+        use std::cmp::Ordering;
+        assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
+        assert_eq!(txt2.cmp(&txt2), Ordering::Equal);
+        assert_eq!(text.cmp(&text), Ordering::Equal);
+        assert_eq!(shrt.cmp(&shrt), Ordering::Equal);
+        assert_eq!(ushrt.cmp(&ushrt), Ordering::Equal);
+        assert_eq!(long.cmp(&long), Ordering::Equal);
+        assert_eq!(ulong.cmp(&ulong), Ordering::Equal);
+        assert_eq!(real.cmp(&real), Ordering::Equal);
+        assert_eq!(time.cmp(&time), Ordering::Equal);
 
         // coercion
-        assert_eq!(hash(&txt1), hash(&txt2));
-        assert_eq!(hash(&txt2), hash(&txt1));
-        assert_eq!(hash(&shrt), hash(&long));
-        assert_eq!(hash(&long), hash(&shrt));
+        assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
+        assert_eq!(txt2.cmp(&txt1), Ordering::Equal);
+        assert_eq!(shrt.cmp(&long), Ordering::Equal);
+        assert_eq!(shrt.cmp(&ulong), Ordering::Equal);
+        assert_eq!(ushrt.cmp(&long), Ordering::Equal);
+        assert_eq!(ushrt.cmp(&ulong), Ordering::Equal);
+        assert_eq!(long.cmp(&shrt), Ordering::Equal);
+        assert_eq!(long.cmp(&ushrt), Ordering::Equal);
+        assert_eq!(ulong.cmp(&shrt), Ordering::Equal);
+        assert_eq!(ulong.cmp(&ushrt), Ordering::Equal);
 
         // negation
-        assert_ne!(hash(&txt1), hash(&txt12));
-        assert_ne!(hash(&txt1), hash(&text));
-        assert_ne!(hash(&txt1), hash(&real));
-        assert_ne!(hash(&txt1), hash(&time));
-        assert_ne!(hash(&txt1), hash(&shrt));
-        assert_ne!(hash(&txt1), hash(&long));
+        assert_ne!(txt1.cmp(&txt12), Ordering::Equal);
+        assert_ne!(txt1.cmp(&text), Ordering::Equal);
+        assert_ne!(txt1.cmp(&real), Ordering::Equal);
+        assert_ne!(txt1.cmp(&time), Ordering::Equal);
+        assert_ne!(txt1.cmp(&shrt), Ordering::Equal);
+        assert_ne!(txt1.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(txt1.cmp(&long), Ordering::Equal);
+        assert_ne!(txt1.cmp(&ulong), Ordering::Equal);
 
-        assert_ne!(hash(&txt2), hash(&txt12));
-        assert_ne!(hash(&txt2), hash(&text));
-        assert_ne!(hash(&txt2), hash(&real));
-        assert_ne!(hash(&txt2), hash(&time));
-        assert_ne!(hash(&txt2), hash(&shrt));
-        assert_ne!(hash(&txt2), hash(&long));
+        assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
+        assert_ne!(txt2.cmp(&text), Ordering::Equal);
+        assert_ne!(txt2.cmp(&real), Ordering::Equal);
+        assert_ne!(txt2.cmp(&time), Ordering::Equal);
+        assert_ne!(txt2.cmp(&shrt), Ordering::Equal);
+        assert_ne!(txt2.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(txt2.cmp(&long), Ordering::Equal);
+        assert_ne!(txt2.cmp(&ulong), Ordering::Equal);
 
-        assert_ne!(hash(&text), hash(&text2));
-        assert_ne!(hash(&text), hash(&txt1));
-        assert_ne!(hash(&text), hash(&txt2));
-        assert_ne!(hash(&text), hash(&real));
-        assert_ne!(hash(&text), hash(&time));
-        assert_ne!(hash(&text), hash(&shrt));
-        assert_ne!(hash(&text), hash(&long));
+        assert_ne!(text.cmp(&text2), Ordering::Equal);
+        assert_ne!(text.cmp(&txt1), Ordering::Equal);
+        assert_ne!(text.cmp(&txt2), Ordering::Equal);
+        assert_ne!(text.cmp(&real), Ordering::Equal);
+        assert_ne!(text.cmp(&time), Ordering::Equal);
+        assert_ne!(text.cmp(&shrt), Ordering::Equal);
+        assert_ne!(text.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(text.cmp(&long), Ordering::Equal);
+        assert_ne!(text.cmp(&ulong), Ordering::Equal);
 
-        assert_ne!(hash(&real), hash(&real2));
-        assert_ne!(hash(&real), hash(&txt1));
-        assert_ne!(hash(&real), hash(&txt2));
-        assert_ne!(hash(&real), hash(&text));
-        assert_ne!(hash(&real), hash(&time));
-        assert_ne!(hash(&real), hash(&shrt));
-        assert_ne!(hash(&real), hash(&long));
+        assert_ne!(real.cmp(&real2), Ordering::Equal);
+        assert_ne!(real.cmp(&txt1), Ordering::Equal);
+        assert_ne!(real.cmp(&txt2), Ordering::Equal);
+        assert_ne!(real.cmp(&text), Ordering::Equal);
+        assert_ne!(real.cmp(&time), Ordering::Equal);
+        assert_ne!(real.cmp(&shrt), Ordering::Equal);
+        assert_ne!(real.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(real.cmp(&long), Ordering::Equal);
+        assert_ne!(real.cmp(&ulong), Ordering::Equal);
 
-        assert_ne!(hash(&time), hash(&time2));
-        assert_ne!(hash(&time), hash(&txt1));
-        assert_ne!(hash(&time), hash(&txt2));
-        assert_ne!(hash(&time), hash(&text));
-        assert_ne!(hash(&time), hash(&real));
-        assert_ne!(hash(&time), hash(&shrt));
-        assert_ne!(hash(&time), hash(&long));
+        assert_ne!(time.cmp(&time2), Ordering::Equal);
+        assert_ne!(time.cmp(&txt1), Ordering::Equal);
+        assert_ne!(time.cmp(&txt2), Ordering::Equal);
+        assert_ne!(time.cmp(&text), Ordering::Equal);
+        assert_ne!(time.cmp(&real), Ordering::Equal);
+        assert_ne!(time.cmp(&shrt), Ordering::Equal);
+        assert_ne!(time.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(time.cmp(&long), Ordering::Equal);
+        assert_ne!(time.cmp(&ulong), Ordering::Equal);
 
-        assert_ne!(hash(&shrt), hash(&shrt6));
-        assert_ne!(hash(&shrt), hash(&txt1));
-        assert_ne!(hash(&shrt), hash(&txt2));
-        assert_ne!(hash(&shrt), hash(&text));
-        assert_ne!(hash(&shrt), hash(&real));
-        assert_ne!(hash(&shrt), hash(&time));
-        assert_ne!(hash(&shrt), hash(&long6));
+        assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(shrt.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(shrt.cmp(&txt1), Ordering::Equal);
+        assert_ne!(shrt.cmp(&txt2), Ordering::Equal);
+        assert_ne!(shrt.cmp(&text), Ordering::Equal);
+        assert_ne!(shrt.cmp(&real), Ordering::Equal);
+        assert_ne!(shrt.cmp(&time), Ordering::Equal);
+        assert_ne!(shrt.cmp(&long6), Ordering::Equal);
+        assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
 
-        assert_ne!(hash(&long), hash(&long6));
-        assert_ne!(hash(&long), hash(&txt1));
-        assert_ne!(hash(&long), hash(&txt2));
-        assert_ne!(hash(&long), hash(&text));
-        assert_ne!(hash(&long), hash(&real));
-        assert_ne!(hash(&long), hash(&time));
-        assert_ne!(hash(&long), hash(&shrt6));
+        assert_ne!(ushrt.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&txt1), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&txt2), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&text), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&real), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&time), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&long6), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
+
+        assert_ne!(long.cmp(&long6), Ordering::Equal);
+        assert_ne!(long.cmp(&ulong6), Ordering::Equal);
+        assert_ne!(long.cmp(&txt1), Ordering::Equal);
+        assert_ne!(long.cmp(&txt2), Ordering::Equal);
+        assert_ne!(long.cmp(&text), Ordering::Equal);
+        assert_ne!(long.cmp(&real), Ordering::Equal);
+        assert_ne!(long.cmp(&time), Ordering::Equal);
+        assert_ne!(long.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
+
+        assert_ne!(ulong.cmp(&long6), Ordering::Equal);
+        assert_ne!(ulong.cmp(&ulong6), Ordering::Equal);
+        assert_ne!(ulong.cmp(&txt1), Ordering::Equal);
+        assert_ne!(ulong.cmp(&txt2), Ordering::Equal);
+        assert_ne!(ulong.cmp(&text), Ordering::Equal);
+        assert_ne!(ulong.cmp(&real), Ordering::Equal);
+        assert_ne!(ulong.cmp(&time), Ordering::Equal);
+        assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
     }
 }
