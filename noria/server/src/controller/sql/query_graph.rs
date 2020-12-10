@@ -698,7 +698,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         //    parameters might be evaluated sooner).
         for column in query_parameters.into_iter() {
             match column.table {
-                None => panic!("each parameter's column must have an associated table!"),
+                None => {
+                    return Err(format!("each parameter's column must have an associated table! (no such column \"{}\")", column).to_string());
+                }
                 Some(ref table) => {
                     let rel = qg.relations.get_mut(table).unwrap();
                     if !rel.columns.contains(&column) {
