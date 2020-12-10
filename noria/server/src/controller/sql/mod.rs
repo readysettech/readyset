@@ -190,20 +190,17 @@ impl SqlIncorporator {
         query_name: &str,
         universe: UniverseId,
         st: &SelectStatement,
-    ) -> (QueryGraph, QueryGraphReuse) {
+    ) -> Result<(QueryGraph, QueryGraphReuse), String> {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
-        let mut qg = match to_query_graph(st) {
-            Ok(qg) => qg,
-            Err(e) => panic!(e),
-        };
+        let mut qg = to_query_graph(st)?;
 
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
         // if reuse is disabled, we're done
         if self.reuse_type == ReuseConfigType::NoReuse {
-            return (qg, QueryGraphReuse::None);
+            return Ok((qg, QueryGraphReuse::None));
         }
 
         // Do we already have this exact query or a subset of it in the same universe?
@@ -238,7 +235,7 @@ impl SqlIncorporator {
                         existing_qg,
                     );
 
-                    return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
+                    return Ok((qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone())));
                 } else if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() != qg.parameters()
                 {
@@ -335,10 +332,10 @@ impl SqlIncorporator {
                                     Some(project_columns)
                                 }
                             };
-                            return (
+                            return Ok((
                                 qg,
                                 QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
-                            );
+                            ));
                         }
                     }
                 }
@@ -376,12 +373,12 @@ impl SqlIncorporator {
                 mir_queries.extend(mqs);
             }
 
-            return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
+            return Ok((qg, QueryGraphReuse::ExtendExisting(mir_queries)));
         } else {
             info!(self.log, "No reuse opportunity, adding fresh query");
         }
 
-        (qg, QueryGraphReuse::None)
+        Ok((qg, QueryGraphReuse::None))
     }
 
     fn add_leaf_to_existing_query(
@@ -487,7 +484,7 @@ impl SqlIncorporator {
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
-        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
+        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
