@@ -138,9 +138,6 @@ pub struct NoriaBackend {
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
 
-    primed: Arc<atomic::AtomicBool>,
-    reset: bool,
-
     parsed: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
 
     sanitize: bool,
@@ -155,7 +152,6 @@ impl NoriaBackend {
         ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        primed: Arc<atomic::AtomicBool>,
         slowlog: bool,
         static_responses: bool,
         sanitize: bool,
@@ -173,9 +169,6 @@ impl NoriaBackend {
             tl_cached: HashMap::new(),
 
             parsed: HashMap::new(),
-
-            primed,
-            reset: false,
 
             sanitize,
             slowlog,
@@ -393,10 +386,6 @@ impl NoriaBackend {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         trace!(%q.variable, "set");
-
-        if q.variable == "@primed" {
-            self.primed.store(true, atomic::Ordering::SeqCst);
-        }
         // ignore
         results.completed(0, 0)
     }
@@ -980,10 +969,6 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
         let span = span!(Level::DEBUG, "prepare", query);
         let _g = span.enter();
 
-        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
-            self.reset = true;
-        }
-
         trace!("sanitize");
         let query = if self.sanitize {
             utils::sanitize_query(query)
@@ -1037,10 +1022,6 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
     ) -> io::Result<()> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
-
-        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
-            self.reset = true;
-        }
 
         let start = time::Instant::now();
 
@@ -1129,10 +1110,6 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
-
-        if !self.reset && self.primed.load(atomic::Ordering::Acquire) {
-            self.reset = true;
-        }
 
         let start = time::Instant::now();
         let query = if self.sanitize {

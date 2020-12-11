@@ -119,14 +119,12 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
         let (s, _) = listener.accept().unwrap();
 
         let stats = (Arc::new(AtomicUsize::new(0)), None);
-        let primed = Arc::new(AtomicBool::new(false));
         let b = NoriaBackend::new(
             rt.handle().clone(),
             ch,
             auto_increments,
             query_cache,
             stats,
-            primed,
             false,
             true,
             true,
