@@ -145,6 +145,7 @@ pub struct NoriaBackend {
     sanitize: bool,
     slowlog: bool,
     static_responses: bool,
+    permissive: bool,
 }
 
 impl NoriaBackend {
@@ -158,6 +159,7 @@ impl NoriaBackend {
         slowlog: bool,
         static_responses: bool,
         sanitize: bool,
+        permissive: bool,
     ) -> Self {
         NoriaBackend {
             inner: NoriaBackendInner::new(ex, ch).await,
@@ -180,6 +182,7 @@ impl NoriaBackend {
             sanitize,
             slowlog,
             static_responses,
+            permissive,
         }
     }
 
@@ -1229,7 +1232,13 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
                     Err(e) => {
                         // if nom-sql rejects the query, there is no chance Noria will like it
                         error!(%query, "query can't be parsed: \"{}\"", query);
-                        return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                        if self.permissive {
+                            warn!("permissive flag enabled, so returning success despite query parse failure");
+                            return results.completed(0, 0);
+                        } else {
+                            return results
+                                .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                        }
                     }
                 }
             }
