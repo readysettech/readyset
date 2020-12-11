@@ -4,7 +4,7 @@ extern crate slog;
 use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -15,7 +15,8 @@ use nom_sql::SelectStatement;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use noria_mysql::NoriaBackend;
+use noria_mysql::backend::noria_connector::NoriaConnector;
+use noria_mysql::backend::Backend;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -118,21 +119,19 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let stats = (Arc::new(AtomicUsize::new(0)), None);
-        let b = NoriaBackend::new(
+        let reader = NoriaConnector::new(
             rt.handle().clone(),
-            ch,
-            auto_increments,
-            query_cache,
-            stats,
-            false,
-            true,
-            true,
-            false,
+            ch.clone(),
+            auto_increments.clone(),
+            query_cache.clone(),
         );
-        let mut b = rt.block_on(b);
 
-        MysqlIntermediary::run_on_tcp(&mut b, s).unwrap();
+        let writer = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
+
+        let reader = rt.block_on(reader);
+        let writer = rt.block_on(writer);
+        let b = Backend::new(true, true, Box::new(reader), Box::new(writer), false, false);
+        MysqlIntermediary::run_on_tcp(b, s).unwrap();
         drop(rt);
     });
 

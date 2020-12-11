@@ -9,12 +9,11 @@ extern crate lazy_static;
 #[macro_use]
 extern crate tracing;
 
-mod backend;
+pub mod backend;
 mod convert;
 mod referred_tables;
 mod rewrite;
 mod schema;
 mod utils;
 
-pub use crate::backend::NoriaBackend;
 pub use crate::schema::Schema;
