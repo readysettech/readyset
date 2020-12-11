@@ -81,6 +81,12 @@ fn main() {
                 .help("Trace client-side execution of every Nth operation"),
         )
         .arg(
+            Arg::with_name("permissive")
+                .long("permissive")
+                .takes_value(false)
+                .help("Be permissive in queries that the mysql adapter accepts (rather than rejecting parse errors)"),
+        )
+        .arg(
             Arg::with_name("time")
                 .long("time")
                 .help("Instead of logging trace events, time them and output metrics on exit"),
@@ -113,6 +119,7 @@ fn main() {
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
     let sanitize = !matches.is_present("no-sanitize");
+    let permissive = matches.is_present("permissive");
     let static_responses = !matches.is_present("no-static-responses");
 
     use tracing_subscriber::Layer;
@@ -206,6 +213,7 @@ fn main() {
                     slowlog,
                     static_responses,
                     sanitize,
+                    permissive,
                 );
                 ex.spawn(async move {
                     let _ = tx.send(b.await);

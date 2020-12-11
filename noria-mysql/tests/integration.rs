@@ -130,6 +130,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
             false,
             true,
             true,
+            false,
         );
         let mut b = rt.block_on(b);
 
