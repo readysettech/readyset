@@ -66,6 +66,7 @@ steps:
     - cargo test -v --workspace
     depends_on:
     - build-image
+    - build-nom-sql
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -91,6 +92,7 @@ steps:
     - cargo build -v --workspace
     depends_on:
     - build-image
+    - build-nom-sql
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -113,6 +115,7 @@ steps:
     - cargo test -v --workspace
     depends_on:
     - build-image
+    - build-noria
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -136,6 +139,8 @@ steps:
     - cd noria-mysql
     - cargo build -v --workspace
     depends_on:
+    - build-noria
+    - build-nom-sql
     - build-image
     plugins:
       - docker#v3.7.0:
@@ -159,6 +164,7 @@ steps:
     - cargo test -v --workspace
     depends_on:
     - build-image
+    - build-noria-mysql
     plugins:
       - docker-compose#v3.7.0:
           run: app
