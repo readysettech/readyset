@@ -18,7 +18,7 @@ mod rewrite;
 mod schema;
 mod utils;
 
-use crate::backend::NoriaBackend;
+use crate::backend::noria_connector::NoriaConnector;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use msql_srv::MysqlIntermediary;
@@ -30,6 +30,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tracing::Level;
+
+use backend::Backend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -185,34 +187,49 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("conn-{}", i));
 
-        let (auto_increments, query_cache) =
-            (auto_increments.clone(), query_cache.clone());
+        let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
 
         let ex = rt.handle().clone();
         let ch = ch.clone();
 
         let jh = builder
             .spawn(move || {
-                let (tx, rx) = tokio::sync::oneshot::channel();
+                let (reader_sender, reader_reciever) = tokio::sync::oneshot::channel();
+                let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
                 let _g = connection.enter();
-                let b = NoriaBackend::new(
+                let reader = NoriaConnector::new(
                     ex.clone(),
-                    ch,
-                    auto_increments,
-                    query_cache,
-                    slowlog,
-                    static_responses,
+                    ch.clone(),
+                    auto_increments.clone(),
+                    query_cache.clone(),
+                );
+
+                // initially, our instinct was that constructing this twice did not make sense and we should instead call clone()
+                // or use an Arc<RwLock<NoriaConnector>> as both the reader and writer.
+                // however, after more thought, there is no benefit to sharing any implentation between the two.
+                // the only potential shared state is the query_cache, however, the set of queries handles by a reader and writer are
+                // disjoint
+
+                let writer = NoriaConnector::new(ex.clone(), ch, auto_increments, query_cache);
+
+                ex.spawn(async move {
+                    reader_sender.send(reader.await);
+                    writer_sender.send(writer.await);
+                });
+                let reader = futures_executor::block_on(reader_reciever).unwrap();
+                let writer = futures_executor::block_on(writer_reciever).unwrap();
+
+                let b = Backend::new(
                     sanitize,
+                    static_responses,
+                    Box::new(reader),
+                    Box::new(writer),
+                    slowlog,
                     permissive,
                 );
-                ex.spawn(async move {
-                    let _ = tx.send(b.await);
-                });
-                let mut b = futures_executor::block_on(rx).unwrap();
 
                 let rs = s.try_clone().unwrap();
-                if let Err(e) =
-                    MysqlIntermediary::run_on(&mut b, BufReader::new(rs), BufWriter::new(s))
+                if let Err(e) = MysqlIntermediary::run_on(b, BufReader::new(rs), BufWriter::new(s))
                 {
                     match e.kind() {
                         io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
