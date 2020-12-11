@@ -128,9 +128,6 @@ impl NoriaBackendInner {
 
 pub struct NoriaBackend {
     inner: NoriaBackendInner,
-    ops: Arc<atomic::AtomicUsize>,
-    trace_every: Option<usize>,
-
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
 
     prepared: HashMap<u32, PreparedStatement>,
@@ -158,7 +155,6 @@ impl NoriaBackend {
         ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        (ops, trace_every): (Arc<atomic::AtomicUsize>, Option<usize>),
         primed: Arc<atomic::AtomicBool>,
         slowlog: bool,
         static_responses: bool,
@@ -167,8 +163,6 @@ impl NoriaBackend {
     ) -> Self {
         NoriaBackend {
             inner: NoriaBackendInner::new(ex, ch).await,
-            ops,
-            trace_every,
 
             auto_increments,
 
