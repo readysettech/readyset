@@ -999,7 +999,7 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
                 }
                 Err(e) => {
                     // if nom-sql rejects the query, there is no chance Noria will like it
-                    error!(%query, "query can't be parsed");
+                    error!(%query, "query can't be parsed: \"{}\"", query);
                     return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                 }
             },
@@ -1228,7 +1228,7 @@ impl<W: io::Write> MysqlShim<W> for &mut NoriaBackend {
                     }
                     Err(e) => {
                         // if nom-sql rejects the query, there is no chance Noria will like it
-                        error!("query can't be parsed");
+                        error!(%query, "query can't be parsed: \"{}\"", query);
                         return results.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
                     }
                 }
