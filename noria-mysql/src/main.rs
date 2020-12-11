@@ -26,7 +26,7 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
 use std::io::{self, BufReader, BufWriter};
-use std::sync::atomic::{self, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tracing::Level;
@@ -165,7 +165,6 @@ fn main() {
             })
             .into_stream(),
     ));
-    let primed = Arc::new(atomic::AtomicBool::new(false));
 
     let mut threads = Vec::new();
     let mut i = 0;
@@ -186,8 +185,8 @@ fn main() {
 
         let builder = thread::Builder::new().name(format!("conn-{}", i));
 
-        let (auto_increments, query_cache, primed) =
-            (auto_increments.clone(), query_cache.clone(), primed.clone());
+        let (auto_increments, query_cache) =
+            (auto_increments.clone(), query_cache.clone());
 
         let ex = rt.handle().clone();
         let ch = ch.clone();
@@ -201,7 +200,6 @@ fn main() {
                     ch,
                     auto_increments,
                     query_cache,
-                    primed,
                     slowlog,
                     static_responses,
                     sanitize,
