@@ -111,11 +111,6 @@ fn main() {
     assert!(!deployment.contains("-"));
 
     let histograms = matches.is_present("time");
-    let trace_every = if matches.is_present("trace") {
-        Some(value_t_or_exit!(matches, "trace", usize))
-    } else {
-        None
-    };
     let slowlog = matches.is_present("slowlog");
     let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
     let sanitize = !matches.is_present("no-sanitize");
@@ -171,7 +166,6 @@ fn main() {
             .into_stream(),
     ));
     let primed = Arc::new(atomic::AtomicBool::new(false));
-    let ops = Arc::new(atomic::AtomicUsize::new(0));
 
     let mut threads = Vec::new();
     let mut i = 0;
@@ -197,7 +191,6 @@ fn main() {
 
         let ex = rt.handle().clone();
         let ch = ch.clone();
-        let ops = ops.clone();
 
         let jh = builder
             .spawn(move || {
@@ -208,7 +201,6 @@ fn main() {
                     ch,
                     auto_increments,
                     query_cache,
-                    (ops, trace_every),
                     primed,
                     slowlog,
                     static_responses,
