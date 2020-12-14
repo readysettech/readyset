@@ -748,6 +748,20 @@ impl Table {
             .await
     }
 
+    /// Insert multiple rows of data into this base table.
+    pub async fn insert_many<I, V>(&mut self, rows: I) -> Result<(), TableError>
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<Vec<DataType>>,
+    {
+        self.quick_n_dirty(
+            rows.into_iter()
+                .map(|row| TableOperation::Insert(row.into()))
+                .collect(),
+        )
+        .await
+    }
+
     /// Perform multiple operation on this base table.
     pub async fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
     where

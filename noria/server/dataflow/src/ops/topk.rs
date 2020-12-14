@@ -1,6 +1,10 @@
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::hash::{Hash, Hasher};
+use std::num::NonZeroUsize;
+use std::ops::Index;
 
 use crate::prelude::*;
 
@@ -29,6 +33,14 @@ impl From<Vec<(usize, OrderType)>> for Order {
     }
 }
 
+type GroupHash = u64;
+
+fn hash<T: Hash>(x: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    x.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
@@ -37,6 +49,15 @@ impl From<Vec<(usize, OrderType)>> for Order {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TopK {
     src: IndexPair,
+
+    /// Cached records, keyed by the hash of the group and ordered by the ordering of this TopK,
+    /// used when we are fully materialized and run out of records
+    ///
+    /// Note that key is equal to the *hash* of the group, to avoid the overhead of storing the
+    /// entire group
+    ///
+    /// Invariant: If this node is partial, this will always be empty
+    extra_records: RefCell<HashMap<GroupHash, Vec<Vec<DataType>>>>,
 
     // some cache state
     us: Option<IndexPair>,
@@ -52,9 +73,12 @@ pub struct TopK {
 impl TopK {
     /// Construct a new TopK operator.
     ///
-    /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
-    /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
-    /// of results per group.
+    /// # Arguments
+    ///
+    /// * `src` - this operator's ancestor
+    /// * `order` - The list of columns to compute top k over
+    /// * `group_by` - the columns that this operator is keyed on
+    /// * `k` - the maximum number of results per group.
     pub fn new(
         src: NodeIndex,
         order: Vec<(usize, OrderType)>,
@@ -67,6 +91,8 @@ impl TopK {
         TopK {
             src: src.into(),
 
+            extra_records: RefCell::new(Default::default()),
+
             us: None,
             cols: 0,
 
@@ -75,23 +101,39 @@ impl TopK {
             k,
         }
     }
+
+    /// Project the columns we are grouping by out of the given record
+    fn project_group<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DataType>
+    where
+        R: Index<usize, Output = DataType> + ?Sized,
+    {
+        self.group_by
+            .iter()
+            .map(|&col| &(rec[col]))
+            .collect::<Vec<_>>()
+    }
+
+    /// Calculate a hash for the columns we are grouping by out of the given record, for use in
+    /// `self.extra_records`
+    fn group_hash<'rec, R>(&self, rec: &'rec R) -> GroupHash
+    where
+        R: Index<usize, Output = DataType> + ?Sized,
+    {
+        let mut hasher = DefaultHasher::new();
+        self.project_group(rec).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Compare two records based on the columns we're grouping by
+    fn group_cmp(&self, rec_a: &Record, rec_b: &Record) -> Ordering {
+        self.project_group(rec_a.rec())
+            .cmp(&self.project_group(rec_b.rec()))
+    }
 }
 
 impl Ingredient for TopK {
     fn take(&mut self) -> NodeOperator {
-        // Necessary because cmp_rows can't be cloned.
-        Self {
-            src: self.src,
-
-            us: self.us,
-            cols: self.cols,
-
-            group_by: self.group_by.clone(),
-
-            order: self.order.clone(),
-            k: self.k,
-        }
-        .into()
+        self.clone().into()
     }
 
     fn ancestors(&self) -> Vec<NodeIndex> {
@@ -130,22 +172,14 @@ impl Ingredient for TopK {
             };
         }
 
-        let group_by = &self.group_by;
-        let group_cmp = |a: &Record, b: &Record| {
-            group_by
-                .iter()
-                .map(|&col| &a[col])
-                .cmp(group_by.iter().map(|&col| &b[col]))
-        };
-
         // First, we want to be smart about multiple added/removed rows with same group.
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries. We'll do this by sorting the batch by our group by.
         let mut rs: Vec<_> = rs.into();
-        rs.sort_by(&group_cmp);
+        rs.sort_by(|l, r| self.group_cmp(l, r));
 
         let us = self.us.unwrap();
-        let db = state
+        let db: &Box<dyn State> = state
             .get(*us)
             .expect("topk operators must have their own state materialized");
 
@@ -157,99 +191,131 @@ impl Ingredient for TopK {
         let mut current: Vec<(Cow<[DataType]>, bool)> = Vec::new();
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
+        let is_partial = db.is_partial();
 
-        macro_rules! post_group {
-            ($out:ident, $current:ident, $grpk:expr, $k:expr, $order:expr) => {{
-                $current.sort_unstable_by(|a, b| $order.cmp(&*a.0, &*b.0));
+        let post_group = |out: &mut Vec<Record>,
+                          current: &mut Vec<(Cow<[DataType]>, bool)>,
+                          grp: &mut Vec<DataType>,
+                          grpk: usize| {
+            current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
 
-                let start = $current.len().saturating_sub($k);
+            let start = current.len().saturating_sub(self.k);
 
-                if $grpk == $k {
-                    if $current.len() < $grpk {
-                        // there used to be k things in the group
-                        // now there are fewer than k
-                        // we don't know if querying would bring us back to k
-                        unimplemented!();
-                    }
-
-                    // FIXME: if all the elements with the smallest value in the new topk are new,
-                    // then it *could* be that there exists some value that is greater than all
-                    // those values, and <= the smallest old value. we would only discover that by
-                    // querying. unfortunately, the check below isn't *quite* right because it does
-                    // not consider old rows that were removed in this batch (which should still be
-                    // counted for this condition).
-                    if false {
-                        let all_new_bottom = $current[start..]
-                            .iter()
-                            .take_while(|(ref r, _)| {
-                                $order.cmp(r, &$current[start].0) == Ordering::Equal
-                            })
-                            .all(|&(_, is_new)| is_new);
-                        if all_new_bottom {
-                            eprintln!("topk is guesstimating bottom row");
+            if grpk == self.k {
+                if let Some(diff) = grpk.checked_sub(current.len()).and_then(NonZeroUsize::new) {
+                    // there used to be k things in the group, now there are fewer than k.
+                    if is_partial {
+                        // If we're partially materialized, we can't (currently) do anything
+                        unimplemented!()
+                    } else {
+                        // If we're fully materialized, that means we've been keeping track of
+                        // records *out of* our topk group in `self.current_records` - let's
+                        // backfill up to k from that if we can.
+                        if let Some(ref mut extra_records) =
+                            self.extra_records.borrow_mut().get_mut(&hash(&grp))
+                        {
+                            current.extend(
+                                extra_records
+                                    .drain(0..diff.into())
+                                    .map(|r| (r.into(), true)),
+                            );
                         }
                     }
                 }
 
-                // optimization: if we don't *have to* remove something, we don't
-                for i in start..$current.len() {
-                    if $current[i].1 {
-                        // we found an `is_new` in current
-                        // can we replace it with a !is_new with the same order value?
-                        let replace = $current[0..start].iter().position(|&(ref r, is_new)| {
-                            !is_new && $order.cmp(r, &$current[i].0) == Ordering::Equal
-                        });
-                        if let Some(ri) = replace {
-                            $current.swap(i, ri);
-                        }
+                // FIXME: if all the elements with the smallest value in the new topk are new,
+                // then it *could* be that there exists some value that is greater than all
+                // those values, and <= the smallest old value. we would only discover that by
+                // querying. unfortunately, the check below isn't *quite* right because it does
+                // not consider old rows that were removed in this batch (which should still be
+                // counted for this condition).
+                if false {
+                    let all_new_bottom = current[start..]
+                        .iter()
+                        .take_while(|(ref r, _)| {
+                            self.order.cmp(r, &current[start].0) == Ordering::Equal
+                        })
+                        .all(|&(_, is_new)| is_new);
+                    if all_new_bottom {
+                        eprintln!("topk is guesstimating bottom row");
                     }
                 }
+            }
 
-                for (r, is_new) in $current.drain(start..) {
-                    if is_new {
-                        $out.push(Record::Positive(r.into_owned()));
+            // optimization: if we don't *have to* remove something, we don't
+            for i in start..current.len() {
+                if current[i].1 {
+                    // we found an `is_new` in current
+                    // can we replace it with a !is_new with the same order value?
+                    let replace = current[0..start].iter().position(|&(ref r, is_new)| {
+                        !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
+                    });
+                    if let Some(ri) = replace {
+                        current.swap(i, ri);
                     }
                 }
+            }
 
-                if !$current.is_empty() {
-                    $out.extend($current.drain(..).filter_map(|(r, is_new)| {
-                        if !is_new {
-                            Some(Record::Negative(r.into_owned()))
-                        } else {
-                            None
-                        }
-                    }));
+            for (r, is_new) in current.drain(start..) {
+                if is_new {
+                    out.push(Record::Positive(r.into_owned()));
                 }
-            }};
+            }
+
+            if !current.is_empty() {
+                for (r, is_new) in current.drain(..) {
+                    if !is_new {
+                        // Was in k, now isn't
+                        out.push(Record::Negative(r.clone().into()));
+                    }
+
+                    if !is_partial {
+                        // If we're fully materialized, save records beyond k into `extra_records`
+                        // so we can use them if we ever receive a negative.
+                        let mut extra_records = self.extra_records.borrow_mut();
+                        let entry = extra_records
+                            .entry(self.group_hash(&(*r)))
+                            .or_insert(Vec::new());
+                        entry.push(r.into());
+                        // TODO(grfn): Sorting here every step of the way is not optimal, we should
+                        // make some sort of btree here wrapping a type with an (unsafe) reference
+                        // to self.order for comparison
+                        entry.sort_unstable_by(|a, b| self.order.cmp(b, a));
+                    }
+                }
+            }
         };
 
-        for r in rs {
-            if grp.iter().cmp(group_by.iter().map(|&col| &r[col])) != Ordering::Equal {
+        // records are now chunked by group
+        for r in &rs {
+            if grp.iter().cmp(self.project_group(r.rec())) != Ordering::Equal {
                 // new group!
 
                 // first, tidy up the old one
                 if !grp.is_empty() {
-                    post_group!(out, current, grpk, self.k, self.order);
+                    post_group(&mut out, &mut current, &mut grp, grpk);
                 }
+                assert!(current.is_empty());
 
                 // make ready for the new one
+                // NOTE(grfn): Is this the most optimal way of doing this?
                 grp.clear();
-                grp.extend(group_by.iter().map(|&col| &r[col]).cloned());
+                grp.extend(self.project_group(r.rec()).into_iter().cloned());
 
                 // check out current state
-                match db.lookup(&group_by[..], &KeyType::from(&grp[..])) {
-                    LookupResult::Some(rs) => {
+                match db.lookup(&self.group_by[..], &KeyType::from(&grp[..])) {
+                    LookupResult::Some(local_records) => {
                         if replay_key_cols.is_some() {
                             lookups.push(Lookup {
                                 on: *us,
-                                cols: group_by.clone(),
+                                cols: self.group_by.clone(),
                                 key: grp.clone(),
                             });
                         }
 
                         missed = false;
-                        grpk = rs.len();
-                        current.extend(rs.into_iter().map(|r| (r, false)))
+                        grpk = local_records.len();
+                        current.extend(local_records.into_iter().map(|r| (r.clone(), false)))
                     }
                     LookupResult::Missing => {
                         missed = true;
@@ -260,27 +326,30 @@ impl Ingredient for TopK {
             if missed {
                 misses.push(Miss {
                     on: *us,
-                    lookup_idx: group_by.clone(),
-                    lookup_cols: group_by.clone(),
+                    lookup_idx: self.group_by.clone(),
+                    lookup_cols: self.group_by.clone(),
                     replay_cols: replay_key_cols.map(Vec::from),
-                    record: r.extract().0,
+                    record: r.row().clone(),
                 });
             } else {
                 match r {
-                    Record::Positive(r) => current.push((Cow::Owned(r), true)),
+                    Record::Positive(r) => current.push((Cow::Owned(r.clone()), true)),
                     Record::Negative(r) => {
                         if let Some(p) = current.iter().position(|&(ref x, _)| *r == **x) {
                             let (_, was_new) = current.swap_remove(p);
+                            // was_new = we received a positive and a negative
+                            // for the same value in one batch
                             if !was_new {
-                                out.push(Record::Negative(r));
+                                out.push(Record::Negative(r.clone()));
                             }
                         }
                     }
                 }
             }
         }
+
         if !grp.is_empty() {
-            post_group!(out, current, grpk, self.k, self.order);
+            post_group(&mut out, &mut current, &mut grp, grpk);
         }
 
         ProcessingResult {
@@ -315,6 +384,10 @@ impl Ingredient for TopK {
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         vec![(self.src.as_global(), Some(col))]
     }
+
+    fn is_selective(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -332,6 +405,7 @@ mod tests {
 
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
+
         g.set_op(
             "topk",
             &["x", "y", "z"],
@@ -395,17 +469,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn it_must_query() {
-        let (mut g, s) = setup(false);
+    fn it_caches_when_full() {
+        let (mut g, _) = setup(false);
 
         let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
         let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
         let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
         let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
         let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
-        let r10b: Vec<DataType> = vec![6.into(), "z".into(), 10.into()];
-        let r10c: Vec<DataType> = vec![7.into(), "z".into(), 10.into()];
 
         // fill topk
         g.narrow_one_row(r12.clone(), true);
@@ -414,34 +485,53 @@ mod tests {
         g.narrow_one_row(r5.clone(), true);
         g.narrow_one_row(r15.clone(), true);
 
-        // put stuff to query for in the bases
-        g.seed(s, r12.clone());
-        g.seed(s, r10.clone());
-        g.seed(s, r11.clone());
-        g.seed(s, r5.clone());
+        // [5, z, 15]
+        // [1, z, 12]
+        // [3, z, 11]
 
         // check that removing 15 brings back 10
-        let a = g.narrow_one_row((r15.clone(), false), true);
-        assert_eq!(a.len(), 2);
-        assert!(a.iter().any(|r| r == &(r15.clone(), false).into()));
-        assert!(a.iter().any(|r| r == &(r10.clone(), true).into()));
-        g.unseed(s);
+        let delta = g.narrow_one_row((r15.clone(), false), true);
+        assert_eq!(delta.len(), 2); // one negative, one positive
+        assert!(delta.iter().any(|r| r == &(r15.clone(), false).into()));
+        assert!(
+            delta.iter().any(|r| r == &(r10.clone(), true).into()),
+            "a = {:?} does not contain ({:?}, true)",
+            &delta,
+            r10.clone()
+        );
+    }
 
-        let a = g.narrow_one_row(r10b.clone(), true);
-        assert_eq!(a.len(), 0);
+    #[test]
+    fn it_caches_when_full_reversed() {
+        let (mut g, _) = setup(true);
 
-        let a = g.narrow_one_row(r10c.clone(), true);
-        assert_eq!(a.len(), 0);
+        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
 
-        g.seed(s, r12.clone());
-        g.seed(s, r11.clone());
-        g.seed(s, r5.clone());
-        g.seed(s, r10b.clone());
-        g.seed(s, r10c.clone());
-        let a = g.narrow_one_row((r10.clone(), false), true);
-        assert_eq!(a.len(), 2);
-        assert_eq!(a[0], (r10.clone(), false).into());
-        assert!(a[1] == (r10b.clone(), true).into() || a[1] == (r10c.clone(), true).into());
+        // fill topk
+        g.narrow_one_row(r12.clone(), true);
+        g.narrow_one_row(r10.clone(), true);
+        g.narrow_one_row(r11.clone(), true);
+        g.narrow_one_row(r5.clone(), true);
+        g.narrow_one_row(r15.clone(), true);
+
+        // [4, z, 5]
+        // [2, z, 10]
+        // [3, z, 11]
+
+        // check that removing 5 brings back 12
+        let delta = g.narrow_one_row((r5.clone(), false), true);
+        assert_eq!(delta.len(), 2); // one negative, one positive
+        assert!(delta.iter().any(|r| r == &(r5.clone(), false).into()));
+        assert!(
+            delta.iter().any(|r| r == &(r12.clone(), true).into()),
+            "a = {:?} does not contain ({:?}, true)",
+            &delta,
+            r12.clone()
+        );
     }
 
     #[test]
