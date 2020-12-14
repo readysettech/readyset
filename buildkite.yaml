@@ -22,8 +22,8 @@ steps:
     commands:
     - "( cd noria; echo '--- :rust: Checking noria'; cargo fmt -- --check )"
     - "( cd noria-mysql; echo '--- :rust: Checking noria-mysql'; cargo fmt -- --check )"
-    - "( cd nom-sql; echo '--- :rust: Checking nom-sql' cargo fmt -- --check )"
-    - "( cd msql-srv; echo '--- :rust: Checking msql-srv' cargo fmt -- --check )"
+    - "( cd nom-sql; echo '--- :rust: Checking nom-sql'; cargo fmt -- --check )"
+    - "( cd msql-srv; echo '--- :rust: Checking msql-srv'; cargo fmt -- --check )"
     depends_on:
     - build-image
     plugins:
