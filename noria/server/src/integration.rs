@@ -3049,6 +3049,52 @@ async fn not_between() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn topk_updates() {
+    let mut g = start_simple_logging("things").await;
+    g.install_recipe(
+        "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);
+
+         QUERY top_posts:
+         SELECT * FROM posts ORDER BY number LIMIT 3",
+    )
+    .await
+    .unwrap();
+
+    let mut posts = g.table("posts").await.unwrap();
+    let mut top_posts = g.view("top_posts").await.unwrap();
+
+    posts
+        .insert_many((1..10).map(|i| vec![i.into(), i.into()]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let res = top_posts.lookup(&[0.into()], true).await.unwrap();
+    let mut rows: Vec<Vec<DataType>> = res.into();
+    rows.sort();
+    assert_eq!(
+        rows,
+        (1..=3)
+            .map(|i| vec![i.into(), i.into(), 0.into()])
+            .collect::<Vec<_>>()
+    );
+
+    posts.delete(vec![1.into()]).await.unwrap();
+
+    sleep().await;
+
+    let res = top_posts.lookup(&[0.into()], true).await.unwrap();
+    let rows: Vec<Vec<DataType>> = res.into();
+    assert_eq!(
+        rows,
+        (2..=4)
+            .map(|i| vec![i.into(), i.into(), 0.into()])
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 

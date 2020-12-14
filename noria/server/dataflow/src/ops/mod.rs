@@ -398,6 +398,7 @@ pub mod test {
             }
         }
 
+        #[allow(dead_code)]
         pub fn unseed(&mut self, base: IndexPair) {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
             let global = self.nut.unwrap().as_global();

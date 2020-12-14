@@ -31,6 +31,13 @@ impl Record {
             Record::Negative(v) => (v, false),
         }
     }
+
+    /// Return the underlying row for this Record, whether negative or positive
+    pub fn row(&self) -> &Vec<DataType> {
+        match self {
+            Record::Positive(v) | Record::Negative(v) => v,
+        }
+    }
 }
 
 impl Deref for Record {
