@@ -14,6 +14,10 @@ steps:
       ecr#v2.2.0:
         login: true
 
+  - label: ':git: Lint commits'
+    commands:
+    - ./scripts/commit_lint.sh
+
   - label: ':rust: Check rustfmt'
     commands:
     - "( cd noria; echo '--- :rust: Checking noria'; cargo fmt -- --check )"

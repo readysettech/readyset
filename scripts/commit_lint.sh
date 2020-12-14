@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2039
+
+set -eo pipefail
+
+CURRENT_SUBJECT=''
+
+proper_subject_length() {
+  local sha=${1}
+
+  CURRENT_SUBJECT=$(git log --format="%s" "${sha}^..${sha}")
+  awk '{ if(length($0) > 80) { exit 1 } }' <<<"${CURRENT_SUBJECT}"
+}
+
+contains_body() {
+  local sha=${1}
+  local body
+
+  CURRENT_SUBJECT=$(git log --format="%s" "${sha}^..${sha}")
+  body=$(git log --format="%b" "${sha}^..${sha}")
+  grep -E '.+' <<<"${body}" >/dev/null
+}
+
+second_line_empty() {
+  local sha=${1}
+  local body
+
+  CURRENT_SUBJECT=$(git log --format="%s" "${sha}^..${sha}")
+  test -z "$(git log --format="%B" "${sha}^..${sha}" | sed '2q;d')"
+}
+
+body_wrapped() {
+  local sha=${1}
+  local body
+
+  body=$(git log --format="%b" "${sha}^..${sha}")
+  awk '{ if(length($0) > 80) { exit 1  }  }' <<<"${body}"
+}
+
+for sha in $(git rev-list origin/master.."${BUILDKITE_COMMIT}"); do
+  echo "Linting: ${sha}"
+  if ! second_line_empty "${sha}"; then
+    echo >&2 "Second line not empty: '$CURRENT_SUBJECT' (${sha})"
+    exit 1
+  fi
+
+  if ! proper_subject_length "${sha}"; then
+    echo >&2 "Subject longer than 80 characters: '$CURRENT_SUBJECT' (${sha})"
+    exit 1
+  fi
+
+  if ! contains_body "${sha}"; then
+    echo >&2 "Missing body: '$CURRENT_SUBJECT' (${sha})"
+    exit 1
+  fi
+
+  if ! body_wrapped "${sha}"; then
+    echo >&2 "At least one line in commit body more than 80 characters: '$CURRENT_SUBJECT' (${sha})"
+    echo >&2 "Note that commit bodies need to be hard-wrapped to 80 characters"
+    exit 1
+  fi
+done
+
+echo 'Success!'
+exit 0
