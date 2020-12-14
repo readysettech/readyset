@@ -2301,6 +2301,40 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    async fn it_adds_topk() {
+        let mut g = integration::start_simple("it_adds_topk").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            "CREATE TABLE things (id int primary key);"
+                .to_flow_parts(&mut inc, None, mig)
+                .unwrap();
+            // source -> things
+            assert_eq!(mig.graph().node_count(), 2);
+
+            let query = inc
+                .add_query(
+                    "SELECT * FROM things ORDER BY id LIMIT 3",
+                    Some("things_by_id_limit_3".into()),
+                    mig,
+                )
+                .unwrap();
+
+            // source -> things -> project bogokey -> topk -> project_columns -> leaf
+            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(
+                query
+                    .new_nodes
+                    .iter()
+                    .filter(|ni| mig.graph()[**ni].description(true) == "π[0, lit: 0]")
+                    .collect::<Vec<_>>()
+                    .len(),
+                1
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
     #[ignore]
     async fn it_queries_over_aliased_view() {
         let mut g = integration::start_simple("it_queries_over_aliased_view").await;

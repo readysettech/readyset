@@ -1773,6 +1773,7 @@ impl SqlToMirConverter {
                 .chain(policy_nodes.into_iter())
                 .chain(ancestors.clone().into_iter())
                 .collect();
+            let mut added_bogokey = false;
 
             // For each policy chain, create a version of the query
             // All query versions, including group queries will be reconciled at the end
@@ -1914,7 +1915,7 @@ impl SqlToMirConverter {
                         new_node_count += 1;
                         nodes_added.push(bogo_project.clone());
                         final_node = bogo_project;
-
+                        added_bogokey = true;
                         vec![Column::new(None, "bogokey")]
                     } else {
                         qg.parameters().into_iter().map(Column::from).collect()
@@ -2029,6 +2030,10 @@ impl SqlToMirConverter {
                     }
                 })
                 .collect();
+
+            if added_bogokey {
+                projected_columns.push(Column::new(None, "bogokey"));
+            }
 
             // if this query does not have any parameters, we must add a bogokey
             let has_bogokey = if has_leaf && qg.parameters().is_empty() {

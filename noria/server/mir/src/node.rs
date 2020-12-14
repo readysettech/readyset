@@ -462,7 +462,7 @@ pub enum MirNodeType {
     Union {
         emit: Vec<Vec<Column>>,
     },
-    /// order function, group columns, k
+    /// order function, group columns, limit k
     TopK {
         order: Option<Vec<(Column, OrderType)>>,
         group_by: Vec<Column>,
