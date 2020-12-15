@@ -346,10 +346,7 @@ where
     ) -> Self {
         match &other {
             ValuesInner::Short(s) => {
-                use std::iter::FromIterator;
-                ValuesInner::Short(smallvec::SmallVec::from_iter(
-                    s.iter().map(|v| v.alias().change_drop()),
-                ))
+                ValuesInner::Short(s.iter().map(|v| v.alias().change_drop()).collect())
             }
             ValuesInner::Long(l) => {
                 let mut long = hashbag::HashBag::with_hasher(hash_builder.clone());
