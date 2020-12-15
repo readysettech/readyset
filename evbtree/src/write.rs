@@ -3,6 +3,7 @@ use crate::read::ReadHandle;
 use crate::values::ValuesInner;
 use left_right::{aliasing::Aliased, Absorb};
 
+use rand::prelude::IteratorRandom;
 use std::collections::btree_map::Entry;
 use std::collections::hash_map::RandomState;
 use std::fmt;
@@ -112,7 +113,10 @@ where
         self.add_op(Operation::SetMeta(meta));
     }
 
-    fn add_op(&mut self, op: Operation<K, V, M>) -> &mut Self {
+    fn add_ops<I>(&mut self, ops: I) -> &mut Self
+    where
+        I: IntoIterator<Item = Operation<K, V, M>>,
+    {
         if let Some(ref mut queued_clone) = self.direct_write {
             {
                 // Safety: we know there are no outstanding w_handle readers, since we haven't
@@ -122,7 +126,9 @@ where
                 let r_handle = self.handle.enter().expect("map has not yet been destroyed");
                 // Because we are operating directly on the map, and nothing is aliased, we do want
                 // to perform drops, so we invoke absorb_second.
-                Absorb::absorb_second(w_inner, op, &*r_handle);
+                for op in ops {
+                    Absorb::absorb_second(w_inner, op, &*r_handle);
+                }
             }
 
             if !*queued_clone {
@@ -131,9 +137,17 @@ where
                 *queued_clone = true;
             }
         } else {
-            self.handle.append(op);
+            // TODO(grfn): Once https://github.com/jonhoo/rust-evmap/pull/86 is merged this can use
+            // `extend`
+            for op in ops {
+                self.handle.append(op);
+            }
         }
         self
+    }
+
+    fn add_op(&mut self, op: Operation<K, V, M>) -> &mut Self {
+        self.add_ops(vec![op])
     }
 
     /// Add the given value to the value-bag of the given key.
@@ -272,7 +286,6 @@ where
         self.add_op(Operation::Reserve(k, additional))
     }
 
-    #[cfg(feature = "eviction")]
     /// Remove the value-bag for `n` randomly chosen keys.
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
@@ -305,16 +318,12 @@ where
 
         // let's pick some (distinct) indices to evict!
         let n = n.min(inner.len());
-        let indices = rand::seq::index::sample(rng, inner.len(), n);
+        let keys: Vec<&K> = inner.keys().choose_multiple(rng, n);
 
-        // we need to sort the indices so that, later, we can make sure to swap remove from last to
-        // first (and so not accidentally remove the wrong index).
-        let mut to_remove = indices.clone().into_vec();
-        to_remove.sort();
-        self.add_op(Operation::EmptyAt(to_remove));
+        self.add_ops(keys.iter().map(|k| Operation::RemoveEntry((*k).clone())));
 
-        indices.into_iter().map(move |i| {
-            let (k, vs) = inner.get_index(i).expect("in-range");
+        keys.into_iter().map(move |k| {
+            let (k, vs) = inner.get_key_value(k).expect("yielded by keys()");
             (k, vs.as_ref())
         })
     }
@@ -367,19 +376,10 @@ where
                     .push(unsafe { value.alias() }, hasher);
             }
             Operation::RemoveEntry(ref key) => {
-                #[cfg(not(feature = "indexed"))]
                 self.data.remove(key);
-                #[cfg(feature = "indexed")]
-                self.data.swap_remove(key);
             }
             Operation::Purge => {
                 self.data.clear();
-            }
-            #[cfg(feature = "eviction")]
-            Operation::EmptyAt(ref indices) => {
-                for &index in indices.iter().rev() {
-                    self.data.swap_remove_index(index);
-                }
             }
             Operation::RemoveValue(ref key, ref value) => {
                 if let Some(e) = self.data.get_mut(key) {
@@ -481,19 +481,10 @@ where
                     .push(unsafe { value.change_drop() }, hasher);
             }
             Operation::RemoveEntry(key) => {
-                #[cfg(not(feature = "indexed"))]
                 inner.data.remove(&key);
-                #[cfg(feature = "indexed")]
-                inner.data.swap_remove(&key);
             }
             Operation::Purge => {
                 inner.data.clear();
-            }
-            #[cfg(feature = "eviction")]
-            Operation::EmptyAt(indices) => {
-                for &index in indices.iter().rev() {
-                    inner.data.swap_remove_index(index);
-                }
             }
             Operation::RemoveValue(key, value) => {
                 if let Some(e) = inner.data.get_mut(&key) {
@@ -624,11 +615,6 @@ pub(super) enum Operation<K, V, M> {
     RemoveValue(K, V),
     /// Remove the value set for this key.
     RemoveEntry(K),
-    #[cfg(feature = "eviction")]
-    /// Drop keys at the given indices.
-    ///
-    /// The list of indices must be sorted in ascending order.
-    EmptyAt(Vec<usize>),
     /// Remove all values in the value set for this key.
     Clear(K),
     /// Remove all values for all keys.
@@ -670,8 +656,6 @@ where
                 f.debug_tuple("RemoveValue").field(a).field(b).finish()
             }
             Operation::RemoveEntry(ref a) => f.debug_tuple("RemoveEntry").field(a).finish(),
-            #[cfg(feature = "eviction")]
-            Operation::EmptyAt(ref a) => f.debug_tuple("EmptyAt").field(a).finish(),
             Operation::Clear(ref a) => f.debug_tuple("Clear").field(a).finish(),
             Operation::Purge => f.debug_tuple("Purge").finish(),
             Operation::Retain(ref a, ref b) => f.debug_tuple("Retain").field(a).field(b).finish(),

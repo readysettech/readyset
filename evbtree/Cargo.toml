@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 smallvec = "1.0.0"
 hashbag = "0.1.2"
-rand = { version = "0.7", default-features = false, features = ["alloc"], optional = true }
+rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.9.1"
 
 [dev-dependencies]

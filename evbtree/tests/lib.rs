@@ -430,7 +430,6 @@ fn empty() {
 }
 
 #[test]
-#[cfg(feature = "eviction")]
 fn empty_random() {
     let (mut w, r) = evbtree::new();
     w.insert(1, "a");
@@ -459,7 +458,6 @@ fn empty_random() {
 }
 
 #[test]
-#[cfg(feature = "eviction")]
 fn empty_random_multiple() {
     let (mut w, r) = evbtree::new();
     w.insert(1, "a");
