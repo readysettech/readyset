@@ -1,11 +1,11 @@
 use crate::values::ValuesInner;
 use crate::{inner::Inner, values::Values, Aliased};
 use left_right::ReadGuard;
-use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
+use std::{borrow::Borrow, ops::RangeBounds};
 
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
@@ -56,6 +56,21 @@ where
     pub fn iter(&self) -> ReadGuardIter<'_, K, V, S> {
         ReadGuardIter {
             iter: self.guard.data.iter(),
+        }
+    }
+
+    /// Constructs a double-ended iterator over a sub-range of key + valueset elements in the map.
+    ///
+    /// Be careful with this function! While the iteration is ongoing, any writer that tries to
+    /// publish changes will block waiting on this reader to finish.
+    pub fn range<Q, R>(&self, range: R) -> RangeIter<'_, K, V, S>
+    where
+        K: Borrow<Q>,
+        R: RangeBounds<Q>,
+        Q: Ord + ?Sized,
+    {
+        RangeIter {
+            iter: self.guard.data.range(range),
         }
     }
 
@@ -254,6 +269,44 @@ where
     type Item = &'rg K;
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(k, _)| k)
+    }
+}
+
+/// An [`Iterator`] over a range of keys.
+pub struct RangeIter<'rg, K, V, S>
+where
+    K: Ord,
+    V: Eq + Hash,
+    S: BuildHasher,
+{
+    iter: btree_map::Range<'rg, K, ValuesInner<V, S, crate::aliasing::NoDrop>>,
+}
+
+impl<'rg, K, V, S> fmt::Debug for RangeIter<'rg, K, V, S>
+where
+    K: Ord + fmt::Debug,
+    V: Eq + Hash,
+    S: BuildHasher,
+    V: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RangeIter").field(&self.iter).finish()
+    }
+}
+
+impl<'rg, K, V, S> Iterator for RangeIter<'rg, K, V, S>
+where
+    K: Ord,
+    V: Eq + Hash,
+    S: BuildHasher,
+{
+    type Item = (&'rg K, &'rg Values<V, S>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, v)| (k, v.as_ref()))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
     }
 }
 
