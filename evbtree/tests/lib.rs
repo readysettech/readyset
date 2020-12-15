@@ -1,7 +1,5 @@
 extern crate evbtree;
 
-use std::iter::FromIterator;
-
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
         if let $p = $x {
@@ -236,7 +234,6 @@ fn busybusybusy_inner(slow: bool) {
             thread::spawn(move || {
                 // rustfmt
                 for i in 0..n {
-                    let i = i.into();
                     loop {
                         let map = r.enter().unwrap();
                         let rs = map.get(&i);
@@ -285,7 +282,6 @@ fn busybusybusy_heap() {
             let r = r.clone();
             thread::spawn(move || {
                 for i in 0..n {
-                    let i = i.into();
                     loop {
                         let map = r.enter().unwrap();
                         let rs = map.get(&i);
@@ -586,7 +582,7 @@ fn map_into() {
     w.insert(1, "x");
 
     use std::collections::HashMap;
-    let copy: HashMap<_, Vec<_>> = r.map_into(|&k, vs| (k, Vec::from_iter(vs.iter().cloned())));
+    let copy: HashMap<_, Vec<_>> = r.map_into(|&k, vs| (k, vs.iter().cloned().collect()));
 
     assert_eq!(copy.len(), 2);
     assert!(copy.contains_key(&1));
@@ -608,7 +604,7 @@ fn keys() {
     w.insert(1, "x");
 
     let mut keys = r.enter().unwrap().keys().copied().collect::<Vec<_>>();
-    keys.sort();
+    keys.sort_unstable();
 
     assert_eq!(keys, vec![1, 2]);
 }
@@ -628,7 +624,7 @@ fn values() {
         .values()
         .map(|value_bag| {
             let mut inner_items = value_bag.iter().copied().collect::<Vec<_>>();
-            inner_items.sort();
+            inner_items.sort_unstable();
             inner_items
         })
         .collect::<Vec<Vec<_>>>();
@@ -665,27 +661,24 @@ fn bigbag() {
 
     let ndistinct = 32;
 
-    let jh = thread::spawn(move || loop {
-        let map = if let Some(map) = r.enter() {
-            map
-        } else {
-            break;
-        };
-        if let Some(rs) = map.get(&1) {
-            assert!(rs.len() <= ndistinct * (ndistinct - 1));
-            let mut found = true;
-            for i in 0..ndistinct {
-                if found {
-                    if !rs.contains(&[i][..]) {
-                        found = false;
+    let jh = thread::spawn(move || {
+        while let Some(map) = r.enter() {
+            if let Some(rs) = map.get(&1) {
+                assert!(rs.len() <= ndistinct * (ndistinct - 1));
+                let mut found = true;
+                for i in 0..ndistinct {
+                    if found {
+                        if !rs.contains(&[i][..]) {
+                            found = false;
+                        }
+                    } else {
+                        assert!(!found);
                     }
-                } else {
-                    assert!(!found);
                 }
+                assert_eq!(rs.into_iter().count(), rs.len());
+                drop(map);
+                thread::yield_now();
             }
-            assert_eq!(rs.into_iter().count(), rs.len());
-            drop(map);
-            thread::yield_now();
         }
     });
 
@@ -759,9 +752,9 @@ fn retain() {
 
     let mut vs = r
         .get(&0)
-        .map(|nums| Vec::from_iter(nums.iter().cloned()))
+        .map(|nums| nums.iter().cloned().collect::<Vec<_>>())
         .unwrap();
-    vs.sort();
+    vs.sort_unstable();
     assert_eq!(v, &*vs);
 }
 
