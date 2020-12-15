@@ -3,14 +3,10 @@ use crate::read::ReadHandle;
 use crate::values::ValuesInner;
 use left_right::{aliasing::Aliased, Absorb};
 
+use std::collections::btree_map::Entry;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-
-#[cfg(feature = "indexed")]
-use indexmap::map::Entry;
-#[cfg(not(feature = "indexed"))]
-use std::collections::hash_map::Entry;
 
 /// A handle that may be used to modify the eventually consistent map.
 ///
@@ -47,7 +43,7 @@ use std::collections::hash_map::Entry;
 /// ```
 pub struct WriteHandle<K, V, M = (), S = RandomState>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -63,7 +59,7 @@ where
 
 impl<K, V, M, S> fmt::Debug for WriteHandle<K, V, M, S>
 where
-    K: Eq + Hash + Clone + fmt::Debug,
+    K: Ord + Clone + fmt::Debug,
     S: BuildHasher + Clone,
     V: Eq + Hash + fmt::Debug,
     M: 'static + Clone + fmt::Debug,
@@ -78,7 +74,7 @@ where
 
 impl<K, V, M, S> WriteHandle<K, V, M, S>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -326,7 +322,7 @@ where
 
 impl<K, V, M, S> Absorb<Operation<K, V, M>> for Inner<K, V, M, S>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -341,7 +337,7 @@ where
         //   _after_ absorb_second is called on this operation, so leaving an alias in the oplog is
         //   also safe.
 
-        let hasher = other.data.hasher();
+        let hasher = &other.hasher;
         match *op {
             Operation::Replace(ref key, ref mut value) => {
                 let vs = self
@@ -414,10 +410,10 @@ where
             },
             Operation::Reserve(ref key, additional) => match self.data.entry(key.clone()) {
                 Entry::Occupied(mut entry) => {
-                    entry.get_mut().reserve(additional, hasher);
+                    entry.get_mut().reserve(additional, &hasher);
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(ValuesInner::with_capacity_and_hasher(additional, hasher));
+                    entry.insert(ValuesInner::with_capacity_and_hasher(additional, &hasher));
                 }
             },
             Operation::MarkReady => {
@@ -456,7 +452,7 @@ where
         //   if absorb_first dropped its alias, then `value` is the only alias
         //   if absorb_first did not drop its alias, then `value` will not be dropped here either,
         //   and at the end of scope we revert to `NoDrop`, so all is well.
-        let hasher = other.data.hasher();
+        let hasher = &other.hasher;
         match op {
             Operation::Replace(key, value) => {
                 let v = inner.data.entry(key).or_insert_with(ValuesInner::new);
@@ -563,9 +559,7 @@ where
                     //
                     // The oplog has only this one operation in it for the first call to `publish`,
                     // so we are about to turn the alias back into NoDrop.
-                    (k.clone(), unsafe {
-                        ValuesInner::alias(vs, other.data.hasher())
-                    })
+                    (k.clone(), unsafe { ValuesInner::alias(vs, &other.hasher) })
                 }));
             }
         }
@@ -592,7 +586,7 @@ where
 
 impl<K, V, M, S> Extend<(K, V)> for WriteHandle<K, V, M, S>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -608,7 +602,7 @@ where
 use std::ops::Deref;
 impl<K, V, M, S> Deref for WriteHandle<K, V, M, S>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -706,6 +700,7 @@ impl<V: ?Sized> Predicate<V> {
 
 impl<V: ?Sized> PartialEq for Predicate<V> {
     #[inline]
+    #[allow(clippy::ptr_eq)]
     fn eq(&self, other: &Self) -> bool {
         // only compare data, not vtable: https://stackoverflow.com/q/47489449/472927
         &*self.0 as *const _ as *const () == &*other.0 as *const _ as *const ()

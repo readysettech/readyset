@@ -20,7 +20,7 @@ pub use factory::ReadHandleFactory;
 /// `ReadHandle` will *only* see writes to the map that preceeded the last call to `publish`.
 pub struct ReadHandle<K, V, M = (), S = RandomState>
 where
-    K: Eq + Hash,
+    K: Ord,
     S: BuildHasher,
 {
     pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, S>>,
@@ -28,7 +28,7 @@ where
 
 impl<K, V, M, S> fmt::Debug for ReadHandle<K, V, M, S>
 where
-    K: Eq + Hash + fmt::Debug,
+    K: Ord + fmt::Debug,
     S: BuildHasher,
     M: fmt::Debug,
 {
@@ -41,7 +41,7 @@ where
 
 impl<K, V, M, S> Clone for ReadHandle<K, V, M, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     S: BuildHasher,
 {
     fn clone(&self) -> Self {
@@ -53,7 +53,7 @@ where
 
 impl<K, V, M, S> ReadHandle<K, V, M, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     S: BuildHasher,
 {
     pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, S>>) -> Self {
@@ -63,7 +63,7 @@ where
 
 impl<K, V, M, S> ReadHandle<K, V, M, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
     M: Clone,
@@ -104,7 +104,7 @@ where
     fn get_raw<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<'_, Values<V, S>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         let inner = self.handle.enter()?;
         if !inner.ready {
@@ -128,7 +128,7 @@ where
     pub fn get<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, Values<V, S>>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         // call `borrow` here to monomorphize `get_raw` fewer times
         self.get_raw(key.borrow())
@@ -152,7 +152,7 @@ where
     pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, V>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         ReadGuard::try_map(self.get_raw(key.borrow())?, |x| x.get_one())
     }
@@ -173,7 +173,7 @@ where
     pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Option<(Option<ReadGuard<'_, Values<V, S>>>, M)>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         let inner = self.handle.enter()?;
         if !inner.ready {
@@ -196,7 +196,7 @@ where
     pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         self.enter().map_or(false, |x| x.contains_key(key))
     }
@@ -209,7 +209,7 @@ where
     where
         K: Borrow<Q>,
         Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Hash + Eq,
+        Q: Ord,
         W: Hash + Eq,
         V: Hash + Eq,
     {

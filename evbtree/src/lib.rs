@@ -313,16 +313,12 @@ where
     #[allow(clippy::type_complexity)]
     pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, S>, ReadHandle<K, V, M, S>)
     where
-        K: Eq + Hash + Clone,
+        K: Ord + Clone,
         S: BuildHasher + Clone,
         V: Eq + Hash,
         M: 'static + Clone,
     {
-        let inner = if let Some(cap) = self.capacity {
-            Inner::with_capacity_and_hasher(self.meta, cap, self.hasher)
-        } else {
-            Inner::with_hasher(self.meta, self.hasher)
-        };
+        let inner = Inner::with_hasher(self.meta, self.hasher);
 
         let (mut w, r) = left_right::new_from_empty(inner);
         w.append(write::Operation::MarkReady);
@@ -340,7 +336,7 @@ pub fn new<K, V>() -> (
     ReadHandle<K, V, (), RandomState>,
 )
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     V: Eq + Hash,
 {
     Options::default().construct()
@@ -357,7 +353,7 @@ pub fn with_meta<K, V, M>(
     ReadHandle<K, V, M, RandomState>,
 )
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
 {
@@ -373,7 +369,7 @@ pub fn with_hasher<K, V, M, S>(
     hasher: S,
 ) -> (WriteHandle<K, V, M, S>, ReadHandle<K, V, M, S>)
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
     S: BuildHasher + Clone,
