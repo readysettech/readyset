@@ -3085,7 +3085,8 @@ async fn topk_updates() {
     sleep().await;
 
     let res = top_posts.lookup(&[0.into()], true).await.unwrap();
-    let rows: Vec<Vec<DataType>> = res.into();
+    let mut rows: Vec<Vec<DataType>> = res.into();
+    rows.sort();
     assert_eq!(
         rows,
         (2..=4)

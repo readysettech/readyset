@@ -1,12 +1,12 @@
 use ahash::RandomState;
 use common::DataType;
-use evmap;
+use evbtree;
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(evmap::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
-    Double(evmap::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
-    Many(evmap::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
+    Single(evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
+    Double(evbtree::handles::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
+    Many(evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
 }
 
 impl Handle {
@@ -20,12 +20,12 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
     where
-        F: FnOnce(&evmap::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnOnce(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
     {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.read()?;
+                let map = h.enter()?;
                 let v = map.get(&key[0]).map(then);
                 let m = *map.meta();
                 Some((v, m))
@@ -54,14 +54,14 @@ impl Handle {
                         1,
                     );
                     let stack_key = mem::transmute::<_, &(DataType, DataType)>(&stack_key);
-                    let map = h.read()?;
+                    let map = h.enter()?;
                     let v = map.get(&stack_key).map(then);
                     let m = *map.meta();
                     Some((v, m))
                 }
             }
             Handle::Many(ref h) => {
-                let map = h.read()?;
+                let map = h.enter()?;
                 let v = map.get(key).map(then);
                 let m = *map.meta();
                 Some((v, m))

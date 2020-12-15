@@ -46,17 +46,17 @@ fn new_inner(
 
     macro_rules! make {
         ($variant:tt) => {{
-            use evmap;
-            let (r, w) = evmap::Options::default()
+            use evbtree;
+            let (w, r) = evbtree::Options::default()
                 .with_meta(-1)
                 .with_hasher(RandomState::default())
                 .construct();
 
-            (multir::Handle::$variant(r), multiw::Handle::$variant(w))
+            (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
     }
 
-    let (r, w) = match key.len() {
+    let (w, r) = match key.len() {
         0 => unreachable!(),
         1 => make!(Single),
         2 => make!(Double),
@@ -153,7 +153,7 @@ impl<'a> MutWriteHandleEntry<'a> {
 impl<'a> WriteHandleEntry<'a> {
     pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&evmap::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle
             .handle
@@ -255,7 +255,7 @@ impl WriteHandle {
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
-    /// bytes that will be freed once the underlying `evmap` applies the operation.
+    /// bytes that will be freed once the underlying `evbtree` applies the operation.
     pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, mut n: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
@@ -339,14 +339,14 @@ impl SingleReadHandle {
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&evmap::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle
             .meta_get_and(key, &mut then)
             .ok_or(())
             .map(|(mut records, meta)| {
                 if records.is_none() && self.trigger.is_none() {
-                    records = Some(then(&evmap::Values::default()));
+                    records = Some(then(&evbtree::refs::Values::default()));
                 }
                 (records, meta)
             })
