@@ -316,7 +316,7 @@ mod tests {
     use case::{CaseWhenExpression, ColumnOrLiteral};
     use column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
     use common::{
-        FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal, Operator,
+        BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
     };
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
@@ -499,7 +499,7 @@ mod tests {
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
             right: Box::new(Base(Literal(literal))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -656,7 +656,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -681,7 +681,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let left_comp = Box::new(ComparisonOp(left_ct));
         let right_ct = ConditionTree {
@@ -689,13 +689,13 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let right_comp = Box::new(ComparisonOp(right_ct));
         let expected_where_cond = Some(LogicalOp(ConditionTree {
             left: left_comp,
             right: right_comp,
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -722,7 +722,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));
 
@@ -834,7 +834,7 @@ mod tests {
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("vote_id")))),
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
         });
         let agg_expr = FunctionExpression::Count(
             FunctionArgument::Conditional(CaseWhenExpression {
@@ -870,7 +870,7 @@ mod tests {
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("sign")))),
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
             FunctionArgument::Conditional(CaseWhenExpression {
@@ -907,7 +907,7 @@ mod tests {
         let filter_cond = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("sign")))),
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
             FunctionArgument::Conditional(CaseWhenExpression {
@@ -947,14 +947,14 @@ mod tests {
             left: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("votes.story_id")))),
                 right: Box::new(Base(Literal(Literal::Null))),
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             })),
             right: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("votes.vote")))),
                 right: Box::new(Base(Literal(Literal::Integer(0)))),
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             })),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
         let agg_expr = FunctionExpression::Count(
             FunctionArgument::Conditional(CaseWhenExpression {
@@ -1042,16 +1042,16 @@ mod tests {
             left: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("item.i_a_id")))),
                 right: Box::new(Base(Field(Column::from("author.a_id")))),
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             })),
             right: Box::new(ComparisonOp(ConditionTree {
                 left: Box::new(Base(Field(Column::from("item.i_subject")))),
                 right: Box::new(Base(Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 )))),
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             })),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -1101,7 +1101,7 @@ mod tests {
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("PCMember.contactId")))),
             right: Box::new(Base(Field(Column::from("PaperReview.contactId")))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let join_cond = ConditionExpression::ComparisonOp(ct);
         let expected = SelectStatement {
@@ -1150,7 +1150,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let expected_where_cond = Some(ComparisonOp(ct));
         let mkjoin = |tbl: &str, col: &str| -> JoinClause {
@@ -1192,7 +1192,7 @@ mod tests {
         let inner_where_clause = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_id")))),
             right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         });
 
         let inner_select = SelectStatement {
@@ -1205,7 +1205,7 @@ mod tests {
         let outer_where_clause = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
             right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
-            operator: Operator::In,
+            operator: BinaryOperator::In,
         });
 
         let outer_select = SelectStatement {
@@ -1242,19 +1242,19 @@ mod tests {
         let cop1 = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_id")))),
             right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         });
 
         let cop2 = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_id")))),
             right: Box::new(Base(NestedSelect(Box::new(recursive_select)))),
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
         });
 
         let inner_where_clause = LogicalOp(ConditionTree {
             left: Box::new(cop1),
             right: Box::new(cop2),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         let inner_select = SelectStatement {
@@ -1267,7 +1267,7 @@ mod tests {
         let outer_where_clause = ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
             right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
-            operator: Operator::In,
+            operator: BinaryOperator::In,
         });
 
         let outer_select = SelectStatement {
@@ -1313,7 +1313,7 @@ mod tests {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("ids".into())),
                 constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                     left: Box::new(Base(Field(Column::from("orders.o_id")))),
                     right: Box::new(Base(Field(Column::from("ids.ol_i_id")))),
                 })),
@@ -1396,7 +1396,7 @@ mod tests {
         let expected_where_clause = Some(ComparisonOp(ConditionTree {
             left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
             right: Box::new(Base(LiteralList(vec![0.into()]))),
-            operator: Operator::In,
+            operator: BinaryOperator::In,
         }));
 
         let expected = SelectStatement {
@@ -1409,7 +1409,7 @@ mod tests {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::Table(Table::from("django_content_type")),
                 constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                     left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
                     right: Box::new(Base(Field(Column::from("django_content_type.id")))),
                 })),

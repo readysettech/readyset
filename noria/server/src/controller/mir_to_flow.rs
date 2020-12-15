@@ -942,7 +942,7 @@ fn materialize_leaf_node(
     name: String,
     key_cols: &[Column],
     mig: &mut Migration,
-    operator: nom_sql::Operator,
+    operator: nom_sql::BinaryOperator,
 ) {
     let na = parent.borrow().flow_node_addr().unwrap();
 

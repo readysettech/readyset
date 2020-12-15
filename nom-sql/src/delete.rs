@@ -51,7 +51,7 @@ pub fn deletion(i: &[u8]) -> IResult<&[u8], DeleteStatement> {
 mod tests {
     use super::*;
     use column::Column;
-    use common::{Literal, Operator};
+    use common::{BinaryOperator, Literal};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -91,7 +91,7 @@ mod tests {
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
             right: Box::new(Base(Literal(Literal::Integer(1)))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         assert_eq!(
             res.unwrap().1,

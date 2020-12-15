@@ -481,7 +481,7 @@ pub enum MirNodeType {
     Leaf {
         node: MirNodeRef,
         keys: Vec<Column>,
-        operator: nom_sql::Operator,
+        operator: nom_sql::BinaryOperator,
     },
     /// Rewrite node
     Rewrite {

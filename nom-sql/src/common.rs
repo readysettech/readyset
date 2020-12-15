@@ -204,8 +204,7 @@ impl fmt::Display for LiteralExpression {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Operator {
-    Not,
+pub enum BinaryOperator {
     And,
     Or,
     Like,
@@ -221,31 +220,30 @@ pub enum Operator {
     Is,
 }
 
-impl Operator {
+impl BinaryOperator {
     /// Returns true if this operator represents an ordered comparison
     pub fn is_comparison(&self) -> bool {
-        use Operator::*;
+        use BinaryOperator::*;
         matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
     }
 }
 
-impl Display for Operator {
+impl Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op = match *self {
-            Operator::Not => "NOT",
-            Operator::And => "AND",
-            Operator::Or => "OR",
-            Operator::Like => "LIKE",
-            Operator::NotLike => "NOT_LIKE",
-            Operator::Equal => "=",
-            Operator::NotEqual => "!=",
-            Operator::Greater => ">",
-            Operator::GreaterOrEqual => ">=",
-            Operator::Less => "<",
-            Operator::LessOrEqual => "<=",
-            Operator::In => "IN",
-            Operator::NotIn => "NOT IN",
-            Operator::Is => "IS",
+            BinaryOperator::And => "AND",
+            BinaryOperator::Or => "OR",
+            BinaryOperator::Like => "LIKE",
+            BinaryOperator::NotLike => "NOT_LIKE",
+            BinaryOperator::Equal => "=",
+            BinaryOperator::NotEqual => "!=",
+            BinaryOperator::Greater => ">",
+            BinaryOperator::GreaterOrEqual => ">=",
+            BinaryOperator::Less => "<",
+            BinaryOperator::LessOrEqual => "<=",
+            BinaryOperator::In => "IN",
+            BinaryOperator::NotIn => "NOT IN",
+            BinaryOperator::Is => "IS",
         };
         write!(f, "{}", op)
     }
@@ -817,18 +815,18 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse binary comparison operators
-pub fn binary_comparison_operator(i: &[u8]) -> IResult<&[u8], Operator> {
+pub fn binary_comparison_operator(i: &[u8]) -> IResult<&[u8], BinaryOperator> {
     alt((
-        map(tag_no_case("not_like"), |_| Operator::NotLike),
-        map(tag_no_case("like"), |_| Operator::Like),
-        map(tag_no_case("!="), |_| Operator::NotEqual),
-        map(tag_no_case("<>"), |_| Operator::NotEqual),
-        map(tag_no_case(">="), |_| Operator::GreaterOrEqual),
-        map(tag_no_case("<="), |_| Operator::LessOrEqual),
-        map(tag_no_case("="), |_| Operator::Equal),
-        map(tag_no_case("<"), |_| Operator::Less),
-        map(tag_no_case(">"), |_| Operator::Greater),
-        map(tag_no_case("in"), |_| Operator::In),
+        map(tag_no_case("not_like"), |_| BinaryOperator::NotLike),
+        map(tag_no_case("like"), |_| BinaryOperator::Like),
+        map(tag_no_case("!="), |_| BinaryOperator::NotEqual),
+        map(tag_no_case("<>"), |_| BinaryOperator::NotEqual),
+        map(tag_no_case(">="), |_| BinaryOperator::GreaterOrEqual),
+        map(tag_no_case("<="), |_| BinaryOperator::LessOrEqual),
+        map(tag_no_case("="), |_| BinaryOperator::Equal),
+        map(tag_no_case("<"), |_| BinaryOperator::Less),
+        map(tag_no_case(">"), |_| BinaryOperator::Greater),
+        map(tag_no_case("in"), |_| BinaryOperator::In),
     ))(i)
 }
 

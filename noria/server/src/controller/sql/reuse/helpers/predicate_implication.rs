@@ -1,58 +1,58 @@
 use nom_sql::ConditionExpression::*;
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator};
+use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, Literal};
 
-fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
+fn direct_elimination(op1: &BinaryOperator, op2: &BinaryOperator) -> Option<BinaryOperator> {
     match *op1 {
-        Operator::Equal => match *op2 {
-            Operator::Equal => Some(Operator::Equal),
-            Operator::Less => Some(Operator::Less),
-            Operator::Greater => Some(Operator::Greater),
+        BinaryOperator::Equal => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::Equal),
+            BinaryOperator::Less => Some(BinaryOperator::Less),
+            BinaryOperator::Greater => Some(BinaryOperator::Greater),
             _ => unimplemented!(),
         },
-        Operator::NotEqual => match *op2 {
-            Operator::Equal => Some(Operator::NotEqual),
-            Operator::Less => None,
-            Operator::Greater => None,
+        BinaryOperator::NotEqual => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::NotEqual),
+            BinaryOperator::Less => None,
+            BinaryOperator::Greater => None,
             _ => unimplemented!(),
         },
-        Operator::Less => match *op2 {
-            Operator::Equal => Some(Operator::Less),
-            Operator::Less => Some(Operator::Less),
-            Operator::Greater => None,
+        BinaryOperator::Less => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::Less),
+            BinaryOperator::Less => Some(BinaryOperator::Less),
+            BinaryOperator::Greater => None,
             _ => unimplemented!(),
         },
-        Operator::LessOrEqual => match *op2 {
-            Operator::Equal => Some(Operator::LessOrEqual),
-            Operator::Less => Some(Operator::LessOrEqual),
-            Operator::Greater => None,
+        BinaryOperator::LessOrEqual => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::LessOrEqual),
+            BinaryOperator::Less => Some(BinaryOperator::LessOrEqual),
+            BinaryOperator::Greater => None,
             _ => unimplemented!(),
         },
-        Operator::Greater => match *op2 {
-            Operator::Equal => Some(Operator::Greater),
-            Operator::Less => None,
-            Operator::Greater => Some(Operator::Greater),
+        BinaryOperator::Greater => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::Greater),
+            BinaryOperator::Less => None,
+            BinaryOperator::Greater => Some(BinaryOperator::Greater),
             _ => unimplemented!(),
         },
-        Operator::GreaterOrEqual => match *op2 {
-            Operator::Equal => Some(Operator::GreaterOrEqual),
-            Operator::Less => None,
-            Operator::Greater => Some(Operator::Greater),
+        BinaryOperator::GreaterOrEqual => match *op2 {
+            BinaryOperator::Equal => Some(BinaryOperator::GreaterOrEqual),
+            BinaryOperator::Less => None,
+            BinaryOperator::Greater => Some(BinaryOperator::Greater),
             _ => unimplemented!(),
         },
         _ => None,
     }
 }
 
-fn check_op_elimination<T>(nv: T, ev: T, nop: &Operator, eop: &Operator) -> bool
+fn check_op_elimination<T>(nv: T, ev: T, nop: &BinaryOperator, eop: &BinaryOperator) -> bool
 where
     T: PartialOrd,
 {
     let ep_op_needed = if nv == ev {
-        direct_elimination(nop, &Operator::Equal)
+        direct_elimination(nop, &BinaryOperator::Equal)
     } else if nv < ev {
-        direct_elimination(nop, &Operator::Less)
+        direct_elimination(nop, &BinaryOperator::Less)
     } else if nv > ev {
-        direct_elimination(nop, &Operator::Greater)
+        direct_elimination(nop, &BinaryOperator::Greater)
     } else {
         None
     };
@@ -105,11 +105,11 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
             }
 
             match ect.operator {
-                Operator::And => {
+                BinaryOperator::And => {
                     complex_predicate_implies(np, &*ect.left)
                         && complex_predicate_implies(np, &*ect.right)
                 }
-                Operator::Or => {
+                BinaryOperator::Or => {
                     complex_predicate_implies(np, &*ect.left)
                         || complex_predicate_implies(np, &*ect.right)
                 }
@@ -118,11 +118,11 @@ pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpress
         }
         ComparisonOp(ref ect) => match *np {
             LogicalOp(ref nct) => match nct.operator {
-                Operator::And => {
+                BinaryOperator::And => {
                     complex_predicate_implies(&*nct.left, ep)
                         || complex_predicate_implies(&*nct.right, ep)
                 }
-                Operator::Or => {
+                BinaryOperator::Or => {
                     complex_predicate_implies(&*nct.left, ep)
                         && complex_predicate_implies(&*nct.right, ep)
                 }
@@ -178,17 +178,17 @@ mod tests {
         use nom_sql::Literal;
 
         let pa = ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
         };
         let pb = ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         };
         let pc = ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(5.into())))),
         };
@@ -206,22 +206,22 @@ mod tests {
         use nom_sql::Literal;
 
         let pa = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         });
         let pb = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(60.into())))),
         });
         let pc = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
         });
         let pd = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(80.into())))),
         });
@@ -230,21 +230,21 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
         });
 
         // a < 10 or a > 80
         let cp2 = LogicalOp(ConditionTree {
             left: Box::new(pc),
             right: Box::new(pd),
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
         });
 
         // a > 60 or a < 20
         let cp3 = LogicalOp(ConditionTree {
             left: Box::new(pb),
             right: Box::new(pa),
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
         });
 
         assert!(complex_predicate_implies(&cp2, &cp1));
@@ -259,22 +259,22 @@ mod tests {
         use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         });
         let pb = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(60.into())))),
         });
         let pc = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
         });
         let pd = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(80.into())))),
         });
@@ -283,21 +283,21 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         // a > 10 and a < 80
         let cp2 = LogicalOp(ConditionTree {
             left: Box::new(pc),
             right: Box::new(pd),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         // a < 60 and a > 20
         let cp3 = LogicalOp(ConditionTree {
             left: Box::new(pb),
             right: Box::new(pa),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         assert!(complex_predicate_implies(&cp1, &cp2));
@@ -312,12 +312,12 @@ mod tests {
         use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         });
         let pb = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(60.into())))),
         });
@@ -326,7 +326,7 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
         });
 
         assert!(complex_predicate_implies(&pa, &cp1));
@@ -341,12 +341,12 @@ mod tests {
         use nom_sql::ConditionExpression::*;
         use nom_sql::Literal;
         let pa = ComparisonOp(ConditionTree {
-            operator: Operator::Greater,
+            operator: BinaryOperator::Greater,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         });
         let pb = ComparisonOp(ConditionTree {
-            operator: Operator::Less,
+            operator: BinaryOperator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
             right: Box::new(Base(Literal(Literal::Integer(60.into())))),
         });
@@ -355,7 +355,7 @@ mod tests {
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         assert!(!complex_predicate_implies(&pa, &cp1));

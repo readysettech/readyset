@@ -3,7 +3,7 @@ use std::sync;
 use crate::ops::filter::{FilterCondition, Value};
 use crate::ops::grouped::GroupedOperation;
 use crate::ops::grouped::GroupedOperator;
-pub use nom_sql::{Literal, Operator};
+pub use nom_sql::{BinaryOperator, Literal};
 
 use crate::prelude::*;
 
@@ -96,13 +96,13 @@ impl GroupedOperation for FilterAggregator {
                         Value::Column(c) => &r[c],
                     };
                     match *op {
-                        Operator::Equal => d == v,
-                        Operator::NotEqual => d != v,
-                        Operator::Greater => d > v,
-                        Operator::GreaterOrEqual => d >= v,
-                        Operator::Less => d < v,
-                        Operator::LessOrEqual => d <= v,
-                        Operator::In => unreachable!(),
+                        BinaryOperator::Equal => d == v,
+                        BinaryOperator::NotEqual => d != v,
+                        BinaryOperator::Greater => d > v,
+                        BinaryOperator::GreaterOrEqual => d >= v,
+                        BinaryOperator::Less => d < v,
+                        BinaryOperator::LessOrEqual => d <= v,
+                        BinaryOperator::In => unreachable!(),
                         _ => unimplemented!(),
                     }
                 }
@@ -203,7 +203,7 @@ mod tests {
                 s.as_global(),
                 &[(
                     1,
-                    FilterCondition::Comparison(Operator::Equal, Value::Constant(2.into())),
+                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(2.into())),
                 )],
                 1,
                 None,
@@ -224,7 +224,7 @@ mod tests {
                 s.as_global(),
                 &[(
                     1,
-                    FilterCondition::Comparison(Operator::Equal, Value::Constant(2.into())),
+                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(2.into())),
                 )],
                 1,
                 None,
@@ -247,11 +247,14 @@ mod tests {
                 &[
                     (
                         1,
-                        FilterCondition::Comparison(Operator::NotEqual, Value::Column(0)),
+                        FilterCondition::Comparison(BinaryOperator::NotEqual, Value::Column(0)),
                     ),
                     (
                         2,
-                        FilterCondition::Comparison(Operator::Greater, Value::Constant(1.into())),
+                        FilterCondition::Comparison(
+                            BinaryOperator::Greater,
+                            Value::Constant(1.into()),
+                        ),
                     ),
                 ],
                 2,
@@ -275,7 +278,7 @@ mod tests {
                 &[(
                     1,
                     FilterCondition::Comparison(
-                        Operator::GreaterOrEqual,
+                        BinaryOperator::GreaterOrEqual,
                         Value::Constant(3.into()),
                     ),
                 )],

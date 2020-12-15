@@ -4,7 +4,7 @@ use std::fmt::{self, Display};
 use std::sync;
 
 use crate::prelude::*;
-pub use nom_sql::Operator;
+pub use nom_sql::BinaryOperator;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +36,7 @@ impl Display for Value {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FilterCondition {
-    Comparison(Operator, Value),
+    Comparison(BinaryOperator, Value),
     In(Vec<DataType>),
 }
 
@@ -92,13 +92,13 @@ impl Ingredient for Filter {
                             Value::Column(c) => &r[c],
                         };
                         match *op {
-                            Operator::Equal => d == v,
-                            Operator::NotEqual => d != v,
-                            Operator::Greater => d > v,
-                            Operator::GreaterOrEqual => d >= v,
-                            Operator::Less => d < v,
-                            Operator::LessOrEqual => d <= v,
-                            Operator::In => unreachable!(),
+                            BinaryOperator::Equal => d == v,
+                            BinaryOperator::NotEqual => d != v,
+                            BinaryOperator::Greater => d > v,
+                            BinaryOperator::GreaterOrEqual => d >= v,
+                            BinaryOperator::Less => d < v,
+                            BinaryOperator::LessOrEqual => d <= v,
+                            BinaryOperator::In => unreachable!(),
                             _ => unimplemented!(),
                         }
                     }
@@ -183,12 +183,12 @@ impl Ingredient for Filter {
                                     Value::Column(c) => &r[c],
                                 };
                                 match *op {
-                                    Operator::Equal => d == v,
-                                    Operator::NotEqual => d != v,
-                                    Operator::Greater => d > v,
-                                    Operator::GreaterOrEqual => d >= v,
-                                    Operator::Less => d < v,
-                                    Operator::LessOrEqual => d <= v,
+                                    BinaryOperator::Equal => d == v,
+                                    BinaryOperator::NotEqual => d != v,
+                                    BinaryOperator::Greater => d > v,
+                                    BinaryOperator::GreaterOrEqual => d >= v,
+                                    BinaryOperator::Less => d < v,
+                                    BinaryOperator::LessOrEqual => d <= v,
                                     _ => unimplemented!(),
                                 }
                             }
@@ -235,7 +235,7 @@ mod tests {
                 s.as_global(),
                 filters.unwrap_or(&[(
                     1,
-                    FilterCondition::Comparison(Operator::Equal, Value::Constant("a".into())),
+                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant("a".into())),
                 )]),
             ),
             materialized,
@@ -282,11 +282,11 @@ mod tests {
             Some(&[
                 (
                     0,
-                    FilterCondition::Comparison(Operator::Equal, Value::Constant(1.into())),
+                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(1.into())),
                 ),
                 (
                     1,
-                    FilterCondition::Comparison(Operator::Equal, Value::Constant("a".into())),
+                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant("a".into())),
                 ),
             ]),
         );
@@ -347,11 +347,17 @@ mod tests {
             Some(&[
                 (
                     0,
-                    FilterCondition::Comparison(Operator::LessOrEqual, Value::Constant(2.into())),
+                    FilterCondition::Comparison(
+                        BinaryOperator::LessOrEqual,
+                        Value::Constant(2.into()),
+                    ),
                 ),
                 (
                     1,
-                    FilterCondition::Comparison(Operator::NotEqual, Value::Constant("a".into())),
+                    FilterCondition::Comparison(
+                        BinaryOperator::NotEqual,
+                        Value::Constant("a".into()),
+                    ),
                 ),
             ]),
         );
@@ -381,7 +387,7 @@ mod tests {
             false,
             Some(&[(
                 0,
-                FilterCondition::Comparison(Operator::Equal, Value::Column(1)),
+                FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(1)),
             )]),
         );
 

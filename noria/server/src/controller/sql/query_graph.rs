@@ -1,8 +1,8 @@
 use nom_sql::SelectStatement;
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
+    ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator, Column, ConditionBase,
     ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator, Table,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table,
 };
 
 use std::cmp::Ordering;
@@ -225,7 +225,7 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
         match ce {
             ConditionExpression::LogicalOp(ref ct) => {
                 match ct.operator {
-                    Operator::And => {
+                    BinaryOperator::And => {
                         new_ces.extend(split_conjunctions(vec![*ct.left.clone()]));
                         new_ces.extend(split_conjunctions(vec![*ct.right.clone()]));
                     }
@@ -298,7 +298,7 @@ fn classify_conditionals(
             );
 
             match ct.operator {
-                Operator::And => {
+                BinaryOperator::And => {
                     //
                     for (t, ces) in new_local {
                         // conjunction, check if either side had a local predicate
@@ -308,7 +308,7 @@ fn classify_conditionals(
                         );
                         if ces.len() == 2 {
                             let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                                operator: Operator::And,
+                                operator: BinaryOperator::And,
                                 left: Box::new(ces.first().unwrap().clone()),
                                 right: Box::new(ces.last().unwrap().clone()),
                             });
@@ -325,7 +325,7 @@ fn classify_conditionals(
                     // new_global around
                     global.extend(new_global);
                 }
-                Operator::Or => {
+                BinaryOperator::Or => {
                     assert!(
                         new_join.is_empty(),
                         "can't handle OR expressions between join predicates"
@@ -339,7 +339,7 @@ fn classify_conditionals(
                         let (t, ces) = new_local.into_iter().next().unwrap();
                         assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpressions");
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                            operator: Operator::Or,
+                            operator: BinaryOperator::Or,
                             left: Box::new(ces.first().unwrap().clone()),
                             right: Box::new(ces.last().unwrap().clone()),
                         });
@@ -375,7 +375,8 @@ fn classify_conditionals(
                                         .contains(&Table::from(rf.table.as_ref().unwrap().as_str()))
                                 {
                                     // both columns' tables appear in table list --> comma join
-                                    if ct.operator == Operator::Equal || ct.operator == Operator::In
+                                    if ct.operator == BinaryOperator::Equal
+                                        || ct.operator == BinaryOperator::In
                                     {
                                         // equi-join between two tables
                                         let mut join_ct = ct.clone();
@@ -611,7 +612,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         right_table = table.name.clone();
 
                         ConditionTree {
-                            operator: Operator::Equal,
+                            operator: BinaryOperator::Equal,
                             left: wrapcol(&left_table, &col.name),
                             right: wrapcol(&right_table, &col.name),
                         }

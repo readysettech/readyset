@@ -1,5 +1,6 @@
 use nom_sql::{
-    ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder, Literal, Operator, SqlQuery,
+    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder, Literal,
+    SqlQuery,
 };
 
 use std::mem;
@@ -49,7 +50,7 @@ fn collapse_where_in_recursive(
                     )
                 })
         }
-        ConditionExpression::ComparisonOp(ref mut ct) if ct.operator != Operator::In => {
+        ConditionExpression::ComparisonOp(ref mut ct) if ct.operator != BinaryOperator::In => {
             collapse_where_in_recursive(leftmost_param_index, &mut *ct.left, rewrite_literals)
                 .or_else(|| {
                     collapse_where_in_recursive(
@@ -109,7 +110,7 @@ fn collapse_where_in_recursive(
             mem::replace(
                 ct,
                 ConditionTree {
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                     left: c,
                     right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
                         Literal::Placeholder(ItemPlaceholder::QuestionMark),

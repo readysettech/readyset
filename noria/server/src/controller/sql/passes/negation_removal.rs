@@ -1,6 +1,6 @@
 use nom_sql::{
-    ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder, JoinConstraint, Literal,
-    Operator, SqlQuery,
+    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder,
+    JoinConstraint, Literal, SqlQuery,
 };
 
 use std::mem;
@@ -18,8 +18,8 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         }) => {
             if negate {
                 *operator = match *operator {
-                    Operator::And => Operator::Or,
-                    Operator::Or => Operator::And,
+                    BinaryOperator::And => BinaryOperator::Or,
+                    BinaryOperator::Or => BinaryOperator::And,
                     _ => unreachable!(),
                 };
             }
@@ -34,12 +34,12 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
         }) => {
             if negate {
                 *operator = match *operator {
-                    Operator::Equal => Operator::NotEqual,
-                    Operator::NotEqual => Operator::Equal,
-                    Operator::Greater => Operator::LessOrEqual,
-                    Operator::GreaterOrEqual => Operator::Less,
-                    Operator::Less => Operator::GreaterOrEqual,
-                    Operator::LessOrEqual => Operator::Greater,
+                    BinaryOperator::Equal => BinaryOperator::NotEqual,
+                    BinaryOperator::NotEqual => BinaryOperator::Equal,
+                    BinaryOperator::Greater => BinaryOperator::LessOrEqual,
+                    BinaryOperator::GreaterOrEqual => BinaryOperator::Less,
+                    BinaryOperator::Less => BinaryOperator::GreaterOrEqual,
+                    BinaryOperator::LessOrEqual => BinaryOperator::Greater,
                     _ => unreachable!(),
                 };
             }
@@ -98,14 +98,14 @@ mod tests {
     fn it_normalizes() {
         let mut expr = ConditionExpression::NegationOp(Box::new(ConditionExpression::LogicalOp(
             ConditionTree {
-                operator: Operator::And,
+                operator: BinaryOperator::And,
                 left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: Operator::Less,
+                    operator: BinaryOperator::Less,
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
                 })),
                 right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
                 })),
@@ -113,14 +113,14 @@ mod tests {
         )));
 
         let target = ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::GreaterOrEqual,
+                operator: BinaryOperator::GreaterOrEqual,
                 left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
                 right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
             })),
             right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::NotEqual,
+                operator: BinaryOperator::NotEqual,
                 left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
                 right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
             })),

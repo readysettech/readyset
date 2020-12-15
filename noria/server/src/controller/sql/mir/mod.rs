@@ -10,9 +10,9 @@ use dataflow::ops::join::JoinType;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    ArithmeticExpression, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
-    CompoundSelectOperator, ConditionBase, ConditionExpression, ConditionTree, Literal, Operator,
-    SqlQuery, TableKey,
+    ArithmeticExpression, BinaryOperator, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
+    CompoundSelectOperator, ConditionBase, ConditionExpression, ConditionTree, Literal, SqlQuery,
+    TableKey,
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
@@ -170,7 +170,7 @@ impl SqlToMirConverter {
         n: &MirNodeRef,
     ) -> Vec<(usize, FilterCondition)> {
         match ct.operator {
-            Operator::And => {
+            BinaryOperator::And => {
                 let mut left_filter = match ct.left.as_ref() {
                     ConditionExpression::LogicalOp(ref ct2) => {
                         self.logical_op_to_conditions(ct2, columns, n)
@@ -335,7 +335,7 @@ impl SqlToMirConverter {
             MirNodeType::Leaf {
                 node: parent.clone(),
                 keys: Vec::from(params),
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             },
             vec![n],
             vec![],
@@ -420,7 +420,7 @@ impl SqlToMirConverter {
                 MirNodeType::Leaf {
                     node: final_node.clone(),
                     keys: vec![],
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                 },
                 vec![final_node.clone()],
                 vec![],
@@ -1258,7 +1258,7 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
 
         // equi-join only
-        assert!(jp.operator == Operator::Equal || jp.operator == Operator::In);
+        assert!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
         let mut l_col = match *jp.left {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
             _ => unimplemented!(),
@@ -1463,7 +1463,7 @@ impl SqlToMirConverter {
             LogicalOp(ref ct) => {
                 let (left, right);
                 match ct.operator {
-                    Operator::And => {
+                    BinaryOperator::And => {
                         left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
 
                         right = self.make_predicate_nodes(
@@ -1476,7 +1476,7 @@ impl SqlToMirConverter {
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
                     }
-                    Operator::Or => {
+                    BinaryOperator::Or => {
                         left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
 
                         right = self.make_predicate_nodes(
@@ -2089,7 +2089,7 @@ impl SqlToMirConverter {
                     Some(ConditionExpression::ComparisonOp(ConditionTree { operator, .. })) => {
                         *operator
                     }
-                    _ => Operator::Equal,
+                    _ => BinaryOperator::Equal,
                 };
 
                 let leaf_node = MirNode::new(

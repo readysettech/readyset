@@ -99,8 +99,8 @@ mod tests {
     use super::*;
     use nom_sql::ConditionBase::*;
     use nom_sql::{
-        Column, ConditionTree, FieldDefinitionExpression, Operator, SelectStatement, SqlQuery,
-        Table,
+        BinaryOperator, Column, ConditionTree, FieldDefinitionExpression, SelectStatement,
+        SqlQuery, Table,
     };
 
     fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
@@ -113,7 +113,7 @@ mod tests {
             tables: vec![Table::from("role")],
             fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: wrap(Field(Column::from("type"))),
                 right: wrap(Literal(1.into())),
             })),
@@ -127,7 +127,7 @@ mod tests {
             tables: vec![Table::from("post")],
             fields: vec![FieldDefinitionExpression::Col(Column::from("pid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
-                operator: Operator::In,
+                operator: BinaryOperator::In,
                 left: wrap(Field(Column::from("author"))),
                 right: wrap(expected.clone()),
             })),
@@ -147,7 +147,7 @@ mod tests {
             tables: vec![Table::from("role")],
             fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: wrap(Field(Column::from("type"))),
                 right: wrap(Literal(1.into())),
             })),
@@ -182,14 +182,14 @@ mod tests {
                 left: Box::new(ComparisonOp(ConditionTree {
                     left: wrap(Field(Column::from("users.id"))),
                     right: wrap(Field(Column::from("articles.author"))),
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                 })),
                 right: Box::new(ComparisonOp(ConditionTree {
                     left: wrap(Field(Column::from("votes.aid"))),
                     right: wrap(Field(Column::from("articles.aid"))),
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                 })),
-                operator: Operator::And,
+                operator: BinaryOperator::And,
             })),
             ..Default::default()
         });

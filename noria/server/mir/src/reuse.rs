@@ -224,7 +224,7 @@ mod tests {
     use super::*;
     use crate::node::{MirNode, MirNodeType};
     use crate::MirNodeRef;
-    use nom_sql::{self, ColumnSpecification, Operator, SqlType};
+    use nom_sql::{self, BinaryOperator, ColumnSpecification, SqlType};
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
@@ -276,7 +276,7 @@ mod tests {
             MirNodeType::Leaf {
                 node: c.clone(),
                 keys: vec![Column::from("ba")],
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
             },
             vec![],
             vec![],
