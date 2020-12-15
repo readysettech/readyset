@@ -3,6 +3,7 @@ use crate::{inner::Inner, values::Values, Aliased};
 use left_right::ReadGuard;
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
@@ -19,7 +20,7 @@ use crate::WriteHandle;
 /// unguarded references to types contained in the map.
 pub struct MapReadRef<'rh, K, V, M = (), S = RandomState>
 where
-    K: Hash + Eq,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -28,7 +29,7 @@ where
 
 impl<'rh, K, V, M, S> fmt::Debug for MapReadRef<'rh, K, V, M, S>
 where
-    K: Hash + Eq,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
     K: fmt::Debug,
@@ -44,7 +45,7 @@ where
 
 impl<'rh, K, V, M, S> MapReadRef<'rh, K, V, M, S>
 where
-    K: Hash + Eq,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -104,7 +105,7 @@ where
     pub fn get<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a Values<V, S>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         self.guard.data.get(key).map(AsRef::as_ref)
     }
@@ -124,7 +125,7 @@ where
     pub fn get_one<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         self.guard
             .data
@@ -139,7 +140,7 @@ where
     pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Ord,
     {
         self.guard.data.contains_key(key)
     }
@@ -152,7 +153,7 @@ where
     where
         K: Borrow<Q>,
         Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Hash + Eq,
+        Q: Ord,
         W: Hash + Eq,
     {
         self.guard
@@ -164,9 +165,9 @@ where
 
 impl<'rh, K, Q, V, M, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, S>
 where
-    K: Eq + Hash + Borrow<Q>,
+    K: Ord + Borrow<Q>,
     V: Eq + Hash,
-    Q: Eq + Hash + ?Sized,
+    Q: Ord + ?Sized,
     S: BuildHasher,
 {
     type Output = Values<V, S>;
@@ -177,7 +178,7 @@ where
 
 impl<'rg, 'rh, K, V, M, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -191,16 +192,16 @@ where
 /// An [`Iterator`] over keys and values in the evmap.
 pub struct ReadGuardIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg crate::inner::MapImpl<K, ValuesInner<V, S, crate::aliasing::NoDrop>, S> as IntoIterator>::IntoIter,
+    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
 }
 
 impl<'rg, K, V, S> fmt::Debug for ReadGuardIter<'rg, K, V, S>
 where
-    K: Eq + Hash + fmt::Debug,
+    K: Ord + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -212,7 +213,7 @@ where
 
 impl<'rg, K, V, S> Iterator for ReadGuardIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -225,16 +226,16 @@ where
 /// An [`Iterator`] over keys.
 pub struct KeysIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg crate::inner::MapImpl<K, ValuesInner<V, S, crate::aliasing::NoDrop>, S> as IntoIterator>::IntoIter,
+    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
 }
 
 impl<'rg, K, V, S> fmt::Debug for KeysIter<'rg, K, V, S>
 where
-    K: Eq + Hash + fmt::Debug,
+    K: Ord + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -246,7 +247,7 @@ where
 
 impl<'rg, K, V, S> Iterator for KeysIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
@@ -259,16 +260,16 @@ where
 /// An [`Iterator`] over value sets.
 pub struct ValuesIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg crate::inner::MapImpl<K, ValuesInner<V, S, crate::aliasing::NoDrop>, S> as IntoIterator>::IntoIter,
+    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
 }
 
 impl<'rg, K, V, S> fmt::Debug for ValuesIter<'rg, K, V, S>
 where
-    K: Eq + Hash + fmt::Debug,
+    K: Ord + fmt::Debug,
     V: Eq + Hash,
     S: BuildHasher,
     V: fmt::Debug,
@@ -280,7 +281,7 @@ where
 
 impl<'rg, K, V, S> Iterator for ValuesIter<'rg, K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord,
     V: Eq + Hash,
     S: BuildHasher,
 {

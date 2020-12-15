@@ -13,7 +13,7 @@ use quickcheck::Gen;
 
 use rand::Rng;
 use std::cmp::{min, Ord};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
 use std::ops::Deref;
@@ -93,10 +93,10 @@ where
 fn do_ops<K, V, S>(
     ops: &[Op<K, V>],
     evbtree: &mut WriteHandle<K, V, (), S>,
-    write_ref: &mut HashMap<K, Vec<V>>,
-    read_ref: &mut HashMap<K, Vec<V>>,
+    write_ref: &mut BTreeMap<K, Vec<V>>,
+    read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
-    K: Hash + Eq + Clone,
+    K: Ord + Clone,
     V: Clone + Eq + Hash,
     S: BuildHasher + Clone,
 {
@@ -130,9 +130,9 @@ fn do_ops<K, V, S>(
     }
 }
 
-fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), S>, b: &HashMap<K, Vec<V>>) -> bool
+fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), S>, b: &BTreeMap<K, Vec<V>>) -> bool
 where
-    K: Clone + Hash + Eq + Debug,
+    K: Clone + Ord + Debug,
     V: Hash + Eq + Debug + Ord + Copy,
     S: BuildHasher,
 {
@@ -184,7 +184,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 struct Alphabet(String);
 
 impl Deref for Alphabet {
@@ -215,8 +215,8 @@ impl Arbitrary for Alphabet {
 #[quickcheck]
 fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
     let (mut w, r) = evbtree::new();
-    let mut write_ref = HashMap::new();
-    let mut read_ref = HashMap::new();
+    let mut write_ref = BTreeMap::new();
+    let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
     assert_maps_equivalent(&r, &read_ref);
 
@@ -227,8 +227,8 @@ fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
 #[quickcheck]
 fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
     let (mut w, r) = evbtree::new();
-    let mut write_ref = HashMap::new();
-    let mut read_ref = HashMap::new();
+    let mut write_ref = BTreeMap::new();
+    let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
     assert_maps_equivalent(&r, &read_ref);
 
@@ -239,8 +239,8 @@ fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
 #[quickcheck]
 fn keys_values(ops: Large<Vec<Op<i8, i8>>>) -> bool {
     let (mut w, r) = evbtree::new();
-    let mut write_ref = HashMap::new();
-    let mut read_ref = HashMap::new();
+    let mut write_ref = BTreeMap::new();
+    let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
 
     if let Some(read_guard) = r.enter() {

@@ -342,7 +342,7 @@ where
 {
     pub(crate) unsafe fn alias(
         other: &ValuesInner<T, S, crate::aliasing::NoDrop>,
-        hasher: &S,
+        hash_builder: &S,
     ) -> Self {
         match &other {
             ValuesInner::Short(s) => {
@@ -352,7 +352,7 @@ where
                 ))
             }
             ValuesInner::Long(l) => {
-                let mut long = hashbag::HashBag::with_hasher(hasher.clone());
+                let mut long = hashbag::HashBag::with_hasher(hash_builder.clone());
                 long.extend(l.set_iter().map(|(v, n)| (v.alias().change_drop(), n)));
                 ValuesInner::Long(long)
             }
