@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn it_expands_implied_tables_for_select() {
         use nom_sql::{
-            ConditionBase, ConditionExpression, ConditionTree, Operator, SelectStatement,
+            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, SelectStatement,
         };
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
@@ -314,7 +314,7 @@ mod tests {
                 FieldDefinitionExpression::Col(Column::from("title")),
             ],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("users.id"))),
                 right: wrap(ConditionBase::Field(Column::from("author"))),
             })),
@@ -343,7 +343,7 @@ mod tests {
                 assert_eq!(
                     tq.where_clause,
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: Operator::Equal,
+                        operator: BinaryOperator::Equal,
                         left: wrap(ConditionBase::Field(Column::from("users.id"))),
                         right: wrap(ConditionBase::Field(Column::from("articles.author"))),
                     }))

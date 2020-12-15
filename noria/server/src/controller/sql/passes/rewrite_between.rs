@@ -1,6 +1,6 @@
 use nom_sql::{
-    ConditionBase, ConditionExpression, ConditionTree, DeleteStatement, Operator, SelectStatement,
-    SqlQuery, UpdateStatement,
+    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, DeleteStatement,
+    SelectStatement, SqlQuery, UpdateStatement,
 };
 use ConditionExpression::*;
 
@@ -99,14 +99,14 @@ fn rewrite_between_condition(
     max: ConditionExpression,
 ) -> ConditionExpression {
     ConditionExpression::LogicalOp(ConditionTree {
-        operator: Operator::And,
+        operator: BinaryOperator::And,
         left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            operator: Operator::GreaterOrEqual,
+            operator: BinaryOperator::GreaterOrEqual,
             left: Box::new(operand.clone()),
             right: Box::new(rewrite_condition(min)),
         })),
         right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            operator: Operator::LessOrEqual,
+            operator: BinaryOperator::LessOrEqual,
             left: Box::new(operand.clone()),
             right: Box::new(rewrite_condition(max)),
         })),

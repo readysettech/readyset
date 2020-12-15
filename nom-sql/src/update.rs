@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
     use column::Column;
-    use common::{ItemPlaceholder, Literal, LiteralExpression, Operator, Real};
+    use common::{BinaryOperator, ItemPlaceholder, Literal, LiteralExpression, Real};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::*;
     use condition::ConditionTree;
@@ -109,7 +109,7 @@ mod tests {
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
             left: Box::new(expected_left),
             right: Box::new(Base(Literal(Literal::Integer(1)))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -152,7 +152,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         assert_eq!(
             res.unwrap().1,
@@ -183,7 +183,7 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             )))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }));
         let expected_ae = ArithmeticExpression::new(
             ArithmeticOperator::Add,

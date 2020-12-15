@@ -23,7 +23,7 @@
 use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
-use nom_sql::Operator;
+use nom_sql::BinaryOperator;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -235,7 +235,7 @@ impl<'a> Migration<'a> {
         &mut self,
         n: NodeIndex,
         name: Option<String>,
-        operator: nom_sql::Operator,
+        operator: nom_sql::BinaryOperator,
     ) {
         use std::collections::hash_map::Entry;
         if let Entry::Vacant(e) = self.readers.entry(n) {
@@ -260,7 +260,7 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
     pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
-        self.ensure_reader_for(n, None, Operator::Equal);
+        self.ensure_reader_for(n, None, BinaryOperator::Equal);
         let ri = self.readers[&n];
 
         self.mainline.ingredients[ri]
@@ -278,7 +278,7 @@ impl<'a> Migration<'a> {
         name: String,
         n: NodeIndex,
         key: &[usize],
-        operator: nom_sql::Operator,
+        operator: nom_sql::BinaryOperator,
     ) {
         self.ensure_reader_for(n, Some(name), operator);
 

@@ -107,7 +107,7 @@ pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{FieldDefinitionExpression, Operator};
+    use common::{BinaryOperator, FieldDefinitionExpression};
     use condition::ConditionBase::*;
     use condition::ConditionExpression::{self, *};
     use condition::ConditionTree;
@@ -123,7 +123,7 @@ mod tests {
         let ct = ConditionTree {
             left: Box::new(Base(Field(Column::from("tags.id")))),
             right: Box::new(Base(Field(Column::from("taggings.tag_id")))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         };
         let join_cond = ConditionExpression::ComparisonOp(ct);
         let expected_stmt = SelectStatement {

@@ -1546,7 +1546,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_count() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_count").await;
         g.migrate(|mig| {
@@ -1574,7 +1574,7 @@ mod tests {
                 FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
-                            operator: Operator::Equal,
+                            operator: BinaryOperator::Equal,
                             left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_sum() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum").await;
         g.migrate(|mig| {
@@ -1637,7 +1637,7 @@ mod tests {
                 FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
-                            operator: Operator::Equal,
+                            operator: BinaryOperator::Equal,
                             left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
@@ -1672,7 +1672,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_sum_else() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
         g.migrate(|mig| {
@@ -1700,7 +1700,7 @@ mod tests {
                 FunctionArgument::Conditional(CaseWhenExpression{
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
-                            operator: Operator::Equal,
+                            operator: BinaryOperator::Equal,
                             left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
@@ -1887,7 +1887,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_aggregation_filter_logical_op() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g = integration::start_simple("it_incorporates_aggregation_filter_sum_else").await;
         g.migrate(|mig| {
@@ -1918,14 +1918,14 @@ mod tests {
                 left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.story_id")))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Null))),
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                 })),
                 right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.vote")))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(0)))),
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                 })),
-                operator: Operator::And,
+                operator: BinaryOperator::And,
             });
             let f = Box::new(FunctionExpression::Count(
                 FunctionArgument::Conditional(CaseWhenExpression{

@@ -3,10 +3,10 @@ use std::collections::HashSet;
 use crate::convert::ToDataType;
 use msql_srv::ParamParser;
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator, Column,
-    ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-    FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression, Operator, SelectStatement,
-    SqlQuery, TableKey, UpdateStatement,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
+    BinaryOperator, Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
+    CreateTableStatement, FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression,
+    SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::{DataType, Modification, Operation};
 use regex::Regex;
@@ -100,12 +100,12 @@ fn do_flatten_conditional(
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         })
         | ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }) => {
             if !pkey.iter().any(|pk| pk.name == c.name) {
                 panic!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
@@ -142,10 +142,10 @@ fn do_flatten_conditional(
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Literal(ref left)),
             right: box ConditionExpression::Base(ConditionBase::Literal(ref right)),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }) if left == right => true,
         ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             ref left,
             ref right,
         }) => {
@@ -162,7 +162,7 @@ fn do_flatten_conditional(
             }
         }
         ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             ref left,
             ref right,
         }) => {
@@ -234,7 +234,7 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
                 box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         })
         | ConditionExpression::ComparisonOp(ConditionTree {
             left:
@@ -242,12 +242,12 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
                     ItemPlaceholder::QuestionMark,
                 ))),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
         }) => vec![c],
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
-            operator: Operator::In,
+            operator: BinaryOperator::In,
         }) if (|| {
             literals
                 .iter()
@@ -275,12 +275,12 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
             operator: _,
         }) => vec![],
         ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             ref left,
             ref right,
         })
         | ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             ref left,
             ref right,
         }) => {
@@ -351,7 +351,7 @@ fn walk_update_where(
 ) {
     match expr {
         ConditionExpression::ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: box ConditionExpression::Base(ConditionBase::Field(c)),
             right: box ConditionExpression::Base(ConditionBase::Literal(l)),
         }) => {
@@ -368,7 +368,7 @@ fn walk_update_where(
             assert!(oldv.is_none());
         }
         ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             left,
             right,
         }) => {

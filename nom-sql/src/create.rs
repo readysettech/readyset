@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn simple_create_view() {
-        use common::{FieldDefinitionExpression, Operator};
+        use common::{BinaryOperator, FieldDefinitionExpression};
         use condition::{ConditionBase, ConditionExpression, ConditionTree};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
@@ -690,7 +690,7 @@ mod tests {
                         right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
                             Literal::String("bob".into())
                         ))),
-                        operator: Operator::Equal,
+                        operator: BinaryOperator::Equal,
                     })),
                     ..Default::default()
                 })),

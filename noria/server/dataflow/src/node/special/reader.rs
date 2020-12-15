@@ -8,7 +8,7 @@ pub struct Reader {
 
     for_node: NodeIndex,
     state: Option<Vec<usize>>,
-    pub operator: nom_sql::Operator,
+    pub operator: nom_sql::BinaryOperator,
 }
 
 impl Clone for Reader {
@@ -24,7 +24,7 @@ impl Clone for Reader {
 }
 
 impl Reader {
-    pub fn new(for_node: NodeIndex, operator: nom_sql::Operator) -> Self {
+    pub fn new(for_node: NodeIndex, operator: nom_sql::BinaryOperator) -> Self {
         Reader {
             writer: None,
             state: None,

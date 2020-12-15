@@ -5,7 +5,7 @@ use std::str;
 use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::Column;
 use common::{
-    binary_comparison_operator, column_identifier, literal, value_list, Literal, Operator,
+    binary_comparison_operator, column_identifier, literal, value_list, BinaryOperator, Literal,
 };
 
 use nom::branch::alt;
@@ -48,7 +48,7 @@ impl fmt::Display for ConditionBase {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConditionTree {
-    pub operator: Operator,
+    pub operator: BinaryOperator,
     pub left: Box<ConditionExpression>,
     pub right: Box<ConditionExpression>,
 }
@@ -135,7 +135,7 @@ pub fn condition_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
         ),
         |p| {
             ConditionExpression::LogicalOp(ConditionTree {
-                operator: Operator::Or,
+                operator: BinaryOperator::Or,
                 left: Box::new(p.0),
                 right: Box::new(p.1),
             })
@@ -154,7 +154,7 @@ pub fn and_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
         ),
         |p| {
             ConditionExpression::LogicalOp(ConditionTree {
-                operator: Operator::And,
+                operator: BinaryOperator::And,
                 left: Box::new(p.0),
                 right: Box::new(p.1),
             })
@@ -213,7 +213,7 @@ pub fn not_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     ))(i)
 }
 
-fn is_null(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+fn is_null(i: &[u8]) -> IResult<&[u8], (BinaryOperator, ConditionExpression)> {
     let (remaining_input, (_, _, not, _, _)) = tuple((
         tag_no_case("is"),
         multispace0,
@@ -228,16 +228,16 @@ fn is_null(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
         remaining_input,
         (
             if not.is_some() {
-                Operator::NotEqual
+                BinaryOperator::NotEqual
             } else {
-                Operator::Equal
+                BinaryOperator::Equal
             },
             ConditionExpression::Base(ConditionBase::Literal(Literal::Null)),
         ),
     ))
 }
 
-fn in_operation(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+fn in_operation(i: &[u8]) -> IResult<&[u8], (BinaryOperator, ConditionExpression)> {
     map(
         separated_pair(
             opt(terminated(tag_no_case("not"), multispace1)),
@@ -254,15 +254,15 @@ fn in_operation(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
         |p| {
             let nested = ConditionExpression::Base(p.1);
             if (p.0).is_some() {
-                (Operator::NotIn, nested)
+                (BinaryOperator::NotIn, nested)
             } else {
-                (Operator::In, nested)
+                (BinaryOperator::In, nested)
             }
         },
     )(i)
 }
 
-fn boolean_primary_rest(i: &[u8]) -> IResult<&[u8], (Operator, ConditionExpression)> {
+fn boolean_primary_rest(i: &[u8]) -> IResult<&[u8], (BinaryOperator, ConditionExpression)> {
     alt((
         is_null,
         in_operation,
@@ -274,7 +274,7 @@ fn boolean_primary(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     alt((
         map(
             separated_pair(predicate, multispace0, boolean_primary_rest),
-            |e: (ConditionExpression, (Operator, ConditionExpression))| {
+            |e: (ConditionExpression, (BinaryOperator, ConditionExpression))| {
                 ConditionExpression::ComparisonOp(ConditionTree {
                     operator: (e.1).0,
                     left: Box::new(e.0),
@@ -354,7 +354,7 @@ mod tests {
     use super::*;
     use arithmetic::{ArithmeticBase, ArithmeticOperator};
     use column::Column;
-    use common::{FieldDefinitionExpression, ItemPlaceholder, Literal, Operator};
+    use common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
     use ConditionBase::*;
     use ConditionExpression::*;
 
@@ -365,7 +365,7 @@ mod tests {
     }
 
     fn flat_condition_tree(
-        op: Operator,
+        op: BinaryOperator,
         l: ConditionBase,
         r: ConditionBase,
     ) -> ConditionExpression {
@@ -425,7 +425,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             flat_condition_tree(
-                Operator::Equal,
+                BinaryOperator::Equal,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(literal)
             )
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: Box::new(x_operator_value(ArithmeticOperator::Multiply, 3.into())),
                 right: Box::new(ConditionExpression::Base(ConditionBase::Literal(21.into())))
             })
@@ -502,7 +502,7 @@ mod tests {
             res.unwrap().1,
             ConditionExpression::Bracketed(Box::new(ConditionExpression::ComparisonOp(
                 ConditionTree {
-                    operator: Operator::Equal,
+                    operator: BinaryOperator::Equal,
                     left: Box::new(x_operator_value(ArithmeticOperator::Subtract, 7.into())),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Literal(15.into())))
                 }
@@ -518,7 +518,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: Box::new(ConditionExpression::Bracketed(Box::new(x_operator_value(
                     ArithmeticOperator::Add,
                     2.into()
@@ -536,7 +536,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: Box::new(ConditionExpression::Bracketed(Box::new(x_operator_value(
                     ArithmeticOperator::Add,
                     2.into()
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(
             res1.unwrap().1,
             flat_condition_tree(
-                Operator::Equal,
+                BinaryOperator::Equal,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(Literal::Integer(42 as i64))
             )
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(
             res2.unwrap().1,
             flat_condition_tree(
-                Operator::Equal,
+                BinaryOperator::Equal,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(Literal::String(String::from("hello")))
             )
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(
             res1.unwrap().1,
             flat_condition_tree(
-                Operator::GreaterOrEqual,
+                BinaryOperator::GreaterOrEqual,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(Literal::Integer(42 as i64))
             )
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(
             res2.unwrap().1,
             flat_condition_tree(
-                Operator::LessOrEqual,
+                BinaryOperator::LessOrEqual,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(Literal::Integer(5 as i64))
             )
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             flat_condition_tree(
-                Operator::Equal,
+                BinaryOperator::Equal,
                 ConditionBase::Field(Column::from("foo")),
                 ConditionBase::Literal(Literal::String(String::from("")))
             )
@@ -625,7 +625,7 @@ mod tests {
         use ConditionExpression::*;
 
         let a = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("foo".into()))),
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
@@ -633,25 +633,25 @@ mod tests {
         });
 
         let b = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("bar".into()))),
             right: Box::new(Base(Literal(Literal::Integer(12.into())))),
         });
 
         let left = Bracketed(Box::new(LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             left: Box::new(a),
             right: Box::new(b),
         })));
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("foobar".into()))),
             right: Box::new(Base(Literal(Literal::String("a".into())))),
         });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             left: Box::new(left),
             right: Box::new(right),
         });
@@ -669,7 +669,7 @@ mod tests {
         use ConditionExpression::*;
 
         let a = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("foo".into()))),
             right: Box::new(Base(Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
@@ -677,25 +677,25 @@ mod tests {
         });
 
         let b = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("bar".into()))),
             right: Box::new(Base(Literal(Literal::Integer(12.into())))),
         });
 
         let left = LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             left: Box::new(a),
             right: Box::new(b),
         });
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("foobar".into()))),
             right: Box::new(Base(Literal(Literal::String("a".into())))),
         });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             left: Box::new(left),
             right: Box::new(right),
         });
@@ -713,19 +713,19 @@ mod tests {
         use ConditionExpression::*;
 
         let left = NegationOp(Box::new(ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("bar".into()))),
             right: Box::new(Base(Literal(Integer(12.into())))),
         })));
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
+            operator: BinaryOperator::Equal,
             left: Box::new(Base(Field("foobar".into()))),
             right: Box::new(Base(Literal(String("a".into())))),
         });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::Or,
+            operator: BinaryOperator::Or,
             left: Box::new(left),
             right: Box::new(right),
         });
@@ -752,7 +752,7 @@ mod tests {
         });
 
         let expected = flat_condition_tree(
-            Operator::In,
+            BinaryOperator::In,
             Field("bar".into()),
             NestedSelect(nested_select),
         );
@@ -821,17 +821,21 @@ mod tests {
         });
 
         let left = flat_condition_tree(
-            Operator::In,
+            BinaryOperator::In,
             Field("paperId".into()),
             NestedSelect(nested_select),
         );
 
-        let right = flat_condition_tree(Operator::Greater, Field("size".into()), Literal(0.into()));
+        let right = flat_condition_tree(
+            BinaryOperator::Greater,
+            Field("size".into()),
+            Literal(0.into()),
+        );
 
         let expected = ConditionExpression::LogicalOp(ConditionTree {
             left: Box::new(left),
             right: Box::new(right),
-            operator: Operator::And,
+            operator: BinaryOperator::And,
         });
 
         assert_eq!(res.unwrap().1, expected);
@@ -846,7 +850,7 @@ mod tests {
         let res = condition_expr(cond.as_bytes());
 
         let expected = flat_condition_tree(
-            Operator::In,
+            BinaryOperator::In,
             Field("bar".into()),
             LiteralList(vec![0.into()]),
         );
@@ -862,15 +866,18 @@ mod tests {
         let cond = "bar IS NULL";
 
         let res = condition_expr(cond.as_bytes());
-        let expected =
-            flat_condition_tree(Operator::Equal, Field("bar".into()), Literal(Literal::Null));
+        let expected = flat_condition_tree(
+            BinaryOperator::Equal,
+            Field("bar".into()),
+            Literal(Literal::Null),
+        );
         assert_eq!(res.unwrap().1, expected);
 
         let cond = "bar IS NOT NULL";
 
         let res = condition_expr(cond.as_bytes());
         let expected = flat_condition_tree(
-            Operator::NotEqual,
+            BinaryOperator::NotEqual,
             Field("bar".into()),
             Literal(Literal::Null),
         );
@@ -894,46 +901,46 @@ mod tests {
 
         let res = condition_expr(cond.as_bytes());
         let expected = ConditionExpression::LogicalOp(ConditionTree {
-            operator: Operator::And,
+            operator: BinaryOperator::And,
             left: Box::new(flat_condition_tree(
-                Operator::Equal,
+                BinaryOperator::Equal,
                 Field("read_ribbons.is_following".into()),
                 Literal(Literal::Integer(1.into())),
             )),
             right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
-                operator: Operator::And,
+                operator: BinaryOperator::And,
                 left: Box::new(flat_condition_tree(
-                    Operator::NotEqual,
+                    BinaryOperator::NotEqual,
                     Field("comments.user_id".into()),
                     Field("read_ribbons.user_id".into()),
                 )),
                 right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
-                    operator: Operator::And,
+                    operator: BinaryOperator::And,
                     left: Box::new(flat_condition_tree(
-                        Operator::GreaterOrEqual,
+                        BinaryOperator::GreaterOrEqual,
                         Field("saldo".into()),
                         Literal(Literal::Integer(0.into())),
                     )),
                     right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
-                        operator: Operator::And,
+                        operator: BinaryOperator::And,
                         left: Box::new(ConditionExpression::Bracketed(Box::new(
                             ConditionExpression::LogicalOp(ConditionTree {
-                                operator: Operator::Or,
+                                operator: BinaryOperator::Or,
                                 left: Box::new(flat_condition_tree(
-                                    Operator::Equal,
+                                    BinaryOperator::Equal,
                                     Field("parent_comments.user_id".into()),
                                     Field("read_ribbons.user_id".into()),
                                 )),
                                 right: Box::new(ConditionExpression::Bracketed(Box::new(
                                     ConditionExpression::LogicalOp(ConditionTree {
-                                        operator: Operator::And,
+                                        operator: BinaryOperator::And,
                                         left: Box::new(flat_condition_tree(
-                                            Operator::Equal,
+                                            BinaryOperator::Equal,
                                             Field("parent_comments.user_id".into()),
                                             Literal(Literal::Null),
                                         )),
                                         right: Box::new(flat_condition_tree(
-                                            Operator::Equal,
+                                            BinaryOperator::Equal,
                                             Field("stories.user_id".into()),
                                             Field("read_ribbons.user_id".into()),
                                         )),
@@ -942,24 +949,24 @@ mod tests {
                             }),
                         ))),
                         right: Box::new(ConditionExpression::LogicalOp(ConditionTree {
-                            operator: Operator::And,
+                            operator: BinaryOperator::And,
                             left: Box::new(ConditionExpression::Bracketed(Box::new(
                                 ConditionExpression::LogicalOp(ConditionTree {
-                                    operator: Operator::Or,
+                                    operator: BinaryOperator::Or,
                                     left: Box::new(flat_condition_tree(
-                                        Operator::Equal,
+                                        BinaryOperator::Equal,
                                         Field("parent_comments.id".into()),
                                         Literal(Literal::Null),
                                     )),
                                     right: Box::new(flat_condition_tree(
-                                        Operator::GreaterOrEqual,
+                                        BinaryOperator::GreaterOrEqual,
                                         Field("saldo".into()),
                                         Literal(Literal::Integer(0)),
                                     )),
                                 }),
                             ))),
                             right: Box::new(flat_condition_tree(
-                                Operator::Equal,
+                                BinaryOperator::Equal,
                                 Field("read_ribbons.user_id".into()),
                                 Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
                             )),
@@ -981,7 +988,7 @@ mod tests {
 
         let c1 = res1.unwrap().1;
         let expected1 = flat_condition_tree(
-            Operator::NotIn,
+            BinaryOperator::NotIn,
             Field("id".into()),
             LiteralList(vec![1.into(), 2.into()]),
         );

@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn it_removes_aliases() {
-        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let q = SelectStatement {
@@ -212,7 +212,7 @@ mod tests {
             }],
             fields: vec![FieldDefinitionExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
                 right: wrap(ConditionBase::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
@@ -233,7 +233,7 @@ mod tests {
                 assert_eq!(
                     tq.where_clause,
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: Operator::Equal,
+                        operator: BinaryOperator::Equal,
                         left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
                         right: wrap(ConditionBase::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
