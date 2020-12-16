@@ -185,142 +185,167 @@ fn handle_message(
     match m.v {
         ReadQuery::Normal {
             target,
-            mut keys,
+            keys,
             block,
-        } => {
-            let immediate = READERS.with(|readers_cache| {
-                let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target).or_insert_with(|| {
-                    let readers = s.lock().unwrap();
-                    readers.get(&target).unwrap().clone()
-                });
-
-                let mut ret = Vec::with_capacity(keys.len());
-
-                // first do non-blocking reads for all keys to see if we can return immediately
-                let mut i = -1;
-                let mut ready = true;
-                let mut pending = Vec::new();
-                keys.retain(|key| {
-                    i += 1;
-                    if !ready {
-                        ret.push(SerializedReadReplyBatch::empty());
-                        return false;
-                    }
-                    let rs = reader.try_find_and(key, |rs| serialize(rs)).map(|r| r.0);
-                    match rs {
-                        Ok(Some(rs)) => {
-                            // immediate hit!
-                            ret.push(rs);
-                            false
-                        }
-                        Err(()) => {
-                            // map not yet ready
-                            ready = false;
-                            ret.push(SerializedReadReplyBatch::empty());
-                            false
-                        }
-                        Ok(None) => {
-                            // need to trigger partial replay for this key
-                            pending.push(i as usize);
-                            ret.push(SerializedReadReplyBatch::empty());
-                            true
-                        }
-                    }
-                });
-
-                if !ready {
-                    return Ok(Tagged {
-                        tag,
-                        v: ReadReply::Normal(Err(())),
-                    });
-                }
-
-                if keys.is_empty() {
-                    // we hit on all the keys!
-                    assert!(pending.is_empty());
-                    return Ok(Tagged {
-                        tag,
-                        v: ReadReply::Normal(Ok(ret)),
-                    });
-                }
-
-                // trigger backfills for all the keys we missed on
-                reader.trigger(keys.iter().map(Vec::as_slice));
-
-                Err((keys, ret, pending))
-            });
-
-            match immediate {
-                Ok(reply) => Either::Left(Either::Left(future::ready(Ok(reply)))),
-                Err((keys, ret, pending)) => {
-                    if !block {
-                        Either::Left(Either::Left(future::ready(Ok(Tagged {
-                            tag,
-                            v: ReadReply::Normal(Ok(ret)),
-                        }))))
-                    } else {
-                        let (tx, rx) = tokio::sync::oneshot::channel();
-                        let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
-                        let now = time::Instant::now();
-                        let r = wait.send((
-                            BlockingRead {
-                                tag,
-                                target,
-                                keys,
-                                pending,
-                                read: ret,
-                                truth: s.clone(),
-                                trigger_timeout: trigger,
-                                next_trigger: now,
-                                first: now,
-                            },
-                            tx,
-                        ));
-                        if r.is_err() {
-                            // we're shutting down
-                            return Either::Left(Either::Left(future::ready(Err(()))));
-                        }
-                        Either::Left(Either::Right(rx.map(|r| match r {
-                            Err(_) => Err(()),
-                            Ok(r) => r,
-                        })))
-                    }
-                }
-            }
-        }
+        } => Either::Left(handle_normal_read_query(tag, s, wait, target, keys, block)),
         ReadQuery::Size { target } => {
-            let size = READERS.with(|readers_cache| {
-                let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target).or_insert_with(|| {
-                    let readers = s.lock().unwrap();
-                    readers.get(&target).unwrap().clone()
-                });
-
-                reader.len()
-            });
-
-            Either::Right(future::ready(Ok(Tagged {
-                tag,
-                v: ReadReply::Size(size),
-            })))
+            Either::Right(Either::Left(handle_size_query(tag, s, target)))
         }
         ReadQuery::Keys { target } => {
-            let keys = READERS.with(|readers_cache| {
-                let mut readers_cache = readers_cache.borrow_mut();
-                let reader = readers_cache.entry(target).or_insert_with(|| {
-                    let readers = s.lock().unwrap();
-                    readers.get(&target).unwrap().clone()
-                });
-
-                reader.keys()
-            });
-            Either::Right(future::ready(Ok(Tagged {
-                tag,
-                v: ReadReply::Keys(keys),
-            })))
+            Either::Right(Either::Right(handle_keys_query(tag, s, target)))
         }
     }
+}
+
+fn handle_normal_read_query(
+    tag: u32,
+    s: &Readers,
+    wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
+    target: (NodeIndex, usize),
+    mut keys: Vec<Vec<DataType>>,
+    block: bool,
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    let immediate = READERS.with(|readers_cache| {
+        let mut readers_cache = readers_cache.borrow_mut();
+        let reader = readers_cache.entry(target).or_insert_with(|| {
+            let readers = s.lock().unwrap();
+            readers.get(&target).unwrap().clone()
+        });
+
+        let mut ret = Vec::with_capacity(keys.len());
+
+        // first do non-blocking reads for all keys to see if we can return immediately
+        let mut i = -1;
+        let mut ready = true;
+        let mut pending = Vec::new();
+        keys.retain(|key| {
+            i += 1;
+            if !ready {
+                ret.push(SerializedReadReplyBatch::empty());
+                return false;
+            }
+            let rs = reader.try_find_and(key, |rs| serialize(rs)).map(|r| r.0);
+            match rs {
+                Ok(Some(rs)) => {
+                    // immediate hit!
+                    ret.push(rs);
+                    false
+                }
+                Err(()) => {
+                    // map not yet ready
+                    ready = false;
+                    ret.push(SerializedReadReplyBatch::empty());
+                    false
+                }
+                Ok(None) => {
+                    // need to trigger partial replay for this key
+                    pending.push(i as usize);
+                    ret.push(SerializedReadReplyBatch::empty());
+                    true
+                }
+            }
+        });
+
+        if !ready {
+            return Ok(Tagged {
+                tag,
+                v: ReadReply::Normal(Err(())),
+            });
+        }
+
+        if keys.is_empty() {
+            // we hit on all the keys!
+            assert!(pending.is_empty());
+            return Ok(Tagged {
+                tag,
+                v: ReadReply::Normal(Ok(ret)),
+            });
+        }
+
+        // trigger backfills for all the keys we missed on
+        reader.trigger(keys.iter().map(Vec::as_slice));
+
+        Err((keys, ret, pending))
+    });
+
+    match immediate {
+        Ok(reply) => Either::Left(future::ready(Ok(reply))),
+        Err((keys, ret, pending)) => {
+            if !block {
+                Either::Left(future::ready(Ok(Tagged {
+                    tag,
+                    v: ReadReply::Normal(Ok(ret)),
+                })))
+            } else {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
+                let now = time::Instant::now();
+                let r = wait.send((
+                    BlockingRead {
+                        tag,
+                        target,
+                        keys,
+                        pending,
+                        read: ret,
+                        truth: s.clone(),
+                        trigger_timeout: trigger,
+                        next_trigger: now,
+                        first: now,
+                    },
+                    tx,
+                ));
+                if r.is_err() {
+                    // we're shutting down
+                    return Either::Left(future::ready(Err(())));
+                }
+                Either::Right(rx.map(|r| match r {
+                    Err(_) => Err(()),
+                    Ok(r) => r,
+                }))
+            }
+        }
+    }
+}
+
+fn handle_size_query(
+    tag: u32,
+    s: &Readers,
+    target: (NodeIndex, usize),
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    let size = READERS.with(|readers_cache| {
+        let mut readers_cache = readers_cache.borrow_mut();
+        let reader = readers_cache.entry(target).or_insert_with(|| {
+            let readers = s.lock().unwrap();
+            readers.get(&target).unwrap().clone()
+        });
+
+        reader.len()
+    });
+
+    future::ready(Ok(Tagged {
+        tag,
+        v: ReadReply::Size(size),
+    }))
+}
+
+fn handle_keys_query(
+    tag: u32,
+    s: &Readers,
+    target: (NodeIndex, usize),
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    let keys = READERS.with(|readers_cache| {
+        let mut readers_cache = readers_cache.borrow_mut();
+        let reader = readers_cache.entry(target).or_insert_with(|| {
+            let readers = s.lock().unwrap();
+            readers.get(&target).unwrap().clone()
+        });
+
+        reader.keys()
+    });
+    future::ready(Ok(Tagged {
+        tag,
+        v: ReadReply::Keys(keys),
+    }))
 }
 
 #[pin_project]
