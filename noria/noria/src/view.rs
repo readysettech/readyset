@@ -8,10 +8,12 @@ use futures_util::{
 use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
+use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tokio_tower::multiplex;
@@ -20,6 +22,7 @@ use tower_buffer::Buffer;
 use tower_discover::ServiceStream;
 use tower_limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
+use vec1::Vec1;
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
@@ -104,11 +107,111 @@ pub enum ViewError {
     /// A lower-level error occurred while communicating with Soup.
     #[fail(display = "{}", _0)]
     TransportError(#[cause] failure::Error),
+    /// The query specified an empty lookup key
+    #[fail(display = "the query specified an empty lookup key")]
+    EmptyKey,
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
     fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
         ViewError::TransportError(failure::Error::from_boxed_compat(e))
+    }
+}
+
+/// Representation for a comparison predicate against a set of keys
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+pub enum KeyComparison {
+    /// Look up exactly one key
+    Equal(Vec1<DataType>),
+
+    /// Look up all keys strictly less than the given key
+    LessThan(Vec1<DataType>),
+
+    /// Look up all keys less than or equal to the given key
+    LessThanOrEqualTo(Vec1<DataType>),
+
+    /// Look up all keys strictly greater than the given key
+    GreaterThan(Vec1<DataType>),
+
+    /// Look up all keys greater than or equal the given key
+    GreaterThanOrEqualTo(Vec1<DataType>),
+}
+
+impl KeyComparison {
+    /// Returns the [`nom_sql::BinaryOperator`] that this key comparison represents.
+    ///
+    /// Note that this is injective but not surjective - every [`KeyComparsion`] corresponds to a
+    /// distinct [`BinaryOperator`] but not vice versa
+    pub fn operator(&self) -> nom_sql::BinaryOperator {
+        use nom_sql::BinaryOperator::*;
+        match self {
+            KeyComparison::Equal(_) => Equal,
+            KeyComparison::LessThan(_) => Less,
+            KeyComparison::LessThanOrEqualTo(_) => LessOrEqual,
+            KeyComparison::GreaterThan(_) => Greater,
+            KeyComparison::GreaterThanOrEqualTo(_) => GreaterOrEqual,
+        }
+    }
+
+    /// Project a KeyComparison into an optional equality predicate, or return None if it's any
+    /// other kind of predicate
+    pub fn equal(self) -> Option<Vec1<DataType>> {
+        match self {
+            KeyComparison::Equal(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Returns the shard key(s) that this [`KeyComparison`] must target, given the total number of
+    /// shards
+    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
+        match self {
+            KeyComparison::Equal(key) => vec![crate::shard_by(&key[0], num_shards)],
+            // Since we currently implement hash-based sharding, any non-point query must target all
+            // shards. This restriction could be lifted in the future by implementing (perhaps
+            // optional) range-based sharding, likely with rebalancing. See Guillote-Blouin, J.
+            // (2020) Implementing Range Queries and Write Policies in a Partially-Materialized
+            // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
+            _ => (0..num_shards).collect(),
+        }
+    }
+}
+
+impl TryFrom<Vec<DataType>> for KeyComparison {
+    type Error = vec1::Size0Error;
+
+    /// Converts to a [`KeyComparison::Equal`]. Returns an error if the input vector is empty
+    fn try_from(value: Vec<DataType>) -> Result<Self, Self::Error> {
+        Ok(Vec1::try_from(value)?.into())
+    }
+}
+
+impl From<Vec1<DataType>> for KeyComparison {
+    /// Converts to a [`KeyComparison::Equal`]
+    fn from(key: Vec1<DataType>) -> Self {
+        KeyComparison::Equal(key)
+    }
+}
+
+impl RangeBounds<Vec1<DataType>> for KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec1<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key),
+            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
+            GreaterThan(ref key) => Excluded(key),
+        }
+    }
+
+    fn end_bound(&self) -> Bound<&Vec1<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key),
+            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
+            LessThan(ref key) => Included(key),
+        }
     }
 }
 
@@ -120,7 +223,7 @@ pub enum ReadQuery {
         /// Where to read from
         target: (NodeIndex, usize),
         /// Keys to read with
-        keys: Vec<Vec<DataType>>,
+        key_comparisons: Vec<KeyComparison>,
         /// Whether to block if a partial replay is triggered
         block: bool,
     },
@@ -245,7 +348,7 @@ impl fmt::Debug for View {
 pub(crate) mod results;
 use self::results::{Results, Row};
 
-impl Service<(Vec<Vec<DataType>>, bool)> for View {
+impl Service<(Vec<KeyComparison>, bool)> for View {
     type Response = Vec<Results>;
     type Error = ViewError;
 
@@ -261,11 +364,11 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, (keys, block): (Vec<Vec<DataType>>, bool)) -> Self::Future {
+    fn call(&mut self, (key_comparisons, block): (Vec<KeyComparison>, bool)) -> Self::Future {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "view-request",
-                ?keys,
+                ?key_comparisons,
                 node = self.node.index()
             ))
         } else {
@@ -276,7 +379,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
-                keys,
+                key_comparisons,
                 block,
             });
 
@@ -303,11 +406,11 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
         if let Some(ref span) = span {
             span.in_scope(|| tracing::trace!("shard request"));
         }
-        assert!(keys.iter().all(|k| k.len() == 1));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
-        for key in keys {
-            let shard = crate::shard_by(&key[0], self.shards.len());
-            shard_queries[shard].push(key);
+        for comparison in key_comparisons {
+            for shard in comparison.shard_keys(self.shards.len()) {
+                shard_queries[shard].push(comparison.clone());
+            }
         }
 
         let node = self.node;
@@ -330,7 +433,7 @@ impl Service<(Vec<Vec<DataType>>, bool)> for View {
                 .map(move |((shardi, shard), shard_queries)| {
                     let request = Tagged::from(ReadQuery::Normal {
                         target: (node, shardi),
-                        keys: shard_queries,
+                        key_comparisons: shard_queries,
                         block,
                     });
 
@@ -443,11 +546,11 @@ impl View {
     /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub async fn multi_lookup(
         &mut self,
-        keys: Vec<Vec<DataType>>,
+        key_comparisons: Vec<KeyComparison>,
         block: bool,
     ) -> Result<Vec<Results>, ViewError> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
-        self.call((keys, block)).await
+        self.call((key_comparisons, block)).await
     }
 
     /// Retrieve the query results for the given parameter value.
@@ -455,9 +558,23 @@ impl View {
     /// The method will block if the results are not yet available only when `block` is `true`.
     pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
         // TODO: Optimized version of this function?
-        let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
+        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
+        let rs = self
+            .multi_lookup(vec![KeyComparison::Equal(key)], block)
+            .await?;
         Ok(rs.into_iter().next().unwrap())
     }
+
+    /// Retrieve the query results for the given range of parameter values
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
+    // pub async fn range(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
+    //     // TODO: Optimized version of this function?
+    //     let rs = self
+    //         .multi_lookup(vec![KeyComparison::Equal(Vec::from(key))], block)
+    //         .await?;
+    //     Ok(rs.into_iter().next().unwrap())
+    // }
 
     /// Retrieve the first query result for the given parameter value.
     ///
@@ -468,7 +585,10 @@ impl View {
         block: bool,
     ) -> Result<Option<Row>, ViewError> {
         // TODO: Optimized version of this function?
-        let rs = self.multi_lookup(vec![Vec::from(key)], block).await?;
+        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
+        let rs = self
+            .multi_lookup(vec![KeyComparison::Equal(key)], block)
+            .await?;
         Ok(rs.into_iter().next().unwrap().into_iter().next())
     }
 }

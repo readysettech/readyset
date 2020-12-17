@@ -45,6 +45,7 @@ slab = "0.4"
 pin-project = "0.4.17"
 futures-util = "0.3.0"
 mysql_common = "0.22"
+vec1 = { version = "1.6.0", features = ["serde"] }
 
 # consensus/
 slog = "2.4.0"

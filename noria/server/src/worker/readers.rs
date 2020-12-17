@@ -9,7 +9,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use noria::{ReadQuery, ReadReply, Tagged};
+use noria::{KeyComparison, ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -20,6 +20,7 @@ use stream_cancel::Valve;
 use tokio::task_local;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
+use vec1::Vec1;
 
 /// Retry reads every this often.
 const RETRY_TIMEOUT: time::Duration = time::Duration::from_micros(100);
@@ -185,9 +186,16 @@ fn handle_message(
     match m.v {
         ReadQuery::Normal {
             target,
-            keys,
+            key_comparisons,
             block,
-        } => Either::Left(handle_normal_read_query(tag, s, wait, target, keys, block)),
+        } => Either::Left(handle_normal_read_query(
+            tag,
+            s,
+            wait,
+            target,
+            key_comparisons,
+            block,
+        )),
         ReadQuery::Size { target } => {
             Either::Right(Either::Left(handle_size_query(tag, s, target)))
         }
@@ -202,7 +210,7 @@ fn handle_normal_read_query(
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     target: (NodeIndex, usize),
-    mut keys: Vec<Vec<DataType>>,
+    mut key_comparisons: Vec<KeyComparison>,
     block: bool,
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let immediate = READERS.with(|readers_cache| {
@@ -212,39 +220,45 @@ fn handle_normal_read_query(
             readers.get(&target).unwrap().clone()
         });
 
-        let mut ret = Vec::with_capacity(keys.len());
+        let mut ret = Vec::with_capacity(key_comparisons.len());
 
         // first do non-blocking reads for all keys to see if we can return immediately
-        let mut i = -1;
+        let mut i: i32 = -1;
         let mut ready = true;
         let mut pending = Vec::new();
-        keys.retain(|key| {
-            i += 1;
-            if !ready {
-                ret.push(SerializedReadReplyBatch::empty());
-                return false;
-            }
-            let rs = reader.try_find_and(key, |rs| serialize(rs)).map(|r| r.0);
-            match rs {
-                Ok(Some(rs)) => {
-                    // immediate hit!
-                    ret.push(rs);
-                    false
-                }
-                Err(()) => {
-                    // map not yet ready
-                    ready = false;
+        let misses = key_comparisons
+            .drain(..)
+            .filter_map(|key_comparison| {
+                i += 1;
+                if !ready {
                     ret.push(SerializedReadReplyBatch::empty());
-                    false
+                    return None;
                 }
-                Ok(None) => {
-                    // need to trigger partial replay for this key
-                    pending.push(i as usize);
-                    ret.push(SerializedReadReplyBatch::empty());
-                    true
+                let key = key_comparison
+                    .equal()
+                    .expect("inequality lookups not yet implemented");
+                let rs = reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0);
+                match rs {
+                    Ok(Some(rs)) => {
+                        // immediate hit!
+                        ret.push(rs);
+                        None
+                    }
+                    Err(()) => {
+                        // map not yet ready
+                        ready = false;
+                        ret.push(SerializedReadReplyBatch::empty());
+                        None
+                    }
+                    Ok(None) => {
+                        // need to trigger partial replay for this key
+                        pending.push(i as usize);
+                        ret.push(SerializedReadReplyBatch::empty());
+                        Some(key)
+                    }
                 }
-            }
-        });
+            })
+            .collect::<Vec<_>>();
 
         if !ready {
             return Ok(Tagged {
@@ -253,7 +267,7 @@ fn handle_normal_read_query(
             });
         }
 
-        if keys.is_empty() {
+        if misses.is_empty() {
             // we hit on all the keys!
             assert!(pending.is_empty());
             return Ok(Tagged {
@@ -263,14 +277,14 @@ fn handle_normal_read_query(
         }
 
         // trigger backfills for all the keys we missed on
-        reader.trigger(keys.iter().map(Vec::as_slice));
+        reader.trigger(misses.iter().map(Vec1::as_slice));
 
-        Err((keys, ret, pending))
+        Err((misses, ret, pending))
     });
 
     match immediate {
         Ok(reply) => Either::Left(future::ready(Ok(reply))),
-        Err((keys, ret, pending)) => {
+        Err((mut keys, ret, pending)) => {
             if !block {
                 Either::Left(future::ready(Ok(Tagged {
                     tag,
@@ -284,7 +298,7 @@ fn handle_normal_read_query(
                     BlockingRead {
                         tag,
                         target,
-                        keys,
+                        keys: keys.drain(..).map(Vec1::into_vec).collect(),
                         pending,
                         read: ret,
                         truth: s.clone(),
