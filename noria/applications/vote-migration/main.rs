@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::{fs, thread, time};
 use tokio::sync::Barrier;
+use vec1::vec1;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 
@@ -222,7 +223,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                         let id_uniform = rand::thread_rng().gen_range(0, narticles);
                         let id_zipf = zipf.sample(&mut rand::thread_rng());
                         let id: usize = if skewed { id_zipf } else { id_uniform };
-                        vec![DataType::from(id)]
+                        vec1![DataType::from(id)].into()
                     })
                     .collect();
                 if let Ok(rss) = read_new.multi_lookup(ids, false).await {

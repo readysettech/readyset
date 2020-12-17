@@ -6,6 +6,7 @@ use noria::{Builder, DataType, Handle};
 use rand::Rng;
 use std::result;
 use std::time;
+use vec1::vec1;
 
 #[tokio::main]
 async fn main() {
@@ -179,9 +180,9 @@ impl BenchmarkApplication {
         let noria_dur = noria_start.elapsed().as_secs_f64();
 
         let noria_smart_start = time::Instant::now();
-        let noria_lookup: Vec<Vec<DataType>> = employee_ids_to_query
+        let noria_lookup: Vec<_> = employee_ids_to_query
             .iter()
-            .map(|e_id| vec![e_id.clone().into()])
+            .map(|e_id| vec1![e_id.clone().into()].into())
             .collect();
         emp_view
             .multi_lookup(noria_lookup.clone(), true)
@@ -237,30 +238,30 @@ impl BenchmarkApplication {
             CREATE TABLE employees (
                 `emp_no`      INT             NOT NULL,
                 `age`         INT             NOT NULL,
-                `gender`      VARCHAR(1)  NOT NULL,    
+                `gender`      VARCHAR(1)  NOT NULL,
                 PRIMARY KEY (emp_no)
             );
-            
+
             CREATE TABLE dept_manager (
             `emp_no`       INT             NOT NULL,
             `dept_no`      INT             NOT NULL,
             `id`           INT             NOT NULL,
             PRIMARY KEY (id)
             );
-            
+
             CREATE TABLE dept_emp (
                 `emp_no`      INT             NOT NULL,
                 `dept_no`     INT             NOT NULL,
                 `id`           INT             NOT NULL,
                 PRIMARY KEY (id)
             );
-            
+
             CREATE TABLE salaries (
                 `emp_no`      INT             NOT NULL,
                 `salary`      INT             NOT NULL,
                 `id`           INT            NOT NULL,
                 PRIMARY KEY (id)
-            ); 
+            );
 
             QUERY select_employee: SELECT * FROM employees WHERE emp_no=?;
             QUERY employee_dept: SELECT * FROM dept_emp WHERE emp_no=?;
@@ -286,30 +287,30 @@ impl BenchmarkApplication {
             CREATE TABLE employees (
                 `emp_no`      INT             NOT NULL,
                 `age`         INT             NOT NULL,
-                `gender`      VARCHAR(1)  NOT NULL,    
+                `gender`      VARCHAR(1)  NOT NULL,
                 PRIMARY KEY (emp_no)
             );
-            
+
             CREATE TABLE dept_manager (
             `emp_no`       INT             NOT NULL,
             `dept_no`      INT             NOT NULL,
             `id`           INT             NOT NULL,
             PRIMARY KEY (id)
             );
-            
+
             CREATE TABLE dept_emp (
                 `emp_no`      INT             NOT NULL,
                 `dept_no`     INT             NOT NULL,
                 `id`           INT             NOT NULL,
                 PRIMARY KEY (id)
             );
-            
+
             CREATE TABLE salaries (
                 `emp_no`      INT             NOT NULL,
                 `salary`      INT             NOT NULL,
                 `id`           INT            NOT NULL,
                 PRIMARY KEY (id)
-            ); 
+            );
         ",
             )
             .unwrap();

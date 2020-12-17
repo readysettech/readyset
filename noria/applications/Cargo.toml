@@ -37,6 +37,7 @@ vec_map = { version = "0.8.0" }
 zipf = "6"
 zookeeper = "0.5.3"
 mysql = "*"
+vec1 = "1.6.0"
 
 # mssql
 # disabled due to lack of async/await support

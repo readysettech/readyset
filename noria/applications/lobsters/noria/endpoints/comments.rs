@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::UserId;
+use vec1::vec1;
 
 pub(crate) async fn handle<F>(
     c: F,
@@ -20,7 +21,7 @@ where
         .lookup(&[DataType::from(0i32)], true)
         .await?
         .into_iter()
-        .map(|mut row| vec![row.take("id").unwrap()])
+        .map(|mut row| vec1![row.take("id").unwrap()].into())
         .collect();
 
     let mut comments = Vec::new();
@@ -43,7 +44,7 @@ where
     if let Some(uid) = acting_as {
         let keys: Vec<_> = stories
             .iter()
-            .map(|sid| vec![uid.into(), sid.clone()])
+            .map(|sid| vec1![uid.into(), sid.clone()].into())
             .collect();
 
         c.view("comments_3")
@@ -59,7 +60,7 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(users.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     let authors: HashSet<_> = c
@@ -67,7 +68,7 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(stories.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(stories.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?
         .into_iter()
         .map(|row| row.into_iter().next().unwrap().take("user_id").unwrap())
@@ -76,7 +77,7 @@ where
     if let Some(uid) = acting_as {
         let keys: Vec<_> = comments
             .into_iter()
-            .map(|comment| vec![uid.into(), comment])
+            .map(|comment| vec1![uid.into(), comment].into())
             .collect();
 
         c.view("comments_6")
@@ -92,7 +93,7 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(authors.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(authors.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     Ok((c, true))

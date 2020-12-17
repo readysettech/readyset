@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::{StoryId, UserId};
+use vec1::vec1;
 
 pub(crate) async fn handle<F>(
     c: F,
@@ -89,13 +90,13 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(users.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     if let Some(uid) = acting_as {
         let keys: Vec<_> = comments
             .into_iter()
-            .map(|comment| vec![uid.into(), comment])
+            .map(|comment| vec1![uid.into(), comment].into())
             .collect();
 
         c.view("story_7")
@@ -147,7 +148,7 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(tags.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(tags.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     Ok((c, true))

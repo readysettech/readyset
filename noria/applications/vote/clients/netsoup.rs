@@ -6,6 +6,7 @@ use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
 use std::future::Future;
 use std::task::{Context, Poll};
 use tower_service::Service;
+use vec1::vec1;
 
 #[derive(Clone)]
 pub(crate) struct Conn {
@@ -67,7 +68,7 @@ impl Service<ReadRequest> for Conn {
         let arg = req
             .0
             .into_iter()
-            .map(|article_id| vec![(article_id as i32).into()])
+            .map(|article_id| vec1![(article_id as i32).into()].into())
             .collect();
 
         let fut = self.r.as_mut().unwrap().call((arg, true));

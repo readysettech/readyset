@@ -11,12 +11,13 @@ use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
-use noria::DataType;
+use noria::{DataType, KeyComparison};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, thread};
+use vec1::vec1;
 
 const DEFAULT_SETTLE_TIME_MS: u64 = 200;
 const DEFAULT_SHARDING: usize = 2;
@@ -2994,7 +2995,7 @@ async fn between_parametrized() {
 
     let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
     let res = one_param_query
-        .multi_lookup(vec![vec![DataType::from(5)]], true)
+        .multi_lookup(vec![vec1![DataType::from(5)].into()], true)
         .await
         .unwrap();
     let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();
@@ -3002,7 +3003,13 @@ async fn between_parametrized() {
 
     let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
     let res = two_param_query
-        .multi_lookup(vec![vec![DataType::from(3), DataType::from(5)]], true)
+        .multi_lookup(
+            vec![KeyComparison::Equal(vec1![
+                DataType::from(3),
+                DataType::from(5),
+            ])],
+            true,
+        )
         .await
         .unwrap();
     let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();

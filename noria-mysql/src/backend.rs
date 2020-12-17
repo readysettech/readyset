@@ -6,14 +6,18 @@ use msql_srv::{self, *};
 use nom_sql::{
     self, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery, UpdateStatement,
 };
+use vec1::vec1;
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 use std::time;
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::TryInto,
+};
 use tracing::Level;
 
 use crate::convert::ToDataType;
@@ -369,7 +373,7 @@ impl NoriaBackend {
 
         let keys: Vec<_> = use_params
             .into_iter()
-            .map(|l| vec![l.to_datatype()])
+            .map(|l| vec1![l.to_datatype()].into())
             .collect();
 
         // we need the schema for the result writer
@@ -822,7 +826,7 @@ impl NoriaBackend {
     fn do_read<W: io::Write>(
         &mut self,
         qname: &str,
-        keys: Vec<Vec<DataType>>,
+        mut keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
@@ -889,9 +893,15 @@ impl NoriaBackend {
 
         trace!("select::lookup");
         let cols = Vec::from(getter.columns());
-        let bogo = vec![vec![DataType::from(0 as i32)]];
-        let is_bogo = keys.is_empty() || keys.iter().all(|k| k.is_empty());
-        let keys = if is_bogo { bogo } else { keys };
+        let bogo = vec![vec1![DataType::from(0i32)].into()];
+        let use_bogo = keys.is_empty();
+        let keys = if use_bogo {
+            bogo
+        } else {
+            keys.drain(..)
+                .map(|k| k.try_into().expect("Input key cannot be empty"))
+                .collect()
+        };
 
         // if first lookup fails, there's no reason to try the others
         match block_on_buffer(getter.multi_lookup(keys, true)) {
@@ -901,7 +911,7 @@ impl NoriaBackend {
                 for resultsets in d {
                     for r in resultsets {
                         let mut r: Vec<_> = r.into();
-                        if is_bogo {
+                        if use_bogo {
                             // drop bogokey
                             r.pop();
                         }

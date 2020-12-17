@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::UserId;
+use vec1::vec1;
 
 pub(crate) async fn handle<F>(
     c: F,
@@ -32,7 +33,7 @@ where
         .into_iter()
         .map(|mut row| row.take("id").unwrap())
         .collect();
-    let stories_multi: Vec<_> = stories.iter().map(|dt| vec![dt.clone()]).collect();
+    let stories_multi: Vec<_> = stories.iter().map(|dt| vec1![dt.clone()].into()).collect();
 
     let users: HashSet<_> = c
         .view("recent_2")
@@ -77,7 +78,7 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(users.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(users.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     let _ = c
@@ -111,14 +112,14 @@ where
         .await?
         .ready_oneshot()
         .await?
-        .multi_lookup(tags.into_iter().map(|v| vec![v]).collect(), true)
+        .multi_lookup(tags.into_iter().map(|v| vec1![v].into()).collect(), true)
         .await?;
 
     // also load things that we need to highlight
     if let Some(uid) = acting_as {
         let keys: Vec<_> = stories
             .iter()
-            .map(|sid| vec![uid.into(), sid.clone()])
+            .map(|sid| vec1![uid.into(), sid.clone()].into())
             .collect();
 
         c.view("recent_10")
