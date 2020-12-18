@@ -9,6 +9,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
 
+use proptest::prelude::Arbitrary;
+
 const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
 
@@ -806,6 +808,30 @@ impl TableOperation {
 impl From<Vec<DataType>> for TableOperation {
     fn from(other: Vec<DataType>) -> Self {
         TableOperation::Insert(other)
+    }
+}
+
+impl Arbitrary for DataType {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<DataType>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use crate::util::arbitrary::arbitrary_naive_date_time;
+        use proptest::arbitrary::any;
+        use proptest::prelude::*;
+        use DataType::*;
+
+        prop_oneof![
+            Just(None),
+            any::<i32>().prop_map(Int),
+            any::<u32>().prop_map(UnsignedInt),
+            any::<i64>().prop_map(BigInt),
+            any::<u64>().prop_map(UnsignedBigInt),
+            any::<(i64, i32)>().prop_map(|(i, f)| Real(i, f)),
+            any::<String>().prop_map(DataType::from),
+            arbitrary_naive_date_time().prop_map(Timestamp),
+        ]
+        .boxed()
     }
 }
 

@@ -208,6 +208,7 @@ mod controller;
 mod data;
 mod data_serde;
 mod table;
+pub mod util;
 mod view;
 
 #[doc(hidden)]

@@ -45,3 +45,6 @@ rocksdb = {version = "0.14", default-features = false, features = ["lz4"] }
 # local deps
 common = { version = "0.7.0", path = "../common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../../noria" }
+
+[dev-dependencies]
+proptest = "0.10.1"
