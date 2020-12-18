@@ -11,6 +11,7 @@ use futures_util::{
 };
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
+use serde::ser::{SerializeSeq, Serializer};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
@@ -20,7 +21,6 @@ use stream_cancel::Valve;
 use tokio::task_local;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
-use vec1::Vec1;
 
 /// Retry reads every this often.
 const RETRY_TIMEOUT: time::Duration = time::Duration::from_micros(100);
@@ -171,7 +171,6 @@ where
             + std::mem::size_of::<u64>(/* seq.len */),
     );
 
-    use serde::ser::Serializer;
     let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
     ser.collect_seq(it).unwrap();
     SerializedReadReplyBatch(v)
@@ -234,10 +233,24 @@ fn handle_normal_read_query(
                     ret.push(SerializedReadReplyBatch::empty());
                     return None;
                 }
-                let key = key_comparison
-                    .equal()
-                    .expect("inequality lookups not yet implemented");
-                let rs = reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0);
+
+                let rs = if let Some(key) = key_comparison.equal() {
+                    reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0)
+                } else {
+                    let mut rs = SerializedReadReplyBatch::empty();
+                    let mut ser =
+                        bincode::Serializer::new(&mut rs.0, bincode::DefaultOptions::default());
+                    let mut seq = ser.serialize_seq(None).unwrap();
+                    reader
+                        .try_find_range_and(&key_comparison, |r| {
+                            seq.serialize_element(&r.into_iter().collect::<Vec<_>>())
+                                .unwrap()
+                        })
+                        .map(|_|
+                             // TODO(grfn): Here's where we'd handle partial
+                             Some(rs))
+                };
+
                 match rs {
                     Ok(Some(rs)) => {
                         // immediate hit!
@@ -254,7 +267,7 @@ fn handle_normal_read_query(
                         // need to trigger partial replay for this key
                         pending.push(i as usize);
                         ret.push(SerializedReadReplyBatch::empty());
-                        Some(key)
+                        Some(key_comparison)
                     }
                 }
             })
@@ -277,7 +290,11 @@ fn handle_normal_read_query(
         }
 
         // trigger backfills for all the keys we missed on
-        reader.trigger(misses.iter().map(Vec1::as_slice));
+        reader.trigger(misses.iter().map(|kc| {
+            kc.equal()
+                .expect("backfills for range queries not yet supported")
+                .as_slice()
+        }));
 
         Err((misses, ret, pending))
     });
@@ -298,7 +315,15 @@ fn handle_normal_read_query(
                     BlockingRead {
                         tag,
                         target,
-                        keys: keys.drain(..).map(Vec1::into_vec).collect(),
+                        keys: keys
+                            .drain(..)
+                            .map(|kc| {
+                                kc.equal()
+                                    .expect("blockingread not supported for range queries")
+                                    .clone()
+                                    .into_vec()
+                            })
+                            .collect(),
                         pending,
                         read: ret,
                         truth: s.clone(),
