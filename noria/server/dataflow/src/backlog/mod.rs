@@ -358,7 +358,7 @@ impl SingleReadHandle {
     pub fn try_find_range_and<F, T, R>(&self, range: R, mut then: F) -> Result<(Vec<T>, i64), ()>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
-        R: RangeBounds<common::DataType>,
+        R: RangeBounds<Vec<common::DataType>>,
     {
         self.handle
             .meta_get_range_and(range, &mut then)
