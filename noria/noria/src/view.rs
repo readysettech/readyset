@@ -155,9 +155,9 @@ impl KeyComparison {
 
     /// Project a KeyComparison into an optional equality predicate, or return None if it's any
     /// other kind of predicate
-    pub fn equal(self) -> Option<Vec1<DataType>> {
+    pub fn equal(&self) -> Option<&Vec1<DataType>> {
         match self {
-            KeyComparison::Equal(key) => Some(key),
+            KeyComparison::Equal(ref key) => Some(key),
             _ => None,
         }
     }
@@ -211,6 +211,50 @@ impl RangeBounds<Vec1<DataType>> for KeyComparison {
             Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key),
             GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
             LessThan(ref key) => Included(key),
+        }
+    }
+}
+
+impl RangeBounds<Vec<DataType>> for KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key.as_vec()),
+            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
+            GreaterThan(ref key) => Excluded(key.as_vec()),
+        }
+    }
+
+    fn end_bound(&self) -> Bound<&Vec<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key.as_vec()),
+            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
+            LessThan(ref key) => Included(key.as_vec()),
+        }
+    }
+}
+
+impl RangeBounds<Vec<DataType>> for &KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key.as_vec()),
+            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
+            GreaterThan(ref key) => Excluded(key.as_vec()),
+        }
+    }
+
+    fn end_bound(&self) -> Bound<&Vec<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key.as_vec()),
+            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
+            LessThan(ref key) => Included(key.as_vec()),
         }
     }
 }
