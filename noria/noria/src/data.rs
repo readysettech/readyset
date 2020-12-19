@@ -301,10 +301,16 @@ where
 
 impl From<i128> for DataType {
     fn from(s: i128) -> Self {
-        if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
+        if s >= std::i32::MIN.into() && s <= std::i32::MAX.into() {
+            DataType::Int(s as i32)
+        } else if s >= std::u32::MIN.into() && s <= std::u32::MAX.into() {
+            DataType::UnsignedInt(s as u32)
+        } else if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
             DataType::BigInt(s as i64)
+        } else if s >= std::u64::MIN.into() && s <= std::u64::MAX.into() {
+            DataType::UnsignedBigInt(s as u64)
         } else {
-            panic!("can't fit {} in a DataType::BigInt", s)
+            panic!("can't fit {} in a DataType", s)
         }
     }
 }
@@ -455,6 +461,13 @@ impl From<&'_ DataType> for i128 {
 impl From<&'_ DataType> for i64 {
     fn from(data: &'_ DataType) -> Self {
         match *data {
+            DataType::UnsignedBigInt(s) => {
+                if s as i128 >= std::i64::MIN.into() && s as i128 <= std::i64::MAX.into() {
+                    s as i64
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an i64", data)
+                }
+            }
             DataType::BigInt(s) => s,
             DataType::Int(s) => i64::from(s),
             DataType::UnsignedInt(s) => i64::from(s),
@@ -473,7 +486,21 @@ impl From<&'_ DataType> for u64 {
     fn from(data: &'_ DataType) -> Self {
         match *data {
             DataType::UnsignedBigInt(s) => s,
+            DataType::BigInt(s) => {
+                if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
+                    s as u64
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to a u64", data)
+                }
+            }
             DataType::UnsignedInt(s) => u64::from(s),
+            DataType::Int(s) => {
+                if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
+                    s as u64
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to a u64", data)
+                }
+            }
             _ => panic!("attempted to convert a {:?} to a u64", data),
         }
     }
@@ -487,10 +514,30 @@ impl From<DataType> for i32 {
 
 impl From<&'_ DataType> for i32 {
     fn from(data: &'_ DataType) -> Self {
-        if let DataType::Int(s) = *data {
-            s
-        } else {
-            panic!("attempted to convert a {:?} to a i32", data)
+        match *data {
+            DataType::UnsignedBigInt(s) => {
+                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
+                    s as i32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                }
+            }
+            DataType::BigInt(s) => {
+                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
+                    s as i32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                }
+            }
+            DataType::UnsignedInt(s) => {
+                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
+                    s as i32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                }
+            }
+            DataType::Int(s) => s,
+            _ => panic!("attempted to convert a {:?} to a i32", data),
         }
     }
 }
@@ -503,10 +550,30 @@ impl From<DataType> for u32 {
 
 impl From<&'_ DataType> for u32 {
     fn from(data: &'_ DataType) -> Self {
-        if let DataType::UnsignedInt(s) = *data {
-            s
-        } else {
-            panic!("attempted to convert a {:?} to a u32", data)
+        match *data {
+            DataType::UnsignedBigInt(s) => {
+                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
+                    s as u32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                }
+            }
+            DataType::BigInt(s) => {
+                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
+                    s as u32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                }
+            }
+            DataType::UnsignedInt(s) => s,
+            DataType::Int(s) => {
+                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
+                    s as u32
+                } else {
+                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                }
+            }
+            _ => panic!("attempted to convert a {:?} to a i32", data),
         }
     }
 }
@@ -521,7 +588,9 @@ impl From<&'_ DataType> for f64 {
     fn from(data: &'_ DataType) -> Self {
         match *data {
             DataType::Real(i, f) => i as f64 + f64::from(f) / FLOAT_PRECISION,
+            DataType::UnsignedInt(i) => f64::from(i),
             DataType::Int(i) => f64::from(i),
+            DataType::UnsignedBigInt(i) => i as f64,
             DataType::BigInt(i) => i as f64,
             _ => panic!("attempted to convert a {:?} to an f64", data),
         }
@@ -1049,6 +1118,150 @@ mod tests {
         assert_ne!(f(&ulong), f(&ushrt6));
         assert_ne!(f(&ulong), f(&shrt6));
         assert_ne!(f(&ulong), f(&long6));
+    }
+
+    #[test]
+    fn data_type_conversion() {
+        let int_i32_min = DataType::Int(std::i32::MIN);
+        let int_u32_min = DataType::Int(std::u32::MIN as i32);
+        let int_i32_max = DataType::Int(std::i32::MAX);
+        let uint_u32_min = DataType::UnsignedInt(std::u32::MIN);
+        let uint_i32_max = DataType::UnsignedInt(std::i32::MAX as u32);
+        let uint_u32_max = DataType::UnsignedInt(std::u32::MAX);
+        let bigint_i64_min = DataType::BigInt(std::i64::MIN);
+        let bigint_i32_min = DataType::BigInt(std::i32::MIN as i64);
+        let bigint_u32_min = DataType::BigInt(std::u32::MIN as i64);
+        let bigint_i32_max = DataType::BigInt(std::i32::MAX as i64);
+        let bigint_u32_max = DataType::BigInt(std::u32::MAX as i64);
+        let bigint_i64_max = DataType::BigInt(std::i64::MAX);
+        let ubigint_u32_min = DataType::UnsignedBigInt(std::u32::MIN as u64);
+        let ubigint_i32_max = DataType::UnsignedBigInt(std::i32::MAX as u64);
+        let ubigint_u32_max = DataType::UnsignedBigInt(std::u32::MAX as u64);
+        let ubigint_i64_max = DataType::UnsignedBigInt(std::i64::MAX as u64);
+        let ubigint_u64_max = DataType::UnsignedBigInt(std::u64::MAX);
+
+        fn _data_type_conversion_test_eq_i32(d: &DataType) {
+            assert_eq!(i32::from(d) as i128, i128::from(d))
+        }
+        fn _data_type_conversion_test_eq_i32_panic(d: &DataType) {
+            assert!(std::panic::catch_unwind(|| i32::from(d)).is_err())
+        }
+        fn _data_type_conversion_test_eq_i64(d: &DataType) {
+            assert_eq!(i64::from(d) as i128, i128::from(d))
+        }
+        fn _data_type_conversion_test_eq_i64_panic(d: &DataType) {
+            assert!(std::panic::catch_unwind(|| i64::from(d)).is_err())
+        }
+        fn _data_type_conversion_test_eq_u32(d: &DataType) {
+            assert_eq!(u32::from(d) as i128, i128::from(d))
+        }
+        fn _data_type_conversion_test_eq_u32_panic(d: &DataType) {
+            assert!(std::panic::catch_unwind(|| u32::from(d)).is_err())
+        }
+        fn _data_type_conversion_test_eq_u64(d: &DataType) {
+            assert_eq!(u64::from(d) as i128, i128::from(d))
+        }
+        fn _data_type_conversion_test_eq_u64_panic(d: &DataType) {
+            assert!(std::panic::catch_unwind(|| u64::from(d)).is_err())
+        }
+        fn _data_type_conversion_test_eq_i128(d: &DataType) {
+            assert_eq!(i128::from(d) as i128, i128::from(d))
+        }
+        fn _data_type_conversion_test_eq_i128_panic(d: &DataType) {
+            assert!(std::panic::catch_unwind(|| i128::from(d)).is_err())
+        }
+
+        _data_type_conversion_test_eq_i32_panic(&bigint_i64_min);
+        _data_type_conversion_test_eq_u32_panic(&bigint_i64_min);
+        _data_type_conversion_test_eq_u64_panic(&bigint_i64_min);
+        _data_type_conversion_test_eq_i64(&bigint_i64_min);
+        _data_type_conversion_test_eq_i128(&bigint_i64_min);
+
+        _data_type_conversion_test_eq_u32_panic(&int_i32_min);
+        _data_type_conversion_test_eq_u64_panic(&int_i32_min);
+        _data_type_conversion_test_eq_i32(&int_i32_min);
+        _data_type_conversion_test_eq_i64(&int_i32_min);
+        _data_type_conversion_test_eq_i128(&int_i32_min);
+        _data_type_conversion_test_eq_u32_panic(&bigint_i32_min);
+        _data_type_conversion_test_eq_u64_panic(&bigint_i32_min);
+        _data_type_conversion_test_eq_i32(&bigint_i32_min);
+        _data_type_conversion_test_eq_i64(&bigint_i32_min);
+        _data_type_conversion_test_eq_i128(&bigint_i32_min);
+
+        _data_type_conversion_test_eq_i32(&int_u32_min);
+        _data_type_conversion_test_eq_i64(&int_u32_min);
+        _data_type_conversion_test_eq_u32(&int_u32_min);
+        _data_type_conversion_test_eq_u64(&int_u32_min);
+        _data_type_conversion_test_eq_i128(&int_u32_min);
+        _data_type_conversion_test_eq_i32(&uint_u32_min);
+        _data_type_conversion_test_eq_i64(&uint_u32_min);
+        _data_type_conversion_test_eq_u32(&uint_u32_min);
+        _data_type_conversion_test_eq_u64(&uint_u32_min);
+        _data_type_conversion_test_eq_i128(&uint_u32_min);
+        _data_type_conversion_test_eq_i32(&bigint_u32_min);
+        _data_type_conversion_test_eq_i64(&bigint_u32_min);
+        _data_type_conversion_test_eq_u32(&bigint_u32_min);
+        _data_type_conversion_test_eq_u64(&bigint_u32_min);
+        _data_type_conversion_test_eq_i128(&bigint_u32_min);
+        _data_type_conversion_test_eq_i32(&ubigint_u32_min);
+        _data_type_conversion_test_eq_i64(&ubigint_u32_min);
+        _data_type_conversion_test_eq_u32(&ubigint_u32_min);
+        _data_type_conversion_test_eq_u64(&ubigint_u32_min);
+        _data_type_conversion_test_eq_i128(&ubigint_u32_min);
+
+        _data_type_conversion_test_eq_i32(&int_i32_max);
+        _data_type_conversion_test_eq_i64(&int_i32_max);
+        _data_type_conversion_test_eq_u32(&int_i32_max);
+        _data_type_conversion_test_eq_u64(&int_i32_max);
+        _data_type_conversion_test_eq_i128(&int_i32_max);
+        _data_type_conversion_test_eq_i32(&uint_i32_max);
+        _data_type_conversion_test_eq_i64(&uint_i32_max);
+        _data_type_conversion_test_eq_u32(&uint_i32_max);
+        _data_type_conversion_test_eq_u64(&uint_i32_max);
+        _data_type_conversion_test_eq_i128(&uint_i32_max);
+        _data_type_conversion_test_eq_i32(&bigint_i32_max);
+        _data_type_conversion_test_eq_i64(&bigint_i32_max);
+        _data_type_conversion_test_eq_u32(&bigint_i32_max);
+        _data_type_conversion_test_eq_u64(&bigint_i32_max);
+        _data_type_conversion_test_eq_i128(&bigint_i32_max);
+        _data_type_conversion_test_eq_i32(&ubigint_i32_max);
+        _data_type_conversion_test_eq_i64(&ubigint_i32_max);
+        _data_type_conversion_test_eq_u32(&ubigint_i32_max);
+        _data_type_conversion_test_eq_u64(&ubigint_i32_max);
+        _data_type_conversion_test_eq_i128(&ubigint_i32_max);
+
+        _data_type_conversion_test_eq_i32_panic(&uint_u32_max);
+        _data_type_conversion_test_eq_i64(&uint_u32_max);
+        _data_type_conversion_test_eq_u32(&uint_u32_max);
+        _data_type_conversion_test_eq_u64(&uint_u32_max);
+        _data_type_conversion_test_eq_i128(&uint_u32_max);
+        _data_type_conversion_test_eq_i32_panic(&bigint_u32_max);
+        _data_type_conversion_test_eq_i64(&bigint_u32_max);
+        _data_type_conversion_test_eq_u32(&bigint_u32_max);
+        _data_type_conversion_test_eq_u64(&bigint_u32_max);
+        _data_type_conversion_test_eq_i128(&bigint_u32_max);
+        _data_type_conversion_test_eq_i32_panic(&ubigint_u32_max);
+        _data_type_conversion_test_eq_i64(&ubigint_u32_max);
+        _data_type_conversion_test_eq_u32(&ubigint_u32_max);
+        _data_type_conversion_test_eq_u64(&ubigint_u32_max);
+        _data_type_conversion_test_eq_i128(&ubigint_u32_max);
+
+        _data_type_conversion_test_eq_i32_panic(&bigint_i64_max);
+        _data_type_conversion_test_eq_u32_panic(&bigint_i64_max);
+        _data_type_conversion_test_eq_i64(&bigint_i64_max);
+        _data_type_conversion_test_eq_u64(&bigint_i64_max);
+        _data_type_conversion_test_eq_i128(&bigint_i64_max);
+        _data_type_conversion_test_eq_i32_panic(&ubigint_i64_max);
+        _data_type_conversion_test_eq_u32_panic(&ubigint_i64_max);
+        _data_type_conversion_test_eq_i64(&ubigint_i64_max);
+        _data_type_conversion_test_eq_u64(&ubigint_i64_max);
+        _data_type_conversion_test_eq_i128(&ubigint_i64_max);
+
+        _data_type_conversion_test_eq_i32_panic(&ubigint_u64_max);
+        _data_type_conversion_test_eq_u32_panic(&ubigint_u64_max);
+        _data_type_conversion_test_eq_i64_panic(&ubigint_u64_max);
+        _data_type_conversion_test_eq_u64(&ubigint_u64_max);
+        _data_type_conversion_test_eq_i128(&ubigint_u64_max);
     }
 
     #[test]
