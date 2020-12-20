@@ -623,7 +623,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     .edges
                     .entry((left_table.clone(), right_table.clone()))
                     .or_insert_with(|| match jc.operator {
-                        JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
+                        JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
+                            QueryGraphEdge::LeftJoin(vec![join_pred])
+                        }
                         JoinOperator::Join | JoinOperator::InnerJoin => {
                             QueryGraphEdge::Join(vec![join_pred])
                         }

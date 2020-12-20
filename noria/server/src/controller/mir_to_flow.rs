@@ -687,7 +687,7 @@ fn make_join_node(
         .unwrap_or_else(|| {
             panic!(
                 "missing right-side join column {:#?} in {:#?}",
-                on_left.first().unwrap(),
+                on_right.first().unwrap(),
                 right.borrow().columns
             )
         });
