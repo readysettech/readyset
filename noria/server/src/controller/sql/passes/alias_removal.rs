@@ -1,5 +1,6 @@
 use nom_sql::{
-    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
+    CaseWhenExpression, Column, ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree,
+    FieldDefinitionExpression, FunctionArgument, FunctionArguments, FunctionExpression,
     JoinConstraint, JoinRightSide, SqlQuery,
 };
 
@@ -16,20 +17,7 @@ fn rewrite_conditional(
     ce: ConditionExpression,
 ) -> ConditionExpression {
     let translate_column = |f: Column| {
-        let new_f = match f.table {
-            None => f,
-            Some(t) => Column {
-                name: f.name,
-                alias: f.alias,
-                table: if table_aliases.contains_key(&t) {
-                    Some(table_aliases[&t].clone())
-                } else {
-                    Some(t)
-                },
-                function: None,
-            },
-        };
-        ConditionExpression::Base(ConditionBase::Field(new_f))
+        ConditionExpression::Base(ConditionBase::Field(rewrite_column(table_aliases, f)))
     };
 
     let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
@@ -63,6 +51,118 @@ fn rewrite_conditional(
             ConditionExpression::LogicalOp(rewritten_ct)
         }
         x => x,
+    }
+}
+
+fn rewrite_column(table_aliases: &HashMap<String, String>, col: Column) -> Column {
+    let function = col
+        .function
+        .map(|f| Box::new(rewrite_function_expression(table_aliases, *f)));
+    let table = col.table.map(|t| {
+        if table_aliases.contains_key(&t) {
+            table_aliases[&t].clone()
+        } else {
+            t.clone()
+        }
+    });
+    Column {
+        name: col.name,
+        alias: col.alias,
+        table: table,
+        function: function,
+    }
+}
+
+fn rewrite_column_or_literal(
+    table_aliases: &HashMap<String, String>,
+    col: ColumnOrLiteral,
+) -> ColumnOrLiteral {
+    match col {
+        ColumnOrLiteral::Column(col) => ColumnOrLiteral::Column(rewrite_column(table_aliases, col)),
+        ColumnOrLiteral::Literal(lit) => ColumnOrLiteral::Literal(lit),
+    }
+}
+
+fn rewrite_case_when_expression(
+    table_aliases: &HashMap<String, String>,
+    cwe: CaseWhenExpression,
+) -> CaseWhenExpression {
+    CaseWhenExpression {
+        condition: rewrite_conditional(table_aliases, cwe.condition),
+        then_expr: rewrite_column_or_literal(table_aliases, cwe.then_expr),
+        else_expr: cwe
+            .else_expr
+            .map(|e| rewrite_column_or_literal(table_aliases, e)),
+    }
+}
+
+fn rewrite_function_argument(
+    table_aliases: &HashMap<String, String>,
+    arg: FunctionArgument,
+) -> FunctionArgument {
+    match arg {
+        FunctionArgument::Column(col) => {
+            FunctionArgument::Column(rewrite_column(table_aliases, col))
+        }
+        FunctionArgument::Conditional(cwe) => {
+            FunctionArgument::Conditional(rewrite_case_when_expression(table_aliases, cwe))
+        }
+    }
+}
+
+fn rewrite_function_expression(
+    table_aliases: &HashMap<String, String>,
+    function: FunctionExpression,
+) -> FunctionExpression {
+    match function {
+        FunctionExpression::Avg(arg, b) => {
+            FunctionExpression::Avg(rewrite_function_argument(table_aliases, arg), b)
+        }
+        FunctionExpression::Count(arg, b) => {
+            FunctionExpression::Count(rewrite_function_argument(table_aliases, arg), b)
+        }
+        FunctionExpression::CountStar => FunctionExpression::CountStar,
+        FunctionExpression::Sum(arg, b) => {
+            FunctionExpression::Sum(rewrite_function_argument(table_aliases, arg), b)
+        }
+        FunctionExpression::Max(arg) => {
+            FunctionExpression::Max(rewrite_function_argument(table_aliases, arg))
+        }
+        FunctionExpression::Min(arg) => {
+            FunctionExpression::Min(rewrite_function_argument(table_aliases, arg))
+        }
+        FunctionExpression::GroupConcat(arg, s) => {
+            FunctionExpression::GroupConcat(rewrite_function_argument(table_aliases, arg), s)
+        }
+        FunctionExpression::Generic(s, args) => FunctionExpression::Generic(
+            s,
+            FunctionArguments {
+                arguments: args
+                    .arguments
+                    .into_iter()
+                    .map(move |arg| rewrite_function_argument(table_aliases, arg))
+                    .collect(),
+            },
+        ),
+    }
+}
+
+fn rewrite_field(
+    table_aliases: &HashMap<String, String>,
+    field: FieldDefinitionExpression,
+) -> FieldDefinitionExpression {
+    match field {
+        FieldDefinitionExpression::Col(col) => {
+            FieldDefinitionExpression::Col(rewrite_column(table_aliases, col))
+        }
+        FieldDefinitionExpression::AllInTable(t) => {
+            if table_aliases.contains_key(&t) {
+                FieldDefinitionExpression::AllInTable(table_aliases[&t].clone())
+            } else {
+                FieldDefinitionExpression::AllInTable(t)
+            }
+        }
+        f => f,
     }
 }
 
@@ -129,29 +229,7 @@ impl AliasRemoval for SqlQuery {
                 sq.fields = sq
                     .fields
                     .into_iter()
-                    .map(|field| match field {
-                        // WTF rustfmt?
-                        FieldDefinitionExpression::Col(mut col) => {
-                            if col.table.is_some() {
-                                let t = col.table.take().unwrap();
-                                col.table = if table_aliases.contains_key(&t) {
-                                    Some(table_aliases[&t].clone())
-                                } else {
-                                    Some(t.clone())
-                                };
-                                col.function = None;
-                            }
-                            FieldDefinitionExpression::Col(col)
-                        }
-                        FieldDefinitionExpression::AllInTable(t) => {
-                            if table_aliases.contains_key(&t) {
-                                FieldDefinitionExpression::AllInTable(table_aliases[&t].clone())
-                            } else {
-                                FieldDefinitionExpression::AllInTable(t)
-                            }
-                        }
-                        f => f,
-                    })
+                    .map(|field| rewrite_field(&table_aliases, field))
                     .collect();
                 // Remove them from join clauses
                 sq.join = sq
@@ -235,6 +313,84 @@ mod tests {
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
                         operator: BinaryOperator::Equal,
                         left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
+                        right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                            ItemPlaceholder::QuestionMark
+                        ))),
+                    }))
+                );
+            }
+            // if we get anything other than a selection query back, something really weird is up
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn it_removes_nested_aliases() {
+        use nom_sql::{
+            ConditionBase, ConditionExpression, ConditionTree, FunctionArgument,
+            FunctionExpression, Operator,
+        };
+
+        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
+        let col_small = Column {
+            name: "count(t.id)".into(),
+            table: None,
+            alias: None,
+            function: Some(Box::new(FunctionExpression::Count(
+                FunctionArgument::Column(Column {
+                    name: "id".into(),
+                    table: Some("t".into()),
+                    alias: None,
+                    function: None,
+                }),
+                true,
+            ))),
+        };
+        let col_full = Column {
+            name: "count(t.id)".into(),
+            table: None,
+            alias: None,
+            function: Some(Box::new(FunctionExpression::Count(
+                FunctionArgument::Column(Column {
+                    name: "id".into(),
+                    table: Some("PaperTag".into()),
+                    alias: None,
+                    function: None,
+                }),
+                true,
+            ))),
+        };
+        let q = SelectStatement {
+            tables: vec![Table {
+                name: String::from("PaperTag"),
+                alias: Some(String::from("t")),
+                schema: None,
+            }],
+            fields: vec![FieldDefinitionExpression::Col(col_small.clone())],
+            where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::Equal,
+                left: wrap(ConditionBase::Field(col_small.clone())),
+                right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                ))),
+            })),
+            ..Default::default()
+        };
+        let mut context = HashMap::new();
+        context.insert(String::from("id"), "global".into());
+        let res = SqlQuery::Select(q).expand_table_aliases(&context);
+        // Table alias removed in field list
+        match res {
+            SqlQuery::Select(tq) => {
+                assert_eq!(
+                    tq.fields,
+                    vec![FieldDefinitionExpression::Col(col_full.clone())]
+                );
+                assert_eq!(
+                    tq.where_clause,
+                    Some(ConditionExpression::ComparisonOp(ConditionTree {
+                        operator: Operator::Equal,
+                        left: wrap(ConditionBase::Field(col_full.clone())),
                         right: wrap(ConditionBase::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),
