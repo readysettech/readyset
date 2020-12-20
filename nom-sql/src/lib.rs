@@ -13,7 +13,8 @@ pub use self::arithmetic::{
 };
 pub use self::case::{CaseWhenExpression, ColumnOrLiteral};
 pub use self::column::{
-    Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionExpression,
+    Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionArguments,
+    FunctionExpression,
 };
 pub use self::common::{
     BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
