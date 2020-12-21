@@ -9,6 +9,10 @@ volumes:
     external: true
   msql-srv-target:
     external: true
+  evbtree-target:
+    external: true
+  unbounded-interval-tree-target:
+    external: true
   cargo-registry:
     external: true
 
@@ -27,6 +31,8 @@ services:
     - 'noria-mysql-target:/workdir/noria-mysql/target'
     - 'nom-sql-target:/workdir/nom-sql/target'
     - 'msql-srv-target:/workdir/msql-srv/target'
+    - 'evbtree-target:/workdir/evbtree/target'
+    - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
     - 'cargo-registry:/usr/local/cargo/registry'
     - '../..:/workdir'
     environment:
