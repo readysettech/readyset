@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn memory_state_process_records() {
         let mut state = MemoryState::default();
-        let mut records: Records = vec![
+        let records: Records = vec![
             (vec![1.into(), "A".into()], true),
             (vec![2.into(), "B".into()], true),
             (vec![3.into(), "C".into()], true),
