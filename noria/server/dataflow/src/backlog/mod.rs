@@ -1,10 +1,10 @@
+pub use self::multir::LookupError;
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
 use evbtree::refs::Values;
 use rand::prelude::*;
 use std::borrow::Cow;
-use std::ops::Bound;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -16,6 +16,12 @@ pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle)
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
+///
+/// # Arguments
+///
+/// * `cols` - the number of columns in this table
+/// * `key` - the column indices for the lookup key for this table
+/// * `trigger` - function to call to trigger an upquery and replay
 pub(crate) fn new_partial<F>(
     cols: usize,
     key: &[usize],
@@ -309,14 +315,6 @@ impl SizeOf for WriteHandle {
     }
 }
 
-/// Signify which intervals are missing in a materialization in response to a range lookup
-#[derive(PartialEq, Debug)]
-pub enum RangeLookupMiss {
-    Single(Vec<(Bound<DataType>, Bound<DataType>)>),
-    Double(Vec<(Bound<(DataType, DataType)>, Bound<(DataType, DataType)>)>),
-    Many(Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>),
-}
-
 /// Handle to get the state of a single shard of a reader.
 #[derive(Clone)]
 pub struct SingleReadHandle {
@@ -360,19 +358,16 @@ impl SingleReadHandle {
     /// swapped in by the writer.
     ///
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
-    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(Option<T>, i64), ()>
+    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(T, i64), LookupError>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
     {
-        self.handle
-            .meta_get_and(key, &mut then)
-            .ok_or(())
-            .map(|(mut records, meta)| {
-                if records.is_none() && self.trigger.is_none() {
-                    records = Some(then(&Values::default()));
-                }
-                (records, meta)
-            })
+        match self.handle.meta_get_and(key, &mut then) {
+            Err(e) if e.is_miss() && self.trigger.is_none() => {
+                Ok((then(&Values::default()), e.meta().unwrap()))
+            }
+            r => r,
+        }
     }
 
     /// Look up the entries whose keys are in `range`, pass each to `then`, and return them
@@ -380,19 +375,17 @@ impl SingleReadHandle {
         &self,
         range: R,
         mut then: F,
-    ) -> Option<Result<(Vec<T>, i64), RangeLookupMiss>>
+    ) -> Result<(Vec<T>, i64), LookupError>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
         R: RangeBounds<Vec<common::DataType>>,
     {
-        self.handle.meta_get_range_and(range, &mut then).map(|res| {
-            res.map(|(mut records, meta)| {
-                if records.is_empty() && self.trigger.is_none() {
-                    records = vec![then(&Values::default())];
-                }
-                (records, meta)
-            })
-        })
+        match self.handle.meta_get_range_and(range, &mut then) {
+            Err(e) if e.is_miss() && self.trigger.is_none() => {
+                Ok((vec![then(&Values::default())], e.meta().unwrap()))
+            }
+            r => r,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -411,6 +404,7 @@ impl SingleReadHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use LookupError::*;
 
     #[test]
     fn store_works() {
@@ -419,29 +413,29 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
 
         // initially, store is uninitialized
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(()));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(NotReady));
 
         w.swap();
 
         // after first swap, it is empty, but ready
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((0, -1)));
 
         w.add(vec![Record::Positive(a.clone())]);
 
         // it is empty even after an add (we haven't swapped yet)
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((Some(0), -1)));
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((0, -1)));
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == a[0] && r[1] == a[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
@@ -463,10 +457,9 @@ mod tests {
             let i = &[i.into()];
             loop {
                 match r.try_find_and(i, |rs| rs.len()) {
-                    Ok((None, _)) => continue,
-                    Ok((Some(1), _)) => break,
-                    Ok((Some(i), _)) => assert_ne!(i, 1),
-                    Err(()) => continue,
+                    Ok((1, _)) => break,
+                    Ok((i, _)) => assert_ne!(i, 1),
+                    Err(_) => continue,
                 }
             }
         }
@@ -484,14 +477,14 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(b.clone())]);
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == a[0] && r[1] == a[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
@@ -506,21 +499,21 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(c.clone())]);
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 2);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == a[0] && r[1] == a[1]))
-            .unwrap()
-            .0
-            .unwrap());
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+                .unwrap()
+                .0
+        );
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == b[0] && r[1] == b[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
@@ -534,14 +527,14 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == b[0] && r[1] == b[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
@@ -556,14 +549,14 @@ mod tests {
         w.add(vec![Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == b[0] && r[1] == b[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
@@ -579,21 +572,21 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(2));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 2);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == a[0] && r[1] == a[1]))
-            .unwrap()
-            .0
-            .unwrap());
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+                .unwrap()
+                .0
+        );
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == b[0] && r[1] == b[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
 
         w.add(vec![
             Record::Negative(a.clone()),
@@ -602,13 +595,25 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, Some(1));
-        assert!(r
-            .try_find_and(&a[0..1], |rs| rs
+        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
+        assert!(
+            r.try_find_and(&a[0..1], |rs| rs
                 .iter()
                 .any(|r| r[0] == b[0] && r[1] == b[1]))
-            .unwrap()
-            .0
-            .unwrap());
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn find_missing_partial() {
+        let (r, mut w) = new_partial(1, &[0], |_| true);
+        w.swap();
+
+        // Point queries
+        assert_eq!(
+            r.try_find_and(&[1.into()], |rs| rs.len()),
+            Err(LookupError::MissPointSingle(1.into(), -1))
+        );
     }
 }

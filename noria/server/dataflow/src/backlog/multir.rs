@@ -1,9 +1,9 @@
-use crate::backlog::RangeLookupMiss;
 use ahash::RandomState;
 use common::DataType;
 use evbtree::{self, refs::Values};
 use noria::util::BoundFunctor;
-use std::{mem, ops::RangeBounds};
+use std::mem;
+use std::ops::{Bound, RangeBounds};
 use unbounded_interval_tree::IntervalTree;
 
 #[derive(Clone, Debug)]
@@ -38,44 +38,82 @@ pub(super) unsafe fn slice_to_2_tuple<T>(slice: &[T]) -> (T, T) {
     core::ptr::read(&res as *const (mem::MaybeUninit<T>, mem::MaybeUninit<T>) as *const (T, T))
 }
 
+/// An error that could occur during an equality or range lookup to a reader node.
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Hash)]
+pub enum LookupError {
+    /// The map is not ready to accept queries
+    NotReady,
+
+    /// A single-keyed point query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissPointSingle(DataType, i64),
+
+    /// A double-keyed point query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissPointDouble((DataType, DataType), i64),
+
+    /// A many-keyed point query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissPointMany(Vec<DataType>, i64),
+
+    /// A single-keyed range query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissRangeSingle(Vec<(Bound<DataType>, Bound<DataType>)>, i64),
+
+    /// A double-keyed range query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissRangeDouble(
+        Vec<(Bound<(DataType, DataType)>, Bound<(DataType, DataType)>)>,
+        i64,
+    ),
+
+    /// A many-keyed range query missed
+    ///
+    /// Second field contains the metadata of the handle
+    MissRangeMany(Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>, i64),
+}
+
+impl LookupError {
+    /// Returns `true` if this `LookupError` represents a miss on a key, `false` if it represents a
+    /// not-ready map
+    pub fn is_miss(&self) -> bool {
+        matches!(self,
+              Self::MissPointSingle(_, _)
+            | Self::MissPointDouble(_, _)
+            | Self::MissPointMany(_, _)
+            | Self::MissRangeSingle(_, _)
+            | Self::MissRangeDouble(_, _)
+            | Self::MissRangeMany(_, _))
+    }
+
+    /// Returns the metadata referenced in this LookupError, if any
+    pub fn meta(&self) -> Option<i64> {
+        match self {
+            LookupError::MissPointSingle(_, meta)
+            | LookupError::MissPointDouble(_, meta)
+            | LookupError::MissPointMany(_, meta)
+            | LookupError::MissRangeSingle(_, meta)
+            | LookupError::MissRangeDouble(_, meta)
+            | LookupError::MissRangeMany(_, meta) => Some(*meta),
+            _ => None,
+        }
+    }
+}
+
+/// The result of an equality or range lookup to the reader node.
+pub(crate) type LookupResult<T> = Result<(T, i64), LookupError>;
+
 impl Handle {
     pub(super) fn len(&self) -> usize {
         match *self {
             Handle::Single(ref h, _) => h.len(),
             Handle::Double(ref h, _) => h.len(),
             Handle::Many(ref h, _) => h.len(),
-        }
-    }
-
-    pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> Option<(Option<T>, i64)>
-    where
-        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> T,
-    {
-        match *self {
-            Handle::Single(ref h, _) => {
-                assert_eq!(key.len(), 1);
-                let map = h.enter()?;
-                let v = map.get(&key[0]).map(then);
-                let m = *map.meta();
-                Some((v, m))
-            }
-            Handle::Double(ref h, _) => {
-                assert_eq!(key.len(), 2);
-                unsafe {
-                    let tuple_key = slice_to_2_tuple(&key);
-                    let map = h.enter()?;
-                    let v = map.get(&tuple_key).map(then);
-                    mem::forget(tuple_key);
-                    let m = *map.meta();
-                    Some((v, m))
-                }
-            }
-            Handle::Many(ref h, _) => {
-                let map = h.enter()?;
-                let v = map.get(key).map(then);
-                let m = *map.meta();
-                Some((v, m))
-            }
         }
     }
 
@@ -87,6 +125,42 @@ impl Handle {
         }
     }
 
+    pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
+    where
+        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> T,
+    {
+        use LookupError::*;
+
+        match *self {
+            Handle::Single(ref h, _) => {
+                assert_eq!(key.len(), 1);
+                let map = h.enter().ok_or(NotReady)?;
+                let m = *map.meta();
+                let v = map.get(&key[0]).ok_or(MissPointSingle(key[0].clone(), m))?;
+                Ok((then(v), m))
+            }
+            Handle::Double(ref h, _) => {
+                assert_eq!(key.len(), 2);
+                unsafe {
+                    let tuple_key = slice_to_2_tuple(&key);
+                    let map = h.enter().ok_or(NotReady)?;
+                    let m = *map.meta();
+                    let v = map
+                        .get(&tuple_key)
+                        .ok_or(MissPointDouble(tuple_key.clone(), m))?;
+                    mem::forget(tuple_key);
+                    Ok((then(v), m))
+                }
+            }
+            Handle::Many(ref h, _) => {
+                let map = h.enter().ok_or(NotReady)?;
+                let m = *map.meta();
+                let v = map.get(key).ok_or(MissPointMany(key.into(), m))?;
+                Ok((then(v), m))
+            }
+        }
+    }
+
     /// Retrieve the values corresponding to the given range of keys, apply `then` to them, and
     /// return the results, along with the metadata
     ///
@@ -94,17 +168,17 @@ impl Handle {
     ///
     /// Panics if the vectors in the bounds of `range` are a different size than the length of our
     /// keys.
-    pub(super) fn meta_get_range_and<F, T, R>(
-        &self,
-        range: R,
-        mut then: F,
-    ) -> Option<Result<(Vec<T>, i64), RangeLookupMiss>>
+    pub(super) fn meta_get_range_and<F, T, R>(&self, range: R, mut then: F) -> LookupResult<Vec<T>>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
         R: RangeBounds<Vec<DataType>>,
     {
+        use LookupError::*;
+
         match *self {
             Handle::Single(ref h, ref t) => {
+                let map = h.enter().ok_or(NotReady)?;
+                let meta = *map.meta();
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
@@ -116,17 +190,14 @@ impl Handle {
                 let range = (start_bound.cloned(), end_bound.cloned());
                 let diff = t.get_interval_difference(range.clone());
                 if diff.is_empty() {
-                    let map = h.enter()?;
-                    let meta = h.meta()?;
-                    Some(Ok((
-                        map.range(range).map(|(_, row)| then(row)).collect(),
-                        *meta,
-                    )))
+                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
                 } else {
-                    Some(Err(RangeLookupMiss::Single(diff)))
+                    Err(MissRangeSingle(diff, meta))
                 }
             }
             Handle::Double(ref h, ref t) => {
+                let map = h.enter().ok_or(NotReady)?;
+                let meta = *map.meta();
                 let start_bound = range.start_bound().map(|r| {
                     assert_eq!(r.len(), 2);
                     (r[0].clone(), r[1].clone())
@@ -138,28 +209,20 @@ impl Handle {
                 let range = (start_bound, end_bound);
                 let diff = t.get_interval_difference(range.clone());
                 if diff.is_empty() {
-                    let map = h.enter()?;
-                    let meta = h.meta()?;
-                    Some(Ok((
-                        map.range(range).map(|(_, row)| then(row)).collect(),
-                        *meta,
-                    )))
+                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
                 } else {
-                    Some(Err(RangeLookupMiss::Double(diff)))
+                    Err(MissRangeDouble(diff, meta))
                 }
             }
             Handle::Many(ref h, ref t) => {
+                let map = h.enter().ok_or(NotReady)?;
+                let meta = *map.meta();
                 let range = (range.start_bound().cloned(), range.end_bound().cloned());
                 let diff = t.get_interval_difference(range.clone());
                 if diff.is_empty() {
-                    let map = h.enter()?;
-                    let meta = h.meta()?;
-                    Some(Ok((
-                        map.range(range).map(|(_, row)| then(row)).collect(),
-                        *meta,
-                    )))
+                    Ok((map.range(range).map(|(_, row)| then(row)).collect(), meta))
                 } else {
-                    Some(Err(RangeLookupMiss::Many(diff)))
+                    Err(MissRangeMany(diff, meta))
                 }
             }
         }
@@ -168,8 +231,6 @@ impl Handle {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound;
-
     use super::*;
     use evbtree::handles::WriteHandle;
     use proptest::prelude::*;
@@ -236,7 +297,6 @@ mod tests {
             .meta_get_range_and(vec![2.into()]..=vec![3.into()], |vals| {
                 vals.into_iter().cloned().collect::<Vec<_>>()
             })
-            .unwrap()
             .unwrap();
         assert_eq!(
             res,
@@ -266,7 +326,6 @@ mod tests {
                 vec![2.into(), 2.into()]..=vec![3.into(), 3.into()],
                 |vals| vals.into_iter().cloned().collect::<Vec<_>>(),
             )
-            .unwrap()
             .unwrap();
         assert_eq!(
             res,

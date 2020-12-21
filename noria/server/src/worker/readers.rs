@@ -237,30 +237,27 @@ fn handle_normal_read_query(
                 let rs = if let Some(key) = key_comparison.equal() {
                     reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0)
                 } else {
-                    match reader.try_find_range_and(&key_comparison, |r| {
-                        r.into_iter().cloned().collect::<Vec<_>>()
-                    }) {
-                        Some(Ok((rs, _))) => Ok(Some(serialize(
-                            &rs.into_iter().flatten().collect::<Vec<_>>(),
-                        ))),
-                        Some(Err(_)) => Ok(None),
-                        None => Err(()),
-                    }
+                    reader
+                        .try_find_range_and(&key_comparison, |r| {
+                            r.into_iter().cloned().collect::<Vec<_>>()
+                        })
+                        .map(|(rs, _)| serialize(&rs.into_iter().flatten().collect::<Vec<_>>()))
                 };
 
+                use dataflow::LookupError::*;
                 match rs {
-                    Ok(Some(rs)) => {
+                    Ok(rs) => {
                         // immediate hit!
                         ret.push(rs);
                         None
                     }
-                    Err(()) => {
+                    Err(NotReady) => {
                         // map not yet ready
                         ready = false;
                         ret.push(SerializedReadReplyBatch::empty());
                         None
                     }
-                    Ok(None) => {
+                    Err(_) => {
                         // need to trigger partial replay for this key
                         pending.push(i as usize);
                         ret.push(SerializedReadReplyBatch::empty());
@@ -441,20 +438,22 @@ impl BlockingRead {
             while let Some(read_i) = self.pending.pop() {
                 let key = self.keys.pop().expect("pending.len() == keys.len()");
                 match reader.try_find_and(&key, |rs| serialize(rs)).map(|r| r.0) {
-                    Ok(Some(rs)) => {
+                    Ok(rs) => {
                         read[read_i] = rs;
                     }
-                    Err(()) => {
-                        // map has been deleted, so server is shutting down
-                        self.pending.clear();
-                        self.keys.clear();
-                        return Err(());
-                    }
-                    Ok(None) => {
-                        // we still missed! restore key + pending
-                        self.pending.push(read_i);
-                        self.keys.push(key);
-                        break;
+                    Err(e) => {
+                        if e.is_miss() {
+                            // TODO(grfn): Handle ranged misses
+                            // we still missed! restore key + pending
+                            self.pending.push(read_i);
+                            self.keys.push(key);
+                            break;
+                        } else {
+                            // map has been deleted, so server is shutting down
+                            self.pending.clear();
+                            self.keys.clear();
+                            return Err(());
+                        }
                     }
                 }
             }
