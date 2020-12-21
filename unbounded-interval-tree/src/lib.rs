@@ -25,7 +25,7 @@ pub struct IntervalTree<Q: Ord + Clone> {
 
 /// An inorder interator through the interval tree.
 pub struct IntervalTreeIter<'a, Q: Ord + Clone> {
-    to_visit: Vec<&'a Box<Node<Q>>>,
+    to_visit: Vec<&'a Node<Q>>,
     curr: &'a Option<Box<Node<Q>>>,
 }
 
@@ -76,7 +76,7 @@ where
     /// assert_eq!(iter.next(), Some(&(Included(20), Included(30))));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter<'a>(&'a self) -> IntervalTreeIter<'a, Q> {
+    pub fn iter(&self) -> IntervalTreeIter<'_, Q> {
         IntervalTreeIter {
             to_visit: vec![],
             curr: &self.root,
@@ -170,7 +170,7 @@ where
     /// assert!(!str_tree.contains_point(&"Noria"));
     /// ```
     pub fn contains_point(&self, q: Q) -> bool {
-        self.contains_interval((Included(q.clone()), Included(q.clone())))
+        self.contains_interval((Included(q.clone()), Included(q)))
     }
 
     /// An alternative "stabbing query": returns whether or not an interval `q`
@@ -506,9 +506,7 @@ where
         use rand::random;
 
         // If interval tree is empty, just return None.
-        if self.root.is_none() {
-            return None;
-        }
+        self.root.as_ref()?;
 
         self.size -= 1;
 
@@ -542,6 +540,7 @@ where
             // Note that at this point in the loop, `curr` can't be a leaf.
             // Indeed, we traverse the tree such that `curr` is always an
             // internal node, so that it is easy to replace a leaf from `curr`.
+            #[allow(clippy::if_same_then_else)]
             let direction = if curr.left.is_none() {
                 Direction::RIGHT
             } else if curr.right.is_none() {
@@ -683,7 +682,7 @@ where
     /// assert!(tree.is_empty());
     /// ```
     pub fn clear(&mut self) {
-        mem::replace(&mut self.root, None);
+        self.root = None;
         self.size = 0;
     }
 }
@@ -731,7 +730,7 @@ where
         let end = match self.key.1 {
             Included(ref x) => format!("{}]", x),
             Excluded(ref x) => format!("{}[", x),
-            Unbounded => format!("∞["),
+            Unbounded => "∞[".to_string(),
         };
         let value = match self.value {
             Included(ref x) => format!("{}]", x),
@@ -895,7 +894,7 @@ mod tests {
 
         let key = (Included(1), Included(3));
 
-        tree.insert(key.clone());
+        tree.insert(key);
         assert!(tree.root.is_some());
         assert_eq!(tree.root.as_ref().unwrap().key, key);
         assert_eq!(tree.root.as_ref().unwrap().value, key.1);
@@ -911,11 +910,11 @@ mod tests {
         let left_key = (Included(0), Included(1));
         let left_right_key = (Excluded(1), Unbounded);
 
-        tree.insert(root_key.clone());
+        tree.insert(root_key);
         assert!(tree.root.is_some());
         assert!(tree.root.as_ref().unwrap().left.is_none());
 
-        tree.insert(left_key.clone());
+        tree.insert(left_key);
         assert!(tree.root.as_ref().unwrap().right.is_none());
         assert!(tree.root.as_ref().unwrap().left.is_some());
         assert_eq!(
@@ -923,7 +922,7 @@ mod tests {
             left_key.1
         );
 
-        tree.insert(left_right_key.clone());
+        tree.insert(left_right_key);
         assert!(tree
             .root
             .as_ref()
@@ -944,10 +943,10 @@ mod tests {
         let left_left_key = (Included(-5), Excluded(10));
         let right_key = (Excluded(3), Unbounded);
 
-        tree.insert(root_key.clone());
+        tree.insert(root_key);
         assert_eq!(tree.root.as_ref().unwrap().value, root_key.1);
 
-        tree.insert(left_key.clone());
+        tree.insert(left_key);
         assert_eq!(tree.root.as_ref().unwrap().value, root_key.1);
         assert!(tree.root.as_ref().unwrap().left.is_some());
         assert_eq!(
@@ -955,7 +954,7 @@ mod tests {
             left_key.1
         );
 
-        tree.insert(left_left_key.clone());
+        tree.insert(left_left_key);
         assert_eq!(tree.root.as_ref().unwrap().value, left_left_key.1);
         assert_eq!(
             tree.root.as_ref().unwrap().left.as_ref().unwrap().value,
@@ -984,7 +983,7 @@ mod tests {
             left_left_key.1
         );
 
-        tree.insert(right_key.clone());
+        tree.insert(right_key);
         assert_eq!(tree.root.as_ref().unwrap().value, right_key.1);
         assert!(tree.root.as_ref().unwrap().right.is_some());
         assert_eq!(
@@ -1027,11 +1026,11 @@ mod tests {
         let left_left_key = (Included(-5), Excluded(10));
         let right_key = (Excluded(3), Unbounded);
 
-        tree.insert(root_key.clone());
-        tree.insert(left_key.clone());
+        tree.insert(root_key);
+        tree.insert(left_key);
         assert_eq!(tree.get_interval_overlaps(&root_key), vec![&root_key]);
 
-        tree.insert(left_left_key.clone());
+        tree.insert(left_left_key);
         assert_eq!(
             tree.get_interval_overlaps(&(Unbounded, Unbounded)),
             vec![&left_left_key, &left_key, &root_key]
@@ -1083,8 +1082,8 @@ mod tests {
         let root_key = (Included((1, 2)), Excluded((1, 4)));
         let right_key = (Included((5, 10)), Included((5, 20)));
 
-        tree.insert(root_key.clone());
-        tree.insert(right_key.clone());
+        tree.insert(root_key);
+        tree.insert(right_key);
 
         assert!(tree
             .get_interval_overlaps(&(Included((2, 0)), Included((2, 30))))
@@ -1201,9 +1200,9 @@ mod tests {
         let key2 = (Excluded(30), Excluded(40));
         let key3 = (Included(40), Unbounded);
 
-        tree.insert(key1.clone());
-        tree.insert(key2.clone());
-        tree.insert(key3.clone());
+        tree.insert(key1);
+        tree.insert(key2);
+        tree.insert(key3);
 
         assert!(tree.contains_interval(key1));
         assert!(!tree.contains_interval((Included(10), Included(20))));
@@ -1224,12 +1223,12 @@ mod tests {
         let key5 = (Excluded(-10), Included(-5));
         let key6 = (Included(-10), Included(-4));
 
-        tree.insert(key1.clone());
-        tree.insert(key2.clone());
-        tree.insert(key3.clone());
-        tree.insert(key4.clone());
-        tree.insert(key5.clone());
-        tree.insert(key6.clone());
+        tree.insert(key1);
+        tree.insert(key2);
+        tree.insert(key3);
+        tree.insert(key4);
+        tree.insert(key5);
+        tree.insert(key6);
 
         let inorder = vec![&key4, &key6, &key5, &key1, &key3, &key2];
         for (idx, interval) in tree.iter().enumerate() {
@@ -1251,7 +1250,7 @@ mod tests {
         let mut tree = IntervalTree::default();
 
         let key1 = (Included(10), Excluded(20));
-        tree.insert(key1.clone());
+        tree.insert(key1);
 
         let deleted = tree.remove_random_leaf();
         assert!(deleted.is_some());
@@ -1271,12 +1270,12 @@ mod tests {
         let key5 = (Included(0), Included(3));
         let key6 = (Included(13), Excluded(26));
 
-        tree.insert(key1.clone());
-        tree.insert(key2.clone());
-        tree.insert(key3.clone());
-        tree.insert(key4.clone());
-        tree.insert(key5.clone());
-        tree.insert(key6.clone());
+        tree.insert(key1);
+        tree.insert(key2);
+        tree.insert(key3);
+        tree.insert(key4);
+        tree.insert(key5);
+        tree.insert(key6);
 
         let mut tree_deleted_key5 = IntervalTree::default();
 
@@ -1286,11 +1285,11 @@ mod tests {
         let key4_deleted5 = (Excluded(15), Included(23));
         let key6_deleted5 = (Included(13), Excluded(26));
 
-        tree_deleted_key5.insert(key1_deleted5.clone());
-        tree_deleted_key5.insert(key2_deleted5.clone());
-        tree_deleted_key5.insert(key3_deleted5.clone());
-        tree_deleted_key5.insert(key4_deleted5.clone());
-        tree_deleted_key5.insert(key6_deleted5.clone());
+        tree_deleted_key5.insert(key1_deleted5);
+        tree_deleted_key5.insert(key2_deleted5);
+        tree_deleted_key5.insert(key3_deleted5);
+        tree_deleted_key5.insert(key4_deleted5);
+        tree_deleted_key5.insert(key6_deleted5);
 
         let mut tree_deleted_key6 = IntervalTree::default();
 
@@ -1300,11 +1299,11 @@ mod tests {
         let key4_deleted6 = (Excluded(15), Included(23));
         let key5_deleted6 = (Included(0), Included(3));
 
-        tree_deleted_key6.insert(key1_deleted6.clone());
-        tree_deleted_key6.insert(key2_deleted6.clone());
-        tree_deleted_key6.insert(key3_deleted6.clone());
-        tree_deleted_key6.insert(key4_deleted6.clone());
-        tree_deleted_key6.insert(key5_deleted6.clone());
+        tree_deleted_key6.insert(key1_deleted6);
+        tree_deleted_key6.insert(key2_deleted6);
+        tree_deleted_key6.insert(key3_deleted6);
+        tree_deleted_key6.insert(key4_deleted6);
+        tree_deleted_key6.insert(key5_deleted6);
 
         use std::collections::HashSet;
         let mut all_deleted = HashSet::new();
@@ -1332,7 +1331,7 @@ mod tests {
             // Keep track of deleted nodes, and reinsert the
             // deleted node in the tree so we come back to
             // the initial state every iteration.
-            all_deleted.insert(deleted.clone());
+            all_deleted.insert(deleted);
             tree.insert(deleted);
         }
     }
@@ -1377,8 +1376,8 @@ mod tests {
         let key1 = (Included(16), Unbounded);
         let key2 = (Included(8), Excluded(9));
 
-        tree.insert(key1.clone());
-        tree.insert(key2.clone());
+        tree.insert(key1);
+        tree.insert(key2);
 
         assert_eq!(tree.len(), 2);
 
