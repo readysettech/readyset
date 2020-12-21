@@ -107,8 +107,11 @@ fn do_flatten_conditional(
             right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
             operator: Operator::Equal,
         }) => {
-            if !pkey.contains(&c) {
+            if !pkey.iter().any(|pk| pk.name == c.name) {
                 panic!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
+            }
+            if !c.table.iter().all(|n| n == pkey[0].table.as_ref().unwrap()) {
+                panic!("UPDATE/DELETE contains references to another table")
             }
 
             let value = DataType::from(l);
@@ -515,7 +518,18 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn test_flatten_conditional_different_table() {
+        compare_flatten(
+            "DELETE FROM T WHERE A.a = 1",
+            vec!["a"],
+            Some(vec![vec![1]]),
+        );
+    }
+
+    #[test]
     fn test_flatten_conditional() {
+        compare_flatten("DELETE FROM T WHERE a = 1", vec!["a"], Some(vec![vec![1]]));
         compare_flatten(
             "DELETE FROM T WHERE T.a = 1",
             vec!["a"],
