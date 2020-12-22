@@ -56,10 +56,18 @@ fn new_inner(
     macro_rules! make {
         ($variant:tt) => {{
             use evbtree;
-            let (w, r) = evbtree::Options::default()
+            let (mut w, r) = evbtree::Options::default()
                 .with_meta(-1)
                 .with_hasher(RandomState::default())
                 .construct();
+            // If we're fully materialized, we never miss, so we can insert a single interval to
+            // cover the full range of keys
+            // PERF: this is likely not the most efficient way to do this - at some point we likely
+            // want to pass whether we're fully materialized down into the evbtree and skip
+            // inserting into the interval tree entirely (maybe make it an option?) if so
+            if trigger.is_none() {
+                w.insert_range(vec![], ..);
+            }
             (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
     }
@@ -398,9 +406,6 @@ mod tests {
         let a = vec![1.into(), "a".into()];
 
         let (r, mut w) = new(2, &[0]);
-
-        // initially, store is uninitialized
-        assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Err(NotReady));
 
         w.swap();
 
