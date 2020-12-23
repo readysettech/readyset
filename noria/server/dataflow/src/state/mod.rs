@@ -4,14 +4,16 @@ mod mk_key;
 mod persistent_state;
 mod single_state;
 
-use std::borrow::Cow;
-use std::ops::Deref;
+use std::fmt::{self, Debug};
+use std::ops::{Bound, Deref};
 use std::rc::Rc;
 use std::vec;
+use std::{borrow::Cow, iter::FromIterator};
 
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
+use derive_more::From;
 use hashbag::HashBag;
 
 pub(crate) use self::memory_state::MemoryState;
@@ -36,6 +38,8 @@ pub(crate) trait State: SizeOf + Send {
     fn mark_filled(&mut self, key: Vec<DataType>, tag: Tag);
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
+
+    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a>;
 
     fn rows(&self) -> usize;
 
@@ -100,9 +104,41 @@ impl SizeOf for Row {
 }
 
 /// An std::borrow::Cow-like wrapper around a collection of rows.
+#[derive(From)]
 pub(crate) enum RecordResult<'a> {
     Borrowed(&'a HashBag<Row, RandomState>),
+    #[from(ignore)]
+    References(Vec<&'a Row>),
     Owned(Vec<Vec<DataType>>),
+}
+
+impl<'a> PartialEq for RecordResult<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Borrowed(s), Self::Borrowed(o)) => s == o,
+            (Self::References(s), Self::References(o)) => s == o,
+            (Self::Owned(s), Self::Owned(o)) => s == o,
+            (Self::Borrowed(s), Self::References(o)) => s.iter().eq_by(o.iter(), |x, y| x == *y),
+            (Self::Borrowed(s), Self::Owned(o)) => s.iter().eq_by(o.iter(), |x, y| **x == *y),
+            (Self::References(s), Self::Owned(o)) => s.iter().eq_by(o.iter(), |x, y| ***x == *y),
+            (Self::Owned(s), Self::References(o)) => s.iter().eq_by(o.iter(), |x, y| *x == ***y),
+            (s, o) => o == s,
+        }
+    }
+}
+impl<'a> Eq for RecordResult<'a> {}
+
+impl<'a> Debug for RecordResult<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Borrowed(rows) => f
+                .debug_tuple("Borrowed")
+                .field(&rows.into_iter().collect::<HashBag<_>>())
+                .finish(),
+            Self::Owned(rows) => f.debug_tuple("Owned").field(rows).finish(),
+            Self::References(refs) => f.debug_tuple("Refs").field(refs).finish(),
+        }
+    }
 }
 
 impl<'a> RecordResult<'a> {
@@ -110,6 +146,7 @@ impl<'a> RecordResult<'a> {
         match *self {
             RecordResult::Borrowed(rs) => rs.len(),
             RecordResult::Owned(ref rs) => rs.len(),
+            RecordResult::References(ref refs) => refs.len(),
         }
     }
 
@@ -117,7 +154,17 @@ impl<'a> RecordResult<'a> {
         match *self {
             RecordResult::Borrowed(rs) => rs.is_empty(),
             RecordResult::Owned(ref rs) => rs.is_empty(),
+            RecordResult::References(ref refs) => refs.is_empty(),
         }
+    }
+}
+
+impl<'a> FromIterator<Vec<DataType>> for RecordResult<'a> {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = Vec<DataType>>,
+    {
+        Self::Owned(iter.into_iter().collect())
     }
 }
 
@@ -129,6 +176,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
         match self {
             RecordResult::Borrowed(rs) => RecordResultIterator::Borrowed(rs.iter()),
             RecordResult::Owned(rs) => RecordResultIterator::Owned(rs.into_iter()),
+            RecordResult::References(rs) => RecordResultIterator::References(rs.into_iter()),
         }
     }
 }
@@ -136,6 +184,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
 pub(crate) enum RecordResultIterator<'a> {
     Owned(vec::IntoIter<Vec<DataType>>),
     Borrowed(hashbag::Iter<'a, Row>),
+    References(vec::IntoIter<&'a Row>),
 }
 
 impl<'a> Iterator for RecordResultIterator<'a> {
@@ -144,6 +193,7 @@ impl<'a> Iterator for RecordResultIterator<'a> {
         match self {
             RecordResultIterator::Borrowed(iter) => iter.next().map(|r| Cow::from(&r[..])),
             RecordResultIterator::Owned(iter) => iter.next().map(Cow::from),
+            RecordResultIterator::References(iter) => iter.next().map(|r| Cow::from(&r[..])),
         }
     }
 }
@@ -151,4 +201,44 @@ impl<'a> Iterator for RecordResultIterator<'a> {
 pub(crate) enum LookupResult<'a> {
     Some(RecordResult<'a>),
     Missing,
+}
+
+impl<'a> LookupResult<'a> {
+    /// Converts from `LookupResult<'a>` into an [`Option<RecordResult<'a>>`]
+    pub fn records(self) -> Option<RecordResult<'a>> {
+        match self {
+            Self::Some(res) => Some(res),
+            Self::Missing => None,
+        }
+    }
+
+    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicing if the value is
+    /// [`Missing`].
+    pub fn unwrap(self) -> RecordResult<'a> {
+        self.records().unwrap()
+    }
+}
+
+pub(crate) type Misses<'a> = Vec<(Bound<Vec<&'a DataType>>, Bound<Vec<&'a DataType>>)>;
+
+#[derive(Eq, PartialEq, Debug)]
+pub(crate) enum RangeLookupResult<'a> {
+    Some(RecordResult<'a>),
+    Missing(Misses<'a>),
+}
+
+impl<'a> RangeLookupResult<'a> {
+    /// Converts from `RangeLookupResult<'a>` into an [`Option<RecordResult<'a>>`]
+    pub fn records(self) -> Option<RecordResult<'a>> {
+        match self {
+            Self::Some(res) => Some(res),
+            Self::Missing(_) => None,
+        }
+    }
+
+    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicing if the value is
+    /// [`Missing`].
+    pub fn unwrap(self) -> RecordResult<'a> {
+        self.records().unwrap()
+    }
 }

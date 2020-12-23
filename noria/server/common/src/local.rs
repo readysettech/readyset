@@ -1,9 +1,12 @@
 use noria::internal::LocalNodeIndex;
+use noria::util::BoundFunctor;
 use noria::DataType;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::{Bound, RangeBounds};
+use vec1::Vec1;
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -182,6 +185,139 @@ impl<'a> KeyType<'a> {
                 more().clone(),
             )),
             _ => unimplemented!(),
+        }
+    }
+}
+
+#[allow(clippy::clippy::type_complexity)]
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+pub enum RangeKey<'a> {
+    /// Key-length-polymorphic double-unbounded range key
+    Unbounded,
+    Single((Bound<&'a DataType>, Bound<&'a DataType>)),
+    Double(
+        (
+            Bound<(&'a DataType, &'a DataType)>,
+            Bound<(&'a DataType, &'a DataType)>,
+        ),
+    ),
+    Tri(
+        (
+            Bound<(&'a DataType, &'a DataType, &'a DataType)>,
+            Bound<(&'a DataType, &'a DataType, &'a DataType)>,
+        ),
+    ),
+    Quad(
+        (
+            Bound<(&'a DataType, &'a DataType, &'a DataType, &'a DataType)>,
+            Bound<(&'a DataType, &'a DataType, &'a DataType, &'a DataType)>,
+        ),
+    ),
+    Quin(
+        (
+            Bound<(
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+            )>,
+            Bound<(
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+            )>,
+        ),
+    ),
+    Sex(
+        (
+            Bound<(
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+            )>,
+            Bound<(
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+                &'a DataType,
+            )>,
+        ),
+    ),
+}
+
+impl<'a> RangeKey<'a> {
+    /// Build a [`RangeKey`] from a type that implements [`RangeBounds`] over a vector of keys.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lengths of the bounds are different, or if the length is greater than 6
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use noria_common::RangeKey;
+    /// use noria::DataType;
+    /// use std::ops::Bound::*;
+    /// use vec1::vec1;
+    ///
+    /// // Can build RangeKeys from regular range expressions
+    /// assert_eq!(RangeKey::from(&(..)), RangeKey::Unbounded);
+    /// assert_eq!(
+    ///   RangeKey::from(&(vec1![DataType::from(0)]..vec1![DataType::from(1)])),
+    ///   RangeKey::Single((Included(&(0.into())), Excluded(&(1.into())))
+    /// ));
+    /// ```
+    pub fn from<R>(range: &'a R) -> Self
+    where
+        R: RangeBounds<Vec1<DataType>>,
+    {
+        use Bound::*;
+        let len = match (range.start_bound(), range.end_bound()) {
+            (Unbounded, Unbounded) => return RangeKey::Unbounded,
+            (Included(ref start) | Excluded(ref start), Included(ref end) | Excluded(ref end)) => {
+                assert_eq!(start.len(), end.len());
+                start.len()
+            }
+            (Included(ref start) | Excluded(ref start), Unbounded) => start.len(),
+            (Unbounded, Included(ref end) | Excluded(ref end)) => end.len(),
+        };
+
+        macro_rules! make {
+            ($variant: ident, |$elem: ident| $make_tuple: expr) => {
+                RangeKey::$variant((
+                    make!(bound, start_bound, $elem, $make_tuple),
+                    make!(bound, end_bound, $elem, $make_tuple),
+                ))
+            };
+            (bound, $bound_type: ident, $elem: ident, $make_tuple: expr) => {
+                range.$bound_type().map(|key| {
+                    let mut key = key.into_iter();
+                    let mut $elem = move || key.next().unwrap();
+                    $make_tuple
+                })
+            };
+        }
+
+        match len {
+            0 => unreachable!("Vec1 cannot be empty"),
+            1 => make!(Single, |elem| elem()),
+            2 => make!(Double, |elem| (elem(), elem())),
+            3 => make!(Tri, |elem| (elem(), elem(), elem())),
+            4 => make!(Quad, |elem| (elem(), elem(), elem(), elem())),
+            5 => make!(Quin, |elem| (elem(), elem(), elem(), elem(), elem())),
+            6 => make!(Sex, |elem| (elem(), elem(), elem(), elem(), elem(), elem())),
+            n => panic!(
+                "RangeKey cannot be built from keys of length greater than 6 (got {})",
+                n
+            ),
         }
     }
 }

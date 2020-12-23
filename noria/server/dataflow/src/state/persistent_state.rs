@@ -1,11 +1,15 @@
 use bincode;
 use itertools::Itertools;
-use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
+use noria::util::BoundFunctor;
+use rocksdb::{
+    self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
+};
 use serde;
+use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 
 use crate::prelude::*;
-use crate::state::{RecordResult, State};
+use crate::state::{RangeLookupResult, RecordResult, State};
 use common::SizeOf;
 
 // Incremented on each PersistentState initialization so that IndexSeq
@@ -85,11 +89,7 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let db = self.db.as_ref().unwrap();
-        let index_id = self
-            .indices
-            .iter()
-            .position(|index| &index.columns[..] == columns)
-            .expect("lookup on non-indexed column set");
+        let index_id = self.index_id(columns);
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
             let prefix = Self::serialize_prefix(&key);
@@ -106,11 +106,65 @@ impl State for PersistentState {
             } else {
                 // This could correspond to more than one value, so we'll use a prefix_iterator:
                 db.prefix_iterator_cf(cf, &prefix)
-                    .map(|(_key, value)| bincode::deserialize(&*value).unwrap())
+                    .map(|(_key, value)| {
+                        bincode::deserialize(&*value)
+                            .expect("Error deserializing data from rocksdb")
+                    })
                     .collect()
             };
 
             LookupResult::Some(RecordResult::Owned(data))
+        })
+    }
+
+    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+        let db = self.db.as_ref().unwrap();
+        tokio::task::block_in_place(|| {
+            let cf = self.index_cf(columns);
+            let (lower, upper) = Self::serialize_range(key, ((), ()));
+
+            let mut opts = rocksdb::ReadOptions::default();
+            // Necessary to override prefix extraction - see
+            // https://github.com/facebook/rocksdb/wiki/Prefix-Seek#how-to-ignore-prefix-bloom-filters-in-read
+            opts.set_total_order_seek(true);
+
+            match upper {
+                Bound::Excluded(k) => {
+                    opts.set_iterate_upper_bound(k);
+                }
+                Bound::Included(mut k) => {
+                    // Rocksdb's iterate_upper_bound is exclusive, so add 1 to the last byte of the
+                    // end value so we get our inclusive last key
+                    k.last_mut().map(|byte| *byte += 1);
+                    opts.set_iterate_upper_bound(k);
+                }
+                _ => {}
+            }
+
+            let start = match &lower {
+                Bound::Unbounded => None,
+                Bound::Included(k) | Bound::Excluded(k) => Some(k),
+            };
+            let mut iterator = db.iterator_cf_opt(
+                cf,
+                opts,
+                match start.as_ref() {
+                    Some(k) => IteratorMode::From(k, Direction::Forward),
+                    None => IteratorMode::Start,
+                },
+            );
+            if matches!(lower, Bound::Excluded(_)) {
+                iterator.next();
+            }
+
+            RangeLookupResult::Some(RecordResult::Owned(
+                iterator
+                    .map(|(_, value)| {
+                        bincode::deserialize(&*value)
+                            .expect("Error deserializing data from rocksdb")
+                    })
+                    .collect(),
+            ))
         })
     }
 
@@ -215,6 +269,11 @@ impl State for PersistentState {
     fn clear(&mut self) {
         unreachable!("can't clear PersistentState")
     }
+}
+
+fn serialize<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
+    let size: u64 = bincode::serialized_size(&k).unwrap();
+    bincode::serialize(&(size, k, extra)).unwrap()
 }
 
 impl PersistentState {
@@ -419,11 +478,6 @@ impl PersistentState {
     // Self::serialize_raw_key is responsible for serializing the underlying KeyType tuple directly
     // (without the enum variant), plus any extra information as described above.
     fn serialize_raw_key<S: serde::Serialize>(key: &KeyType, extra: S) -> Vec<u8> {
-        fn serialize<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
-            let size: u64 = bincode::serialized_size(&k).unwrap();
-            bincode::serialize(&(size, k, extra)).unwrap()
-        }
-
         match key {
             KeyType::Single(k) => serialize(k, extra),
             KeyType::Double(k) => serialize(k, extra),
@@ -442,6 +496,37 @@ impl PersistentState {
         let mut bytes = Self::serialize_raw_key(key, ());
         bytes.extend_from_slice(raw_primary);
         bytes
+    }
+
+    fn serialize_range<S, T>(key: &RangeKey, extra: (S, T)) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
+    where
+        S: serde::Serialize,
+        T: serde::Serialize,
+    {
+        use Bound::*;
+        fn do_serialize_range<K, S, T>(
+            range: (Bound<K>, Bound<K>),
+            extra: (S, T),
+        ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
+        where
+            K: serde::Serialize,
+            S: serde::Serialize,
+            T: serde::Serialize,
+        {
+            (
+                range.0.map(|k| serialize(k, &extra.0)),
+                range.1.map(|k| serialize(k, &extra.1)),
+            )
+        }
+        match key {
+            RangeKey::Unbounded => (Unbounded, Unbounded),
+            RangeKey::Single(range) => do_serialize_range(*range, extra),
+            RangeKey::Double(range) => do_serialize_range(*range, extra),
+            RangeKey::Tri(range) => do_serialize_range(*range, extra),
+            RangeKey::Quad(range) => do_serialize_range(*range, extra),
+            RangeKey::Quin(range) => do_serialize_range(*range, extra),
+            RangeKey::Sex(range) => do_serialize_range(*range, extra),
+        }
     }
 
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
@@ -535,6 +620,24 @@ impl PersistentState {
             };
         })
     }
+
+    /// Returns the id of the index for the given coluns, panicking if it doesn't exist
+    fn index_id(&self, columns: &[usize]) -> usize {
+        self.indices
+            .iter()
+            .position(|index| &index.columns[..] == columns)
+            .expect("lookup on non-indexed column set")
+    }
+
+    /// Returns a column family handle for the index for the given columns, panicking if it doesn't
+    /// exist
+    fn index_cf<'a>(&'a self, columns: &[usize]) -> &'a rocksdb::ColumnFamily {
+        self.db
+            .as_ref()
+            .unwrap()
+            .cf_handle(&self.indices[self.index_id(columns)].column_family)
+            .unwrap()
+    }
 }
 
 // SliceTransforms are used to create prefixes of all inserted keys, which can then be used for
@@ -614,6 +717,7 @@ impl SizeOf for PersistentState {
 mod tests {
     use super::*;
     use bincode;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
@@ -635,6 +739,13 @@ mod tests {
         )
     }
 
+    pub(self) fn setup_single_key(name: &str) -> PersistentState {
+        let mut state = setup_persistent(name);
+        let columns = &[0];
+        state.add_key(columns, None);
+        state
+    }
+
     #[test]
     fn persistent_state_is_partial() {
         let state = setup_persistent("persistent_state_is_partial");
@@ -643,18 +754,16 @@ mod tests {
 
     #[test]
     fn persistent_state_single_key() {
-        let mut state = setup_persistent("persistent_state_single_key");
-        let columns = &[0];
+        let mut state = setup_single_key("persistent_state_single_key");
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
-        state.add_key(columns, None);
         insert(&mut state, row);
 
-        match state.lookup(columns, &KeyType::Single(&5.into())) {
+        match state.lookup(&[0], &KeyType::Single(&5.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
-        match state.lookup(columns, &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows[0][0], 10.into());
                 assert_eq!(rows[0][1], "Cat".into());
@@ -1168,5 +1277,126 @@ mod tests {
 
         // 4) prefix(prefix(key)) == prefix(key)
         assert_eq!(prefix, prefix_transform(&prefix));
+    }
+
+    mod lookup_range {
+        use super::*;
+        use pretty_assertions::assert_eq;
+
+        fn setup() -> PersistentState {
+            let mut state = setup_single_key("persistent_state_single_key");
+            state.process_records(
+                &mut (0..10)
+                    .map(|n| Record::from(vec![n.into()]))
+                    .collect::<Records>(),
+                None,
+            );
+            state
+        }
+
+        #[test]
+        fn missing() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(11)]..vec![DataType::from(20)]))
+                ),
+                RangeLookupResult::Some(vec![].into())
+            );
+        }
+
+        #[test]
+        fn inclusive_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(3)]..vec![DataType::from(7)]))
+                ),
+                RangeLookupResult::Some((3..7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn inclusive_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(3)]..=vec![DataType::from(7)]))
+                ),
+                RangeLookupResult::Some((3..=7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn exclusive_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Bound::Excluded(vec![DataType::from(3)]),
+                        Bound::Excluded(vec![DataType::from(7)])
+                    ))
+                ),
+                RangeLookupResult::Some(
+                    (3..7)
+                        .skip(1)
+                        .map(|n| vec![n.into()])
+                        .collect::<Vec<_>>()
+                        .into()
+                )
+            );
+        }
+
+        #[test]
+        fn exclusive_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Bound::Excluded(vec![DataType::from(3)]),
+                        Bound::Included(vec![DataType::from(7)])
+                    ))
+                ),
+                RangeLookupResult::Some(
+                    (3..=7)
+                        .skip(1)
+                        .map(|n| vec![n.into()])
+                        .collect::<Vec<_>>()
+                        .into()
+                )
+            );
+        }
+
+        #[test]
+        fn inclusive_unbounded() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(vec![DataType::from(3)]..))),
+                RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn unbounded_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec![DataType::from(3)]))),
+                RangeLookupResult::Some((0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn unbounded_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(..vec![DataType::from(3)]))),
+                RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
     }
 }
