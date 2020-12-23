@@ -776,6 +776,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_more"
+version = "0.99.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41cb0e6161ad61ed084a36ba71fbba9e3ac5aee3606fb607fe08da6acbcf3d8c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derive_utils"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2188,7 +2199,7 @@ name = "nom-sql"
 version = "0.0.11"
 dependencies = [
  "nom 5.1.2",
- "pretty_assertions",
+ "pretty_assertions 0.5.1",
  "serde",
  "serde_derive",
 ]
@@ -2291,6 +2302,7 @@ version = "0.7.0"
 dependencies = [
  "ahash 0.3.8",
  "bincode",
+ "derive_more",
  "evbtree",
  "futures-util",
  "hashbag",
@@ -2301,6 +2313,7 @@ dependencies = [
  "noria",
  "noria-common",
  "petgraph",
+ "pretty_assertions 0.6.1",
  "proptest",
  "rand 0.7.3",
  "regex",
@@ -2313,6 +2326,7 @@ dependencies = [
  "tempfile",
  "timekeeper",
  "tokio 0.2.24",
+ "tuple",
  "unbounded-interval-tree",
  "vec_map",
 ]
@@ -2497,6 +2511,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "output_vt100"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53cdc5b785b7a58c5aad8216b3dfa114df64b0b06ae6e1501cef91df2fbdf8f9"
+dependencies = [
+ "winapi 0.3.9",
 ]
 
 [[package]]
@@ -2737,6 +2760,18 @@ checksum = "3a029430f0d744bc3d15dd474d591bed2402b645d024583082b9f63bb936dac6"
 dependencies = [
  "ansi_term 0.11.0",
  "difference",
+]
+
+[[package]]
+name = "pretty_assertions"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f81e1644e1b54f5a68959a29aa86cde704219254669da328ecfdf6a1f09d427"
+dependencies = [
+ "ansi_term 0.11.0",
+ "ctor",
+ "difference",
+ "output_vt100",
 ]
 
 [[package]]
@@ -4209,6 +4244,16 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
+name = "tuple"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39a40ba241047e1174c927dc5f61c141a166b938d61a2ff61838441368cc7d0e"
+dependencies = [
+ "num-traits",
+ "serde",
+]
 
 [[package]]
 name = "twox-hash"

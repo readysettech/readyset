@@ -7,6 +7,8 @@ use crate::prelude::*;
 use crate::state::single_state::SingleState;
 use common::SizeOf;
 
+use super::RangeLookupResult;
+
 #[derive(Default)]
 pub struct MemoryState {
     state: Vec<SingleState>,
@@ -137,6 +139,17 @@ impl State for MemoryState {
             .state_for(columns)
             .expect("lookup on non-indexed column set");
         self.state[index].lookup(key)
+    }
+
+    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+        debug_assert!(
+            !self.state.is_empty(),
+            "lookup_range on uninitialized index"
+        );
+        let index = self
+            .state_for(columns)
+            .expect("lookup on non-indexed column set");
+        self.state[index].lookup_range(key)
     }
 
     fn keys(&self) -> Vec<Vec<usize>> {
@@ -283,5 +296,127 @@ mod tests {
             }
             _ => unreachable!(),
         };
+    }
+
+    mod lookup_range {
+        use super::*;
+        use std::ops::Bound;
+
+        fn setup() -> MemoryState {
+            let mut state = MemoryState::default();
+            state.add_key(&[0], None);
+            state.process_records(
+                &mut (0..10)
+                    .map(|n| Record::from(vec![n.into()]))
+                    .collect::<Records>(),
+                None,
+            );
+            state
+        }
+
+        #[test]
+        fn missing() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(11)]..vec![DataType::from(20)]))
+                ),
+                RangeLookupResult::Some(vec![].into())
+            );
+        }
+
+        #[test]
+        fn inclusive_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(3)]..vec![DataType::from(7)]))
+                ),
+                RangeLookupResult::Some((3..7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn inclusive_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(vec![DataType::from(3)]..=vec![DataType::from(7)]))
+                ),
+                RangeLookupResult::Some((3..=7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn exclusive_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Bound::Excluded(vec![DataType::from(3)]),
+                        Bound::Excluded(vec![DataType::from(7)])
+                    ))
+                ),
+                RangeLookupResult::Some(
+                    (3..7)
+                        .skip(1)
+                        .map(|n| vec![n.into()])
+                        .collect::<Vec<_>>()
+                        .into()
+                )
+            );
+        }
+
+        #[test]
+        fn exclusive_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Bound::Excluded(vec![DataType::from(3)]),
+                        Bound::Included(vec![DataType::from(7)])
+                    ))
+                ),
+                RangeLookupResult::Some(
+                    (3..=7)
+                        .skip(1)
+                        .map(|n| vec![n.into()])
+                        .collect::<Vec<_>>()
+                        .into()
+                )
+            );
+        }
+
+        #[test]
+        fn inclusive_unbounded() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(vec![DataType::from(3)]..))),
+                RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn unbounded_inclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec![DataType::from(3)]))),
+                RangeLookupResult::Some((0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
+
+        #[test]
+        fn unbounded_exclusive() {
+            let state = setup();
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(..vec![DataType::from(3)]))),
+                RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
+            );
+        }
     }
 }

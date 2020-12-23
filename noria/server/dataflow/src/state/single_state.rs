@@ -1,4 +1,5 @@
 use super::mk_key::MakeKey;
+use super::RangeLookupResult;
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
@@ -14,6 +15,7 @@ pub(super) struct SingleState {
 
 macro_rules! insert_row_match_impl {
     ($self:ident, $r:ident, $map:ident) => {{
+        use std::collections::btree_map::Entry;
         let key = MakeKey::from_row(&$self.key, &*$r);
         match $map.entry(key) {
             Entry::Occupied(mut rs) => {
@@ -50,7 +52,6 @@ impl SingleState {
     /// Inserts the given record, or returns false if a hole was encountered (and the record hence
     /// not inserted).
     pub(super) fn insert_row(&mut self, r: Row) -> bool {
-        use indexmap::map::Entry;
         match self.state {
             KeyedState::Single(ref mut map) => {
                 // treat this specially to avoid the extra Vec
@@ -182,26 +183,20 @@ impl SingleState {
 
     pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
-            KeyedState::Single(ref mut m) => m.swap_remove(&(key[0])),
-            KeyedState::Double(ref mut m) => {
-                m.swap_remove::<(DataType, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::Tri(ref mut m) => {
-                m.swap_remove::<(DataType, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::Quad(ref mut m) => {
-                m.swap_remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
-            }
+            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
+            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
             KeyedState::Quin(ref mut m) => {
-                m.swap_remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::Sex(ref mut m) => {
-                m.swap_remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
         };
         // mark_hole should only be called on keys we called mark_filled on
         removed
-            .unwrap()
+            .expect("mark_hole called on absent key")
             .iter()
             .filter(|r| Rc::strong_count(&r.0) == 1)
             .map(SizeOf::deep_size_of)
@@ -267,6 +262,7 @@ impl SingleState {
     pub(super) fn is_empty(&self) -> bool {
         self.rows == 0
     }
+
     pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
             LookupResult::Some(RecordResult::Borrowed(rs))
@@ -275,6 +271,19 @@ impl SingleState {
             LookupResult::Missing
         } else {
             LookupResult::Some(RecordResult::Owned(vec![]))
+        }
+    }
+
+    pub(super) fn lookup_range<'a>(&'a self, key: &RangeKey) -> RangeLookupResult<'a> {
+        match self.state.lookup_range(key) {
+            Ok(rs) => RangeLookupResult::Some(RecordResult::References(rs.collect())),
+            Err(misses) => {
+                if self.partial() {
+                    RangeLookupResult::Missing(misses)
+                } else {
+                    RangeLookupResult::Some(RecordResult::Owned(vec![]))
+                }
+            }
         }
     }
 }
