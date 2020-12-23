@@ -1,4 +1,5 @@
 use crate::data::*;
+use crate::util::BoundFunctor;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
@@ -124,40 +125,25 @@ pub enum KeyComparison {
     /// Look up exactly one key
     Equal(Vec1<DataType>),
 
-    /// Look up all keys strictly less than the given key
-    LessThan(Vec1<DataType>),
-
-    /// Look up all keys less than or equal to the given key
-    LessThanOrEqualTo(Vec1<DataType>),
-
-    /// Look up all keys strictly greater than the given key
-    GreaterThan(Vec1<DataType>),
-
-    /// Look up all keys greater than or equal the given key
-    GreaterThanOrEqualTo(Vec1<DataType>),
+    /// Look up all keys within a range
+    Range((Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)),
 }
 
 impl KeyComparison {
-    /// Returns the [`nom_sql::BinaryOperator`] that this key comparison represents.
-    ///
-    /// Note that this is injective but not surjective - every [`KeyComparsion`] corresponds to a
-    /// distinct [`BinaryOperator`] but not vice versa
-    pub fn operator(&self) -> nom_sql::BinaryOperator {
-        use nom_sql::BinaryOperator::*;
-        match self {
-            KeyComparison::Equal(_) => Equal,
-            KeyComparison::LessThan(_) => Less,
-            KeyComparison::LessThanOrEqualTo(_) => LessOrEqual,
-            KeyComparison::GreaterThan(_) => Greater,
-            KeyComparison::GreaterThanOrEqualTo(_) => GreaterOrEqual,
-        }
-    }
-
-    /// Project a KeyComparison into an optional equality predicate, or return None if it's any
-    /// other kind of predicate
+    /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
+    /// predicate
     pub fn equal(&self) -> Option<&Vec1<DataType>> {
         match self {
             KeyComparison::Equal(ref key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Project a KeyComparison into an optional range predicate, or return None if it's a range
+    /// predicate
+    pub fn range(&self) -> Option<&(Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)> {
+        match self {
+            KeyComparison::Range(ref range) => Some(range),
             _ => None,
         }
     }
@@ -198,9 +184,10 @@ impl RangeBounds<Vec1<DataType>> for KeyComparison {
         use Bound::*;
         use KeyComparison::*;
         match self {
-            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key),
-            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
-            GreaterThan(ref key) => Excluded(key),
+            Equal(ref key) => Included(key),
+            Range((Unbounded, _)) => Unbounded,
+            Range((Included(ref k), _)) => Included(k),
+            Range((Excluded(ref k), _)) => Excluded(k),
         }
     }
 
@@ -208,54 +195,31 @@ impl RangeBounds<Vec1<DataType>> for KeyComparison {
         use Bound::*;
         use KeyComparison::*;
         match self {
-            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key),
-            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
-            LessThan(ref key) => Included(key),
+            Equal(ref key) => Included(key),
+            Range((_, Unbounded)) => Unbounded,
+            Range((_, Included(ref k))) => Included(k),
+            Range((_, Excluded(ref k))) => Excluded(k),
         }
     }
 }
 
 impl RangeBounds<Vec<DataType>> for KeyComparison {
     fn start_bound(&self) -> Bound<&Vec<DataType>> {
-        use Bound::*;
-        use KeyComparison::*;
-        match self {
-            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key.as_vec()),
-            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
-            GreaterThan(ref key) => Excluded(key.as_vec()),
-        }
+        self.start_bound().map(Vec1::as_vec)
     }
 
     fn end_bound(&self) -> Bound<&Vec<DataType>> {
-        use Bound::*;
-        use KeyComparison::*;
-        match self {
-            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key.as_vec()),
-            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
-            LessThan(ref key) => Included(key.as_vec()),
-        }
+        self.end_bound().map(Vec1::as_vec)
     }
 }
 
 impl RangeBounds<Vec<DataType>> for &KeyComparison {
     fn start_bound(&self) -> Bound<&Vec<DataType>> {
-        use Bound::*;
-        use KeyComparison::*;
-        match self {
-            Equal(ref key) | GreaterThanOrEqualTo(ref key) => Included(key.as_vec()),
-            LessThan(_) | LessThanOrEqualTo(_) => Unbounded,
-            GreaterThan(ref key) => Excluded(key.as_vec()),
-        }
+        (**self).start_bound()
     }
 
     fn end_bound(&self) -> Bound<&Vec<DataType>> {
-        use Bound::*;
-        use KeyComparison::*;
-        match self {
-            Equal(ref key) | LessThanOrEqualTo(ref key) => Included(key.as_vec()),
-            GreaterThan(_) | GreaterThanOrEqualTo(_) => Unbounded,
-            LessThan(ref key) => Included(key.as_vec()),
-        }
+        (**self).end_bound()
     }
 }
 
