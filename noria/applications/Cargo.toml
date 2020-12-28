@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 clap = "2.25.0"
-failure = "0.1"
+anyhow = "1.0"
 flurry = "0.3"
 futures-core = "0.3.0"
 futures-util = "0.3.0"

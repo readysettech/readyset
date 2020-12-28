@@ -37,7 +37,7 @@ impl<A: Authority + 'static> Handle<A> {
         authority: Arc<A>,
         event_tx: futures::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-    ) -> impl Future<Item = Self, Error = failure::Error> {
+    ) -> impl Future<Item = Self, Error = anyhow::Error> {
         ControllerHandle::make(authority).map(move |c| Handle {
             c: Some(c),
             event_tx: Some(event_tx),
@@ -97,7 +97,7 @@ impl<A: Authority + 'static> Handle<A> {
 
     /// Install a new set of policies on the controller.
     #[must_use]
-    fn set_security_config(&mut self, p: String) -> impl Future<Item = (), Error = failure::Error> {
+    fn set_security_config(&mut self, p: String) -> impl Future<Item = (), Error = anyhow::Error> {
         self.rpc("set_security_config", p, "failed to set security config")
     }
 
@@ -106,7 +106,7 @@ impl<A: Authority + 'static> Handle<A> {
     fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
-    ) -> impl Future<Item = (), Error = failure::Error> {
+    ) -> impl Future<Item = (), Error = anyhow::Error> {
         let mut c = self.c.clone().unwrap();
 
         let uid = context

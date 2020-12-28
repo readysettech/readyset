@@ -3,7 +3,7 @@
 #![feature(allow_fail)]
 
 #[macro_use]
-extern crate failure;
+extern crate anyhow;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]

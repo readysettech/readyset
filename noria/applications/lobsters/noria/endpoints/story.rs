@@ -9,9 +9,9 @@ pub(crate) async fn handle<F>(
     c: F,
     acting_as: Option<UserId>,
     id: StoryId,
-) -> Result<(crate::Conn, bool), failure::Error>
+) -> Result<(crate::Conn, bool), anyhow::Error>
 where
-    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, anyhow::Error>> + Send,
 {
     // XXX: at the end there are also a bunch of repeated, seemingly superfluous queries
     let c = c.await?;

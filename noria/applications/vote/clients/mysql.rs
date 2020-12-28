@@ -23,7 +23,7 @@ impl Clone for Conn {
 }
 
 impl Conn {
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), failure::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), anyhow::Error>> {
         if self.next.is_some() {
             return Poll::Ready(Ok(()));
         }
@@ -48,7 +48,7 @@ impl Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    type Future = impl Future<Output = Result<Self, anyhow::Error>> + Send;
     fn new(params: Parameters, args: clap::ArgMatches<'_>) -> <Self as VoteClient>::Future {
         let addr = args.value_of("address").unwrap();
         let addr = format!("mysql://{}", addr);
@@ -131,8 +131,8 @@ impl VoteClient for Conn {
 
 impl Service<ReadRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Conn::poll_ready(self, cx)
@@ -162,8 +162,8 @@ impl Service<ReadRequest> for Conn {
 
 impl Service<WriteRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Conn::poll_ready(self, cx)

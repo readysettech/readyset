@@ -14,7 +14,7 @@ pub(crate) trait VoteClient
 where
     Self: Sized,
 {
-    type Future: Future<Output = Result<Self, failure::Error>> + Send + 'static;
+    type Future: Future<Output = Result<Self, anyhow::Error>> + Send + 'static;
     fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future;
 }
 

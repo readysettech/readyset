@@ -106,7 +106,7 @@ impl Builder {
     pub fn start<A: Authority + 'static>(
         &self,
         authority: Arc<A>,
-    ) -> impl Future<Output = Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), failure::Error>>
+    ) -> impl Future<Output = Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), anyhow::Error>>
     {
         let Builder {
             listen_addr,
@@ -139,7 +139,7 @@ impl Builder {
                 Handle<LocalAuthority>,
                 impl Future<Output = ()> + Unpin + Send,
             ),
-            failure::Error,
+            anyhow::Error,
         >,
     > {
         let fut = self.start(Arc::new(LocalAuthority::new()));

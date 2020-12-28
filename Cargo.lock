@@ -67,6 +67,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee67c11feeac938fae061b232e38e0b6d94f97a9df10e6271319325ac4c56a86"
+
+[[package]]
 name = "arccstr"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2191,6 +2197,7 @@ name = "noria"
 version = "0.7.0"
 dependencies = [
  "ahash 0.3.8",
+ "anyhow",
  "arccstr",
  "assert_approx_eq",
  "assert_infrequent",
@@ -2199,7 +2206,6 @@ dependencies = [
  "bufstream",
  "byteorder",
  "chrono",
- "failure",
  "futures-util",
  "hyper",
  "mysql_common 0.22.2",
@@ -2213,6 +2219,7 @@ dependencies = [
  "serde_json",
  "slab",
  "slog",
+ "thiserror",
  "tokio 0.2.24",
  "tokio-tower",
  "tower-balance",
@@ -2232,9 +2239,9 @@ dependencies = [
 name = "noria-applications"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "clap",
- "failure",
  "flurry",
  "futures-core",
  "futures-util",
@@ -2324,10 +2331,10 @@ dependencies = [
 name = "noria-mysql"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "arccstr",
  "chrono",
  "clap",
- "failure",
  "futures-executor",
  "futures-util",
  "lazy_static",
@@ -2352,13 +2359,13 @@ name = "noria-server"
 version = "0.7.0"
 dependencies = [
  "ahash 0.3.8",
+ "anyhow",
  "async-bincode",
  "async-timer",
  "backtrace",
  "bincode",
  "clap",
  "diff",
- "failure",
  "futures-core",
  "futures-executor",
  "futures-sink",
@@ -2385,6 +2392,7 @@ dependencies = [
  "stream-cancel",
  "streamunordered",
  "tempfile",
+ "thiserror",
  "timekeeper",
  "tokio 0.2.24",
  "tokio-tower",
@@ -3400,9 +3408,9 @@ checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "syn"
-version = "1.0.57"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4211ce9909eb971f111059df92c45640aad50a619cf55cd76476be803c4c68e6"
+checksum = "cc60a3d73ea6594cd712d830cc1f0390fd71542d8c8cd24e70cc54cdfd5e05d5"
 dependencies = [
  "proc-macro2",
  "quote",

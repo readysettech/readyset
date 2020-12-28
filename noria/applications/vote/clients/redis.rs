@@ -1,6 +1,6 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
+use anyhow::Context as AnyhowContext;
 use clap;
-use failure::ResultExt;
 use redis::AsyncCommands;
 use std::future::Future;
 use std::task::{Context, Poll};
@@ -13,7 +13,7 @@ pub(crate) struct Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    type Future = impl Future<Output = Result<Self, anyhow::Error>> + Send;
     fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future {
         let addr = args.value_of("address").unwrap();
 
@@ -47,7 +47,7 @@ impl VoteClient for Conn {
 
 impl Service<ReadRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
+    type Error = anyhow::Error;
     type Future = <tower_limit::ConcurrencyLimit<ActualConn> as Service<ReadRequest>>::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -61,7 +61,7 @@ impl Service<ReadRequest> for Conn {
 
 impl Service<WriteRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
+    type Error = anyhow::Error;
     type Future = <tower_limit::ConcurrencyLimit<ActualConn> as Service<WriteRequest>>::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -80,8 +80,8 @@ pub(crate) struct ActualConn {
 
 impl Service<ReadRequest> for ActualConn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -105,8 +105,8 @@ impl Service<ReadRequest> for ActualConn {
 
 impl Service<WriteRequest> for ActualConn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

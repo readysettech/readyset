@@ -1,6 +1,6 @@
 use noria::{ControllerHandle, DataType, Table, TableOperation, View, ZookeeperAuthority};
 
-use failure;
+use anyhow;
 use futures_executor::block_on as block_on_buffer;
 use msql_srv::{self, *};
 use nom_sql::{
@@ -106,7 +106,7 @@ impl NoriaBackendInner {
     fn get_or_make_mutator<'a, 'b>(
         &'a mut self,
         table: &'b str,
-    ) -> Result<&'a mut Table, failure::Error> {
+    ) -> Result<&'a mut Table, anyhow::Error> {
         if !self.inputs.contains_key(table) {
             let t = block_on!(self, self.noria.table(table))?;
             self.inputs.insert(table.to_owned(), t);
@@ -117,7 +117,7 @@ impl NoriaBackendInner {
     fn get_or_make_getter<'a, 'b>(
         &'a mut self,
         view: &'b str,
-    ) -> Result<&'a mut View, failure::Error> {
+    ) -> Result<&'a mut View, anyhow::Error> {
         if !self.outputs.contains_key(view) {
             let vh = block_on!(self, self.noria.view(view))?;
             self.outputs.insert(view.to_owned(), vh);
@@ -190,7 +190,7 @@ impl NoriaBackend {
         }
     }
 
-    fn fetch_endpoints(&mut self, need: Vec<nom_sql::Table>) -> Result<(), failure::Error> {
+    fn fetch_endpoints(&mut self, need: Vec<nom_sql::Table>) -> Result<(), anyhow::Error> {
         for t in need {
             //  1. check inner.inputs/inner.outputs
             if self.inner.inputs.contains_key(&t.name) {
@@ -237,7 +237,7 @@ impl NoriaBackend {
                 trace!("table::created");
                 results.completed(0, 0)
             }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 
@@ -261,7 +261,7 @@ impl NoriaBackend {
                 trace!("view::created");
                 results.completed(0, 0)
             }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.compat())),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 
@@ -520,7 +520,7 @@ impl NoriaBackend {
                                     .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             ) {
                                 error!(error = %e, "add query failed");
-                                return Err(io::Error::new(io::ErrorKind::Other, e.compat()));
+                                return Err(io::Error::new(io::ErrorKind::Other, e));
                             }
 
                             gc.insert(q.clone(), qname.clone());

@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 arccstr = "1.1.0"
 clap = "2.24.0"
-failure = "0.1.1"
+anyhow = "1.0"
 msql-srv = { version = "0.8.7", path = "../msql-srv" }
 noria = { version = "0.7", path = "../noria/noria/" }
 futures-executor = "0.3.0"

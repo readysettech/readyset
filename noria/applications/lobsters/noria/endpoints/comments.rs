@@ -8,9 +8,9 @@ use vec1::vec1;
 pub(crate) async fn handle<F>(
     c: F,
     acting_as: Option<UserId>,
-) -> Result<(crate::Conn, bool), failure::Error>
+) -> Result<(crate::Conn, bool), anyhow::Error>
 where
-    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, anyhow::Error>> + Send,
 {
     let c = c.await?;
     let ids: Vec<_> = c

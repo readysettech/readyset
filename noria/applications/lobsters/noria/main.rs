@@ -33,7 +33,7 @@ struct NoriaConnection {
 }
 
 impl NoriaConnection {
-    async fn view(&self, view: &'static str) -> Result<noria::View, failure::Error> {
+    async fn view(&self, view: &'static str) -> Result<noria::View, anyhow::Error> {
         if let Some(v) = self.views.pin().get(view) {
             return Ok(v.clone());
         }
@@ -45,7 +45,7 @@ impl NoriaConnection {
         Ok(handle)
     }
 
-    async fn table(&self, table: &'static str) -> Result<noria::Table, failure::Error> {
+    async fn table(&self, table: &'static str) -> Result<noria::Table, anyhow::Error> {
         if let Some(v) = self.tables.pin().get(table) {
             return Ok(v.clone());
         }
@@ -65,7 +65,7 @@ mod endpoints;
 
 impl Service<bool> for NoriaTrawlerBuilder {
     type Response = NoriaTrawler;
-    type Error = failure::Error;
+    type Error = anyhow::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
     fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -102,7 +102,7 @@ impl Service<bool> for NoriaTrawlerBuilder {
 
 impl Service<TrawlerRequest> for NoriaTrawler {
     type Response = ();
-    type Error = failure::Error;
+    type Error = anyhow::Error;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

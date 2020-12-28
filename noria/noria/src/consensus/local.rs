@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Condvar, Mutex};
 
-use failure::Error;
+use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

@@ -196,7 +196,7 @@ async fn listen_domain_replies(
                 tokio::spawn(
                     valve
                         .wrap(AsyncBincodeReader::from(sock))
-                        .map_err(failure::Error::from)
+                        .map_err(anyhow::Error::from)
                         .forward(
                             crate::ImplSinkForSender(reply_tx.clone())
                                 .sink_map_err(|_| format_err!("main event loop went away")),
@@ -219,8 +219,8 @@ fn instance_campaign<A: Authority + 'static>(
     config: Config,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
-    let campaign_inner = move |event_tx: UnboundedSender<Event>| -> Result<(), failure::Error> {
-        let payload_to_event = |payload: Vec<u8>| -> Result<Event, failure::Error> {
+    let campaign_inner = move |event_tx: UnboundedSender<Event>| -> Result<(), anyhow::Error> {
+        let payload_to_event = |payload: Vec<u8>| -> Result<Event, anyhow::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
             let state: ControllerState =
                 serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap())?;

@@ -2,7 +2,7 @@ use std::process;
 use std::thread::{self, Thread};
 use std::time::Duration;
 
-use failure::{Error, ResultExt};
+use anyhow::{Context as AnyhowContext, Error};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};

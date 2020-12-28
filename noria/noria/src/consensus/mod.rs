@@ -1,7 +1,7 @@
 //! Code for interacting with ZooKeeper to determine which Noria worker acts as the controller, and
 //! for detecting failed controllers which necessitate a controller changeover.
 
-use failure::Error;
+use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

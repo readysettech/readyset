@@ -1,6 +1,6 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
+use anyhow::Context as AnyhowContext;
 use clap::{self, value_t_or_exit};
-use failure::ResultExt;
 use noria::{self, TableOperation};
 use std::future::Future;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ pub(crate) struct LocalNoria {
 unsafe impl Send for LocalNoria {}
 
 impl VoteClient for LocalNoria {
-    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    type Future = impl Future<Output = Result<Self, anyhow::Error>> + Send;
     fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future {
         use noria::{DurabilityMode, PersistenceParameters};
 
@@ -113,15 +113,15 @@ impl VoteClient for LocalNoria {
 
 impl Service<ReadRequest> for LocalNoria {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.r
             .as_mut()
             .unwrap()
             .poll_ready(cx)
-            .map_err(failure::Error::from)
+            .map_err(anyhow::Error::from)
     }
 
     fn call(&mut self, req: ReadRequest) -> Self::Future {
@@ -144,11 +144,11 @@ impl Service<ReadRequest> for LocalNoria {
 
 impl Service<WriteRequest> for LocalNoria {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Service::poll_ready(self.w.as_mut().unwrap(), cx).map_err(failure::Error::from)
+        Service::poll_ready(self.w.as_mut().unwrap(), cx).map_err(anyhow::Error::from)
     }
 
     fn call(&mut self, req: WriteRequest) -> Self::Future {
