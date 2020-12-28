@@ -1,5 +1,6 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
+use crate::errors::wrap_boxed_error;
 use crate::internal::*;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
@@ -16,6 +17,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::{fmt, io};
+use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower_balance::p2c::Balance;
@@ -273,30 +275,24 @@ pub(crate) type TableRpc = Buffer<
 >;
 
 /// A failed [`Table`] operation.
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum TableError {
     /// The wrong number of columns was given when inserting a row.
-    #[fail(
-        display = "wrong number of columns specified: expected {}, got {}",
-        _0, _1
-    )]
+    #[error("wrong number of columns specified: expected {0}, got {1}")]
     WrongColumnCount(usize, usize),
 
     /// The wrong number of key columns was given when modifying a row.
-    #[fail(
-        display = "wrong number of key columns used: expected {}, got {}",
-        _0, _1
-    )]
+    #[error("wrong number of key columns used: expected {0}, got {1}")]
     WrongKeyColumnCount(usize, usize),
 
     /// The underlying connection to Noria produced an error.
-    #[fail(display = "{}", _0)]
-    TransportError(#[cause] failure::Error),
+    #[error("{0}")]
+    TransportError(#[source] anyhow::Error),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for TableError {
     fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        TableError::TransportError(failure::Error::from_boxed_compat(e))
+        TableError::TransportError(wrap_boxed_error(e))
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::clients::localsoup::graph::RECIPE;
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
+use anyhow::Context as AnyhowContext;
 use clap;
-use failure::ResultExt;
 use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
 use std::future::Future;
 use std::task::{Context, Poll};
@@ -16,7 +16,7 @@ pub(crate) struct Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    type Future = impl Future<Output = Result<Self, anyhow::Error>> + Send;
     fn new(params: Parameters, args: clap::ArgMatches) -> <Self as VoteClient>::Future {
         let zk = format!(
             "{}/{}",
@@ -52,15 +52,15 @@ impl VoteClient for Conn {
 
 impl Service<ReadRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.r
             .as_mut()
             .unwrap()
             .poll_ready(cx)
-            .map_err(failure::Error::from)
+            .map_err(anyhow::Error::from)
     }
 
     fn call(&mut self, req: ReadRequest) -> Self::Future {
@@ -85,12 +85,12 @@ impl Service<ReadRequest> for Conn {
 
 impl Service<WriteRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap(), cx)
-            .map_err(failure::Error::from)
+            .map_err(anyhow::Error::from)
     }
 
     fn call(&mut self, req: WriteRequest) -> Self::Future {

@@ -8,9 +8,9 @@ use vec1::vec1;
 pub(crate) async fn handle<F>(
     c: F,
     acting_as: Option<UserId>,
-) -> Result<(crate::Conn, bool), failure::Error>
+) -> Result<(crate::Conn, bool), anyhow::Error>
 where
-    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, anyhow::Error>> + Send,
 {
     // /recent is a little weird:
     // https://github.com/lobsters/lobsters/blob/50b4687aeeec2b2d60598f63e06565af226f93e3/app/models/story_repository.rb#L41

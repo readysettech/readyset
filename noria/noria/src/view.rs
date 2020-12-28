@@ -1,4 +1,5 @@
 use crate::data::*;
+use crate::errors::wrap_boxed_error;
 use crate::util::BoundFunctor;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
@@ -17,6 +18,7 @@ use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use thiserror::Error;
 use tokio_tower::multiplex;
 use tower_balance::p2c::Balance;
 use tower_buffer::Buffer;
@@ -100,22 +102,22 @@ pub(crate) type ViewRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>, Tagged<ReadQuery>>;
 
 /// A failed [`View`] operation.
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ViewError {
     /// The given view is not yet available.
-    #[fail(display = "the view is not yet available")]
+    #[error("the view is not yet available")]
     NotYetAvailable,
-    /// A lower-level error occurred while communicating with Soup.
-    #[fail(display = "{}", _0)]
-    TransportError(#[cause] failure::Error),
-    /// The query specified an empty lookup key
-    #[fail(display = "the query specified an empty lookup key")]
+    /// The query specified an empty lookup key.
+    #[error("the query specified an empty lookup key")]
     EmptyKey,
+    /// A lower-level error occurred while communicating with Soup.
+    #[error("{0}")]
+    TransportError(#[source] anyhow::Error),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
     fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        ViewError::TransportError(failure::Error::from_boxed_compat(e))
+        ViewError::TransportError(wrap_boxed_error(e))
     }
 }
 

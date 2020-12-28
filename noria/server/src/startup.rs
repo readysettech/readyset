@@ -37,7 +37,7 @@ pub(crate) enum Event {
     ),
     LeaderChange(ControllerState, ControllerDescriptor),
     WonLeaderElection(ControllerState),
-    CampaignError(failure::Error),
+    CampaignError(anyhow::Error),
     #[cfg(test)]
     IsReady(tokio::sync::oneshot::Sender<bool>),
     ManualMigration {
@@ -71,7 +71,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
-) -> Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), failure::Error> {
+) -> Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), anyhow::Error> {
     let (trigger, valve) = Valve::new();
     let (alive, done) = tokio::sync::mpsc::channel(1);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -202,7 +202,7 @@ async fn listen_internal(
                     valve
                         .wrap(AsyncBincodeReader::from(sock))
                         .map_ok(Event::InternalMessage)
-                        .map_err(failure::Error::from)
+                        .map_err(anyhow::Error::from)
                         .forward(
                             crate::ImplSinkForSender(event_tx.clone())
                                 .sink_map_err(|_| format_err!("main event loop went away")),

@@ -10,7 +10,7 @@ pub(crate) mod story_vote;
 pub(crate) mod submit;
 pub(crate) mod user;
 
-pub(crate) async fn notifications(c: crate::Conn, uid: u32) -> Result<crate::Conn, failure::Error> {
+pub(crate) async fn notifications(c: crate::Conn, uid: u32) -> Result<crate::Conn, anyhow::Error> {
     let _ = c
         .view("notif_1")
         .await?

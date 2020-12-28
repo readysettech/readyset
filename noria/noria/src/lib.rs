@@ -109,7 +109,7 @@
 #![warn(rust_2018_idioms)]
 
 #[macro_use]
-extern crate failure;
+extern crate anyhow;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
@@ -207,6 +207,8 @@ use tokio_tower::multiplex;
 mod controller;
 mod data;
 mod data_serde;
+#[doc(hidden)]
+pub mod errors;
 mod table;
 pub mod util;
 mod view;

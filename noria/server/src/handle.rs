@@ -34,7 +34,7 @@ impl<A: Authority + 'static> Handle<A> {
         authority: Arc<A>,
         event_tx: tokio::sync::mpsc::UnboundedSender<Event>,
         kill: Trigger,
-    ) -> Result<Self, failure::Error> {
+    ) -> Result<Self, anyhow::Error> {
         let c = ControllerHandle::make(authority).await?;
         Ok(Handle {
             c: Some(c),
@@ -88,7 +88,7 @@ impl<A: Authority + 'static> Handle<A> {
 
     /// Install a new set of policies on the controller.
     #[must_use]
-    pub async fn set_security_config(&mut self, p: String) -> Result<(), failure::Error> {
+    pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
         self.rpc("set_security_config", p, "failed to set security config")
             .await
     }
@@ -98,7 +98,7 @@ impl<A: Authority + 'static> Handle<A> {
     pub async fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<(), anyhow::Error> {
         let mut c = self.c.clone().unwrap();
 
         let uid = context

@@ -1,7 +1,7 @@
 #![feature(type_alias_impl_trait)]
 
+use anyhow::Context as AnyhowContext;
 use clap::value_t_or_exit;
-use failure::ResultExt;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use noria_applications::Timeline;
@@ -34,8 +34,8 @@ use self::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
 where
     C: VoteClient + Unpin + 'static,
-    C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
-    C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
+    C: Service<ReadRequest, Response = (), Error = anyhow::Error> + Clone + Send,
+    C: Service<WriteRequest, Response = (), Error = anyhow::Error> + Clone + Send,
     <C as Service<ReadRequest>>::Future: Send,
     <C as Service<ReadRequest>>::Response: Send,
     <C as Service<WriteRequest>>::Future: Send,
@@ -233,8 +233,8 @@ fn run_generator<C, R>(
 where
     C: VoteClient + Unpin + 'static,
     R: rand::distributions::Distribution<usize>,
-    C: Service<ReadRequest, Response = (), Error = failure::Error> + Clone + Send,
-    C: Service<WriteRequest, Response = (), Error = failure::Error> + Clone + Send,
+    C: Service<ReadRequest, Response = (), Error = anyhow::Error> + Clone + Send,
+    C: Service<WriteRequest, Response = (), Error = anyhow::Error> + Clone + Send,
     <C as Service<ReadRequest>>::Future: Send,
     <C as Service<ReadRequest>>::Response: Send,
     <C as Service<WriteRequest>>::Future: Send,

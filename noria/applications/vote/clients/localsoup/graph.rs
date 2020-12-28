@@ -50,7 +50,7 @@ impl Builder {
     pub async fn start(
         &self,
         persistence_params: PersistenceParameters,
-    ) -> Result<Graph, failure::Error> {
+    ) -> Result<Graph, anyhow::Error> {
         // XXX: why isn't PersistenceParameters inside self?
         let mut g = noria::Builder::default();
         if !self.partial {

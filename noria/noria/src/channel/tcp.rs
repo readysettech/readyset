@@ -15,15 +15,16 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum SendError {
-    #[fail(display = "{}", _0)]
-    BincodeError(#[cause] bincode::Error),
-    #[fail(display = "{}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "channel has previously encountered an error")]
+    #[error("{0}")]
+    BincodeError(#[source] bincode::Error),
+    #[error("{0}")]
+    IoError(#[source] io::Error),
+    #[error("channel has previously encountered an error")]
     Poisoned,
 }
 

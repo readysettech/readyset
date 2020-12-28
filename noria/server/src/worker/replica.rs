@@ -4,6 +4,7 @@ const FORCE_INPUT_YIELD_EVERY: usize = 32;
 use super::ChannelCoordinator;
 use crate::coordination::CoordinationPayload;
 use ahash::{AHashMap, AHashSet};
+use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
 use async_timer::Oneshot;
 use bincode;
@@ -12,7 +13,6 @@ use dataflow::{
     prelude::{DataType, Executor},
     Domain, Packet, PollEvent, ProcessResult,
 };
-use failure::{self, Fail, ResultExt};
 use futures_util::{
     sink::Sink,
     stream::{futures_unordered::FuturesUnordered, Stream},
@@ -133,7 +133,7 @@ impl Replica {
         }
     }
 
-    fn try_acks(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+    fn try_acks(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), anyhow::Error> {
         let this = self.project();
 
         let mut inputs = this.inputs;
@@ -256,7 +256,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), failure::Error> {
+    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), anyhow::Error> {
         let this = self.project();
 
         let cc = this.coord;
@@ -328,7 +328,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, failure::Error> {
+    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, anyhow::Error> {
         let mut this = self.project();
 
         if let Poll::Ready(true) = this.valve.poll_closed(cx) {
@@ -338,7 +338,7 @@ impl Replica {
                 .incoming
                 .as_mut()
                 .poll_fn(cx, |mut i, cx| i.poll_accept(cx))
-                .map_err(|e| e.context("poll_accept"))?
+                .map_err(|e| anyhow::Error::new(e).context("poll_accept"))?
             {
                 // we know that any new connection to a domain will first send a one-byte
                 // token to indicate whether the connection is from a base or not.
@@ -541,7 +541,7 @@ impl Executor for Outboxes {
 }
 
 impl Future for Replica {
-    type Output = Result<(), failure::Error>;
+    type Output = Result<(), anyhow::Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         'process: loop {
             // are there any new connections?

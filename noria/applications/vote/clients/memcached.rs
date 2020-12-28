@@ -1,6 +1,6 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
+use anyhow::{anyhow, Context as AnyhowContext};
 use clap;
-use failure::{bail, ResultExt};
 use memcached;
 use memcached::proto::{MultiOperation, ProtoType};
 use std::future::Future;
@@ -120,7 +120,7 @@ impl Conn {
 }
 
 impl VoteClient for Conn {
-    type Future = impl Future<Output = Result<Self, failure::Error>> + Send;
+    type Future = impl Future<Output = Result<Self, anyhow::Error>> + Send;
     fn new(params: Parameters, args: clap::ArgMatches<'_>) -> <Self as VoteClient>::Future {
         let addr = args.value_of("address").unwrap();
         let fast = args.is_present("fast");
@@ -164,8 +164,8 @@ impl VoteClient for Conn {
 
 impl Service<ReadRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.c
@@ -198,7 +198,7 @@ impl Service<ReadRequest> for Conn {
 
         async move {
             if let Err(_) = res {
-                bail!("backing thread failed for read");
+                anyhow!("backing thread failed for read");
             }
 
             rx.await.unwrap()?;
@@ -209,8 +209,8 @@ impl Service<ReadRequest> for Conn {
 
 impl Service<WriteRequest> for Conn {
     type Response = ();
-    type Error = failure::Error;
-    type Future = impl Future<Output = Result<(), failure::Error>> + Send;
+    type Error = anyhow::Error;
+    type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.c
@@ -230,7 +230,7 @@ impl Service<WriteRequest> for Conn {
 
         async move {
             if let Err(_) = res {
-                bail!("backing thread failed for write");
+                anyhow!("backing thread failed for write");
             }
 
             rx.await.unwrap()?;

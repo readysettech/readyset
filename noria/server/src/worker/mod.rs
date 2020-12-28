@@ -182,7 +182,7 @@ async fn listen_df<'a>(
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
     mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
-) -> Result<(), failure::Error> {
+) -> Result<(), anyhow::Error> {
     // first, try to connect to controller
     let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
     let ctrl_addr = ctrl.local_addr()?;
@@ -339,7 +339,7 @@ async fn listen_df<'a>(
                     let _alive = a;
                     let log = replica.log.clone();
                     if let Err(e) = replica.await {
-                        crit!(log, "replica failure: {:?}", e);
+                        crit!(log, "replica anyhow: {:?}", e);
                     }
                 });
 

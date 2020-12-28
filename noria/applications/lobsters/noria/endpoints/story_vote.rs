@@ -7,9 +7,9 @@ pub(crate) async fn handle<F>(
     acting_as: Option<UserId>,
     story: StoryId,
     v: Vote,
-) -> Result<(crate::Conn, bool), failure::Error>
+) -> Result<(crate::Conn, bool), anyhow::Error>
 where
-    F: 'static + Future<Output = Result<crate::Conn, failure::Error>> + Send,
+    F: 'static + Future<Output = Result<crate::Conn, anyhow::Error>> + Send,
 {
     let c = c.await?;
     let user = acting_as.unwrap();

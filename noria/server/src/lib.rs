@@ -352,7 +352,7 @@
 #![allow(clippy::redundant_closure)]
 
 #[macro_use]
-extern crate failure;
+extern crate anyhow;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
