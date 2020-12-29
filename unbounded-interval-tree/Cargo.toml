@@ -10,4 +10,5 @@ repository = "https://github.com/jonathanGB/unbounded-interval-tree"
 keywords = ["interval", "tree", "bound", "exclusive", "difference"]
 
 [dependencies]
+proptest = "0.10.1"
 rand = "0.7"
