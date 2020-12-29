@@ -239,6 +239,10 @@ impl GroupedOperation for GroupConcat {
             })
             .collect::<Vec<_>>()
     }
+
+    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
+        Some(nom_sql::SqlType::Text)
+    }
 }
 
 #[cfg(test)]

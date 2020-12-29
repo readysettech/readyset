@@ -172,6 +172,9 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     match kind {
                         Aggregation::COUNT => FilterAggregation::COUNT,
                         Aggregation::SUM => FilterAggregation::SUM,
+                        // TODO: average not yet supported for filter aggregations.
+                        // fix during refactor: https://app.clubhouse.io/readysettech/story/172
+                        Aggregation::AVG => FilterAggregation::SUM,
                     },
                 )
             } else {

@@ -1113,6 +1113,13 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
+            Avg(FunctionArgument::Column(ref col), distinct) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::Aggregation(Aggregation::AVG),
+                distinct,
+                None,
+            ),
             Max(FunctionArgument::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,

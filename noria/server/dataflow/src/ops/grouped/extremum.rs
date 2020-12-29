@@ -189,6 +189,10 @@ impl GroupedOperation for ExtremumOperator {
     fn over_columns(&self) -> Vec<usize> {
         vec![self.over]
     }
+
+    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
+        None // Type of extremum relies on col type
+    }
 }
 
 #[cfg(test)]
