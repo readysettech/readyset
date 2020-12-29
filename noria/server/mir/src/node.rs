@@ -808,6 +808,7 @@ impl Debug for MirNodeType {
                 let op_string = match *kind {
                     AggregationKind::COUNT => format!("|*|({})", on.name.as_str()),
                     AggregationKind::SUM => format!("𝛴({})", on.name.as_str()),
+                    AggregationKind::AVG => format!("AVG({})", on.name.as_str()),
                 };
                 let group_cols = group_by
                     .iter()

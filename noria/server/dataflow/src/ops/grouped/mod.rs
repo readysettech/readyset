@@ -3,6 +3,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 
+use nom_sql::SqlType;
+
 use crate::prelude::*;
 
 // pub mod latest;
@@ -61,6 +63,12 @@ pub trait GroupedOperation: fmt::Debug + Clone {
 
     fn description(&self, detailed: bool) -> String;
     fn over_columns(&self) -> Vec<usize>;
+
+    /// Defines the output column type for the Grouped Operation if possible.
+    /// Returns None if the type of of the output varies depending on data type of over column
+    /// (e.g. SUM can be either int or float)
+    /// Other operators like Count (int) and Concat (text) always have the same column type.
+    fn output_col_type(&self) -> Option<SqlType>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +102,10 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 
     pub fn over_columns(&self) -> Vec<usize> {
         self.inner.over_columns()
+    }
+
+    pub fn output_col_type(&self) -> Option<SqlType> {
+        self.inner.output_col_type()
     }
 }
 

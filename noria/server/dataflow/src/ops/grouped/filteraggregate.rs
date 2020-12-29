@@ -3,7 +3,7 @@ use std::sync;
 use crate::ops::filter::{FilterCondition, Value};
 use crate::ops::grouped::GroupedOperation;
 use crate::ops::grouped::GroupedOperator;
-pub use nom_sql::{BinaryOperator, Literal};
+pub use nom_sql::{BinaryOperator, Literal, SqlType};
 
 use crate::prelude::*;
 
@@ -184,6 +184,13 @@ impl GroupedOperation for FilterAggregator {
 
     fn over_columns(&self) -> Vec<usize> {
         vec![self.over]
+    }
+
+    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
+        match self.op {
+            FilterAggregation::COUNT => Some(SqlType::Bigint(64)),
+            _ => None,
+        }
     }
 }
 
