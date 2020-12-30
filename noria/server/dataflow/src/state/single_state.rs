@@ -3,8 +3,11 @@ use super::RangeLookupResult;
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
+use noria::KeyComparison;
 use rand::prelude::*;
+use std::ops::Bound;
 use std::rc::Rc;
+use vec1::Vec1;
 
 pub(super) struct SingleState {
     key: Vec<usize>,
@@ -13,37 +16,15 @@ pub(super) struct SingleState {
     rows: usize,
 }
 
-macro_rules! insert_row_match_impl {
-    ($self:ident, $r:ident, $map:ident) => {{
-        use std::collections::btree_map::Entry;
-        let key = MakeKey::from_row(&$self.key, &*$r);
-        match $map.entry(key) {
-            Entry::Occupied(mut rs) => {
-                rs.get_mut().insert($r);
-            }
-            Entry::Vacant(..) if $self.partial => return false,
-            rs @ Entry::Vacant(..) => {
-                rs.or_default().insert($r);
-            }
-        }
-    }};
-}
-
-macro_rules! remove_row_match_impl {
-    ($self:ident, $r:ident, $do_remove:ident, $map:ident, $($hint:tt)*) => {{
-        // TODO: can we avoid the Clone here?
-        let key = MakeKey::from_row(&$self.key, $r);
-        if let Some(ref mut rs) = $map.get_mut::<$($hint)*>(&key) {
-            return $do_remove(&mut $self.rows, rs);
-        }
-    }};
-}
-
 impl SingleState {
     pub(super) fn new(columns: &[usize], partial: bool) -> Self {
+        let mut state: KeyedState = columns.into();
+        if !partial {
+            state.insert_range((Bound::Unbounded, Bound::Unbounded))
+        }
         Self {
             key: Vec::from(columns),
-            state: columns.into(),
+            state,
             partial,
             rows: 0,
         }
@@ -52,6 +33,22 @@ impl SingleState {
     /// Inserts the given record, or returns false if a hole was encountered (and the record hence
     /// not inserted).
     pub(super) fn insert_row(&mut self, r: Row) -> bool {
+        macro_rules! insert_row_match_impl {
+            ($self:ident, $r:ident, $map:ident) => {{
+                use super::partial_map::Entry;
+                let key = MakeKey::from_row(&$self.key, &*$r);
+                match $map.entry(key) {
+                    Entry::Occupied(mut rs) => {
+                        rs.get_mut().insert($r);
+                    }
+                    Entry::Vacant(..) if $self.partial => return false,
+                    rs @ Entry::Vacant(..) => {
+                        rs.or_default().insert($r);
+                    }
+                }
+            }};
+        }
+
         match self.state {
             KeyedState::Single(ref mut map) => {
                 // treat this specially to avoid the extra Vec
@@ -107,6 +104,15 @@ impl SingleState {
             rm
         };
 
+        macro_rules! remove_row_match_impl {
+            ($self:ident, $r:ident, $map:ident) => {{
+                let key = MakeKey::from_row(&$self.key, $r);
+                if let Some(ref mut rs) = $map.get_mut(&key) {
+                    return do_remove(&mut $self.rows, rs);
+                }
+            }};
+        }
+
         match self.state {
             KeyedState::Single(ref mut map) => {
                 if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
@@ -114,25 +120,25 @@ impl SingleState {
                 }
             }
             KeyedState::Double(ref mut map) => {
-                remove_row_match_impl!(self, r, do_remove, map, (DataType, _))
+                remove_row_match_impl!(self, r, map)
             }
             KeyedState::Tri(ref mut map) => {
-                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _))
+                remove_row_match_impl!(self, r, map)
             }
             KeyedState::Quad(ref mut map) => {
-                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _))
+                remove_row_match_impl!(self, r, map)
             }
             KeyedState::Quin(ref mut map) => {
-                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _, _))
+                remove_row_match_impl!(self, r, map)
             }
             KeyedState::Sex(ref mut map) => {
-                remove_row_match_impl!(self, r, do_remove, map, (DataType, _, _, _, _, _))
+                remove_row_match_impl!(self, r, map)
             }
         }
         None
     }
 
-    pub(super) fn mark_filled(&mut self, key: Vec<DataType>) {
+    fn mark_point_filled(&mut self, key: Vec1<DataType>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
             KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
@@ -181,18 +187,25 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
+    fn mark_range_filled(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
+        self.state.insert_range(range);
+    }
+
+    pub(super) fn mark_filled(&mut self, key: KeyComparison) {
+        match key {
+            KeyComparison::Equal(k) => self.mark_point_filled(k),
+            KeyComparison::Range(range) => self.mark_range_filled(range),
+        }
+    }
+
     pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
         let removed = match self.state {
             KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quin(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::Sex(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
-            }
+            KeyedState::Double(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Sex(ref mut m) => m.remove(&MakeKey::from_key(key)),
         };
         // mark_hole should only be called on keys we called mark_filled on
         removed
@@ -277,13 +290,36 @@ impl SingleState {
     pub(super) fn lookup_range<'a>(&'a self, key: &RangeKey) -> RangeLookupResult<'a> {
         match self.state.lookup_range(key) {
             Ok(rs) => RangeLookupResult::Some(RecordResult::References(rs.collect())),
-            Err(misses) => {
-                if self.partial() {
-                    RangeLookupResult::Missing(misses)
-                } else {
-                    RangeLookupResult::Some(RecordResult::Owned(vec![]))
-                }
-            }
+            Err(misses) if self.partial() => RangeLookupResult::Missing(misses),
+            _ => RangeLookupResult::Some(RecordResult::Owned(vec![])),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Bound;
+
+    use super::*;
+    use vec1::vec1;
+
+    #[test]
+    fn mark_filled_point() {
+        let mut state = SingleState::new(&[0], true);
+        state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
+        assert!(state.lookup(&KeyType::from(&[0.into()])).is_some())
+    }
+
+    #[test]
+    fn mark_filled_range() {
+        let mut state = SingleState::new(&[0], true);
+        state.mark_filled(KeyComparison::Range((
+            Bound::Included(vec1![0.into()]),
+            Bound::Excluded(vec1![5.into()]),
+        )));
+        assert!(state.lookup(&KeyType::from(&[0.into()])).is_some());
+        assert!(state
+            .lookup_range(&RangeKey::from(&(vec![0.into()]..vec![5.into()])))
+            .is_some());
     }
 }

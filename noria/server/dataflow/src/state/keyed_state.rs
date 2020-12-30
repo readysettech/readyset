@@ -1,8 +1,11 @@
-use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::rc::Rc;
 use tuple::Map;
+use tuple::TupleElements;
+use vec1::Vec1;
 
 use super::mk_key::MakeKey;
+use super::partial_map::PartialMap;
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
@@ -10,12 +13,12 @@ use noria::util::BoundFunctor;
 
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
-    Single(BTreeMap<DataType, Rows>),
-    Double(BTreeMap<(DataType, DataType), Rows>),
-    Tri(BTreeMap<(DataType, DataType, DataType), Rows>),
-    Quad(BTreeMap<(DataType, DataType, DataType, DataType), Rows>),
-    Quin(BTreeMap<(DataType, DataType, DataType, DataType, DataType), Rows>),
-    Sex(BTreeMap<(DataType, DataType, DataType, DataType, DataType, DataType), Rows>),
+    Single(PartialMap<DataType, Rows>),
+    Double(PartialMap<(DataType, DataType), Rows>),
+    Tri(PartialMap<(DataType, DataType, DataType), Rows>),
+    Quad(PartialMap<(DataType, DataType, DataType, DataType), Rows>),
+    Quin(PartialMap<(DataType, DataType, DataType, DataType, DataType), Rows>),
+    Sex(PartialMap<(DataType, DataType, DataType, DataType, DataType, DataType), Rows>),
 }
 
 impl KeyedState {
@@ -31,36 +34,102 @@ impl KeyedState {
         }
     }
 
+    pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
+        macro_rules! adapt_range {
+            ($range: expr, $hint: ty) => {{
+                use tuple::TupleElements;
+                (
+                    $range
+                        .0
+                        .map(|k| <$hint as TupleElements>::from_iter(k.into_iter()).unwrap()),
+                    $range
+                        .1
+                        .map(|k| <$hint as TupleElements>::from_iter(k.into_iter()).unwrap()),
+                )
+            }};
+        }
+
+        match self {
+            KeyedState::Single(ref mut map) => map.insert_range((
+                range.0.map(|k| k.split_off_first().0),
+                range.1.map(|k| k.split_off_first().0),
+            )),
+            KeyedState::Double(ref mut map) => map.insert_range(adapt_range!(range, (DataType, _))),
+            KeyedState::Tri(ref mut map) => map.insert_range(adapt_range!(range, (DataType, _, _))),
+            KeyedState::Quad(ref mut map) => {
+                map.insert_range(adapt_range!(range, (DataType, _, _, _)))
+            }
+            KeyedState::Quin(ref mut map) => {
+                map.insert_range(adapt_range!(range, (DataType, _, _, _, _)))
+            }
+            KeyedState::Sex(ref mut map) => {
+                map.insert_range(adapt_range!(range, (DataType, _, _, _, _, _)))
+            }
+        };
+    }
+
     pub(super) fn lookup_range<'a>(
         &'a self,
         key: &RangeKey,
-    ) -> Result<Box<dyn Iterator<Item = &'a Row> + 'a>, Misses<'a>> {
+    ) -> Result<Box<dyn Iterator<Item = &'a Row> + 'a>, Misses> {
+        fn to_misses<K: TupleElements<Element = DataType>>(
+            misses: Vec<(Bound<K>, Bound<K>)>,
+        ) -> Misses {
+            misses
+                .into_iter()
+                .map(|(lower, upper)| {
+                    (
+                        lower.map(|k| k.into_elements().collect()),
+                        upper.map(|k| k.into_elements().collect()),
+                    )
+                })
+                .collect()
+        }
+
+        fn flatten_rows<'a, K: 'a, I: Iterator<Item = (&'a K, &'a Rows)> + 'a>(
+            r: I,
+        ) -> Box<dyn Iterator<Item = &'a Row> + 'a> {
+            Box::new(r.flat_map(|(_, rows)| rows))
+        }
+
         macro_rules! full_range {
             ($m: expr) => {
-                Ok(Box::new($m.range(..).flat_map(|(_, rows)| rows)))
+                $m.range(..).map(flatten_rows).map_err(to_misses)
             };
         }
 
         macro_rules! range {
             ($m: expr, $range: ident) => {
-                Ok(Box::new(
-                    $m.range((
-                        $range.0.map(|k| k.map(Clone::clone)),
-                        $range.1.map(|k| k.map(Clone::clone)),
-                    ))
-                    .flat_map(|(_, rows)| rows),
+                $m.range((
+                    $range.0.map(|k| k.map(Clone::clone)),
+                    $range.1.map(|k| k.map(Clone::clone)),
                 ))
+                .map(flatten_rows)
+                .map_err(to_misses)
             };
         }
 
         match (self, key) {
-            (&KeyedState::Single(ref m), &RangeKey::Unbounded) => full_range!(m),
+            (&KeyedState::Single(ref m), &RangeKey::Unbounded) => m
+                .range(..)
+                .map_err(|misses| {
+                    misses
+                        .into_iter()
+                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
+                        .collect()
+                })
+                .map(flatten_rows),
             (&KeyedState::Double(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::Tri(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::Quad(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::Sex(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::Single(ref m), &RangeKey::Single(range)) => {
-                Ok(Box::new(m.range(range).flat_map(|(_, rows)| rows)))
+                m.range(range).map(flatten_rows).map_err(|misses| {
+                    misses
+                        .into_iter()
+                        .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
+                        .collect()
+                })
             }
             (&KeyedState::Double(ref m), &RangeKey::Double(range)) => range!(m, range),
             (&KeyedState::Tri(ref m), &RangeKey::Tri(range)) => range!(m, range),
@@ -130,15 +199,12 @@ impl KeyedState {
     pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
         match *self {
             KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key)),
-            KeyedState::Quin(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
-            }
-            KeyedState::Sex(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
-            }
+            KeyedState::Double(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Tri(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quad(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            KeyedState::Quin(ref mut m) => m.remove(&MakeKey::from_key(key)),
+
+            KeyedState::Sex(ref mut m) => m.remove(&MakeKey::from_key(key)),
         }
         .map(|rows| {
             rows.iter()
@@ -154,12 +220,12 @@ impl<'a> Into<KeyedState> for &'a [usize] {
     fn into(self) -> KeyedState {
         match self.len() {
             0 => unreachable!(),
-            1 => KeyedState::Single(BTreeMap::default()),
-            2 => KeyedState::Double(BTreeMap::default()),
-            3 => KeyedState::Tri(BTreeMap::default()),
-            4 => KeyedState::Quad(BTreeMap::default()),
-            5 => KeyedState::Quin(BTreeMap::default()),
-            6 => KeyedState::Sex(BTreeMap::default()),
+            1 => KeyedState::Single(PartialMap::default()),
+            2 => KeyedState::Double(PartialMap::default()),
+            3 => KeyedState::Tri(PartialMap::default()),
+            4 => KeyedState::Quad(PartialMap::default()),
+            5 => KeyedState::Quin(PartialMap::default()),
+            6 => KeyedState::Sex(PartialMap::default()),
             x => panic!("invalid compound key of length: {}", x),
         }
     }

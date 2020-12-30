@@ -2328,6 +2328,7 @@ dependencies = [
  "tokio 0.2.24",
  "tuple",
  "unbounded-interval-tree",
+ "vec1",
  "vec_map",
 ]
 

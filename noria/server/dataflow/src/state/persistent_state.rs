@@ -1,10 +1,9 @@
-use bincode;
 use itertools::Itertools;
 use noria::util::BoundFunctor;
+use noria::KeyComparison;
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };
-use serde;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 
@@ -250,7 +249,7 @@ impl State for PersistentState {
         false
     }
 
-    fn mark_filled(&mut self, _: Vec<DataType>, _: Tag) {
+    fn mark_filled(&mut self, _: KeyComparison, _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 

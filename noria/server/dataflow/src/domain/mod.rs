@@ -1,3 +1,4 @@
+use noria::KeyComparison;
 use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
@@ -8,6 +9,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
+use vec1::Vec1;
 
 use crate::group_commit::GroupCommitQueueSet;
 use crate::node::NodeProcessingResult;
@@ -1973,7 +1975,12 @@ impl Domain {
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(segment.node) {
                                 for key in backfill_keys.iter() {
-                                    state.mark_filled(key.clone(), tag);
+                                    state.mark_filled(
+                                        KeyComparison::Equal(
+                                            Vec1::try_from_vec(key.clone()).expect("Empty key"),
+                                        ),
+                                        tag,
+                                    );
                                 }
                             } else {
                                 n.with_reader_mut(|r| {

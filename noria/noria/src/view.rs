@@ -150,6 +150,14 @@ impl KeyComparison {
         }
     }
 
+    /// Build a [`KeyComparison`] from a range of keys
+    pub fn from_range<R>(range: &R) -> Self
+    where
+        R: RangeBounds<Vec1<DataType>>,
+    {
+        KeyComparison::Range((range.start_bound().cloned(), range.end_bound().cloned()))
+    }
+
     /// Returns the shard key(s) that this [`KeyComparison`] must target, given the total number of
     /// shards
     pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
@@ -161,6 +169,28 @@ impl KeyComparison {
             // (2020) Implementing Range Queries and Write Policies in a Partially-Materialized
             // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
             _ => (0..num_shards).collect(),
+        }
+    }
+
+    /// Returns the length of the key this [`KeyComparison`] is comparing against, or None if this
+    /// is an unbounded lookup
+    ///
+    /// Since all KeyComparisons wrap a [`Vec1`], this function will never return `Some(0)`
+    pub fn len(&self) -> Option<usize> {
+        match self {
+            Self::Equal(key) => Some(key.len()),
+            Self::Range((Bound::Unbounded, Bound::Unbounded)) => None,
+            Self::Range(
+                (Bound::Included(ref key) | Bound::Excluded(ref key), Bound::Unbounded)
+                | (Bound::Unbounded, Bound::Included(ref key) | Bound::Excluded(ref key)),
+            ) => Some(key.len()),
+            Self::Range((
+                Bound::Included(ref start) | Bound::Excluded(ref start),
+                Bound::Included(ref end) | Bound::Excluded(ref end),
+            )) => {
+                debug_assert_eq!(start.len(), end.len());
+                Some(start.len())
+            }
         }
     }
 }
