@@ -204,6 +204,20 @@ where
         }
     }
 
+    /// Inserts a single point into the interval tree.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut int_tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// int_tree.insert_point(1);
+    /// assert!(int_tree.contains_point(&1));
+    /// ```
+    pub fn insert_point(&mut self, point: Q) {
+        self.insert((Included(&point), Included(&point)));
+    }
+
     /// Remove an interval from the interval tree
     ///
     /// # Examples
@@ -462,6 +476,24 @@ where
             }
             to_insert = new_to_insert
         }
+    }
+
+    /// Remove a single point from the interval tree
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert(5..=10);
+    /// tree.remove_point(&7);
+    ///
+    /// assert!(!tree.contains_point(&7));
+    /// assert!(tree.contains_interval(5..7));
+    /// assert!(tree.contains_interval(8..=10));
+    /// ````
+    pub fn remove_point(&mut self, point: &Q) {
+        self.remove(&(Included(point), Included(point)))
     }
 
     /// A "stabbing query" in the jargon: returns whether or not a point `q`

@@ -1,6 +1,7 @@
 mod keyed_state;
 mod memory_state;
 mod mk_key;
+mod partial_map;
 mod persistent_state;
 mod single_state;
 
@@ -15,6 +16,9 @@ use ahash::RandomState;
 use common::SizeOf;
 use derive_more::From;
 use hashbag::HashBag;
+use noria::KeyComparison;
+
+pub use partial_map::PartialMap;
 
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
@@ -35,7 +39,7 @@ pub(crate) trait State: SizeOf + Send {
 
     fn mark_hole(&mut self, key: &[DataType], tag: Tag);
 
-    fn mark_filled(&mut self, key: Vec<DataType>, tag: Tag);
+    fn mark_filled(&mut self, key: KeyComparison, tag: Tag);
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
 
@@ -203,7 +207,13 @@ pub(crate) enum LookupResult<'a> {
     Missing,
 }
 
+#[allow(dead_code)]
 impl<'a> LookupResult<'a> {
+    /// Returns true if this LookupResult is `LookupResult::Some`
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(_))
+    }
+
     /// Converts from `LookupResult<'a>` into an [`Option<RecordResult<'a>>`]
     pub fn records(self) -> Option<RecordResult<'a>> {
         match self {
@@ -219,15 +229,22 @@ impl<'a> LookupResult<'a> {
     }
 }
 
-pub(crate) type Misses<'a> = Vec<(Bound<Vec<&'a DataType>>, Bound<Vec<&'a DataType>>)>;
+pub(crate) type Misses = Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>;
 
 #[derive(Eq, PartialEq, Debug)]
 pub(crate) enum RangeLookupResult<'a> {
     Some(RecordResult<'a>),
-    Missing(Misses<'a>),
+    /// We encountered a miss in some partial state
+    Missing(Misses),
 }
 
+#[allow(dead_code)]
 impl<'a> RangeLookupResult<'a> {
+    /// Returns true if this LookupResult is `LookupResult::Some`
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(_))
+    }
+
     /// Converts from `RangeLookupResult<'a>` into an [`Option<RecordResult<'a>>`]
     pub fn records(self) -> Option<RecordResult<'a>> {
         match self {

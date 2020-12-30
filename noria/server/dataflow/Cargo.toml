@@ -48,6 +48,7 @@ noria = { version = "0.7.0", path = "../../noria" }
 unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
 derive_more = "0.99.11"
 tuple = "0.5.1"
+vec1 = "1.6.0"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
