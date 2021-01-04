@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::cell;
 use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,7 +25,6 @@ use stream_cancel::Valve;
 
 use crate::Readers;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use tokio;
 
 #[derive(Debug)]
 pub enum PollEvent {
@@ -2042,7 +2042,10 @@ impl Domain {
                                 // it's important that we clear out any partially-filled holes.
                                 if let Some(state) = self.state.get_mut(segment.node) {
                                     for miss in &missed_on {
-                                        state.mark_hole(&miss[..], tag);
+                                        state.mark_hole(
+                                            &KeyComparison::try_from(miss.clone()).unwrap(),
+                                            tag,
+                                        );
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
@@ -2077,8 +2080,8 @@ impl Domain {
                             // materialized union ate some of our keys,
                             // so we didn't *actually* fill those keys after all!
                             if let Some(state) = self.state.get_mut(segment.node) {
-                                for key in &captured {
-                                    state.mark_hole(&key[..], tag);
+                                for key in captured {
+                                    state.mark_hole(&KeyComparison::try_from(key).unwrap(), tag);
                                 }
                             } else {
                                 n.with_reader_mut(|r| {
@@ -2237,7 +2240,7 @@ impl Domain {
                         // insted, we probably want the join to do the eviction. we achieve this by
                         // only evicting from a after the replay has passed the join (or, more
                         // generally, the operator that might perform lookups into a)
-                        if backfill_keys.is_some() {
+                        if let Some(ref backfill_keys) = backfill_keys {
                             // first and foremost -- evict the source of the replay (if we own it).
                             // we only do this when the replay has reached its target, or if it's
                             // about to leave the domain, otherwise we might evict state that a
@@ -2251,9 +2254,14 @@ impl Domain {
                                             .state
                                             .get_mut(*src)
                                             .expect("replay sourced at non-materialized node");
-                                        trace!(self.log, "clearing keys from purgeable replay source after replay"; "node" => n.global_addr().index(), "keys" => ?backfill_keys.as_ref().unwrap());
-                                        for key in backfill_keys.as_ref().unwrap().iter() {
-                                            state.mark_hole(&key[..], tag);
+                                        trace!(self.log, "clearing keys from purgeable replay source after replay";
+                                               "node" => n.global_addr().index(),
+                                               "keys" => ?backfill_keys);
+                                        for key in backfill_keys {
+                                            state.mark_hole(
+                                                &KeyComparison::try_from(key.clone()).unwrap(),
+                                                tag,
+                                            );
                                         }
                                     }
                                 }
@@ -2336,8 +2344,13 @@ impl Domain {
 
                                     if let Some(tag) = evict_tag {
                                         // NOTE: this assumes that the key order is the same
-                                        trace!(self.log, "clearing keys from purgeable materialization after replay"; "node" => self.nodes[pn].borrow().global_addr().index(), "key" => ?&lookup.key);
-                                        state.mark_hole(&lookup.key[..], tag);
+                                        trace!(self.log, "clearing keys from purgeable materialization after replay";
+                                               "node" => self.nodes[pn].borrow().global_addr().index(),
+                                               "key" => ?&lookup.key);
+                                        state.mark_hole(
+                                            &KeyComparison::try_from(lookup.key.clone()).unwrap(),
+                                            tag,
+                                        );
                                     } else {
                                         unreachable!(
                                             "no tag found for lookup target {:?}({:?}) (really {:?})",

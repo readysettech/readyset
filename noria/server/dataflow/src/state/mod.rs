@@ -37,7 +37,7 @@ pub(crate) trait State: SizeOf + Send {
     // are removed from `records` (thus the mutable reference).
     fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>);
 
-    fn mark_hole(&mut self, key: &[DataType], tag: Tag);
+    fn mark_hole(&mut self, key: &KeyComparison, tag: Tag);
 
     fn mark_filled(&mut self, key: KeyComparison, tag: Tag);
 

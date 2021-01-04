@@ -4,6 +4,7 @@ use tuple::Map;
 use tuple::TupleElements;
 use vec1::Vec1;
 
+#[macro_use]
 use super::mk_key::MakeKey;
 use super::partial_map::PartialMap;
 use super::Misses;
@@ -35,36 +36,26 @@ impl KeyedState {
     }
 
     pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
-        macro_rules! adapt_range {
-            ($range: expr, $hint: ty) => {{
-                use tuple::TupleElements;
-                (
-                    $range
-                        .0
-                        .map(|k| <$hint as TupleElements>::from_iter(k.into_iter()).unwrap()),
-                    $range
-                        .1
-                        .map(|k| <$hint as TupleElements>::from_iter(k.into_iter()).unwrap()),
-                )
-            }};
-        }
-
         match self {
             KeyedState::Single(ref mut map) => map.insert_range((
                 range.0.map(|k| k.split_off_first().0),
                 range.1.map(|k| k.split_off_first().0),
             )),
-            KeyedState::Double(ref mut map) => map.insert_range(adapt_range!(range, (DataType, _))),
-            KeyedState::Tri(ref mut map) => map.insert_range(adapt_range!(range, (DataType, _, _))),
+            KeyedState::Double(ref mut map) => {
+                map.insert_range(<(DataType, _) as MakeKey<_>>::from_range(&range))
+            }
+            KeyedState::Tri(ref mut map) => {
+                map.insert_range(<(DataType, _, _) as MakeKey<_>>::from_range(&range))
+            }
             KeyedState::Quad(ref mut map) => {
-                map.insert_range(adapt_range!(range, (DataType, _, _, _)))
+                map.insert_range(<(DataType, _, _, _) as MakeKey<_>>::from_range(&range))
             }
             KeyedState::Quin(ref mut map) => {
-                map.insert_range(adapt_range!(range, (DataType, _, _, _, _)))
+                map.insert_range(<(DataType, _, _, _, _) as MakeKey<_>>::from_range(&range))
             }
-            KeyedState::Sex(ref mut map) => {
-                map.insert_range(adapt_range!(range, (DataType, _, _, _, _, _)))
-            }
+            KeyedState::Sex(ref mut map) => map.insert_range(
+                <(DataType, _, _, _, _, _) as MakeKey<_>>::from_range(&range),
+            ),
         };
     }
 

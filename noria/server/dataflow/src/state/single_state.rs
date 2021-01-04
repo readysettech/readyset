@@ -198,21 +198,54 @@ impl SingleState {
         }
     }
 
-    pub(super) fn mark_hole(&mut self, key: &[DataType]) -> u64 {
-        let removed = match self.state {
-            KeyedState::Single(ref mut m) => m.remove(&(key[0])),
-            KeyedState::Double(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Tri(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Quad(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Quin(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            KeyedState::Sex(ref mut m) => m.remove(&MakeKey::from_key(key)),
+    pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
+        let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
+            KeyComparison::Equal(key) => match self.state {
+                KeyedState::Single(ref mut m) => {
+                    Box::new(m.remove(&(key[0])).into_iter().flatten())
+                }
+                KeyedState::Double(ref mut m) => {
+                    Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
+                }
+                KeyedState::Tri(ref mut m) => {
+                    Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
+                }
+                KeyedState::Quad(ref mut m) => {
+                    Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
+                }
+                KeyedState::Quin(ref mut m) => {
+                    Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
+                }
+                KeyedState::Sex(ref mut m) => {
+                    Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
+                }
+            },
+            KeyComparison::Range(range) => {
+                macro_rules! remove_range {
+                    ($m: expr, $range: expr, $hint: ty) => {
+                        Box::new(
+                            $m.remove_range(<$hint as MakeKey<DataType>>::from_range(range))
+                                .flat_map(|(_, rows)| rows),
+                        )
+                    };
+                }
+
+                match self.state {
+                    KeyedState::Single(ref mut m) => remove_range!(m, range, DataType),
+                    KeyedState::Double(ref mut m) => remove_range!(m, range, (DataType, _)),
+                    KeyedState::Tri(ref mut m) => remove_range!(m, range, (DataType, _, _)),
+                    KeyedState::Quad(ref mut m) => remove_range!(m, range, (DataType, _, _, _)),
+                    KeyedState::Quin(ref mut m) => remove_range!(m, range, (DataType, _, _, _, _)),
+                    KeyedState::Sex(ref mut m) => {
+                        remove_range!(m, range, (DataType, _, _, _, _, _))
+                    }
+                }
+            }
         };
-        // mark_hole should only be called on keys we called mark_filled on
+
         removed
-            .expect("mark_hole called on absent key")
-            .iter()
-            .filter(|r| Rc::strong_count(&r.0) == 1)
-            .map(SizeOf::deep_size_of)
+            .filter(|(r, _)| Rc::strong_count(&r.0) == 1)
+            .map(|(r, count)| SizeOf::deep_size_of(&r) * (count as u64))
             .sum()
     }
 
