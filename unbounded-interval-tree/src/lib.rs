@@ -6,6 +6,29 @@
 //! in the tree of intervals?"), as well as helpers to get the difference between a queried
 //! interval and the database (in order to find subsegments not covered), and the list of
 //! intervals in the database overlapping a queried interval.
+//!
+//! # Implementation
+//!
+//! The [`IntervalTree`] is implemented as a binary search tree of intervals (which are represented
+//! as a pair of [`Bound`]s), ordered by the lower bound of the interval and with each node
+//! augmented with the maximum upper bound of all of its descendants
+//!
+//! Explicitly:
+//!
+//! - A tree is either an empty, or contains a single root [`Node`]
+//! - Every [`Node`] contains an [interval](Node::key) and a single [max bound](Node::value)
+//! - A node's [left child](Node::left) contains the interval in the tree with the greatest left
+//!   bound less than or equal to the node's left bound
+//! - A node's [right child](Node::right) contains the interval in the tree with the lowest left
+//!   bound greater than or equal to the node's left bound
+//! - The node's [max bound](Node::value) contains the maximum upper bound of all its children
+//!
+//! ## Invariants
+//!
+//! - Every range's lower bound is less than or equal to its upper bound
+//! - Every node's upper bound is less than or equal to its parent's max bound
+//! - The max bound of each node is equal to the upper bound of either that node, or one of that
+//!   node's descendants
 #![feature(bound_cloned, or_patterns)]
 
 use std::cmp::Ordering;
@@ -22,7 +45,9 @@ use intervals::{
     bound_ref, cmp, cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps,
 };
 
-/// The interval tree storing all the underlying intervals.
+/// A tree for storing intervals
+///
+/// See [the module documentation](crate) for more information
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntervalTree<Q: Ord + Clone> {
     root: Option<Box<Node<Q>>>,
