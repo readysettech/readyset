@@ -219,6 +219,18 @@ where
         self.interval_tree.remove_point(key);
         self.map.remove_entry(key)
     }
+
+    /// Remove the values corresponding to the keys covered by `range`, and return them.
+    pub fn remove_range<'a, R>(&'a mut self, range: R) -> impl Iterator<Item = (K, V)> + 'a
+    where
+        R: RangeBounds<K> + 'a,
+    {
+        self.interval_tree.remove(&range);
+        // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
+        // the way Vec does. This is forcing us into an O(n) operation where we could have an
+        // O(log(n)) one.
+        self.map.drain_filter(move |k, _| range.contains(k))
+    }
 }
 
 pub struct VacantEntry<'a, K, V>

@@ -253,7 +253,7 @@ impl State for PersistentState {
         unreachable!("PersistentState can't be partial")
     }
 
-    fn mark_hole(&mut self, _: &[DataType], _: Tag) {
+    fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 
@@ -715,7 +715,6 @@ impl SizeOf for PersistentState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bincode;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
@@ -1281,6 +1280,7 @@ mod tests {
     mod lookup_range {
         use super::*;
         use pretty_assertions::assert_eq;
+        use vec1::vec1;
 
         fn setup() -> PersistentState {
             let mut state = setup_single_key("persistent_state_single_key");
@@ -1299,7 +1299,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec![DataType::from(11)]..vec![DataType::from(20)]))
+                    &RangeKey::from(&(vec1![DataType::from(11)]..vec1![DataType::from(20)]))
                 ),
                 RangeLookupResult::Some(vec![].into())
             );
@@ -1311,7 +1311,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec![DataType::from(3)]..vec![DataType::from(7)]))
+                    &RangeKey::from(&(vec1![DataType::from(3)]..vec1![DataType::from(7)]))
                 ),
                 RangeLookupResult::Some((3..7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
@@ -1323,7 +1323,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec![DataType::from(3)]..=vec![DataType::from(7)]))
+                    &RangeKey::from(&(vec1![DataType::from(3)]..=vec1![DataType::from(7)]))
                 ),
                 RangeLookupResult::Some((3..=7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
@@ -1336,8 +1336,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec![DataType::from(3)]),
-                        Bound::Excluded(vec![DataType::from(7)])
+                        Bound::Excluded(vec1![DataType::from(3)]),
+                        Bound::Excluded(vec1![DataType::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -1357,8 +1357,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec![DataType::from(3)]),
-                        Bound::Included(vec![DataType::from(7)])
+                        Bound::Excluded(vec1![DataType::from(3)]),
+                        Bound::Included(vec1![DataType::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -1375,7 +1375,7 @@ mod tests {
         fn inclusive_unbounded() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(vec![DataType::from(3)]..))),
+                state.lookup_range(&[0], &RangeKey::from(&(vec1![DataType::from(3)]..))),
                 RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -1384,7 +1384,7 @@ mod tests {
         fn unbounded_inclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..=vec![DataType::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DataType::from(3)]))),
                 RangeLookupResult::Some((0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -1393,7 +1393,7 @@ mod tests {
         fn unbounded_exclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..vec![DataType::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&(..vec1![DataType::from(3)]))),
                 RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }

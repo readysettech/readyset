@@ -127,7 +127,7 @@ impl State for MemoryState {
         self.state[index].mark_filled(key);
     }
 
-    fn mark_hole(&mut self, key: &[DataType], tag: Tag) {
+    fn mark_hole(&mut self, key: &KeyComparison, tag: Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[&tag];
         let freed_bytes = self.state[index].mark_hole(key);
