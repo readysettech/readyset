@@ -1,17 +1,7 @@
 version: '2'
 
 volumes:
-  noria-target:
-    external: true
-  noria-mysql-target:
-    external: true
-  nom-sql-target:
-    external: true
-  msql-srv-target:
-    external: true
-  evbtree-target:
-    external: true
-  unbounded-interval-tree-target:
+  target:
     external: true
   cargo-registry:
     external: true
@@ -27,12 +17,7 @@ services:
       - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql-build:latest
     working_dir: /workdir
     volumes:
-    - 'noria-target:/workdir/noria/target'
-    - 'noria-mysql-target:/workdir/noria-mysql/target'
-    - 'nom-sql-target:/workdir/nom-sql/target'
-    - 'msql-srv-target:/workdir/msql-srv/target'
-    - 'evbtree-target:/workdir/evbtree/target'
-    - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+    - 'target:/workdir/target'
     - 'cargo-registry:/usr/local/cargo/registry'
     - '../..:/workdir'
     environment:

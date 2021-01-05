@@ -8,12 +8,12 @@ edition = "2018"
 arccstr = "1.1.0"
 clap = "2.24.0"
 failure = "0.1.1"
-msql-srv = "0.8.7"
-noria = "0.7"
+msql-srv = { version = "0.8.7", path = "../msql-srv" }
+noria = { version = "0.7", path = "../noria/noria/" }
 futures-executor = "0.3.0"
 futures-util = "0.3.0"
 lazy_static = "1.0.0"
-nom-sql = "0.0.11"
+nom-sql = { version =  "0.0.11", path = "../nom-sql" }
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"
@@ -28,25 +28,8 @@ vec1 = "1.6.0"
 [dev-dependencies]
 mysql = "18"
 zookeeper = "0.5.4"
-noria-server = "0.7"
+noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "0.2.0", features = ["full"] }
-
-[profile.release]
-debug=true
 
 [lib]
 path = "src/lib.rs"
-
-[patch.crates-io]
-# prefer noria from git
-noria = { path = "../noria/noria/" }
-noria-server = { path = "../noria/server/" }
-msql-srv = { path = "../msql-srv/" }
-nom-sql = { path = "../nom-sql/" }
-# optional overrides:
-# https://github.com/tower-rs/tokio-tower/pull/6
-# optional -- just a perf optimization
-tokio-tower = { git = "https://github.com/tower-rs/tokio-tower.git", branch = "no-box" }
-# https://github.com/tokio-rs/tokio/pull/2160
-# optional -- just saves us from busy future loops
-tokio = { git = "https://github.com/tokio-rs/tokio.git" }

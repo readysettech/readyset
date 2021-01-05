@@ -15,7 +15,7 @@ keywords = ["internal"]
 maintenance = { status = "experimental" }
 
 [dependencies]
-nom-sql = "0.0.11"
+nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
 regex = "1.0.0"
 slog = "2.4.0"
 petgraph = { version = "0.5", features = ["serde-1"] }

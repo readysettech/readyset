@@ -20,23 +20,14 @@ steps:
 
   - label: ':rust: Check rustfmt'
     commands:
-    - "( cd noria; echo '--- :rust: Checking noria'; cargo fmt -- --check )"
-    - "( cd noria-mysql; echo '--- :rust: Checking noria-mysql'; cargo fmt -- --check )"
-    - "( cd nom-sql; echo '--- :rust: Checking nom-sql'; cargo fmt -- --check )"
-    - "( cd msql-srv; echo '--- :rust: Checking msql-srv'; cargo fmt -- --check )"
-    - "( cd evbtree; echo '--- :rust: Checking evbtree'; cargo fmt -- --check )"
-    - "( cd unbounded-interval-tree; echo '--- :rust: Checking unbounded-interval-tree'; cargo fmt -- --check )"
+    - "cargo fmt -- --check"
     depends_on:
     - build-image
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
+          - 'target:/workdir/target'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
           - CARGO_INCREMENTAL=0
@@ -45,19 +36,15 @@ steps:
 
   - label: ':clippy: Check clippy'
     commands:
-    - "( cd evbtree; echo '--- :rust: Checking evbtree'; cargo clippy -- -D warnings)"
-    - "( cd unbounded-interval-tree; echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -- -D warnings)"
+    - "( echo '--- :rust: Checking evbtree'; cargo clippy -p evbtree -- -D warnings)"
+    - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     depends_on:
     - build-image
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
+          - 'target:/workdir/target'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
           - CARGO_INCREMENTAL=0
@@ -68,18 +55,14 @@ steps:
     key: build-nom-sql
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cd nom-sql
-    - cargo build -v --workspace
+    - cargo build -v -p nom-sql
     depends_on:
     - build-image
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -90,8 +73,7 @@ steps:
   - label: ':rust: Test nom-sql'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cd nom-sql
-    - cargo test -v --workspace
+    - cargo test -v -p nom-sql
     depends_on:
     - build-image
     - build-nom-sql
@@ -99,10 +81,7 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -115,19 +94,14 @@ steps:
     key: build-evbtree
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cd evbtree
-    - cargo build -v --workspace
+    - cargo build -v -p evbtree
     depends_on:
     - build-image
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -138,8 +112,7 @@ steps:
   - label: ':rust: Test evbtree'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cd evbtree
-    - cargo test -v --workspace
+    - cargo test -v -p evbtree
     depends_on:
     - build-image
     - build-evbtree
@@ -147,11 +120,7 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -164,15 +133,14 @@ steps:
     key: build-unbounded-interval-tree
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cd unbounded-interval-tree
-    - cargo build -v --workspace
+    - cargo build -v -p unbounded-interval-tree
     depends_on:
     - build-image
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -184,7 +152,7 @@ steps:
     command:
     - 'echo +++ :rust: Running cargo test'
     - cd unbounded-interval-tree
-    - cargo test -v --workspace
+    - cargo test -v -p unbounded-interval-tree
     depends_on:
     - build-image
     - build-unbounded-interval-tree
@@ -192,7 +160,7 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -206,8 +174,7 @@ steps:
     key: build-noria
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cd noria
-    - cargo build -v --workspace
+    - cargo build -v -p noria
     depends_on:
     - build-image
     - build-nom-sql
@@ -217,12 +184,8 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
-          - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -233,8 +196,7 @@ steps:
   - label: ':rust: Test noria'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cd noria
-    - cargo test -v --workspace
+    - cargo test -v -p noria
     depends_on:
     - build-image
     - build-noria
@@ -242,12 +204,7 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
-          - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -260,8 +217,7 @@ steps:
     key: build-noria-mysql
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cd noria-mysql
-    - cargo build -v --workspace
+    - cargo build -v -p noria-mysql
     depends_on:
     - build-noria
     - build-nom-sql
@@ -270,12 +226,7 @@ steps:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
-          - 'noria-target:/workdir/noria/target'
-          - 'noria-mysql-target:/workdir/noria-mysql/target'
-          - 'nom-sql-target:/workdir/nom-sql/target'
-          - 'msql-srv-target:/workdir/msql-srv/target'
-          - 'evbtree-target:/workdir/evbtree/target'
-          - 'unbounded-interval-tree-target:/workdir/unbounded-interval-tree/target'
+          - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
           - SCCACHE_BUCKET=readyset-sccache
@@ -286,8 +237,7 @@ steps:
   - label: ':rust: Test noria-mysql'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cd noria-mysql
-    - cargo test -v --workspace
+    - cargo test -v -p noria-mysql
     depends_on:
     - build-image
     - build-noria-mysql
