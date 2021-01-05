@@ -24,7 +24,7 @@ hashbag = "0.1.2"
 ahash = "0.3"
 futures-util = "0.3.0"
 itertools = "0.9"
-nom-sql = "0.0.11"
+nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
 indexmap = "1.1.0"
 rand = "0.7"
 regex = "1"
