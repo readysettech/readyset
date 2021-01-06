@@ -36,9 +36,9 @@ where
     Long(hashbag::HashBag<Aliased<T, D>, S>),
 }
 
-impl<T, S> Into<Values<T, S>> for ValuesInner<T, S, crate::aliasing::NoDrop> {
-    fn into(self) -> Values<T, S> {
-        Values(self)
+impl<T, S> From<ValuesInner<T, S, crate::aliasing::NoDrop>> for Values<T, S> {
+    fn from(other: ValuesInner<T, S, crate::aliasing::NoDrop>) -> Self {
+        Self(other)
     }
 }
 
