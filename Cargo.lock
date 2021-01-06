@@ -2337,6 +2337,7 @@ dependencies = [
  "clap",
  "futures-executor",
  "futures-util",
+ "itertools",
  "lazy_static",
  "msql-srv",
  "mysql 18.2.0",

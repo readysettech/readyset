@@ -226,6 +226,18 @@ impl BinaryOperator {
         use BinaryOperator::*;
         matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
     }
+    /// If this operator is an ordered comparison, invert its meaning.
+    /// (i.e. Greater becomes Less)
+    pub fn flip_comparison(self) -> Option<Self> {
+        use BinaryOperator::*;
+        match self {
+            Greater => Some(Less),
+            GreaterOrEqual => Some(LessOrEqual),
+            Less => Some(Greater),
+            LessOrEqual => Some(GreaterOrEqual),
+            _ => None,
+        }
+    }
 }
 
 impl Display for BinaryOperator {

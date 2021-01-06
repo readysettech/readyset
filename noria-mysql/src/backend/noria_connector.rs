@@ -3,7 +3,10 @@ use noria::{ControllerHandle, DataType, Table, TableOperation, View, ZookeeperAu
 use anyhow;
 use futures_executor::block_on as block_on_buffer;
 use msql_srv::{self, *};
-use nom_sql::{self, ColumnConstraint, InsertStatement, Literal, SelectStatement, UpdateStatement};
+use nom_sql::{
+    self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement,
+    UpdateStatement,
+};
 use vec1::vec1;
 
 use std::borrow::Cow;
@@ -21,6 +24,7 @@ use crate::utils;
 use crate::backend::reader::Reader;
 use crate::backend::writer::Writer;
 use crate::backend::PreparedStatement;
+use itertools::Itertools;
 
 pub struct NoriaBackendInner {
     executor: tokio::runtime::Handle,
@@ -441,7 +445,7 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
         ));
 
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, keys, schema.as_slice(), results)
+        self.do_read(&qname, &q, keys, schema.as_slice(), results)
     }
 
     fn prepare_select(
@@ -505,11 +509,12 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
     fn execute_select(
         &mut self,
         qname: &str,
+        q: &nom_sql::SelectStatement,
         keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        self.do_read(qname, keys, schema, results)
+        self.do_read(qname, q, keys, schema, results)
     }
 }
 impl NoriaConnector {
@@ -721,6 +726,7 @@ impl NoriaConnector {
     fn do_read<W: io::Write>(
         &mut self,
         qname: &str,
+        q: &nom_sql::SelectStatement,
         mut keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
@@ -793,8 +799,21 @@ impl NoriaConnector {
         let keys = if use_bogo {
             bogo
         } else {
+            let mut binops = utils::get_select_statement_binops(q)
+                .into_iter()
+                .map(|(_, b)| b)
+                .unique();
+            let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
+            if let Some(other) = binops.next() {
+                panic!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
+            }
+
             keys.drain(..)
-                .map(|k| k.try_into().expect("Input key cannot be empty"))
+                .map(|k_op| {
+                    (k_op, binop_to_use)
+                        .try_into()
+                        .expect("Input key cannot be empty")
+                })
                 .collect()
         };
 

@@ -7,7 +7,7 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
-use nom_sql::ColumnSpecification;
+use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -171,6 +171,26 @@ impl TryFrom<Vec<DataType>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]. Returns an error if the input vector is empty
     fn try_from(value: Vec<DataType>) -> Result<Self, Self::Error> {
         Ok(Vec1::try_from(value)?.into())
+    }
+}
+
+impl TryFrom<(Vec<DataType>, BinaryOperator)> for KeyComparison {
+    // FIXME(eta): proper error handling here
+    type Error = String;
+
+    fn try_from((value, binop): (Vec<DataType>, BinaryOperator)) -> Result<Self, Self::Error> {
+        use self::BinaryOperator::*;
+
+        let value = Vec1::try_from(value).map_err(|e| e.to_string())?;
+        let inner = match binop {
+            Greater => (Bound::Excluded(value), Bound::Unbounded),
+            GreaterOrEqual => (Bound::Included(value), Bound::Unbounded),
+            Less => (Bound::Unbounded, Bound::Excluded(value)),
+            LessOrEqual => (Bound::Unbounded, Bound::Included(value)),
+            Equal => return Ok(value.into()),
+            _ => Err("bad binop!".to_string())?,
+        };
+        Ok(KeyComparison::Range(inner))
     }
 }
 
