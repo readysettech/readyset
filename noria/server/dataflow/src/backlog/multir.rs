@@ -94,11 +94,11 @@ impl Handle {
                 let meta = h.meta()?;
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
-                    &v[1]
+                    &v[0]
                 });
                 let end_bound = range.end_bound().map(|v| {
                     assert!(v.len() == 1);
-                    &v[1]
+                    &v[0]
                 });
                 Some((
                     map.range((start_bound, end_bound))
@@ -136,6 +136,17 @@ mod tests {
     use evbtree::handles::WriteHandle;
     use proptest::prelude::*;
 
+    fn make_single() -> (
+        WriteHandle<DataType, Vec<DataType>, i64, RandomState>,
+        Handle,
+    ) {
+        let (w, r) = evbtree::Options::default()
+            .with_meta(-1)
+            .with_hasher(RandomState::default())
+            .construct();
+        (w, Handle::Single(r))
+    }
+
     fn make_double() -> (
         WriteHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>,
         Handle,
@@ -167,6 +178,27 @@ mod tests {
                 assert_eq!(result.into_iter().cloned().collect::<Vec<_>>(), vec![val]);
             }).unwrap();
         }
+    }
+
+    #[test]
+    fn get_single_range() {
+        let (mut w, handle) = make_single();
+        for n in 0..10 {
+            w.insert(n.into(), vec![n.into(), n.into()]);
+        }
+        w.publish();
+        let (res, meta) = handle
+            .meta_get_range_and(vec![2.into()]..=vec![3.into()], |vals| {
+                vals.into_iter().cloned().collect::<Vec<_>>()
+            })
+            .unwrap();
+        assert_eq!(
+            res,
+            (2..=3)
+                .map(|n| vec![vec![DataType::from(n), DataType::from(n)]])
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(meta, -1);
     }
 
     #[test]
