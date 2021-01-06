@@ -14,7 +14,7 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tokio_tower::multiplex;
@@ -176,6 +176,12 @@ impl From<Vec1<DataType>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]
     fn from(key: Vec1<DataType>) -> Self {
         KeyComparison::Equal(key)
+    }
+}
+
+impl From<Range<Vec1<DataType>>> for KeyComparison {
+    fn from(range: Range<Vec1<DataType>>) -> Self {
+        KeyComparison::Range((Bound::Included(range.start), Bound::Excluded(range.end)))
     }
 }
 

@@ -3130,3 +3130,44 @@ async fn correct_nested_view_schema() {
     ];
     assert_eq!(q.schema(), Some(&expected_schema[..]));
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn non_sql_materialized_range_query() {
+    let mut g = {
+        let mut builder = Builder::default();
+        builder.disable_partial();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
+        builder.start_local()
+    }
+    .await
+    .unwrap()
+    .0;
+
+    g.migrate(|mig| {
+        let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
+        mig.maintain_anonymous(a, &[0]);
+    })
+    .await;
+
+    let mut a = g.table("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap();
+    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let res = reader
+        .multi_lookup(
+            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            false,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        &*res,
+        &[(2..5).map(|n| vec![n.into(), n.into()]).collect::<Vec<_>>()]
+    )
+}
