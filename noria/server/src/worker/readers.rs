@@ -11,7 +11,7 @@ use futures_util::{
 };
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged};
 use pin_project::pin_project;
-use serde::ser::{SerializeSeq, Serializer};
+use serde::ser::Serializer;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
@@ -237,18 +237,13 @@ fn handle_normal_read_query(
                 let rs = if let Some(key) = key_comparison.equal() {
                     reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0)
                 } else {
-                    let mut rs = SerializedReadReplyBatch::empty();
-                    let mut ser =
-                        bincode::Serializer::new(&mut rs.0, bincode::DefaultOptions::default());
-                    let mut seq = ser.serialize_seq(None).unwrap();
                     reader
                         .try_find_range_and(&key_comparison, |r| {
-                            seq.serialize_element(&r.into_iter().collect::<Vec<_>>())
-                                .unwrap()
+                            r.into_iter().cloned().collect::<Vec<_>>()
                         })
-                        .map(|_|
+                        .map(|(rs, _)|
                              // TODO(grfn): Here's where we'd handle partial
-                             Some(rs))
+                             Some(serialize(&rs.into_iter().flatten().collect::<Vec<_>>())))
                 };
 
                 match rs {
