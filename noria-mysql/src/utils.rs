@@ -226,7 +226,7 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         .collect()
 }
 
-fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
+fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<(&Column, BinaryOperator)> {
     match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
@@ -234,16 +234,16 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
                 box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
-            operator: BinaryOperator::Equal,
-        })
-        | ConditionExpression::ComparisonOp(ConditionTree {
+            operator: binop,
+        }) => vec![(c, binop)],
+        ConditionExpression::ComparisonOp(ConditionTree {
             left:
                 box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            operator: BinaryOperator::Equal,
-        }) => vec![c],
+            operator: binop,
+        }) => vec![(c, binop.flip_comparison().unwrap_or(binop))],
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
@@ -256,7 +256,7 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
         {
             // the weird extra closure above is due to
             // https://github.com/rust-lang/rfcs/issues/1006
-            vec![c; literals.len()]
+            vec![(c, BinaryOperator::Equal); literals.len()]
         }
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(_)),
@@ -296,11 +296,24 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<&Column> {
     }
 }
 
+pub(crate) fn get_select_statement_binops(
+    query: &SelectStatement,
+) -> Vec<(&Column, BinaryOperator)> {
+    if let Some(ref wc) = query.where_clause {
+        get_parameter_columns_recurse(wc)
+    } else {
+        vec![]
+    }
+}
+
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     match *query {
         SqlQuery::Select(ref query) => {
             if let Some(ref wc) = query.where_clause {
                 get_parameter_columns_recurse(wc)
+                    .into_iter()
+                    .map(|(c, _)| c)
+                    .collect()
             } else {
                 vec![]
             }
@@ -334,6 +347,9 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
 
             let where_params = if let Some(ref wc) = query.where_clause {
                 get_parameter_columns_recurse(wc)
+                    .into_iter()
+                    .map(|(c, _)| c)
+                    .collect()
             } else {
                 vec![]
             };

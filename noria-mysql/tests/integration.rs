@@ -65,7 +65,8 @@ fn zk_addr() -> String {
 }
 
 // Initializes a Noria worker and starts processing MySQL queries against it.
-fn setup(deployment: &Deployment) -> mysql::Opts {
+// If `partial` is `false`, disables partial queries.
+fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
     // Run with VERBOSE=1 for log output.
     let verbose = env::var("VERBOSE")
         .ok()
@@ -87,6 +88,9 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
     thread::spawn(move || {
         let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
         let mut builder = Builder::default();
+        if !partial {
+            builder.disable_partial();
+        }
         authority.log_with(l.clone());
         builder.log_with(l);
         let mut rt = tokio::runtime::Runtime::new().unwrap();
@@ -141,7 +145,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 #[test]
 fn delete_basic() {
     let d = Deployment::new("delete_basic");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
         .unwrap();
@@ -172,7 +176,7 @@ fn delete_basic() {
 #[test]
 fn delete_only_constraint() {
     let d = Deployment::new("delete_only_constraint");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -200,7 +204,7 @@ fn delete_only_constraint() {
 #[test]
 fn delete_multiple() {
     let d = Deployment::new("delete_multiple");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
         .unwrap();
@@ -235,7 +239,7 @@ fn delete_multiple() {
 #[test]
 fn delete_bogus() {
     let d = Deployment::new("delete_bogus");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
         .unwrap();
@@ -251,7 +255,7 @@ fn delete_bogus() {
 #[test]
 fn delete_bogus_valid_and() {
     let d = Deployment::new("delete_bogus_valid_and");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
         .unwrap();
@@ -283,7 +287,7 @@ fn delete_bogus_valid_and() {
 #[test]
 fn delete_bogus_valid_or() {
     let d = Deployment::new("delete_bogus_valid_or");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
         .unwrap();
@@ -315,7 +319,7 @@ fn delete_bogus_valid_or() {
 #[test]
 fn delete_other_column() {
     let d = Deployment::new("delete_other_column");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -328,7 +332,7 @@ fn delete_other_column() {
 #[test]
 fn delete_no_keys() {
     let d = Deployment::new("delete_no_keys");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -340,7 +344,7 @@ fn delete_no_keys() {
 #[test]
 fn delete_compound_primary_key() {
     let d = Deployment::new("delete_compound_primary_key");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -374,7 +378,7 @@ fn delete_compound_primary_key() {
 #[ignore]
 fn delete_multi_compound_primary_key() {
     let d = Deployment::new("delete_multi_compound_primary_key");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -405,7 +409,7 @@ fn delete_multi_compound_primary_key() {
 #[test]
 fn update_basic() {
     let d = Deployment::new("update_basic");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -433,7 +437,7 @@ fn update_basic() {
 #[test]
 fn update_basic_prepared() {
     let d = Deployment::new("update_basic");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -481,7 +485,7 @@ fn update_basic_prepared() {
 #[test]
 fn update_compound_primary_key() {
     let d = Deployment::new("update_compound_primary_key");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -514,7 +518,7 @@ fn update_compound_primary_key() {
 #[test]
 fn update_only_constraint() {
     let d = Deployment::new("update_only_constraint");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -543,7 +547,7 @@ fn update_only_constraint() {
 #[test]
 fn update_pkey() {
     let d = Deployment::new("update_pkey");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -574,7 +578,7 @@ fn update_pkey() {
 #[test]
 fn update_separate() {
     let d = Deployment::new("update_separate");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -610,7 +614,7 @@ fn update_separate() {
 #[test]
 fn update_no_keys() {
     let d = Deployment::new("update_no_keys");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -623,7 +627,7 @@ fn update_no_keys() {
 #[test]
 fn update_other_column() {
     let d = Deployment::new("update_no_keys");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -639,7 +643,7 @@ fn update_no_changes() {
     // ignored because we currently *always* return 1 row(s) affected.
 
     let d = Deployment::new("update_no_changes");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -658,7 +662,7 @@ fn update_no_changes() {
 #[test]
 fn update_bogus() {
     let d = Deployment::new("update_bogus");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -675,7 +679,7 @@ fn update_bogus() {
 #[test]
 fn select_collapse_where_in() {
     let d = Deployment::new("collapsed_where");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -757,7 +761,7 @@ fn select_collapse_where_in() {
 #[test]
 fn basic_select() {
     let d = Deployment::new("basic_select");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
     sleep();
@@ -779,7 +783,7 @@ fn basic_select() {
 #[test]
 fn prepared_select() {
     let d = Deployment::new("prepared_select");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
     sleep();
@@ -802,7 +806,7 @@ fn prepared_select() {
 #[test]
 fn create_view() {
     let d = Deployment::new("create_view");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
     sleep();
@@ -838,7 +842,7 @@ fn create_view() {
 #[ignore]
 fn create_view_rev() {
     let d = Deployment::new("create_view_rev");
-    let opts = setup(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
     sleep();
@@ -856,4 +860,66 @@ fn create_view_rev() {
             .len(),
         1
     );
+}
+
+#[test]
+fn prepare_ranged_query_non_partial() {
+    let d = Deployment::new("prepare_ranged_query_non_partial");
+    let opts = setup(&d, false);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 1)")
+        .unwrap();
+    sleep();
+
+    let res: Vec<(i32, i32)> = conn
+        .exec("SELECT * FROM test WHERE y > ?", (1i32,))
+        .unwrap();
+    assert_eq!(res, vec![(4, 2)]);
+}
+
+#[test]
+#[should_panic]
+fn prepare_conflicting_ranged_query() {
+    let d = Deployment::new("prepare_conflicting_ranged_query");
+    let opts = setup(&d, false);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 1)")
+        .unwrap();
+    sleep();
+
+    // panics because you can't mix and match range operators like this yet
+    let res: Vec<(i32, i32)> = conn
+        .exec("SELECT * FROM test WHERE y > ? AND x < ?", (1i32, 5i32))
+        .unwrap();
+}
+
+#[test]
+#[ignore] // doesn't actually work yet
+fn prepare_ranged_query_partial() {
+    let d = Deployment::new("prepare_ranged_query_partial");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 1)")
+        .unwrap();
+    sleep();
+
+    let res: Vec<(i32, i32)> = conn
+        .exec("SELECT * FROM test WHERE y > ?", (1i32,))
+        .unwrap();
+    assert_eq!(res, vec![(4, 2)]);
 }

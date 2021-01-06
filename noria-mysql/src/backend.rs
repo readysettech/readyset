@@ -23,6 +23,7 @@ use writer::Writer;
 #[derive(Clone)]
 pub enum PreparedStatement {
     /// Query name, Query, result schema, optional parameter rewrite map
+    /// TODO(eta): make these into actual struct-y things?
     Select(
         String,
         nom_sql::SelectStatement,
@@ -173,7 +174,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
 
         trace!("delegate");
         let res = match prep {
-            PreparedStatement::Select(ref qname, ref _q, ref schema, ref rewritten) => {
+            PreparedStatement::Select(ref qname, ref q, ref schema, ref rewritten) => {
                 trace!("apply where-in rewrites");
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
@@ -205,7 +206,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                         .collect::<Vec<_>>()],
                 };
 
-                self.reader.execute_select(&qname, key, schema, results)
+                self.reader.execute_select(&qname, q, key, schema, results)
             }
             PreparedStatement::Insert(ref q) => {
                 let values: Vec<DataType> = params

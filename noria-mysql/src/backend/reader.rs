@@ -23,6 +23,7 @@ pub trait Reader<W: io::Write> {
     fn execute_select(
         &mut self,
         qname: &str,
+        q: &nom_sql::SelectStatement,
         keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
         results: QueryResultWriter<W>,
