@@ -222,50 +222,34 @@ fn handle_normal_read_query(
         let mut ret = Vec::with_capacity(key_comparisons.len());
 
         // first do non-blocking reads for all keys to see if we can return immediately
-        let mut i: i32 = -1;
         let mut ready = true;
         let mut pending = Vec::new();
-        let misses = key_comparisons
-            .drain(..)
-            .filter_map(|key_comparison| {
-                i += 1;
-                if !ready {
+        let mut misses = Vec::new();
+        for (i, key_comparison) in key_comparisons.drain(..).enumerate() {
+            if !ready {
+                ret.push(SerializedReadReplyBatch::empty());
+                continue;
+            }
+
+            use dataflow::LookupError::*;
+            match do_lookup(reader, &key_comparison) {
+                Ok(rs) => {
+                    // immediate hit!
+                    ret.push(rs);
+                }
+                Err(NotReady) => {
+                    // map not yet ready
+                    ready = false;
                     ret.push(SerializedReadReplyBatch::empty());
-                    return None;
                 }
-
-                let rs = if let Some(key) = key_comparison.equal() {
-                    reader.try_find_and(&*key, |rs| serialize(rs)).map(|r| r.0)
-                } else {
-                    reader
-                        .try_find_range_and(&key_comparison, |r| {
-                            r.into_iter().cloned().collect::<Vec<_>>()
-                        })
-                        .map(|(rs, _)| serialize(&rs.into_iter().flatten().collect::<Vec<_>>()))
-                };
-
-                use dataflow::LookupError::*;
-                match rs {
-                    Ok(rs) => {
-                        // immediate hit!
-                        ret.push(rs);
-                        None
-                    }
-                    Err(NotReady) => {
-                        // map not yet ready
-                        ready = false;
-                        ret.push(SerializedReadReplyBatch::empty());
-                        None
-                    }
-                    Err(_) => {
-                        // need to trigger partial replay for this key
-                        pending.push(i as usize);
-                        ret.push(SerializedReadReplyBatch::empty());
-                        Some(key_comparison)
-                    }
+                Err(miss) => {
+                    // need to trigger partial replay for this key
+                    pending.push(i as usize);
+                    ret.push(SerializedReadReplyBatch::empty());
+                    misses.extend(miss.into_misses())
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
 
         if !ready {
             return Ok(Tagged {
@@ -284,18 +268,14 @@ fn handle_normal_read_query(
         }
 
         // trigger backfills for all the keys we missed on
-        reader.trigger(misses.iter().map(|kc| {
-            kc.equal()
-                .expect("backfills for range queries not yet supported")
-                .as_slice()
-        }));
+        reader.trigger(misses.iter());
 
         Err((misses, ret, pending))
     });
 
     match immediate {
         Ok(reply) => Either::Left(future::ready(Ok(reply))),
-        Err((mut keys, ret, pending)) => {
+        Err((keys, ret, pending)) => {
             if !block {
                 Either::Left(future::ready(Ok(Tagged {
                     tag,
@@ -309,21 +289,14 @@ fn handle_normal_read_query(
                     BlockingRead {
                         tag,
                         target,
-                        keys: keys
-                            .drain(..)
-                            .map(|kc| {
-                                kc.equal()
-                                    .expect("blockingread not supported for range queries")
-                                    .clone()
-                                    .into_vec()
-                            })
-                            .collect(),
+                        keys,
                         pending,
                         read: ret,
                         truth: s.clone(),
                         trigger_timeout: trigger,
                         next_trigger: now,
                         first: now,
+                        warned: false,
                     },
                     tx,
                 ));
@@ -381,6 +354,21 @@ fn handle_keys_query(
     }))
 }
 
+fn do_lookup(
+    reader: &SingleReadHandle,
+    key: &KeyComparison,
+) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
+    if let Some(equal) = &key.equal() {
+        reader
+            .try_find_and(&*equal, |rs| serialize(rs))
+            .map(|r| r.0)
+    } else {
+        reader
+            .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
+            .map(|(rs, _)| serialize(&rs.into_iter().flatten().collect::<Vec<_>>()))
+    }
+}
+
 #[pin_project]
 struct BlockingRead {
     tag: u32,
@@ -388,7 +376,7 @@ struct BlockingRead {
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read
-    keys: Vec<Vec<DataType>>,
+    keys: Vec<KeyComparison>,
     // index in self.read that each entyr in keys corresponds to
     pending: Vec<usize>,
     truth: Readers,
@@ -396,6 +384,7 @@ struct BlockingRead {
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
     first: time::Instant,
+    warned: bool,
 }
 
 impl std::fmt::Debug for BlockingRead {
@@ -437,13 +426,13 @@ impl BlockingRead {
 
             while let Some(read_i) = self.pending.pop() {
                 let key = self.keys.pop().expect("pending.len() == keys.len()");
-                match reader.try_find_and(&key, |rs| serialize(rs)).map(|r| r.0) {
+
+                match do_lookup(reader, &key) {
                     Ok(rs) => {
                         read[read_i] = rs;
                     }
                     Err(e) => {
                         if e.is_miss() {
-                            // TODO(grfn): Handle ranged misses
                             // we still missed! restore key + pending
                             self.pending.push(read_i);
                             self.keys.push(key);
@@ -461,7 +450,7 @@ impl BlockingRead {
 
             if !self.keys.is_empty() && now > next_trigger {
                 // maybe the key got filled, then evicted, and we missed it?
-                if !reader.trigger(self.keys.iter().map(Vec::as_slice)) {
+                if !reader.trigger(self.keys.iter()) {
                     // server is shutting down and won't do the backfill
                     return Err(());
                 }
@@ -472,12 +461,12 @@ impl BlockingRead {
 
             if !self.keys.is_empty() {
                 let waited = now - self.first;
-                self.first = now;
-                if waited > time::Duration::from_secs(7) {
+                if waited > time::Duration::from_secs(7) && !self.warned {
                     eprintln!(
                         "warning: read has been stuck waiting on {:?} for {:?}",
                         self.keys, waited
                     );
+                    self.warned = true;
                 }
             }
 

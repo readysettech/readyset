@@ -891,3 +891,16 @@ fn remove_range_works() {
         assert!(m.get(&9).is_some());
     }
 }
+
+#[test]
+fn contains_range_works() {
+    let (mut w, r) = evbtree::new();
+    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..6);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.contains_range(3..4));
+        assert!(!m.contains_range(6..));
+    }
+}

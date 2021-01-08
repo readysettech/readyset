@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::convert::TryInto;
 use std::mem;
+use vec1::vec1;
 
 use crate::prelude::*;
 
@@ -324,7 +326,7 @@ impl Ingredient for Join {
                         lookups.push(Lookup {
                             on: *self.right,
                             cols: vec![self.on.1],
-                            key: vec![prev_join_key.clone()],
+                            key: vec1![prev_join_key.clone()].into(),
                         });
                     }
 
@@ -359,7 +361,7 @@ impl Ingredient for Join {
                     lookup_cols: vec![from_key],
                     replay_cols: replay_key_cols.clone(),
                     // NOTE: we're stealing data here!
-                    record: mem::replace(&mut *rs[i], Vec::new()),
+                    record: mem::take(&mut *rs[i]).try_into().expect("Empty record"),
                 }));
                 continue;
             }
@@ -368,7 +370,7 @@ impl Ingredient for Join {
                 lookups.push(Lookup {
                     on: other,
                     cols: vec![other_key],
-                    key: vec![prev_join_key.clone()],
+                    key: vec1![prev_join_key.clone()].into(),
                 });
             }
 
@@ -411,7 +413,7 @@ impl Ingredient for Join {
                         lookup_cols: vec![from_key],
                         replay_cols: replay_key_cols.clone(),
                         // NOTE: we're stealing data here!
-                        record: mem::replace(&mut *rs[i], Vec::new()),
+                        record: mem::take(&mut *rs[i]).try_into().expect("Empty record"),
                     }));
                     continue;
                 }

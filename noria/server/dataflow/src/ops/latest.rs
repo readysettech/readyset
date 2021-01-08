@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
+use vec1::vec1;
 
 use crate::prelude::*;
 
@@ -79,7 +81,7 @@ impl Ingredient for Latest {
                             lookups.push(Lookup {
                                 on: *us,
                                 cols: vec![self.key],
-                                key: vec![r[self.key].clone()],
+                                key: vec1![r[self.key].clone()].into(),
                             });
                         }
 
@@ -95,7 +97,7 @@ impl Ingredient for Latest {
                             lookup_idx: vec![self.key],
                             lookup_cols: vec![self.key],
                             replay_cols: replay_key_cols.map(Vec::from),
-                            record: r.extract().0,
+                            record: r.into_row().try_into().expect("Empty record"),
                         });
                         None
                     }

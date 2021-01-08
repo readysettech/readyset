@@ -1,5 +1,6 @@
 use crate::payload;
 use crate::prelude::*;
+use noria::KeyComparison;
 use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]
@@ -164,7 +165,7 @@ impl Sharder {
         &mut self,
         key_columns: &[usize],
         tag: Tag,
-        keys: &[Vec<DataType>],
+        keys: &[KeyComparison],
         src: LocalNodeIndex,
         is_sharded: bool,
         output: &mut dyn Executor,
@@ -174,18 +175,19 @@ impl Sharder {
         if key_columns.len() == 1 && key_columns[0] == self.shard_by {
             // Send only to the shards that must evict something.
             for key in keys {
-                let shard = self.shard(&key[0]);
-                let dst = self.txs[shard].0;
-                let p = self.sharded.entry(shard).or_insert_with(|| {
-                    Box::new(Packet::EvictKeys {
-                        link: Link { src, dst },
-                        keys: Vec::new(),
-                        tag,
-                    })
-                });
-                match **p {
-                    Packet::EvictKeys { ref mut keys, .. } => keys.push(key.to_vec()),
-                    _ => unreachable!(),
+                for shard in key.shard_keys(self.txs.len()) {
+                    let dst = self.txs[shard].0;
+                    let p = self.sharded.entry(shard).or_insert_with(|| {
+                        Box::new(Packet::EvictKeys {
+                            link: Link { src, dst },
+                            keys: Vec::new(),
+                            tag,
+                        })
+                    });
+                    match **p {
+                        Packet::EvictKeys { ref mut keys, .. } => keys.push(key.clone()),
+                        _ => unreachable!(),
+                    }
                 }
             }
 

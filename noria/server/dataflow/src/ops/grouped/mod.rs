@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt;
 
 use nom_sql::SqlType;
@@ -228,7 +229,7 @@ where
                                     lookups.push(Lookup {
                                         on: *us,
                                         cols: out_key.clone(),
-                                        key: group.clone(),
+                                        key: group.clone().try_into().expect("Empty group"),
                                     });
                                 }
 
@@ -241,7 +242,7 @@ where
                                     lookup_idx: out_key.clone(),
                                     lookup_cols: group_by.clone(),
                                     replay_cols: replay_key_cols.map(Vec::from),
-                                    record: r.extract().0,
+                                    record: r.into_row().try_into().expect("Empty record"),
                                 }));
                                 return;
                             }

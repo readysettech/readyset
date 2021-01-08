@@ -22,3 +22,4 @@ serde_derive = "1.0.8"
 serde = { version = "1.0.8", features = ["rc"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 slog = "2.4.0"
+vec1 = "1.6.0"

@@ -261,7 +261,7 @@ impl State for PersistentState {
         unreachable!("can't evict keys from PersistentState")
     }
 
-    fn evict_keys(&mut self, _: Tag, _: &[Vec<DataType>]) -> Option<(&[usize], u64)> {
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<(&[usize], u64)> {
         unreachable!("can't evict keys from PersistentState")
     }
 

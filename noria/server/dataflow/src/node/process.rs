@@ -1,6 +1,8 @@
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
+use noria::util::hash;
+use noria::KeyComparison;
 use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
@@ -14,8 +16,31 @@ pub(crate) struct NodeProcessingResult {
     /// The lookups that were performed during processing
     pub(crate) lookups: Vec<Lookup>,
 
-    /// The results of the processing
-    pub(crate) captured: HashSet<Vec<DataType>>,
+    /// Keys for replays captured during processing
+    pub(crate) captured: HashSet<KeyComparison>,
+}
+
+impl NodeProcessingResult {
+    /// Returns a vector of the unique contents of `misses`, by only the columns that were missed on
+    ///
+    /// This isn't as simple as just returning a `HashSet` or similar structure of misses, since we
+    /// don't care about the columns in the record that aren't part of the key
+    pub(crate) fn unique_misses(&self) -> Vec<&Miss> {
+        let mut res: Vec<&Miss> = self.misses.iter().collect();
+        res.sort_unstable_by(|a, b| {
+            a.on.cmp(&b.on)
+                .then_with(|| a.replay_cols.cmp(&b.replay_cols))
+                .then_with(|| a.lookup_idx.cmp(&b.lookup_idx))
+                .then_with(|| a.lookup_cols.cmp(&b.lookup_cols))
+                // we only need *some* sort of stable ordering on KeyComparisons - we don't require
+                // any semantics here. Keys aren't Ord (since they might contain ranges, which don't
+                // have good ordering semantics) so we just compare the hashes
+                .then_with(|| hash(&a.lookup_key()).cmp(&hash(&b.lookup_key())))
+                .then_with(|| hash(&a.replay_key()).cmp(&hash(&b.replay_key())))
+        });
+        res.dedup();
+        res
+    }
 }
 
 impl Node {
@@ -277,7 +302,7 @@ impl Node {
         &mut self,
         from: LocalNodeIndex,
         key_columns: &[usize],
-        keys: &[Vec<DataType>],
+        keys: &[KeyComparison],
         tag: Tag,
         on_shard: Option<usize>,
         ex: &mut dyn Executor,
@@ -306,7 +331,7 @@ impl Node {
                 i.on_eviction(from, tag, keys);
             }
             NodeType::Reader(ref mut r) => {
-                r.on_eviction(&keys[..]);
+                r.on_eviction(keys);
             }
             NodeType::Ingress => {}
             NodeType::Dropped => {}

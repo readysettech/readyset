@@ -2294,6 +2294,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "slog",
+ "vec1",
 ]
 
 [[package]]

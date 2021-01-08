@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain;
 use crate::prelude::*;
-use noria;
 use noria::internal::LocalOrNot;
+use noria::{self, KeyComparison};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -60,7 +60,7 @@ pub enum InitialState {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
-        for_keys: HashSet<Vec<DataType>>,
+        for_keys: HashSet<KeyComparison>,
         requesting_shard: usize,
         unishard: bool,
         ignore: bool,
@@ -113,7 +113,7 @@ pub enum Packet {
     EvictKeys {
         link: Link,
         tag: Tag,
-        keys: Vec<Vec<DataType>>,
+        keys: Vec<KeyComparison>,
     },
 
     //
@@ -188,7 +188,7 @@ pub enum Packet {
     /// Ask domain (nicely) to replay a particular set of keys.
     RequestPartialReplay {
         tag: Tag,
-        keys: Vec<Vec<DataType>>,
+        keys: Vec<KeyComparison>,
         unishard: bool,
         requesting_shard: usize,
     },
@@ -197,7 +197,7 @@ pub enum Packet {
     RequestReaderReplay {
         node: LocalNodeIndex,
         cols: Vec<usize>,
-        keys: Vec<Vec<DataType>>,
+        keys: Vec<KeyComparison>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.

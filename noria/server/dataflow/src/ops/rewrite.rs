@@ -1,5 +1,7 @@
 use crate::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
+use vec1::vec1;
 
 /// A Rewrite data-flow operator.
 /// This node rewrites a column from a subset of records to a pre-determined value.
@@ -108,7 +110,7 @@ impl Ingredient for Rewrite {
                         lookup_idx: vec![0],
                         lookup_cols: vec![self.signal_key],
                         replay_cols: replay_key_cols.map(Vec::from),
-                        record: r.extract().0,
+                        record: r.into_row().try_into().expect("Empty record"),
                     });
                     continue;
                 }
@@ -117,7 +119,7 @@ impl Ingredient for Rewrite {
                     lookups.push(Lookup {
                         on: *self.signal,
                         cols: vec![0],
-                        key: vec![key.clone()],
+                        key: vec1![key.clone()].into(),
                     });
                 }
 
@@ -150,7 +152,7 @@ impl Ingredient for Rewrite {
                         lookup_idx: vec![self.signal_key],
                         lookup_cols: vec![0],
                         replay_cols: replay_key_cols.map(Vec::from),
-                        record: r.extract().0,
+                        record: r.into_row().try_into().expect("Empty record"),
                     });
                     continue;
                 }

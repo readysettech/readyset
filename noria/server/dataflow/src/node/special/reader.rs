@@ -1,3 +1,5 @@
+use noria::KeyComparison;
+
 use crate::backlog;
 use crate::prelude::*;
 
@@ -39,8 +41,7 @@ impl Reader {
         self.for_node
     }
 
-    #[allow(dead_code)]
-    fn writer(&self) -> Option<&backlog::WriteHandle> {
+    pub(crate) fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
     }
 
@@ -106,11 +107,11 @@ impl Reader {
         bytes_freed
     }
 
-    pub(in crate::node) fn on_eviction(&mut self, keys: &[Vec<DataType>]) {
+    pub(in crate::node) fn on_eviction(&mut self, keys: &[KeyComparison]) {
         // NOTE: *could* be None if reader has been created but its state hasn't been built yet
         if let Some(w) = self.writer.as_mut() {
             for k in keys {
-                w.mut_with_key(&k[..]).mark_hole();
+                w.mark_hole(k);
             }
             w.swap();
         }
@@ -125,17 +126,17 @@ impl Reader {
                 m.map_data(|data| {
                     data.retain(|row| {
                         match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
-                            Ok((None, _)) => {
+                            Err(e) if e.is_miss() => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
                                 false
                             }
-                            Err(_) => unreachable!(),
-                            _ => {
+                            Ok(_) => {
                                 // state is already present,
                                 // so we can safely keep it up to date.
                                 true
                             }
+                            Err(_) => unreachable!(),
                         }
                     });
                 });
@@ -148,11 +149,11 @@ impl Reader {
                 m.map_data(|data| {
                     data.retain(|row| {
                         match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
-                            Ok((None, _)) => {
+                            Err(e) if e.is_miss() => {
                                 // filling a hole with replay -- ok
                                 true
                             }
-                            Ok((Some(_), _)) => {
+                            Ok(_) => {
                                 // a given key should only be replayed to once!
                                 false
                             }

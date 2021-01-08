@@ -904,7 +904,6 @@ fn prepare_conflicting_ranged_query() {
 }
 
 #[test]
-#[ignore] // doesn't actually work yet
 fn prepare_ranged_query_partial() {
     let d = Deployment::new("prepare_ranged_query_partial");
     let opts = setup(&d, true);

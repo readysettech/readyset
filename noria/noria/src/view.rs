@@ -1,6 +1,6 @@
 use crate::data::*;
 use crate::errors::wrap_boxed_error;
-use crate::util::BoundFunctor;
+use crate::util::{BoundAsRef, BoundFunctor};
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
@@ -9,6 +9,7 @@ use futures_util::{
 };
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
+use proptest::arbitrary::Arbitrary;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -121,16 +122,19 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
     }
 }
 
+pub(crate) type BoundPair<T> = (Bound<T>, Bound<T>);
+
 /// Representation for a comparison predicate against a set of keys
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
 pub enum KeyComparison {
     /// Look up exactly one key
     Equal(Vec1<DataType>),
 
     /// Look up all keys within a range
-    Range((Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)),
+    Range(BoundPair<Vec1<DataType>>),
 }
 
+#[allow(clippy::len_without_is_empty)] // can never be empty
 impl KeyComparison {
     /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
     /// predicate
@@ -143,7 +147,7 @@ impl KeyComparison {
 
     /// Project a KeyComparison into an optional range predicate, or return None if it's a range
     /// predicate
-    pub fn range(&self) -> Option<&(Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)> {
+    pub fn range(&self) -> Option<&BoundPair<Vec1<DataType>>> {
         match self {
             KeyComparison::Range(ref range) => Some(range),
             _ => None,
@@ -158,11 +162,11 @@ impl KeyComparison {
         KeyComparison::Range((range.start_bound().cloned(), range.end_bound().cloned()))
     }
 
-    /// Returns the shard key(s) that this [`KeyComparison`] must target, given the total number of
-    /// shards
-    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
+    /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
+    /// the total number of shards
+    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> Vec<usize> {
         match self {
-            KeyComparison::Equal(key) => vec![crate::shard_by(&key[0], num_shards)],
+            KeyComparison::Equal(key) => vec![crate::shard_by(&key[key_idx], num_shards)],
             // Since we currently implement hash-based sharding, any non-point query must target all
             // shards. This restriction could be lifted in the future by implementing (perhaps
             // optional) range-based sharding, likely with rebalancing. See Guillote-Blouin, J.
@@ -170,6 +174,12 @@ impl KeyComparison {
             // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
             _ => (0..num_shards).collect(),
         }
+    }
+
+    /// Returns the shard key(s) that the first column in this [`KeyComparison`] must target, given
+    /// the total number of shards
+    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
+        self.shard_keys_at(0, num_shards)
     }
 
     /// Returns the length of the key this [`KeyComparison`] is comparing against, or None if this
@@ -191,6 +201,22 @@ impl KeyComparison {
                 debug_assert_eq!(start.len(), end.len());
                 Some(start.len())
             }
+        }
+    }
+
+    /// Returns true if the given `key` is covered by this [`KeyComparsion`].
+    ///
+    /// Concretely, this is the case if the [`KeyComparsion`] is either an
+    /// [equality](KeyComparison::equal) match on `key`, or a [range](KeyComparison::range) match
+    /// that covers `key`.
+    pub fn contains(&self, key: &[DataType]) -> bool {
+        match self {
+            Self::Equal(equal) => key == equal.as_slice(),
+            Self::Range((lower, upper)) => (
+                lower.as_ref().map(Vec1::as_slice),
+                upper.as_ref().map(Vec1::as_slice),
+            )
+                .contains(key),
         }
     }
 }
@@ -237,6 +263,27 @@ impl From<Range<Vec1<DataType>>> for KeyComparison {
     }
 }
 
+impl TryFrom<BoundPair<Vec<DataType>>> for KeyComparison {
+    type Error = vec1::Size0Error;
+
+    /// Converts to a [`KeyComparison::Range`]
+    fn try_from((lower, upper): BoundPair<Vec<DataType>>) -> Result<Self, Self::Error> {
+        let convert_bound = |bound| match bound {
+            Bound::Unbounded => Ok(Bound::Unbounded),
+            Bound::Included(x) => Ok(Bound::Included(Vec1::try_from(x)?)),
+            Bound::Excluded(x) => Ok(Bound::Excluded(Vec1::try_from(x)?)),
+        };
+        Ok(Self::Range((convert_bound(lower)?, convert_bound(upper)?)))
+    }
+}
+
+impl From<BoundPair<Vec1<DataType>>> for KeyComparison {
+    /// Converts to a [`KeyComparison::Range`]
+    fn from(range: BoundPair<Vec1<DataType>>) -> Self {
+        KeyComparison::Range(range)
+    }
+}
+
 impl RangeBounds<Vec1<DataType>> for KeyComparison {
     fn start_bound(&self) -> Bound<&Vec1<DataType>> {
         use Bound::*;
@@ -278,6 +325,29 @@ impl RangeBounds<Vec<DataType>> for &KeyComparison {
 
     fn end_bound(&self) -> Bound<&Vec<DataType>> {
         (**self).end_bound()
+    }
+}
+
+impl Arbitrary for KeyComparison {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<KeyComparison>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::arbitrary::any_with;
+        use proptest::prop_oneof;
+        use proptest::strategy::Strategy;
+
+        let bound = || {
+            any_with::<Bound<Vec<DataType>>>(((1..100).into(), ()))
+                .prop_map(|bound| bound.map(|k| Vec1::try_from_vec(k).unwrap()))
+        };
+
+        prop_oneof![
+            any_with::<Vec<DataType>>(((1..100).into(), ()))
+                .prop_map(|k| KeyComparison::try_from(k).unwrap()),
+            (bound(), bound()).prop_map(KeyComparison::Range)
+        ]
+        .boxed()
     }
 }
 
