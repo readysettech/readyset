@@ -237,6 +237,20 @@ where
         self.add_op(Operation::RemoveEntry(k))
     }
 
+    /// Remove all the entries for keys in the given range.
+    ///
+    /// The entries will only disappear from readers after the next call to
+    /// [`publish`](Self::publish).
+    pub fn remove_range<R>(&mut self, range: R) -> &mut Self
+    where
+        R: RangeBounds<K>,
+    {
+        self.add_op(Operation::RemoveRange((
+            range.start_bound().cloned(),
+            range.end_bound().cloned(),
+        )))
+    }
+
     /// Purge all value-bags from the map.
     ///
     /// The map will only appear empty to readers after the next call to
@@ -415,6 +429,10 @@ where
                     e.swap_remove(&value);
                 }
             }
+            Operation::RemoveRange(ref range) => {
+                self.tree.remove(range);
+                self.data.drain_filter(move |k, _| range.contains(k));
+            }
             Operation::Retain(ref key, ref mut predicate) => {
                 if let Some(e) = self.data.get_mut(key) {
                     let mut first = true;
@@ -522,6 +540,10 @@ where
             }
             Operation::RemoveEntry(key) => {
                 inner.data.remove(&key);
+            }
+            Operation::RemoveRange(range) => {
+                self.tree.remove(&range);
+                self.data.drain_filter(move |k, _| range.contains(k));
             }
             Operation::Purge => {
                 inner.data.clear();
@@ -661,6 +683,8 @@ pub(super) enum Operation<K, V, M> {
     RemoveValue(K, V),
     /// Remove the value set for this key.
     RemoveEntry(K),
+    /// Remove all entries in the given range
+    RemoveRange((Bound<K>, Bound<K>)),
     /// Remove all values in the value set for this key.
     Clear(K),
     /// Remove all values for all keys.
@@ -704,6 +728,7 @@ where
             Operation::RemoveValue(ref a, ref b) => {
                 f.debug_tuple("RemoveValue").field(a).field(b).finish()
             }
+            Operation::RemoveRange(ref range) => f.debug_tuple("RemoveRange").field(range).finish(),
             Operation::RemoveEntry(ref a) => f.debug_tuple("RemoveEntry").field(a).finish(),
             Operation::Clear(ref a) => f.debug_tuple("Clear").field(a).finish(),
             Operation::Purge => f.debug_tuple("Purge").finish(),

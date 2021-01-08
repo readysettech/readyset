@@ -1,4 +1,5 @@
 #![cfg(not(miri))]
+#![feature(btree_drain_filter)]
 
 extern crate evbtree;
 
@@ -16,7 +17,7 @@ use std::cmp::{min, Ord};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
-use std::ops::Deref;
+use std::ops::{Bound, Deref, RangeBounds};
 
 fn set<'a, T: 'a, I>(iter: I) -> HashSet<T>
 where
@@ -72,6 +73,7 @@ enum Op<K, V> {
     Add(K, V),
     Remove(K),
     RemoveValue(K, V),
+    RemoveRange((Bound<K>, Bound<K>)),
     Refresh,
 }
 
@@ -85,6 +87,7 @@ where
             0 => Add(K::arbitrary(g), V::arbitrary(g)),
             1 => Remove(K::arbitrary(g)),
             2 => RemoveValue(K::arbitrary(g), V::arbitrary(g)),
+            3 => RemoveRange((Bound::arbitrary(g), Bound::arbitrary(g))),
             _ => Refresh,
         }
     }
@@ -121,6 +124,10 @@ fn do_ops<K, V, S>(
                         .position(|value| value == v)
                         .map(|pos| values.swap_remove(pos))
                 });
+            }
+            RemoveRange(ref range) => {
+                evbtree.remove_range(range.clone());
+                write_ref.drain_filter(|k, _| range.contains(k));
             }
             Refresh => {
                 evbtree.publish();

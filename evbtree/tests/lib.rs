@@ -866,3 +866,28 @@ fn insert_range_pre_publish() {
         );
     }
 }
+
+#[test]
+fn remove_range_works() {
+    let (mut w, r) = evbtree::new();
+    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..=6);
+    w.insert(5, 7);
+    w.insert(9, 20);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.range(3..4).is_ok());
+    }
+
+    w.remove_range(4..=5);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.range(3..=4).is_err());
+        assert!(m.get(&4).is_none());
+        assert!(m.get(&3).is_some());
+        assert!(m.get(&9).is_some());
+    }
+}
