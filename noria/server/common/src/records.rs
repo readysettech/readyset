@@ -32,8 +32,15 @@ impl Record {
         }
     }
 
-    /// Return the underlying row for this Record, whether negative or positive
+    /// Return a reference to the underlying row for this Record, whether negative or positive
     pub fn row(&self) -> &Vec<DataType> {
+        match self {
+            Record::Positive(v) | Record::Negative(v) => v,
+        }
+    }
+
+    /// Convert this Record into its underlying row
+    pub fn into_row(self) -> Vec<DataType> {
         match self {
             Record::Positive(v) | Record::Negative(v) => v,
         }

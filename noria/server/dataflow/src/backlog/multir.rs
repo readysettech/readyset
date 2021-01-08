@@ -5,8 +5,11 @@ use evbtree::{
     refs::{Miss, Values},
 };
 use noria::util::BoundFunctor;
+use noria::KeyComparison;
+use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::ops::{Bound, RangeBounds};
+use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
@@ -96,10 +99,45 @@ impl LookupError {
             _ => None,
         }
     }
+
+    /// Returns the misses from this LookupError as a list of KeyComparisons. If this LookupError is
+    /// NotReady, the result will be empty
+    pub fn into_misses(self) -> Vec<KeyComparison> {
+        match self {
+            LookupError::NotReady => vec![],
+            LookupError::MissPointSingle(x, _) => vec![vec1![x].into()],
+            LookupError::MissPointDouble((x, y), _) => vec![vec1![x, y].into()],
+            LookupError::MissPointMany(xs, _) => vec![xs.try_into().unwrap()],
+            LookupError::MissRangeSingle(ranges, _) => ranges
+                .into_iter()
+                .map(|(lower, upper)| (lower.map(|x| vec1![x]), upper.map(|x| vec1![x])).into())
+                .collect(),
+            LookupError::MissRangeDouble(ranges, _) => ranges
+                .into_iter()
+                .map(|(lower, upper)| {
+                    (
+                        lower.map(|(x, y)| vec1![x, y]),
+                        upper.map(|(x, y)| vec1![x, y]),
+                    )
+                        .into()
+                })
+                .collect(),
+            LookupError::MissRangeMany(ranges, _) => ranges
+                .into_iter()
+                .map(|(lower, upper)| {
+                    (
+                        lower.map(|x| Vec1::try_from(x).unwrap()),
+                        upper.map(|x| Vec1::try_from(x).unwrap()),
+                    )
+                        .into()
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The result of an equality or range lookup to the reader node.
-pub(crate) type LookupResult<T> = Result<(T, i64), LookupError>;
+pub type LookupResult<T> = Result<(T, i64), LookupError>;
 
 impl Handle {
     pub(super) fn len(&self) -> usize {
@@ -154,6 +192,34 @@ impl Handle {
         }
     }
 
+    /// Returns None if this handle is not ready, Some(true) if this handle contains the given
+    /// key, Some(false) if it doesn't
+    ///
+    /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
+    pub(super) fn contains_key(&self, key: &[DataType]) -> Option<bool> {
+        match *self {
+            Handle::Single(ref h) => {
+                assert_eq!(key.len(), 1);
+                let map = h.enter()?;
+                Some(map.contains_key(&key[0]))
+            }
+            Handle::Double(ref h) => {
+                assert_eq!(key.len(), 2);
+                unsafe {
+                    let tuple_key = slice_to_2_tuple(&key);
+                    let map = h.enter()?;
+                    let res = map.contains_key(&tuple_key);
+                    mem::forget(tuple_key);
+                    Some(res)
+                }
+            }
+            Handle::Many(ref h) => {
+                let map = h.enter()?;
+                Some(map.contains_key(key))
+            }
+        }
+    }
+
     /// Retrieve the values corresponding to the given range of keys, apply `then` to them, and
     /// return the results, along with the metadata
     ///
@@ -161,7 +227,7 @@ impl Handle {
     ///
     /// Panics if the vectors in the bounds of `range` are a different size than the length of our
     /// keys.
-    pub(super) fn meta_get_range_and<F, T, R>(&self, range: R, mut then: F) -> LookupResult<Vec<T>>
+    pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, mut then: F) -> LookupResult<Vec<T>>
     where
         F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
         R: RangeBounds<Vec<DataType>>,
@@ -208,6 +274,46 @@ impl Handle {
                     .range((range.start_bound(), range.end_bound()))
                     .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
+            }
+        }
+    }
+
+    /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
+    /// key range, Some(false) if any of the keys miss
+    ///
+    /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
+    pub(super) fn contains_range<R>(&self, range: &R) -> Option<bool>
+    where
+        R: RangeBounds<Vec<DataType>>,
+    {
+        match *self {
+            Handle::Single(ref h) => {
+                let map = h.enter()?;
+                let start_bound = range.start_bound().map(|v| {
+                    assert!(v.len() == 1);
+                    &v[0]
+                });
+                let end_bound = range.end_bound().map(|v| {
+                    assert!(v.len() == 1);
+                    &v[0]
+                });
+                Some(map.contains_range((start_bound, end_bound)))
+            }
+            Handle::Double(ref h) => {
+                let map = h.enter()?;
+                let start_bound = range.start_bound().map(|r| {
+                    assert_eq!(r.len(), 2);
+                    (r[0].clone(), r[1].clone())
+                });
+                let end_bound = range.end_bound().map(|r| {
+                    assert_eq!(r.len(), 2);
+                    (r[0].clone(), r[1].clone())
+                });
+                Some(map.contains_range((start_bound, end_bound)))
+            }
+            Handle::Many(ref h) => {
+                let map = h.enter()?;
+                Some(map.contains_range((range.start_bound(), range.end_bound())))
             }
         }
     }
@@ -275,7 +381,7 @@ mod tests {
         w.publish();
 
         let (res, meta) = handle
-            .meta_get_range_and(vec![2.into()]..=vec![3.into()], |vals| {
+            .meta_get_range_and(&(vec![2.into()]..=vec![3.into()]), |vals| {
                 vals.into_iter().cloned().collect::<Vec<_>>()
             })
             .unwrap();
@@ -286,6 +392,19 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(meta, -1);
+    }
+
+    #[test]
+    fn contains_key_single() {
+        let (mut w, handle) = make_single();
+        assert_eq!(handle.contains_key(&[1.into()]), None);
+
+        w.publish();
+        assert_eq!(handle.contains_key(&[1.into()]), Some(false));
+
+        w.insert(1.into(), vec![1.into()]);
+        w.publish();
+        assert_eq!(handle.contains_key(&[1.into()]), Some(true));
     }
 
     #[test]
@@ -301,7 +420,7 @@ mod tests {
 
         let (res, meta) = handle
             .meta_get_range_and(
-                vec![2.into(), 2.into()]..=vec![3.into(), 3.into()],
+                &(vec![2.into(), 2.into()]..=vec![3.into(), 3.into()]),
                 |vals| vals.into_iter().cloned().collect::<Vec<_>>(),
             )
             .unwrap();

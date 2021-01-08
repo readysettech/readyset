@@ -58,7 +58,7 @@ pub(crate) trait State: SizeOf + Send {
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
     /// of the index that was evicted from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: Tag, keys: &[Vec<DataType>]) -> Option<(&[usize], u64)>;
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&[usize], u64)>;
 
     fn clear(&mut self);
 }
@@ -69,6 +69,12 @@ pub(crate) struct Row(Rc<Vec<DataType>>);
 pub(crate) type Rows = HashBag<Row, RandomState>;
 
 unsafe impl Send for Row {}
+
+impl From<Vec<DataType>> for Row {
+    fn from(r: Vec<DataType>) -> Self {
+        Self(Rc::new(r))
+    }
+}
 
 impl From<Rc<Vec<DataType>>> for Row {
     fn from(r: Rc<Vec<DataType>>) -> Self {
@@ -214,6 +220,11 @@ impl<'a> LookupResult<'a> {
         matches!(self, Self::Some(_))
     }
 
+    /// Returns true if this LookupResult is `LookupResult::Missing`
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
     /// Converts from `LookupResult<'a>` into an [`Option<RecordResult<'a>>`]
     pub fn records(self) -> Option<RecordResult<'a>> {
         match self {
@@ -240,9 +251,14 @@ pub(crate) enum RangeLookupResult<'a> {
 
 #[allow(dead_code)]
 impl<'a> RangeLookupResult<'a> {
-    /// Returns true if this LookupResult is `LookupResult::Some`
+    /// Returns true if this RangeLookupResult is `RangeLookupResult::Some`
     pub fn is_some(&self) -> bool {
         matches!(self, Self::Some(_))
+    }
+
+    /// Returns true if this RangeLookupResult is `RangeLookupResult::Missing`
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing(_))
     }
 
     /// Converts from `RangeLookupResult<'a>` into an [`Option<RecordResult<'a>>`]

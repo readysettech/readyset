@@ -3058,7 +3058,7 @@ async fn not_between() {
 
 #[tokio::test(threaded_scheduler)]
 async fn topk_updates() {
-    let mut g = start_simple_logging("things").await;
+    let mut g = start_simple("things").await;
     g.install_recipe(
         "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);
 
@@ -3162,6 +3162,46 @@ async fn non_sql_materialized_range_query() {
         .multi_lookup(
             vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
             false,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        &*res,
+        &[(2..5).map(|n| vec![n.into(), n.into()]).collect::<Vec<_>>()]
+    )
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn non_sql_range_upquery() {
+    let mut g = {
+        let mut builder = Builder::default();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
+        builder.start_local()
+    }
+    .await
+    .unwrap()
+    .0;
+
+    g.migrate(|mig| {
+        let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
+        mig.maintain_anonymous(a, &[0]);
+    })
+    .await;
+
+    let mut a = g.table("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap();
+    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let res = reader
+        .multi_lookup(
+            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            true,
         )
         .await
         .unwrap();

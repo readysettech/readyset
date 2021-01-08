@@ -1,5 +1,8 @@
+use noria::KeyComparison;
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::TryFrom;
+use vec1::Vec1;
 
 use crate::prelude::*;
 
@@ -49,7 +52,7 @@ pub struct Union {
     /// key match for an update.
     ///
     /// This map's key is really (Tag, Key, requesting_shard)
-    replay_pieces: BTreeMap<(Tag, Vec<DataType>, usize), ReplayPieces>,
+    replay_pieces: BTreeMap<(Tag, Vec1<DataType>, usize), ReplayPieces>,
 
     required: usize,
 
@@ -590,7 +593,10 @@ impl Ingredient for Union {
                     .into_iter()
                     .map(|r| {
                         (
-                            key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
+                            Vec1::try_from(
+                                key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
+                            )
+                            .unwrap(),
                             r,
                         )
                     })
@@ -613,7 +619,8 @@ impl Ingredient for Union {
                 let rs = {
                     keys.iter()
                         .filter_map(|key| {
-                            let rs = rs_by_key.remove(&key[..]).unwrap_or_else(Records::default);
+                            let key = key.equal().expect("Unions can't handle range queries yet");
+                            let rs = rs_by_key.remove(key).unwrap_or_else(Records::default);
 
                             // store this replay piece
                             use std::collections::btree_map::Entry;
@@ -643,7 +650,7 @@ impl Ingredient for Union {
                                         Some((key, m))
                                     } else {
                                         e.into_mut().buffered.insert(from, rs);
-                                        captured.insert(key.clone());
+                                        captured.insert(KeyComparison::from(key.clone()));
                                         None
                                     }
                                 }
@@ -663,7 +670,7 @@ impl Ingredient for Union {
                                             buffered: m,
                                             evict: false,
                                         });
-                                        captured.insert(key.clone());
+                                        captured.insert(KeyComparison::from(key.clone()));
                                         None
                                     }
                                 }
@@ -674,7 +681,7 @@ impl Ingredient for Union {
                                 // TODO XXX TODO XXX TODO XXX TODO
                                 eprintln!("!!! need to issue an eviction after replaying key");
                             }
-                            released.insert(key.clone());
+                            released.insert(KeyComparison::from(key.clone()));
                             pieces.buffered.into_iter()
                         })
                         .flat_map(|(from, rs)| {
@@ -744,8 +751,9 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[Vec<DataType>]) {
+    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         for key in keys {
+            let key = key.equal().expect("Unions can't handle range queries yet");
             // TODO: the key.clone()s here are really sad
             for (_, e) in self
                 .replay_pieces

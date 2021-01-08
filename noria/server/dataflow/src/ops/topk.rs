@@ -1,7 +1,9 @@
+use noria::util::hash;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::ops::Index;
@@ -34,12 +36,6 @@ impl From<Vec<(usize, OrderType)>> for Order {
 }
 
 type GroupHash = u64;
-
-fn hash<T: Hash>(x: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    x.hash(&mut hasher);
-    hasher.finish()
-}
 
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
@@ -309,7 +305,7 @@ impl Ingredient for TopK {
                             lookups.push(Lookup {
                                 on: *us,
                                 cols: self.group_by.clone(),
-                                key: grp.clone(),
+                                key: grp.clone().try_into().expect("Empty group"),
                             });
                         }
 
@@ -329,7 +325,7 @@ impl Ingredient for TopK {
                     lookup_idx: self.group_by.clone(),
                     lookup_cols: self.group_by.clone(),
                     replay_cols: replay_key_cols.map(Vec::from),
-                    record: r.row().clone(),
+                    record: r.row().clone().try_into().expect("Empty record"),
                 });
             } else {
                 match r {

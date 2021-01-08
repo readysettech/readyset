@@ -1,11 +1,50 @@
+use derive_more::From;
+use noria::util::{BoundAsRef, BoundFunctor};
+use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
+use vec1::Vec1;
 
 use crate::ops;
 use crate::prelude::*;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
+
+#[derive(PartialEq, Eq, Debug, From)]
+pub(crate) enum MissRecord {
+    /// A miss on a point query
+    Point(Vec1<DataType>),
+    /// A miss on a range query
+    Range((Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)),
+}
+
+impl MissRecord {
+    /// Project the values in `columns` out of this `MissRecord` into a [`KeyComparison`]
+    pub fn project_key(&self, columns: &[usize]) -> KeyComparison {
+        let project_rec = move |rec: &Vec1<DataType>| {
+            Vec1::try_from_vec(columns.iter().map(|i| rec[*i].clone()).collect())
+                .expect("Empty key columns")
+        };
+        match self {
+            Self::Point(rec) => KeyComparison::Equal(project_rec(rec)),
+            Self::Range((lower, upper)) => KeyComparison::Range((
+                lower.as_ref().map(|r| project_rec(r)),
+                upper.as_ref().map(|r| project_rec(r)),
+            )),
+        }
+    }
+}
+
+impl TryFrom<Vec<DataType>> for MissRecord {
+    type Error = vec1::Size0Error;
+
+    fn try_from(value: Vec<DataType>) -> Result<Self, Self::Error> {
+        Ok(Self::Point(value.try_into()?))
+    }
+}
 
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Miss {
@@ -18,32 +57,18 @@ pub(crate) struct Miss {
     /// The columns of `record` that identify the replay key (if any).
     pub(crate) replay_cols: Option<Vec<usize>>,
     /// The record we were processing when we missed.
-    pub(crate) record: Vec<DataType>,
+    pub(crate) record: MissRecord,
 }
 
 impl Miss {
-    pub(crate) fn replay_key<'a>(&'a self) -> Option<impl Iterator<Item = &DataType> + 'a> {
+    pub(crate) fn replay_key<'a>(&'a self) -> Option<KeyComparison> {
         self.replay_cols
             .as_ref()
-            .map(move |rc| rc.iter().map(move |&rc| &self.record[rc]))
+            .map(|cols| self.record.project_key(cols))
     }
 
-    pub(crate) fn replay_key_vec(&self) -> Option<Vec<DataType>> {
-        self.replay_cols
-            .as_ref()
-            .map(|rc| rc.iter().map(|&rc| &self.record[rc]).cloned().collect())
-    }
-
-    pub(crate) fn lookup_key<'a>(&'a self) -> impl Iterator<Item = &DataType> + 'a {
-        self.lookup_cols.iter().map(move |&rc| &self.record[rc])
-    }
-
-    pub(crate) fn lookup_key_vec(&self) -> Vec<DataType> {
-        self.lookup_cols
-            .iter()
-            .map(|&rc| &self.record[rc])
-            .cloned()
-            .collect()
+    pub(crate) fn lookup_key<'a>(&'a self) -> KeyComparison {
+        self.record.project_key(&self.lookup_cols[..])
     }
 }
 
@@ -54,7 +79,7 @@ pub(crate) struct Lookup {
     /// The columns of `on` we were looking up on.
     pub(crate) cols: Vec<usize>,
     /// The key used for the lookup.
-    pub(crate) key: Vec<DataType>,
+    pub(crate) key: KeyComparison,
 }
 
 #[derive(Default, Debug)]
@@ -74,8 +99,8 @@ pub(crate) enum RawProcessingResult {
     CapturedFull,
     ReplayPiece {
         rows: Records,
-        keys: HashSet<Vec<DataType>>,
-        captured: HashSet<Vec<DataType>>,
+        keys: HashSet<KeyComparison>,
+        captured: HashSet<KeyComparison>,
     },
 }
 
@@ -84,7 +109,7 @@ pub(crate) enum ReplayContext<'a> {
     None,
     Partial {
         key_cols: &'a [usize],
-        keys: &'a HashSet<Vec<DataType>>,
+        keys: &'a HashSet<KeyComparison>,
         requesting_shard: usize,
         tag: Tag,
         unishard: bool,
@@ -212,7 +237,7 @@ where
 
     /// Triggered whenever a replay occurs, to allow the operator to react evict from any auxillary
     /// state other than what is stored in its materialization.
-    fn on_eviction(&mut self, _from: LocalNodeIndex, _tag: Tag, _keys: &[Vec<DataType>]) {}
+    fn on_eviction(&mut self, _from: LocalNodeIndex, _tag: Tag, _keys: &[KeyComparison]) {}
 
     fn can_query_through(&self) -> bool {
         false

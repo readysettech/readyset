@@ -186,6 +186,14 @@ where
             .get(key)
             .map_or(false, |values| values.as_ref().contains(value))
     }
+
+    /// Returns true if the map contains the specified range of keys.
+    pub fn contains_range<R>(&self, range: R) -> bool
+    where
+        R: RangeBounds<K> + Clone,
+    {
+        self.guard.tree.contains_interval(range)
+    }
 }
 
 impl<'rh, K, Q, V, M, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, S>

@@ -1,7 +1,9 @@
+use std::ops::RangeBounds;
+
 use super::{key_to_double, key_to_single, Key};
 use crate::prelude::*;
 use ahash::RandomState;
-use evbtree;
+use noria::util::{BoundAsRef, BoundFunctor};
 
 pub(super) enum Handle {
     Single(evbtree::handles::WriteHandle<DataType, Vec<DataType>, i64, RandomState>),
@@ -46,6 +48,41 @@ impl Handle {
         }
     }
 
+    pub fn empty_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<Vec<DataType>>,
+    {
+        match self {
+            Handle::Single(h) => {
+                h.remove_range((
+                    range.start_bound().as_ref().map(|r| {
+                        debug_assert_eq!(r.len(), 1);
+                        &r[0]
+                    }),
+                    range.end_bound().as_ref().map(|r| {
+                        debug_assert_eq!(r.len(), 1);
+                        &r[0]
+                    }),
+                ));
+            }
+            Handle::Double(h) => {
+                h.remove_range((
+                    range.start_bound().as_ref().map(|r| {
+                        debug_assert_eq!(r.len(), 2);
+                        (r[0].clone(), r[1].clone())
+                    }),
+                    range.end_bound().as_ref().map(|r| {
+                        debug_assert_eq!(r.len(), 2);
+                        (r[0].clone(), r[1].clone())
+                    }),
+                ));
+            }
+            Handle::Many(h) => {
+                h.remove_range(range);
+            }
+        }
+    }
+
     /// Evict `n` randomly selected keys from state, and invoke `f` with each of the values that
     /// have been evicted
     pub fn empty_random_for_each(
@@ -71,57 +108,6 @@ impl Handle {
             }
             Handle::Many(ref mut h) => {
                 h.publish();
-            }
-        }
-    }
-
-    pub fn meta_get_and<F, T>(&self, key: Key, then: F) -> Option<(Option<T>, i64)>
-    where
-        F: FnOnce(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
-    {
-        match *self {
-            Handle::Single(ref h) => {
-                assert_eq!(key.len(), 1);
-                let map = h.enter()?;
-                let v = map.get(&key[0]).map(then);
-                let m = *map.meta();
-                Some((v, m))
-            }
-            Handle::Double(ref h) => {
-                assert_eq!(key.len(), 2);
-                // we want to transmute &[T; 2] to &(T, T), but that's not actually safe
-                // we're not guaranteed that they have the same memory layout
-                // we *could* just clone DataType, but that would mean dealing with string refcounts
-                // so instead, we play a trick where we memcopy onto the stack and then forget!
-                //
-                // h/t https://gist.github.com/mitsuhiko/f6478a0dd1ef174b33c63d905babc89a
-                use std::mem;
-                use std::ptr;
-                unsafe {
-                    let mut stack_key: (mem::MaybeUninit<DataType>, mem::MaybeUninit<DataType>) =
-                        (mem::MaybeUninit::uninit(), mem::MaybeUninit::uninit());
-                    ptr::copy_nonoverlapping(
-                        &key[0] as *const DataType,
-                        stack_key.0.as_mut_ptr(),
-                        1,
-                    );
-                    ptr::copy_nonoverlapping(
-                        &key[1] as *const DataType,
-                        stack_key.1.as_mut_ptr(),
-                        1,
-                    );
-                    let stack_key = mem::transmute::<_, &(DataType, DataType)>(&stack_key);
-                    let map = h.enter()?;
-                    let v = map.get(&stack_key).map(then);
-                    let m = *map.meta();
-                    Some((v, m))
-                }
-            }
-            Handle::Many(ref h) => {
-                let map = h.enter()?;
-                let v = map.get(&key[..]).map(then);
-                let m = *map.meta();
-                Some((v, m))
             }
         }
     }
@@ -186,5 +172,54 @@ impl Handle {
             }
         }
         memory_delta
+    }
+
+    pub fn insert_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<Vec<DataType>>,
+    {
+        match self {
+            Handle::Single(h) => {
+                h.insert_range(
+                    vec![],
+                    (
+                        range.start_bound().as_ref().map(|r| {
+                            debug_assert_eq!(r.len(), 1);
+                            &r[0]
+                        }),
+                        range.end_bound().as_ref().map(|r| {
+                            debug_assert_eq!(r.len(), 1);
+                            &r[0]
+                        }),
+                    ),
+                );
+            }
+            Handle::Double(h) => {
+                h.insert_range(
+                    vec![],
+                    (
+                        range.start_bound().as_ref().map(|r| {
+                            debug_assert_eq!(r.len(), 2);
+                            (r[0].clone(), r[1].clone())
+                        }),
+                        range.end_bound().as_ref().map(|r| {
+                            debug_assert_eq!(r.len(), 2);
+                            (r[0].clone(), r[1].clone())
+                        }),
+                    ),
+                );
+            }
+            Handle::Many(h) => {
+                h.insert_range(vec![], range);
+            }
+        }
+    }
+
+    pub fn read(&self) -> super::multir::Handle {
+        match self {
+            Handle::Single(h) => super::multir::Handle::Single((*h).clone()),
+            Handle::Double(h) => super::multir::Handle::Double((*h).clone()),
+            Handle::Many(h) => super::multir::Handle::Many((*h).clone()),
+        }
     }
 }

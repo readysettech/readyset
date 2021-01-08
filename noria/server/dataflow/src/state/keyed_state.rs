@@ -1,10 +1,9 @@
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use tuple::Map;
 use tuple::TupleElements;
 use vec1::Vec1;
 
-#[macro_use]
 use super::mk_key::MakeKey;
 use super::partial_map::PartialMap;
 use super::Misses;
@@ -204,6 +203,33 @@ impl KeyedState {
                 .sum()
         })
         .unwrap_or(0)
+    }
+
+    pub(super) fn evict_range<R>(&mut self, range: &R) -> u64
+    where
+        R: RangeBounds<Vec1<DataType>>,
+    {
+        macro_rules! do_evict_range {
+            ($m: expr, $range: expr, $hint: ty) => {
+                $m.remove_range(<$hint as MakeKey<DataType>>::from_range($range))
+                    .map(|(_, rows)| -> u64 {
+                        rows.iter()
+                            .filter(|r| Rc::strong_count(&r.0) == 1)
+                            .map(SizeOf::deep_size_of)
+                            .sum()
+                    })
+                    .sum()
+            };
+        }
+
+        match self {
+            KeyedState::Single(m) => do_evict_range!(m, range, DataType),
+            KeyedState::Double(m) => do_evict_range!(m, range, (DataType, _)),
+            KeyedState::Tri(m) => do_evict_range!(m, range, (DataType, _, _)),
+            KeyedState::Quad(m) => do_evict_range!(m, range, (DataType, _, _, _)),
+            KeyedState::Quin(m) => do_evict_range!(m, range, (DataType, _, _, _, _)),
+            KeyedState::Sex(m) => do_evict_range!(m, range, (DataType, _, _, _, _, _)),
+        }
     }
 }
 

@@ -1,12 +1,18 @@
-pub use self::multir::LookupError;
+pub use self::multir::{LookupError, LookupResult};
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
 use evbtree::refs::Values;
+use noria::util::{BoundAsRef, BoundFunctor};
+use noria::KeyComparison;
 use rand::prelude::*;
 use std::borrow::Cow;
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use vec1::Vec1;
+
+pub(crate) trait Trigger =
+    Fn(&mut dyn Iterator<Item = &KeyComparison>) -> bool + 'static + Send + Sync;
 
 /// Allocate a new end-user facing result table.
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
@@ -28,7 +34,7 @@ pub(crate) fn new_partial<F>(
     trigger: F,
 ) -> (SingleReadHandle, WriteHandle)
 where
-    F: Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + 'static + Send + Sync,
+    F: Trigger,
 {
     new_inner(cols, key, Some(Arc::new(trigger)))
 }
@@ -36,7 +42,7 @@ where
 fn new_inner(
     cols: usize,
     key: &[usize],
-    trigger: Option<Arc<dyn Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + Send + Sync>>,
+    trigger: Option<Arc<dyn Trigger>>,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -139,12 +145,25 @@ pub(crate) struct WriteHandleEntry<'a> {
     key: Key<'a>,
 }
 
+impl<'a> WriteHandleEntry<'a> {
+    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> LookupResult<T>
+    where
+        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
+    {
+        self.handle.handle.read().meta_get_and(&self.key, &mut then)
+    }
+}
+
 impl<'a> MutWriteHandleEntry<'a> {
     pub(crate) fn mark_filled(self) {
-        if let Some((None, _)) = self
+        if self
             .handle
             .handle
-            .meta_get_and(Cow::Borrowed(&*self.key), |rs| rs.is_empty())
+            .read()
+            .meta_get_and(&self.key, |rs| rs.is_empty())
+            .err()
+            .iter()
+            .any(LookupError::is_miss)
         {
             self.handle.handle.clear(self.key)
         } else {
@@ -156,25 +175,12 @@ impl<'a> MutWriteHandleEntry<'a> {
         let size = self
             .handle
             .handle
-            .meta_get_and(Cow::Borrowed(&*self.key), |rs| {
-                rs.iter().map(SizeOf::deep_size_of).sum()
-            })
-            .map(|r| r.0.unwrap_or(0))
+            .read()
+            .meta_get_and(&self.key, |rs| rs.iter().map(SizeOf::deep_size_of).sum())
+            .map(|(size, _)| size)
             .unwrap_or(0);
         self.handle.mem_size = self.handle.mem_size.checked_sub(size as usize).unwrap();
         self.handle.handle.empty(self.key)
-    }
-}
-
-impl<'a> WriteHandleEntry<'a> {
-    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> Result<(Option<T>, i64), ()>
-    where
-        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
-    {
-        self.handle
-            .handle
-            .meta_get_and(self.key, &mut then)
-            .ok_or(())
     }
 }
 
@@ -224,6 +230,16 @@ impl WriteHandle {
         WriteHandleEntry {
             handle: self,
             key: key.into(),
+        }
+    }
+
+    pub(crate) fn contains(&self, key: &KeyComparison) -> Option<bool> {
+        match key {
+            KeyComparison::Equal(k) => self.handle.read().contains_key(k),
+            KeyComparison::Range((start, end)) => self.handle.read().contains_range(&(
+                start.as_ref().map(Vec1::as_vec),
+                end.as_ref().map(Vec1::as_vec),
+            )),
         }
     }
 
@@ -292,6 +308,38 @@ impl WriteHandle {
             .unwrap();
         bytes_to_be_freed
     }
+
+    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) {
+        match key {
+            KeyComparison::Equal(k) => self.mut_with_key(k.as_vec()).mark_hole(),
+            KeyComparison::Range((start, end)) => {
+                let range = (
+                    start.as_ref().map(Vec1::as_vec),
+                    end.as_ref().map(Vec1::as_vec),
+                );
+                let size = self
+                    .handle
+                    .read()
+                    .meta_get_range_and(&range, |rs| {
+                        rs.iter().map(SizeOf::deep_size_of).sum::<u64>()
+                    })
+                    .map(|(sizes, _)| sizes.iter().sum())
+                    .unwrap_or(0);
+                self.mem_size = self.mem_size.checked_sub(size as usize).unwrap();
+                self.handle.empty_range(range)
+            }
+        }
+    }
+
+    pub(crate) fn mark_filled(&mut self, key: KeyComparison) {
+        match key {
+            KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled(),
+            KeyComparison::Range((start, end)) => self.handle.insert_range((
+                (start.as_ref()).map(Vec1::as_vec),
+                (end.as_ref()).map(Vec1::as_vec),
+            )),
+        }
+    }
 }
 
 impl SizeOf for WriteHandle {
@@ -314,7 +362,7 @@ impl SizeOf for WriteHandle {
 #[derive(Clone)]
 pub struct SingleReadHandle {
     handle: multir::Handle,
-    trigger: Option<Arc<dyn Fn(&mut dyn Iterator<Item = &[DataType]>) -> bool + Send + Sync>>,
+    trigger: Option<Arc<dyn Trigger>>,
     key: Vec<usize>,
 }
 
@@ -332,7 +380,7 @@ impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
     pub fn trigger<'a, I>(&self, keys: I) -> bool
     where
-        I: Iterator<Item = &'a [DataType]>,
+        I: Iterator<Item = &'a KeyComparison>,
     {
         assert!(
             self.trigger.is_some(),
@@ -343,6 +391,18 @@ impl SingleReadHandle {
 
         // trigger a replay to populate
         (*self.trigger.as_ref().unwrap())(&mut it)
+    }
+
+    /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
+    /// key comparison, Some(false) if any of the keys miss
+    pub fn contains(&self, key: &KeyComparison) -> Option<bool> {
+        match key {
+            KeyComparison::Equal(k) => self.handle.contains_key(k),
+            KeyComparison::Range((start, end)) => self.handle.contains_range(&(
+                start.as_ref().map(Vec1::as_vec),
+                end.as_ref().map(Vec1::as_vec),
+            )),
+        }
     }
 
     /// Find all entries that matched the given conditions.
@@ -368,7 +428,7 @@ impl SingleReadHandle {
     /// Look up the entries whose keys are in `range`, pass each to `then`, and return them
     pub fn try_find_range_and<F, T, R>(
         &self,
-        range: R,
+        range: &R,
         mut then: F,
     ) -> Result<(Vec<T>, i64), LookupError>
     where
@@ -399,7 +459,6 @@ impl SingleReadHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use LookupError::*;
 
     #[test]
     fn store_works() {
@@ -599,13 +658,96 @@ mod tests {
 
     #[test]
     fn find_missing_partial() {
-        let (r, mut w) = new_partial(1, &[0], |_| true);
+        let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
         w.swap();
 
-        // Point queries
         assert_eq!(
             r.try_find_and(&[1.into()], |rs| rs.len()),
             Err(LookupError::MissPointSingle(1.into(), -1))
         );
+    }
+
+    mod mark_filled {
+        use super::*;
+        use vec1::vec1;
+
+        #[test]
+        fn point() {
+            let (r, mut w) =
+                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            w.swap();
+
+            let key = vec1![DataType::from(0)];
+            assert!(r.try_find_and(&key, |_| ()).err().unwrap().is_miss());
+
+            w.mark_filled(key.clone().into());
+            w.swap();
+            assert!(r.try_find_and(&key, |_| ()).is_ok());
+        }
+
+        #[test]
+        fn range() {
+            let (r, mut w) =
+                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            w.swap();
+
+            let range = vec![DataType::from(0)]..vec![DataType::from(10)];
+            assert!(r
+                .try_find_range_and(&range, |_| ())
+                .err()
+                .unwrap()
+                .is_miss());
+
+            w.mark_filled(KeyComparison::from_range(
+                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+            ));
+            w.swap();
+            assert!(r.try_find_range_and(&range, |_| ()).is_ok());
+        }
+    }
+
+    mod mark_hole {
+        use super::*;
+        use vec1::vec1;
+
+        #[test]
+        fn point() {
+            let (r, mut w) =
+                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            w.swap();
+
+            let key = vec1![DataType::from(0)];
+            w.mark_filled(key.clone().into());
+            w.swap();
+            assert!(r.try_find_and(&key, |_| ()).is_ok());
+
+            w.mark_hole(&key.clone().into());
+            w.swap();
+            assert!(r.try_find_and(&key, |_| ()).err().unwrap().is_miss());
+        }
+
+        #[test]
+        fn range() {
+            let (r, mut w) =
+                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            w.swap();
+
+            let range = vec![DataType::from(0)]..vec![DataType::from(10)];
+            w.mark_filled(KeyComparison::from_range(
+                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+            ));
+            w.swap();
+            assert!(r.try_find_range_and(&range, |_| ()).is_ok());
+
+            w.mark_hole(&KeyComparison::from_range(
+                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+            ));
+            w.swap();
+            assert!(r
+                .try_find_range_and(&range, |_| ())
+                .err()
+                .unwrap()
+                .is_miss());
+        }
     }
 }

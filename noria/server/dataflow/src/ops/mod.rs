@@ -1,3 +1,4 @@
+use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -187,7 +188,7 @@ impl Ingredient for NodeOperator {
             log
         )
     }
-    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[Vec<DataType>]) {
+    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
     }
     fn can_query_through(&self) -> bool {

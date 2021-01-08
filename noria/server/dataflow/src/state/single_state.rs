@@ -282,8 +282,13 @@ impl SingleState {
     }
 
     /// Evicts a specified key from this state, returning the number of bytes freed.
-    pub(super) fn evict_keys(&mut self, keys: &[Vec<DataType>]) -> u64 {
-        keys.iter().map(|k| self.state.evict(k)).sum()
+    pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> u64 {
+        keys.iter()
+            .map(|k| match k {
+                KeyComparison::Equal(equal) => self.state.evict(equal),
+                KeyComparison::Range(range) => self.state.evict_range(range),
+            })
+            .sum()
     }
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
@@ -352,7 +357,44 @@ mod tests {
         )));
         assert!(state.lookup(&KeyType::from(&[0.into()])).is_some());
         assert!(state
-            .lookup_range(&RangeKey::from(&(vec![0.into()]..vec![5.into()])))
+            .lookup_range(&RangeKey::from(&(vec1![0.into()]..vec1![5.into()])))
             .is_some());
+    }
+
+    mod evict_keys {
+        use super::*;
+        use vec1::vec1;
+
+        #[test]
+        fn equal() {
+            let mut state = SingleState::new(&[0], true);
+            let key = KeyComparison::Equal(vec1![0.into()]);
+            state.mark_filled(key.clone());
+            state.insert_row(vec![0.into(), 1.into()].into());
+            state.evict_keys(&[key]);
+            assert!(state.lookup(&KeyType::from(&[0.into()])).is_missing())
+        }
+
+        #[test]
+        fn range() {
+            let mut state = SingleState::new(&[0], true);
+            let key =
+                KeyComparison::from_range(&(vec1![DataType::from(0)]..vec1![DataType::from(10)]));
+            state.mark_filled(key.clone());
+            assert!(state
+                .lookup_range(&RangeKey::from(
+                    &(vec1![DataType::from(0)]..vec1![DataType::from(10)])
+                ))
+                .is_some());
+
+            state.insert_row(vec![0.into(), 1.into()].into());
+            state.evict_keys(&[key]);
+            assert!(state.lookup(&KeyType::from(&[0.into()])).is_missing());
+            assert!(state
+                .lookup_range(&RangeKey::from(
+                    &(vec1![DataType::from(0)]..vec1![DataType::from(10)])
+                ))
+                .is_missing())
+        }
     }
 }
