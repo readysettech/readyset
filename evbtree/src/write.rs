@@ -592,6 +592,7 @@ where
                     // so we are about to turn the alias back into NoDrop.
                     (k.clone(), unsafe { ValuesInner::alias(vs, &other.hasher) })
                 }));
+                inner.tree = other.tree.clone();
             }
         }
     }
