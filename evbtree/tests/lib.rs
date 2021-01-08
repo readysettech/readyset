@@ -835,3 +835,34 @@ fn range_works() {
         assert_eq!(results[1].1.iter().cloned().collect::<Vec<_>>(), vec![10]);
     }
 }
+
+#[test]
+fn insert_range_pre_publish() {
+    // There's an optimization in the write handle where if we've never published before, rather
+    // than adding new changes to the oplog we apply them to the map underlying the write handle
+    // directly, then add an op that copies the changes over to the other side on the eventual
+    // publish. This tests that that works properly for the interval tree by checking reads with
+    // both an even and an odd number of publishes
+    let (mut w, r) = evbtree::new::<i32, i32>();
+    w.insert_range(vec![], ..);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.range(1..=2).is_ok());
+    }
+
+    w.insert(1, 2);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert_eq!(
+            m.range(1..=2)
+                .unwrap()
+                .map(|(k, v)| (*k, v.into_iter().cloned().collect::<Vec<_>>()))
+                .collect::<Vec<_>>(),
+            vec![(1, vec![2])]
+        );
+    }
+}
