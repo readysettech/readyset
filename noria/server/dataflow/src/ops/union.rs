@@ -820,6 +820,7 @@ impl Ingredient for Union {
             }
         }
     }
+
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         match self.emit {
             Emit::AllFrom(p, _) => vec![(p.as_global(), Some(col))],
@@ -869,7 +870,7 @@ mod tests {
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
         assert_eq!(
-            u.one_row(r, right.clone(), false),
+            u.one_row(r, right, false),
             vec![vec![1.into(), "x".into()]].into()
         );
     }
@@ -907,5 +908,151 @@ mod tests {
             .unwrap()
             .iter()
             .any(|&(n, c)| n == r.as_global() && c == 2));
+    }
+
+    mod replay_capturing {
+        use super::*;
+        use maplit::hashset;
+        use vec1::vec1;
+
+        #[test]
+        fn left_then_right() {
+            let (mut g, left, right) = setup();
+            let tag = Tag::new(0);
+            let key: KeyComparison = vec1![1.into()].into();
+            let keys = hashset![key.clone()];
+            let replay_ctx = || ReplayContext::Partial {
+                key_cols: &[0],
+                keys: &keys,
+                requesting_shard: 0,
+                tag,
+                unishard: true,
+            };
+
+            // point-key replay on the left
+            let res = g.input_raw(
+                left,
+                vec![vec![DataType::from(1), DataType::from("a")]],
+                replay_ctx(),
+                false,
+            );
+            match res {
+                RawProcessingResult::ReplayPiece { rows, captured, .. } => {
+                    // We should capture the replay and emit no records
+                    assert_eq!(rows, Records::default());
+                    assert_eq!(captured, hashset![key.clone()]);
+                }
+                _ => unreachable!("expected replay piece, got: {:?}", res),
+            }
+
+            // then a point-key replay on the right
+            let res = g.input_raw(
+                right,
+                vec![vec![
+                    DataType::from(1),
+                    DataType::from("skipped"),
+                    DataType::from("b"),
+                ]],
+                replay_ctx(),
+                false,
+            );
+
+            match res {
+                RawProcessingResult::ReplayPiece {
+                    rows,
+                    captured,
+                    keys,
+                    ..
+                } => {
+                    // we should emit both the originally captured record from the left and the one
+                    // from the right
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
+
+                    assert!(captured.is_empty());
+                    assert_eq!(keys, hashset![key]);
+                }
+                _ => unreachable!("Expected replay piece, got: {:?}", res),
+            }
+        }
+
+        #[test]
+        fn left_then_update_then_right() {
+            let (mut g, left, right) = setup();
+            let tag = Tag::new(0);
+            let key: KeyComparison = vec1![1.into()].into();
+            let keys = hashset![key.clone()];
+            let replay_ctx = || ReplayContext::Partial {
+                key_cols: &[0],
+                keys: &keys,
+                requesting_shard: 0,
+                tag,
+                unishard: true,
+            };
+
+            // replay on the left
+            let res = g.input_raw(
+                left,
+                vec![
+                    vec![DataType::from(1), DataType::from("a")],
+                    vec![DataType::from(1), DataType::from("c")],
+                ],
+                replay_ctx(),
+                false,
+            );
+            match res {
+                RawProcessingResult::ReplayPiece { rows, captured, .. } => {
+                    // We should capture the replay and emit no records
+                    assert_eq!(rows, Records::default());
+                    assert_eq!(captured, hashset![key.clone()]);
+                }
+                _ => unreachable!("expected replay piece, got: {:?}", res),
+            }
+
+            // then an update from the left
+            let res = g.input_raw(
+                left,
+                vec![
+                    (vec![DataType::from(1), DataType::from("d")], true),
+                    (vec![DataType::from(1), DataType::from("c")], false),
+                ],
+                ReplayContext::None,
+                false,
+            );
+            assert!(matches!(res, RawProcessingResult::Regular(_)));
+
+            // then a replay on the right
+            let res = g.input_raw(
+                right,
+                vec![vec![
+                    DataType::from(1),
+                    DataType::from("skipped"),
+                    DataType::from("b"),
+                ]],
+                replay_ctx(),
+                false,
+            );
+
+            match res {
+                RawProcessingResult::ReplayPiece {
+                    rows,
+                    captured,
+                    keys,
+                    ..
+                } => {
+                    dbg!(&rows);
+                    // we should emit both the captured record from the left with the updates
+                    // applied, and the records from the right
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
+                    // assert!(!rows.contains(&Record::Positive(vec![1.into(), "c".into()])));
+                    assert!(rows.contains(&Record::Positive(vec![1.into(), "d".into()])));
+
+                    assert!(captured.is_empty());
+                    assert_eq!(keys, hashset![key]);
+                }
+                _ => unreachable!("Expected replay piece, got: {:?}", res),
+            }
+        }
     }
 }

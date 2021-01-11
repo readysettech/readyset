@@ -35,6 +35,11 @@ stream-cancel = "0.6.1"
 tokio = { version = "0.2.0", features = ["stream"] }
 vec_map = { version = "0.8.0", features = ["eders"] }
 tempfile = "3.0.2"
+unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
+derive_more = "0.99.11"
+tuple = "0.5.1"
+vec1 = "1.6.0"
+maplit = "1.0.2"
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
@@ -45,10 +50,6 @@ rocksdb = {version = "0.14", default-features = false, features = ["lz4"] }
 # local deps
 common = { version = "0.7.0", path = "../common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../../noria" }
-unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
-derive_more = "0.99.11"
-tuple = "0.5.1"
-vec1 = "1.6.0"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"

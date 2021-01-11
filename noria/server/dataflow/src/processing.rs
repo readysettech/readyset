@@ -93,6 +93,7 @@ pub(crate) struct ProcessingResult {
     pub(crate) lookups: Vec<Lookup>,
 }
 
+#[derive(Debug)]
 pub(crate) enum RawProcessingResult {
     Regular(ProcessingResult),
     FullReplay(Records, bool),
@@ -120,11 +121,18 @@ pub(crate) enum ReplayContext<'a> {
 }
 
 impl<'a> ReplayContext<'a> {
-    fn key(&self) -> Option<&'a [usize]> {
+    pub(crate) fn key(&self) -> Option<&'a [usize]> {
         if let ReplayContext::Partial { key_cols, .. } = *self {
             Some(key_cols)
         } else {
             None
+        }
+    }
+
+    pub(crate) fn tag(&self) -> Option<Tag> {
+        match self {
+            Self::Partial { tag, .. } => Some(*tag),
+            _ => None,
         }
     }
 }
