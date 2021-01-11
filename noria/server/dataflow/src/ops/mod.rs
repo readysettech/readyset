@@ -243,6 +243,7 @@ pub mod test {
         pub(super) states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
+        pub(super) logger: slog::Logger,
     }
 
     #[allow(clippy::new_without_default)]
@@ -261,6 +262,7 @@ pub mod test {
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
                 remap: HashMap::new(),
+                logger: slog::Logger::root(slog::Discard, o!()),
             }
         }
 
@@ -414,7 +416,13 @@ pub mod test {
             self.states.insert(*base, Box::new(state));
         }
 
-        pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {
+        pub fn input_raw<U: Into<Records>>(
+            &mut self,
+            src: IndexPair,
+            u: U,
+            replay: ReplayContext,
+            remember: bool,
+        ) -> RawProcessingResult {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(*self.nut.unwrap()));
 
@@ -426,20 +434,50 @@ pub mod test {
                 fn send(&mut self, _: ReplicaAddr, _: Box<Packet>) {}
             }
 
-            let mut u = {
+            let tag = replay.tag();
+            let mut res = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[*id].borrow_mut();
-                let m = n.on_input(&mut Ex, *src, u.into(), None, &self.nodes, &self.states);
-                assert_eq!(m.misses, vec![]);
-                m.results
+                n.on_input_raw(
+                    &mut Ex,
+                    *src,
+                    u.into(),
+                    replay,
+                    &self.nodes,
+                    &self.states,
+                    &self.logger,
+                )
             };
 
             if !remember || !self.states.contains_key(*self.nut.unwrap()) {
-                return u;
+                return res;
             }
 
-            node::materialize(&mut u, None, self.states.get_mut(*self.nut.unwrap()));
-            u
+            if let RawProcessingResult::Regular(ref mut res) = &mut res {
+                node::materialize(
+                    &mut res.results,
+                    tag,
+                    self.states.get_mut(*self.nut.unwrap()),
+                );
+            }
+
+            res
+        }
+
+        pub fn input<U: Into<Records>>(
+            &mut self,
+            src: IndexPair,
+            u: U,
+            remember: bool,
+        ) -> ProcessingResult {
+            match self.input_raw(src, u, ReplayContext::None, remember) {
+                RawProcessingResult::Regular(res) => res,
+                _ => unreachable!(),
+            }
+        }
+
+        pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {
+            self.input(src, u, remember).results
         }
 
         pub fn one_row<R: Into<Record>>(
