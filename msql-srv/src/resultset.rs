@@ -387,6 +387,9 @@ impl<'a, W: Write + 'a> RowWriter<'a, W> {
 
 impl<'a, W: Write + 'a> Drop for RowWriter<'a, W> {
     fn drop(&mut self) {
-        self.finish_inner().unwrap();
+        // TODO(eta): do something better here.
+        // The original code called unwrap(), which is really bad, because it can lead to a panic-
+        // while-panicking situation.
+        let _ = self.finish_inner();
     }
 }

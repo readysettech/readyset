@@ -188,6 +188,11 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                             .into_iter()
                             .map(|pv| pv.value.to_datatype())
                             .collect::<Vec<_>>();
+                        assert_ne!(
+                            params.len(),
+                            0,
+                            "empty parameters passed to a rewritten query"
+                        );
                         (0..*nrewritten)
                             .map(|poffset| {
                                 params
@@ -200,10 +205,17 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                             })
                             .collect()
                     }
-                    None => vec![params
-                        .into_iter()
-                        .map(|pv| pv.value.to_datatype())
-                        .collect::<Vec<_>>()],
+                    None => {
+                        let keys = params
+                            .into_iter()
+                            .map(|pv| pv.value.to_datatype())
+                            .collect::<Vec<_>>();
+                        if keys.len() > 0 {
+                            vec![keys]
+                        } else {
+                            vec![]
+                        }
+                    }
                 };
 
                 self.reader.execute_select(&qname, q, key, schema, results)

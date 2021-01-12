@@ -482,7 +482,10 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
                 .ensure_getter(&qname)
                 .schema()
                 .expect(&format!("no schema for view '{}'", qname))
-                .to_vec(),
+                .iter()
+                .cloned()
+                .filter(|c| c.column.name != "bogokey")
+                .collect(),
         );
 
         // now convert params to msql_srv types; we have to do this here because we don't have
