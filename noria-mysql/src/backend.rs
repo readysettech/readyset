@@ -366,7 +366,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
         trace!("delegate");
         let res = match q {
             nom_sql::SqlQuery::CreateTable(q) => self.writer.handle_create_table(q, results),
-            nom_sql::SqlQuery::CreateView(q) => self.writer.handle_create_view(q, results),
+            nom_sql::SqlQuery::CreateView(q) => self.reader.handle_create_view(q, results),
             nom_sql::SqlQuery::Insert(q) => self.writer.handle_insert(q, results),
             nom_sql::SqlQuery::Select(q) => self.reader.handle_select(q, use_params, results),
             nom_sql::SqlQuery::Set(q) => self.writer.handle_set(q, results),

@@ -63,10 +63,4 @@ pub trait Writer<W: io::Write> {
         q: nom_sql::CreateTableStatement,
         results: QueryResultWriter<W>,
     ) -> io::Result<()>;
-
-    fn handle_create_view(
-        &mut self,
-        q: nom_sql::CreateViewStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()>;
 }
