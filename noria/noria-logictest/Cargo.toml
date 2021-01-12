@@ -9,11 +9,20 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.38"
 clap = "3.0.0-beta.2"
+colored = "2.0.0"
 derive_more = "0.99.11"
 hex = "0.4.2"
 md5 = "0.7.0"
+mysql = "20.1.0"
 nom = "5.1.2"
 nom-trace = "0.2.1"
+zookeeper = "0.5.9"
+noria-server = { version = "0.7", path = "../server/" }
+noria = { version = "0.7", path = "../noria/" }
+noria-mysql = { path = "../../noria-mysql/" }
+nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
+msql-srv = { path = "../../msql-srv" }
+tokio = { version = "0.2.0", features = ["signal", "rt-threaded", "io-driver", "time"] }
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
