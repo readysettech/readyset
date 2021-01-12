@@ -1,0 +1,14 @@
+statement ok
+CREATE TABLE t1(x VARCHAR(32))
+
+query T valuesort
+SELECT * FROM t1
+----
+
+statement ok
+INSERT INTO t1(x) VALUES ('a')
+
+query T valuesort
+SELECT * FROM t1
+----
+a

@@ -7,6 +7,9 @@ use clap::Clap;
 
 pub mod ast;
 pub mod parser;
+pub mod runner;
+
+use crate::runner::{RunOptions, TestScript};
 
 #[derive(Clap)]
 struct Opts {
@@ -16,8 +19,17 @@ struct Opts {
 
 #[derive(Clap)]
 enum Command {
-    #[clap(version = "0.1")]
     Parse(Parse),
+    Verify(Verify),
+}
+
+impl Command {
+    fn run(&self) -> anyhow::Result<()> {
+        match self {
+            Self::Parse(parse) => parse.run(),
+            Self::Verify(verify) => verify.run(),
+        }
+    }
 }
 
 fn input_files(path: &Path) -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
@@ -80,12 +92,40 @@ impl Parse {
     }
 }
 
+/// Run a test script, or all test scripts in a directory, against Noria
+#[derive(Clap)]
+struct Verify {
+    /// File or directory containing test scripts to run. If `-`, will read from standard input
+    #[clap(parse(from_str))]
+    path: PathBuf,
+
+    /// Zookeeper host to connect to
+    #[clap(long, default_value = "127.0.0.1")]
+    zookeeper_host: String,
+
+    /// Zookeeper port to connect to
+    #[clap(long, default_value = "2181")]
+    zookeeper_port: u16,
+}
+
+impl Verify {
+    fn run(&self) -> anyhow::Result<()> {
+        for (filename, file) in input_files(&self.path)? {
+            let script = TestScript::read(filename, file)?;
+            script.run(self.run_options())?;
+        }
+        Ok(())
+    }
+
+    fn run_options(&self) -> RunOptions {
+        let mut opts = RunOptions::default();
+        opts.zookeeper_host = self.zookeeper_host.clone();
+        opts.zookeeper_port = self.zookeeper_port;
+        opts
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    match opts.subcommand {
-        Command::Parse(parse) => {
-            parse.run()?;
-        }
-    }
-    Ok(())
+    opts.subcommand.run()
 }

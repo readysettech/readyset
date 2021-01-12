@@ -2,6 +2,10 @@
 //!
 //! [1]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Display;
+
+use anyhow::bail;
 use derive_more::{From, TryInto};
 
 /// The expected result of a statement
@@ -42,6 +46,30 @@ pub enum Type {
     Real,
 }
 
+impl Type {
+    pub fn of_mysql_value(val: &mysql::Value) -> Option<Self> {
+        use mysql::Value::*;
+        match val {
+            Bytes(_) => Some(Self::Text),
+            Int(_) => Some(Self::Real),
+            UInt(_) => Some(Self::Real),
+            Float(_) => Some(Self::Real),
+            Double(_) => Some(Self::Real),
+            _ => None,
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text => write!(f, "Text"),
+            Self::Integer => write!(f, "Integer"),
+            Self::Real => write!(f, "Real"),
+        }
+    }
+}
+
 /// Result set sorting mode of a query
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SortMode {
@@ -75,6 +103,32 @@ pub enum ResultValue {
     Integer(i64),
     Real(i64, u32),
     Null,
+}
+
+impl TryFrom<mysql::Value> for ResultValue {
+    type Error = anyhow::Error;
+
+    fn try_from(value: mysql::Value) -> Result<Self, Self::Error> {
+        use mysql::Value::*;
+        match value {
+            NULL => Ok(Self::Null),
+            Bytes(bs) => Ok(Self::Text(String::from_utf8(bs)?)),
+            Int(i) => Ok(Self::Integer(i)),
+            UInt(i) => Ok(Self::Integer(i.try_into()?)),
+            Float(f) => Self::try_from(Double(f as f64)),
+            Double(f) => {
+                if !f.is_finite() {
+                    bail!("Invalid infinite float value");
+                }
+                Ok(Self::Real(
+                    f.trunc() as i64,
+                    (f.fract() * 1_000_000_000.0).round() as u32,
+                ))
+            }
+            Date(_, _, _, _, _, _, _) => bail!("Invalid column value of type Date"),
+            Time(_, _, _, _, _, _) => bail!("Invalid column value of type Time"),
+        }
+    }
 }
 
 impl ResultValue {
