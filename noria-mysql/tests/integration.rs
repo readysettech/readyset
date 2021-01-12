@@ -923,3 +923,23 @@ fn prepare_ranged_query_partial() {
         .unwrap();
     assert_eq!(res, vec![(4, 2)]);
 }
+#[test]
+fn absurdly_simple_select() {
+    let d = Deployment::new("absurdly_simple_select");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (1, 3)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (2, 4)")
+        .unwrap();
+    sleep();
+
+    let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    rows.sort_by_key(|(a, _)| *a);
+    assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
+}
