@@ -13,13 +13,20 @@ use crate::ast::*;
 
 use anyhow::{anyhow, bail, Context};
 use nom::character::complete::{
-    alphanumeric1, anychar, digit1, line_ending, multispace0, multispace1, not_line_ending,
+    alphanumeric1, anychar, digit1, line_ending, multispace1, not_line_ending,
 };
 use nom::character::is_space;
 use nom::{
-    alt, complete, count, do_parse, eof, flat_map, many0, many1, many_till, map, map_opt, named,
-    one_of, opt, parse_to, preceded, tag, take_while1, terminated,
+    alt, char, complete, count, do_parse, eof, flat_map, many0, many1, many_till, map, map_opt,
+    named, one_of, opt, parse_to, preceded, tag, take_while, take_while1, terminated,
 };
+
+named!(
+    comment<()>,
+    complete!(do_parse!(
+        take_while!(is_space) >> char!('#') >> not_line_ending >> (())
+    ))
+);
 
 named!(
     statement_result<StatementResult>,
@@ -139,6 +146,7 @@ named!(
             >> tag!("to")
             >> take_while1!(is_space)
             >> digest: digest
+            >> opt!(comment)
             >> (QueryResults::Hash { count, digest })
     )
 );
@@ -218,6 +226,7 @@ named!(
                     .into_iter()
                     .collect::<String>(
                 ))
+            >> opt!(preceded!(line_ending, comment))
             >> results: query_results
             >> (Query {
                 label,
@@ -248,7 +257,26 @@ named!(pub record<Record>, alt!(
     hash_threshold
 ));
 
-named!(pub records<Vec<Record>>, complete!(many1!(complete!(terminated!(record, multispace0)))));
+named!(
+    ignore<()>,
+    map!(
+        opt!(many1!(alt!(
+            comment |
+            multispace1 => { |_| () }
+        ))),
+        |_| ()
+    )
+);
+
+named!(pub records<Vec<Record>>, complete!(
+    preceded!(
+        ignore,
+        many1!(complete!(terminated!(
+            record,
+            ignore
+        )))
+    )
+));
 
 pub fn read_records<R>(mut input: R) -> anyhow::Result<Vec<Record>>
 where
@@ -534,6 +562,39 @@ SELECT * FROM t1
                     results: QueryResults::Results(vec![123.into(), 456.into(), 789.into(),]),
                 })
             ]
+        );
+    }
+
+    #[test]
+    fn parse_record_with_comment() {
+        let input = b"# hi there I'm a comment
+query I rowsort x0
+SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
+  FROM t1
+----
+# comment
+30 values hashing to efdbaa4d180e7867bec1c4d897bd25b9 # comment";
+        let result = complete(records)(input);
+        assert_eq!(
+            result.unwrap().1,
+            vec![Record::Query(Query {
+                column_types: vec![Type::Integer],
+                sort_mode: Some(SortMode::RowSort),
+                label: Some("x0".to_string()),
+                conditionals: vec![],
+                query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
+  FROM t1"
+                    .to_string(),
+                results: QueryResults::Hash {
+                    count: 30,
+                    digest: md5::Digest(
+                        hex::decode("efdbaa4d180e7867bec1c4d897bd25b9")
+                            .unwrap()
+                            .try_into()
+                            .unwrap()
+                    )
+                }
+            })]
         );
     }
 }
