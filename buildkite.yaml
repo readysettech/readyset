@@ -51,6 +51,46 @@ steps:
       - ecr#v2.2.0:
           login: true
 
+
+  - label: ':rust: Build noria-logictest'
+    key: build-noria-logictest
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - cargo build -v -p noria-logictest
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test noria-logictest'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cargo test -v -p noria-logictest
+    depends_on:
+    - build-image
+    - build-noria-logictest
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+
   - label: ':rust: Build nom-sql'
     key: build-nom-sql
     commands:
