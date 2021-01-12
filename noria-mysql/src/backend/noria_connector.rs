@@ -152,30 +152,6 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
         }
     }
 
-    fn handle_create_view(
-        &mut self,
-        q: nom_sql::CreateViewStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
-
-        info!(%q.definition, %q.name, "view::create");
-        match block_on!(
-            self.inner,
-            self.inner
-                .noria
-                .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
-        ) {
-            Ok(_) => {
-                // no rows to return
-                trace!("view::created");
-                results.completed(0, 0)
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-        }
-    }
-
     fn handle_delete(
         &mut self,
         q: nom_sql::DeleteStatement,
@@ -559,6 +535,30 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         self.do_read(qname, q, keys, schema, key_column_indices, results)
+    }
+
+    fn handle_create_view(
+        &mut self,
+        q: nom_sql::CreateViewStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
+        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
+
+        info!(%q.definition, %q.name, "view::create");
+        match block_on!(
+            self.inner,
+            self.inner
+                .noria
+                .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
+        ) {
+            Ok(_) => {
+                // no rows to return
+                trace!("view::created");
+                results.completed(0, 0)
+            }
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        }
     }
 }
 impl NoriaConnector {

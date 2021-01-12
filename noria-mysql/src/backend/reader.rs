@@ -29,4 +29,10 @@ pub trait Reader<W: io::Write> {
         key_column_indices: &[usize],
         results: QueryResultWriter<W>,
     ) -> io::Result<()>;
+
+    fn handle_create_view(
+        &mut self,
+        q: nom_sql::CreateViewStatement,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()>;
 }
