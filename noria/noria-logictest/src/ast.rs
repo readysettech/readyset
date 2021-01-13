@@ -187,7 +187,11 @@ impl ResultValue {
         }
         match typ {
             Type::Text => Ok(Self::Text(mysql::from_value_opt(val)?)),
-            Type::Integer => Ok(Self::Integer(mysql::from_value_opt(val)?)),
+            Type::Integer => Ok(Self::Integer(mysql::from_value_opt(val.clone()).or_else(
+                |_| -> anyhow::Result<i64> {
+                    Ok(mysql::from_value_opt::<f64>(val)?.trunc() as i64)
+                },
+            )?)),
             Type::Real => {
                 let f: f64 = mysql::from_value_opt(val)?;
                 Ok(Self::Real(
