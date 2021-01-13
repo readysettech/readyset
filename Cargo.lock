@@ -103,6 +103,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
+name = "ascii_utils"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71938f30533e4d95a6d17aa530939da3842c2ab6f4f84b9dae68447e4129f74a"
+
+[[package]]
 name = "assert_approx_eq"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1475,6 +1481,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37d572918e350e82412fe766d24b15e6682fb2ed2bbe018280caa810397cb319"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2331,7 +2346,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hdrhistogram",
- "itertools",
+ "itertools 0.9.0",
  "memcached-rs",
  "mysql 20.1.0",
  "mysql_async 0.23.1",
@@ -2381,7 +2396,7 @@ dependencies = [
  "futures-util",
  "hashbag",
  "indexmap",
- "itertools",
+ "itertools 0.9.0",
  "jemallocator",
  "nom-sql",
  "noria",
@@ -2411,10 +2426,12 @@ name = "noria-logictest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ascii_utils",
  "clap 3.0.0-beta.2",
  "colored",
  "derive_more",
  "hex 0.4.2",
+ "itertools 0.10.0",
  "md5 0.7.0",
  "msql-srv",
  "mysql 20.1.0",
@@ -2451,7 +2468,7 @@ dependencies = [
  "clap 2.33.3",
  "futures-executor",
  "futures-util",
- "itertools",
+ "itertools 0.9.0",
  "lazy_static",
  "msql-srv",
  "mysql 18.2.0",
