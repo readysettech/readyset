@@ -25,6 +25,7 @@ msql-srv = { path = "../../msql-srv" }
 tokio = { version = "0.2.0", features = ["signal", "rt-threaded", "io-driver", "time"] }
 itertools = "0.10.0"
 ascii_utils = "0.9.3"
+slog = "2.7.0"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"

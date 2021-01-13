@@ -2442,6 +2442,7 @@ dependencies = [
  "noria-mysql",
  "noria-server",
  "pretty_assertions 0.6.1",
+ "slog",
  "tokio 0.2.24",
  "zookeeper",
 ]
