@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use clap::Clap;
 
 pub mod ast;
@@ -92,7 +92,8 @@ impl Parse {
     }
 }
 
-/// Run a test script, or all test scripts in a directory, against Noria
+/// Run a test script, or all test scripts in a directory, against either Noria or a reference MySQL
+/// database
 #[derive(Clap)]
 struct Verify {
     /// File or directory containing test scripts to run. If `-`, will read from standard input
@@ -106,21 +107,48 @@ struct Verify {
     /// Zookeeper port to connect to
     #[clap(long, default_value = "2181")]
     zookeeper_port: u16,
+
+    /// Connect to and run verification against a MySQL server rather than using noria
+    #[clap(long)]
+    mysql: bool,
+
+    /// MySQL host to connect to. Ignored if `mysql` is not set
+    #[clap(long, default_value = "localhost")]
+    mysql_host: String,
+
+    /// MySQL port to connect to. Ignored if `mysql` is not set
+    #[clap(long, default_value = "3306")]
+    mysql_port: u16,
+
+    /// MySQL database to connect to. Ignored if `mysql` is not set
+    #[clap(long, default_value = "sqllogictest")]
+    mysql_db: String,
 }
 
 impl Verify {
     fn run(&self) -> anyhow::Result<()> {
         for (filename, file) in input_files(&self.path)? {
             let script = TestScript::read(filename, file)?;
-            script.run(self.run_options())?;
+            let mut run_opts: RunOptions = self.into();
+            run_opts.deployment_name = script.name().to_string();
+            script
+                .run(run_opts)
+                .with_context(|| format!("Running test script {}", script.name()))?;
         }
         Ok(())
     }
+}
 
-    fn run_options(&self) -> RunOptions {
+impl Into<RunOptions> for &Verify {
+    #[allow(clippy::field_reassign_with_default)]
+    fn into(self) -> RunOptions {
         let mut opts = RunOptions::default();
         opts.zookeeper_host = self.zookeeper_host.clone();
         opts.zookeeper_port = self.zookeeper_port;
+        opts.use_mysql = self.mysql;
+        opts.mysql_host = self.mysql_host.clone();
+        opts.mysql_port = self.mysql_port;
+        opts.mysql_db = self.mysql_db.clone();
         opts
     }
 }
