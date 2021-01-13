@@ -230,11 +230,19 @@ impl TestScript {
                         vals.len(),
                     );
                 }
+                let actual_digest = ResultValue::hash_results(&vals);
+                if actual_digest != *digest {
+                    bail!(
+                        "Incorrect values returned from query, expected values hashing to {:x}, but got {:x}",
+                        digest,
+                        actual_digest
+                    );
+                }
             }
             QueryResults::Results(expected_vals) => {
-                if &vals != expected_vals {
+                if vals != *expected_vals {
                     bail!(
-                        "Invalid values resturned from query: \nexpected:\n{:#?}\ngot:\n{:#?}",
+                        "Incorrect values returned from query: \nexpected:\n{:#?}\ngot:\n{:#?}",
                         expected_vals,
                         vals
                     )
