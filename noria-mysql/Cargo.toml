@@ -13,6 +13,7 @@ noria = { version = "0.7", path = "../noria/noria/" }
 futures-executor = "0.3.0"
 futures-util = "0.3.0"
 lazy_static = "1.0.0"
+mysql = "20.1.0"
 nom-sql = { version =  "0.0.11", path = "../nom-sql" }
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
@@ -27,7 +28,6 @@ vec1 = "1.6.0"
 itertools = "0.9"
 
 [dev-dependencies]
-mysql = "18"
 zookeeper = "0.5.4"
 noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "0.2.0", features = ["full"] }

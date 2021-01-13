@@ -4,69 +4,54 @@ use msql_srv::{self, *};
 use nom_sql::{self, SqlQuery};
 
 use std::collections::HashMap;
-use std::fmt;
 use std::io;
 use std::time;
 use tracing::Level;
 
-use crate::convert::ToDataType;
 use crate::rewrite;
 use crate::utils;
 
+pub mod mysql_connector;
 pub mod noria_connector;
-mod reader;
-mod writer;
 
-use reader::Reader;
-use writer::Writer;
+pub(crate) mod error;
 
-#[derive(Clone)]
-pub enum PreparedStatement {
-    /// Query name, Query, result schema, optional parameter rewrite map
-    Select {
-        name: String,
-        statement: nom_sql::SelectStatement,
-        schema: Vec<msql_srv::Column>,
-        key_column_indices: Vec<usize>,
-        rewritten_columns: Option<(usize, usize)>,
-    },
-    Insert(nom_sql::InsertStatement),
-    Update(nom_sql::UpdateStatement),
+use crate::backend::error::Error;
+use crate::backend::error::Error::{IOError, ParseError};
+use mysql_connector::MySqlConnector;
+use noria_connector::NoriaConnector;
+
+pub enum Writer {
+    MySqlConnector(MySqlConnector),
+    NoriaConnector(NoriaConnector),
 }
 
-impl fmt::Debug for PreparedStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            PreparedStatement::Select {
-                name, statement, ..
-            } => write!(f, "{}: {}", name, statement),
-            PreparedStatement::Insert(s) => write!(f, "{}", s),
-            PreparedStatement::Update(s) => write!(f, "{}", s),
-        }
-    }
-}
-
-pub struct Backend<W> {
+pub struct Backend {
     //if false, queries are not sanitized which improves latency.
     sanitize: bool,
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
     // all queries previously prepared, mapped by their ID
-    prepared_queries: HashMap<u32, PreparedStatement>,
+    prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     static_responses: bool,
-    writer: Box<dyn Writer<W>>,
-    reader: Box<dyn Reader<W>>,
+    writer: Writer,
+    reader: NoriaConnector,
     slowlog: bool,
     permissive: bool,
 }
 
-impl<W: io::Write> Backend<W> {
+pub struct SelectSchema {
+    use_bogo: bool,
+    schema: Vec<Column>,
+    columns: Vec<String>,
+}
+impl Backend {
     pub fn new(
         sanitize: bool,
         static_responses: bool,
-        reader: Box<dyn Reader<W>>,
-        writer: Box<dyn Writer<W>>,
+        writer: Writer,
+        reader: NoriaConnector,
         slowlog: bool,
         permissive: bool,
     ) -> Self {
@@ -85,12 +70,38 @@ impl<W: io::Write> Backend<W> {
             permissive,
         }
     }
+
+    fn handle_failure<W: io::Write>(
+        &mut self,
+        q: &str,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        if let Writer::MySqlConnector(connector) = &mut self.writer {
+            Backend::write_query_results(connector.on_query(q), results)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn write_query_results<W: io::Write>(
+        r: Result<(u64, u64), Error>,
+        results: QueryResultWriter<W>,
+    ) -> io::Result<()> {
+        match r {
+            Ok((row_count, last_insert)) => results.completed(row_count, last_insert),
+            Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+        }
+    }
 }
 
-impl<W: io::Write> MysqlShim<W> for Backend<W> {
-    type Error = io::Error;
+impl<W: io::Write> MysqlShim<W> for Backend {
+    type Error = Error;
 
-    fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
+    fn on_prepare(
+        &mut self,
+        query: &str,
+        info: StatementMetaWriter<W>,
+    ) -> std::result::Result<(), Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
@@ -104,49 +115,76 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
             query.to_owned()
         };
 
-        trace!("parse");
-        let sql_q = match self.parsed_query_cache.get(&query) {
-            None => match nom_sql::parse_query(&query) {
-                Ok(sql_q) => {
+        if !self.parsed_query_cache.contains_key(&query) {
+            //if we dont already have the parsed query, try to parse it
+            trace!("Parsing query");
+            match nom_sql::parse_query(&query) {
+                Ok(q) => {
                     self.parsed_query_cache
-                        .insert(query.to_owned(), (sql_q.clone(), vec![]));
+                        .insert(query.to_owned(), (q.clone(), vec![]));
+                }
 
-                    sql_q
-                }
-                Err(e) => {
+                Err(_e) => {
                     // if nom-sql rejects the query, there is no chance Noria will like it
+                    let e_string = format!("query can't be parsed: \"{}\"", query);
                     error!(%query, "query can't be parsed: \"{}\"", query);
-                    return info.error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
+                    let error = ParseError(e_string);
+                    info.error(error.error_kind(), error.message().as_bytes())?;
+                    return Err(error);
                 }
-            },
+            }
+        }
+
+        let sql_q = match self.parsed_query_cache.get(&query) {
             Some((q, _)) => q.clone(),
+            None => unreachable!(),
         };
 
         trace!("delegate");
-        let prepared_statement = match sql_q {
+        let res = match sql_q {
             nom_sql::SqlQuery::Select(_) => {
-                self.reader.prepare_select(sql_q, info, self.prepared_count)
+                //todo : also prepare in writer if it is mysql
+                let (id, params, schema) = self
+                    .reader
+                    .prepare_select(sql_q.clone(), self.prepared_count)?;
+                info.reply(id, params.as_slice(), schema.as_slice())
             }
             nom_sql::SqlQuery::Insert(_) => {
-                self.writer.prepare_insert(sql_q, info, self.prepared_count)
+                match &mut self.writer {
+                    Writer::NoriaConnector(connector) => {
+                        match connector.prepare_insert(sql_q.clone(), self.prepared_count) {
+                            Ok((id, params, schema)) => {
+                                info.reply(id, params.as_slice(), schema.as_slice())
+                            }
+                            Err(e) => info.error(e.error_kind(), e.message().as_bytes()),
+                        }
+                    }
+                    Writer::MySqlConnector(connector) => {
+                        // todo : handle params correctly. dont just leave them blank.
+                        connector.on_prepare(&sql_q.to_string(), self.prepared_count)?;
+                        info.reply(self.prepared_count, &[], &[])
+                    }
+                }
             }
             nom_sql::SqlQuery::Update(_) => {
-                self.writer.prepare_update(sql_q, info, self.prepared_count)
+                match &mut self.writer {
+                    Writer::NoriaConnector(connector) => {
+                        let (_, params) =
+                            connector.prepare_update(sql_q.clone(), self.prepared_count)?;
+                        info.reply(self.prepared_count, &params[..], &[])
+                    }
+                    Writer::MySqlConnector(connector) => {
+                        // todo : handle params correctly. dont just leave them blank.
+                        connector.on_prepare(&sql_q.to_string(), self.prepared_count)?;
+                        info.reply(self.prepared_count, &[], &[])
+                    }
+                }
             }
-            _ => {
-                // Noria only supports prepared SELECT statements at the moment
-                error!(%query, "unsupported query for prepared statement");
-                return info.error(
-                    msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                    "unsupported query".as_bytes(),
-                );
-            }
+            _ => unimplemented!(),
         };
-
-        // register a new prepared statement
         self.prepared_queries
-            .insert(self.prepared_count, prepared_statement.unwrap());
-        Ok(())
+            .insert(self.prepared_count, sql_q.to_owned());
+        Ok(res?)
     }
 
     fn on_execute(
@@ -154,7 +192,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
         id: u32,
         params: ParamParser,
         results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> std::result::Result<(), Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
@@ -162,91 +200,132 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
 
         // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
         // have self.prepared borrowed
-        let prep: PreparedStatement = {
+        let prep: SqlQuery = {
             match self.prepared_queries.get(&id) {
                 Some(e) => e.clone(),
                 None => {
-                    return results.error(
-                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                        "non-existent statement".as_bytes(),
-                    )
+                    let e = Error::MissingPreparedStatement;
+                    return results
+                        .error(e.error_kind(), "non-existent statement".as_bytes())
+                        .map_err(|e| IOError(e));
                 }
             }
         };
 
         trace!("delegate");
-        let res = match &prep {
-            PreparedStatement::Select {
-                name,
-                statement: q,
-                schema,
-                key_column_indices,
-                rewritten_columns: rewritten,
-            } => {
-                trace!("apply where-in rewrites");
-                let key = match rewritten {
-                    Some((first_rewritten, nrewritten)) => {
-                        // this is a little tricky
-                        // the user is giving us some params [a, b, c, d]
-                        // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
-                        // that we rewrote to WHERE x = ? AND y = ? AND z = ?
-                        // so we need to turn that into the keys:
-                        // [[a, b, d], [a, c, d]]
-                        let params: Vec<_> = params
-                            .into_iter()
-                            .map(|pv| pv.value.to_datatype())
-                            .collect::<Vec<_>>();
-                        assert_ne!(
-                            params.len(),
-                            0,
-                            "empty parameters passed to a rewritten query"
-                        );
-                        (0..*nrewritten)
-                            .map(|poffset| {
-                                params
-                                    .iter()
-                                    .take(*first_rewritten)
-                                    .chain(params.iter().skip(first_rewritten + poffset).take(1))
-                                    .chain(params.iter().skip(first_rewritten + nrewritten))
-                                    .cloned()
-                                    .collect()
-                            })
-                            .collect()
-                    }
-                    None => {
-                        let keys = params
-                            .into_iter()
-                            .map(|pv| pv.value.to_datatype())
-                            .collect::<Vec<_>>();
-                        if keys.len() > 0 {
-                            vec![keys]
-                        } else {
-                            vec![]
+        let res = match prep {
+            SqlQuery::Select(_) => {
+                let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
+                    let written = match *c {
+                        DataType::None => rw.write_col(None::<i32>),
+                        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
+                        // this out into a helper since i has a different time depending on the DataType
+                        // variant.
+                        DataType::Int(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
                         }
+                        DataType::BigInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::UnsignedInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::UnsignedBigInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
+                        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
+                        ref dt @ DataType::Real(_, _) => match cs.coltype {
+                            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
+                                let f = dt.to_string();
+                                rw.write_col(f)
+                            }
+                            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                                let f: f64 = dt.into();
+                                rw.write_col(f)
+                            }
+                            _ => unreachable!(),
+                        },
+                        DataType::Timestamp(ts) => rw.write_col(ts),
+                    };
+                    match written {
+                        Ok(_) => (),
+                        Err(e) => panic!("failed to write column: {:?}", e),
                     }
                 };
+                let (data, select_schema) = self.reader.execute_prepared_select(id, params)?;
+                let mut rw = results.start(&select_schema.schema).unwrap();
+                for resultsets in data {
+                    for r in resultsets {
+                        let mut r: Vec<_> = r.into();
+                        if select_schema.use_bogo {
+                            // drop bogokey
+                            r.pop();
+                        }
 
-                self.reader
-                    .execute_select(&name, q, key, schema, &key_column_indices, results)
+                        for c in &select_schema.schema {
+                            let coli = select_schema
+                                .columns
+                                .iter()
+                                .position(|f| f == &c.column)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "tried to emit column {:?} not in getter with schema {:?}",
+                                        c.column, select_schema.columns
+                                    );
+                                });
+                            write_column(&mut rw, &r[coli], &c);
+                        }
+                        rw.end_row()?;
+                    }
+                }
+                rw.finish()
             }
-            PreparedStatement::Insert(ref q) => {
-                let values: Vec<DataType> = params
-                    .into_iter()
-                    .map(|pv| pv.value.to_datatype())
-                    .collect();
-
-                self.writer.execute_insert(&q, values, results)
-            }
-            PreparedStatement::Update(ref q) => self.writer.execute_update(&q, params, results),
+            SqlQuery::Insert(ref _q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => Backend::write_query_results(
+                    connector.execute_prepared_insert(id, params),
+                    results,
+                ),
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_execute(id, params), results)
+                }
+            },
+            SqlQuery::Update(ref _q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => Backend::write_query_results(
+                    connector.execute_prepared_update(id, params),
+                    results,
+                ),
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_execute(id, params), results)
+                }
+            },
+            _ => unreachable!(),
         };
 
         if self.slowlog {
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                let query: &dyn std::fmt::Display = match &prep {
-                    PreparedStatement::Select { statement, .. } => statement,
-                    PreparedStatement::Insert(q) => q,
-                    PreparedStatement::Update(q) => q,
+                let query: &dyn std::fmt::Display = match prep {
+                    SqlQuery::Select(ref q) => q,
+                    SqlQuery::Insert(ref q) => q,
+                    SqlQuery::Update(ref q) => q,
+                    _ => unreachable!(),
                 };
                 warn!(
                     %query,
@@ -255,16 +334,21 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                 );
             }
         }
-        res
+        Ok(res?)
     }
 
     fn on_close(&mut self, _: u32) {}
 
-    fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> io::Result<()> {
+    fn on_query(
+        &mut self,
+        query: &str,
+        results: QueryResultWriter<W>,
+    ) -> std::result::Result<(), Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
 
         let start = time::Instant::now();
+        trace!("sanitize");
         let query = if self.sanitize {
             let q = utils::sanitize_query(query);
             trace!(%q, "sanitized");
@@ -280,7 +364,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
             || query_lc.starts_with("commit")
         {
             trace!("ignoring transaction bits");
-            return results.completed(0, 0);
+            return Ok(results.completed(0, 0)?);
         }
 
         if query_lc.starts_with("show databases")
@@ -291,7 +375,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
             || query_lc.starts_with("create fulltext index")
         {
             warn!("unsupported query; returning empty results");
-            return results.completed(0, 0);
+            return Ok(results.completed(0, 0)?);
         }
 
         if query_lc.starts_with("show tables") {
@@ -304,7 +388,7 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
             // TODO(malte): we could find out which tables exist via RPC to Soup and return them
             let writer = results.start(&cols)?;
             trace!("mocking show tables");
-            return writer.finish();
+            return Ok(writer.finish()?);
         }
 
         if self.static_responses {
@@ -324,65 +408,192 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                     for &(_, ref r) in columns {
                         writer.write_col(String::from(*r))?;
                     }
-                    return writer.end_row();
+                    return Ok(writer.end_row()?);
                 }
             }
         }
 
-        trace!("analyzing query");
-        let (q, use_params) = match self.parsed_query_cache.get(&query) {
-            None => {
-                trace!("parsing query");
-                match nom_sql::parse_query(&query) {
-                    Ok(mut q) => {
-                        trace!("checking endpoint availability");
-                        trace!("collapsing where-in clauses");
-                        let mut use_params = Vec::new();
-                        if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
-                            use_params = p;
-                        }
-
-                        self.parsed_query_cache
-                            .insert(query.to_owned(), (q.clone(), use_params.clone()));
-
-                        (q, use_params)
+        if !self.parsed_query_cache.contains_key(&query) {
+            //if we dont already have the parsed query, try to parse it
+            trace!("Parsing query");
+            match nom_sql::parse_query(&query) {
+                Ok(mut q) => {
+                    trace!("checking endpoint availability");
+                    trace!("collapsing where-in clauses");
+                    let mut use_params = Vec::new();
+                    if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
+                        use_params = p;
                     }
-                    Err(e) => {
-                        // if nom-sql rejects the query, there is no chance Noria will like it
-                        error!(%query, "query can't be parsed: \"{}\"", query);
-                        if self.permissive {
-                            warn!("permissive flag enabled, so returning success despite query parse failure");
-                            return results.completed(0, 0);
-                        } else {
-                            return results
-                                .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes());
-                        }
+                    self.parsed_query_cache
+                        .insert(query.to_owned(), (q.clone(), use_params.clone()));
+                }
+
+                Err(_e) => {
+                    // if nom-sql rejects the query, there is no chance Noria will like it
+                    error!(%query, "query can't be parsed: \"{}\"", query);
+                    if self.permissive {
+                        warn!("permissive flag enabled, so returning success despite query parse failure");
+                        return Ok(results.completed(0, 0)?);
+                    } else {
+                        return self.handle_failure(&query, results).map_err(|e| IOError(e));
                     }
                 }
             }
+        }
+
+        let (q, use_params) = match self.parsed_query_cache.get(&query) {
             Some((q, use_params)) => (q.clone(), use_params.clone()),
+            None => unreachable!(),
         };
 
-        trace!("delegate");
+        trace!("delegating");
         let res = match q {
-            nom_sql::SqlQuery::CreateTable(q) => self.writer.handle_create_table(q, results),
-            nom_sql::SqlQuery::CreateView(q) => self.reader.handle_create_view(q, results),
-            nom_sql::SqlQuery::Insert(q) => self.writer.handle_insert(q, results),
-            nom_sql::SqlQuery::Select(q) => self.reader.handle_select(q, use_params, results),
-            nom_sql::SqlQuery::Set(q) => self.writer.handle_set(q, results),
-            nom_sql::SqlQuery::Update(q) => self.writer.handle_update(q, results),
-            nom_sql::SqlQuery::Delete(q) => self.writer.handle_delete(q, results),
-            nom_sql::SqlQuery::DropTable(_) => {
-                warn!("ignoring drop table");
-                return results.completed(0, 0);
+            nom_sql::SqlQuery::CreateTable(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => match connector.handle_create_table(q) {
+                    Ok(()) => results.completed(0, 0),
+                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+                },
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+            },
+            nom_sql::SqlQuery::CreateView(q) => match self.reader.handle_create_view(q) {
+                Ok(()) => results.completed(0, 0),
+                Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+            },
+            nom_sql::SqlQuery::Insert(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    Backend::write_query_results(connector.handle_insert(q), results)
+                }
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+            },
+            nom_sql::SqlQuery::Select(q) => {
+                let (d, select_result) = self.reader.handle_select(q, use_params)?;
+                let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
+                    let written = match *c {
+                        DataType::None => rw.write_col(None::<i32>),
+                        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
+                        // this out into a helper since i has a different time depending on the DataType
+                        // variant.
+                        DataType::Int(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::BigInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::UnsignedInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::UnsignedBigInt(i) => {
+                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                                rw.write_col(i as usize)
+                            } else {
+                                rw.write_col(i as isize)
+                            }
+                        }
+                        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
+                        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
+                        ref dt @ DataType::Real(_, _) => match cs.coltype {
+                            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
+                                let f = dt.to_string();
+                                rw.write_col(f)
+                            }
+                            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                                let f: f64 = dt.into();
+                                rw.write_col(f)
+                            }
+                            _ => unreachable!(),
+                        },
+                        DataType::Timestamp(ts) => rw.write_col(ts),
+                    };
+                    match written {
+                        Ok(_) => (),
+                        Err(e) => panic!("failed to write column: {:?}", e),
+                    }
+                };
+                let mut rw = results.start(&select_result.schema)?;
+                for resultsets in d {
+                    for r in resultsets {
+                        let mut r: Vec<_> = r.into();
+                        if select_result.use_bogo {
+                            // drop bogokey
+                            r.pop();
+                        }
+
+                        for c in &select_result.schema {
+                            let coli = select_result
+                                .columns
+                                .iter()
+                                .position(|f| f == &c.column)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "tried to emit column {:?} not in getter with schema {:?}",
+                                        c.column, &select_result.columns
+                                    );
+                                });
+                            write_column(&mut rw, &r[coli], &c);
+                        }
+                        rw.end_row()?;
+                    }
+                }
+                rw.finish()
             }
-            _ => {
-                error!("unsupported query");
-                return results.error(
-                    msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                    "unsupported query".as_bytes(),
-                );
-            }
+            nom_sql::SqlQuery::Set(_) => results.error(
+                msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                "unsupported set query".as_bytes(),
+            ),
+            nom_sql::SqlQuery::Update(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    Backend::write_query_results(connector.handle_update(q), results)
+                }
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+            },
+            nom_sql::SqlQuery::Delete(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => match connector.handle_delete(q) {
+                    Ok(row_count) => results.completed(row_count, 0),
+                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+                },
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+            },
+            nom_sql::SqlQuery::DropTable(q) => match &mut self.writer {
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+                _ => {
+                    warn!("ignoring drop table");
+                    unimplemented!()
+                }
+            },
+            _ => match &mut self.writer {
+                Writer::MySqlConnector(connector) => {
+                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                }
+                _ => {
+                    error!("unsupported query");
+                    results.error(
+                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                        "unsupported query".as_bytes(),
+                    )
+                }
+            },
         };
 
         if self.slowlog {
@@ -395,7 +606,6 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                 );
             }
         }
-
-        res
+        Ok(res?)
     }
 }

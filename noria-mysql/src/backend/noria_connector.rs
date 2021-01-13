@@ -14,7 +14,6 @@ use vec1::vec1;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
-use std::io;
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 
@@ -23,10 +22,42 @@ use crate::rewrite;
 use crate::schema::{self, schema_for_column, Schema};
 use crate::utils;
 
-use crate::backend::reader::Reader;
-use crate::backend::writer::Writer;
-use crate::backend::PreparedStatement;
+use crate::backend::error::Error;
+use crate::backend::error::Error::{
+    MissingPreparedStatement, NoriaRecipeError, NoriaWriteError, UnimplementedError,
+    UnsupportedError,
+};
+use crate::backend::SelectSchema;
 use itertools::Itertools;
+use noria::results::Results;
+use std::fmt;
+
+type StatementID = u32;
+
+#[derive(Clone)]
+pub enum PreparedStatement {
+    Select {
+        name: String,
+        statement: nom_sql::SelectStatement,
+        schema: Vec<msql_srv::Column>,
+        key_column_indices: Vec<usize>,
+        rewritten_columns: Option<(usize, usize)>,
+    },
+    Insert(nom_sql::InsertStatement),
+    Update(nom_sql::UpdateStatement),
+}
+
+impl fmt::Debug for PreparedStatement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            PreparedStatement::Select {
+                name, statement, ..
+            } => write!(f, "{}: {}", name, statement),
+            PreparedStatement::Insert(s) => write!(f, "{}", s),
+            PreparedStatement::Update(s) => write!(f, "{}", s),
+        }
+    }
+}
 
 pub struct NoriaBackendInner {
     executor: tokio::runtime::Handle,
@@ -110,6 +141,7 @@ pub struct NoriaConnector {
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
+    prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
 }
 
 impl NoriaConnector {
@@ -124,91 +156,14 @@ impl NoriaConnector {
             auto_increments,
             cached: query_cache,
             tl_cached: HashMap::new(),
-        }
-    }
-}
-
-impl<W: io::Write> Writer<W> for NoriaConnector {
-    fn handle_create_table(
-        &mut self,
-        q: nom_sql::CreateTableStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
-
-        info!(table = %q.table.name, "table::create");
-        match block_on!(
-            self.inner,
-            self.inner.noria.extend_recipe(&format!("{};", q))
-        ) {
-            Ok(_) => {
-                // no rows to return
-                // TODO(malte): potentially eagerly cache the mutator for this table
-                trace!("table::created");
-                results.completed(0, 0)
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            prepared_statement_cache: HashMap::new(),
         }
     }
 
-    fn handle_delete(
-        &mut self,
-        q: nom_sql::DeleteStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        let cond = q
-            .where_clause
-            .expect("only supports DELETEs with WHERE-clauses");
-
-        // create a mutator if we don't have one for this table already
-        trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name);
-
-        trace!("delete::extract schema");
-        let pkey = if let Some(cts) = mutator.schema() {
-            utils::get_primary_key(cts)
-                .into_iter()
-                .map(|(_, c)| c)
-                .collect()
-        } else {
-            // cannot delete from view
-            unimplemented!();
-        };
-
-        trace!("delete::flatten conditionals");
-        match utils::flatten_conditional(&cond, &pkey) {
-            None => results.completed(0, 0),
-            Some(ref flattened) if flattened.len() == 0 => {
-                panic!("DELETE only supports WHERE-clauses on primary keys");
-            }
-            Some(flattened) => {
-                let count = flattened.len() as u64;
-                trace!("delete::execute");
-                for key in flattened {
-                    match block_on_buffer(mutator.delete(key)) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!(error = %e, "failed");
-                            return results.error(
-                                msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                                format!("{:?}", e).as_bytes(),
-                            );
-                        }
-                    };
-                }
-
-                trace!("delete::done");
-                results.completed(count, 0)
-            }
-        }
-    }
-
-    fn handle_insert(
+    pub fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> std::result::Result<(u64, u64), Error> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -230,34 +185,14 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
             .map(|row| row.iter().map(DataType::from).collect())
             .collect();
 
-        self.do_insert(&q, data, results)
+        self.do_insert(&q, data)
     }
 
-    fn handle_set(
-        &mut self,
-        q: nom_sql::SetStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        trace!(%q.variable, "set");
-        // ignore
-        // todo https://app.clubhouse.io/readysettech/story/107/currently-ignoring-set-in-noria-mysql-adaptor
-        results.completed(0, 0)
-    }
-
-    fn handle_update(
-        &mut self,
-        q: nom_sql::UpdateStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        self.do_update(Cow::Owned(q), None, results)
-    }
-
-    fn prepare_insert(
+    pub fn prepare_insert(
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
-        info: StatementMetaWriter<W>,
         statement_id: u32,
-    ) -> io::Result<PreparedStatement> {
+    ) -> std::result::Result<(u32, Vec<msql_srv::Column>, Vec<Column>), Error> {
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
@@ -307,8 +242,6 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
         };
 
         // nothing more to do for an insert
-        info.reply(statement_id, params.as_slice(), schema.as_slice())?;
-
         // register a new prepared statement
         let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
             q
@@ -316,24 +249,95 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
             unreachable!()
         };
         trace!(id = statement_id, "insert::registered");
-        Ok(PreparedStatement::Insert(q))
+        self.prepared_statement_cache
+            .insert(statement_id, PreparedStatement::Insert(q));
+        Ok((statement_id, params, schema))
     }
 
-    fn execute_update(
+    pub(crate) fn execute_prepared_insert(
         &mut self,
-        q: &UpdateStatement,
+        q_id: u32,
         params: ParamParser,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        self.do_update(Cow::Borrowed(q), Some(params), results)
+    ) -> std::result::Result<(u64, u64), Error> {
+        let prep: PreparedStatement = self
+            .prepared_statement_cache
+            .get(&q_id)
+            .ok_or(MissingPreparedStatement)?
+            .clone();
+        trace!("delegate");
+        match prep {
+            PreparedStatement::Insert(ref q) => {
+                let values: Vec<DataType> = params
+                    .into_iter()
+                    .map(|pv| pv.value.to_datatype())
+                    .collect();
+                return self.do_insert(&q, vec![values]);
+            }
+            _ => {
+                unreachable!(
+                    "Execute_prepared_insert is being called for a non insert prepared statement."
+                );
+            }
+        };
     }
 
-    fn prepare_update(
+    pub(crate) fn handle_delete(
+        &mut self,
+        q: nom_sql::DeleteStatement,
+    ) -> std::result::Result<u64, Error> {
+        let cond = q
+            .where_clause
+            .expect("only supports DELETEs with WHERE-clauses");
+
+        // create a mutator if we don't have one for this table already
+        trace!(table = %q.table.name, "delete::access mutator");
+        let mutator = self.inner.ensure_mutator(&q.table.name);
+
+        trace!("delete::extract schema");
+        let pkey = if let Some(cts) = mutator.schema() {
+            utils::get_primary_key(cts)
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect()
+        } else {
+            unimplemented!("cannot delete from view");
+        };
+
+        trace!("delete::flatten conditionals");
+        match utils::flatten_conditional(&cond, &pkey) {
+            None => Ok(0 as u64),
+            Some(ref flattened) if flattened.is_empty() => Err(UnimplementedError(
+                "DELETE only supports WHERE-clauses on primary keys"
+                    .parse()
+                    .unwrap(),
+            )),
+            Some(flattened) => {
+                let count = flattened.len() as u64;
+                trace!("delete::execute");
+                for key in flattened {
+                    if let Err(e) = block_on_buffer(mutator.delete(key)) {
+                        error!(error = %e, "failed");
+                        return Err(NoriaWriteError(e));
+                    };
+                }
+                trace!("delete::done");
+                Ok(count)
+            }
+        }
+    }
+
+    pub(crate) fn handle_update(
+        &mut self,
+        q: nom_sql::UpdateStatement,
+    ) -> std::result::Result<(u64, u64), Error> {
+        self.do_update(Cow::Owned(q), None)
+    }
+
+    pub(crate) fn prepare_update(
         &mut self,
         sql_q: nom_sql::SqlQuery,
-        info: StatementMetaWriter<W>,
         statement_id: u32,
-    ) -> io::Result<PreparedStatement> {
+    ) -> std::result::Result<(u64, Vec<Column>), Error> {
         // ensure that we have schemas and endpoints for the query
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
@@ -362,211 +366,53 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
         };
 
         trace!(id = statement_id, "update::registered");
-
-        info.reply(statement_id, &params[..], &[])?;
-        Ok(PreparedStatement::Update(q))
+        self.prepared_statement_cache
+            .insert(statement_id, PreparedStatement::Update(q));
+        Ok((statement_id as u64, params))
     }
 
-    fn execute_insert(
+    pub(crate) fn execute_prepared_update(
         &mut self,
-        q: &InsertStatement,
-        data: Vec<DataType>,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        assert_eq!(q.fields.as_ref().unwrap().len(), data.len());
-        self.do_insert(&q, vec![data], results)
-    }
-}
+        q_id: u32,
+        params: ParamParser,
+    ) -> std::result::Result<(u64, u64), Error> {
+        let prep: PreparedStatement = self
+            .prepared_statement_cache
+            .get(&q_id)
+            .ok_or(MissingPreparedStatement)?
+            .clone();
 
-impl<W: io::Write> Reader<W> for NoriaConnector {
-    fn handle_select(
-        &mut self,
-        q: nom_sql::SelectStatement,
-        use_params: Vec<Literal>,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        trace!("query::select::access view");
-        let qname = match self.get_or_create_view(&q, false) {
-            Ok(qn) => qn,
-            Err(e) => {
-                error!(error = ?e, "failed to parse");
-                if e.kind() == io::ErrorKind::Other {
-                    // maybe ER_SYNTAX_ERROR ?
-                    // would be good to narrow these down
-                    // TODO: why are the actual error contents never printed?
-                    return results.error(
-                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                        e.to_string().as_bytes(),
-                    );
-                } else {
-                    return Err(e);
-                }
+        trace!("delegate");
+        match prep {
+            PreparedStatement::Update(ref q) => {
+                return self.do_update(Cow::Borrowed(q), Some(params))
             }
+            _ => unreachable!(),
         };
-
-        let keys: Vec<_> = use_params
-            .into_iter()
-            .map(|l| vec1![l.to_datatype()].into())
-            .collect();
-
-        // we need the schema for the result writer
-        trace!(%qname, "query::select::extract schema");
-        let getter_schema = self
-            .inner
-            .ensure_getter(&qname)
-            .schema()
-            .expect(&format!("no schema for view '{}'", qname));
-        let schema = schema::convert_schema(&Schema::View(
-            getter_schema
-                .iter()
-                .cloned()
-                .filter(|c| c.column.name != "bogokey")
-                .collect(),
-        ));
-
-        let key_column_indices = utils::select_statement_parameter_columns(&q)
-            .into_iter()
-            .map(|col| {
-                getter_schema
-                    .iter()
-                    // TODO(grfn): Looking up columns in the resulting view by the name of the
-                    // column in the input query is a little iffy - ideally, the getter itself would
-                    // be able to tell us the types of the columns and we could skip all of this
-                    // nonsense.
-                    // https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
-                    .position(|getter_col| getter_col.column.name == *col.name)
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        trace!(%qname, "query::select::do");
-        self.do_read(
-            &qname,
-            &q,
-            keys,
-            schema.as_slice(),
-            &key_column_indices,
-            results,
-        )
     }
 
-    fn prepare_select(
+    pub(crate) fn handle_create_table(
         &mut self,
-        mut sql_q: nom_sql::SqlQuery,
-        info: StatementMetaWriter<W>,
-        statement_id: u32,
-    ) -> io::Result<PreparedStatement> {
-        // extract parameter columns
-        // note that we have to do this *before* collapsing WHERE IN, otherwise the
-        // client will be confused about the number of parameters it's supposed to
-        // give.
-        let param_columns: Vec<nom_sql::Column> = utils::get_parameter_columns(&sql_q)
-            .into_iter()
-            .cloned()
-            .collect();
-
-        trace!("select::collapse where-in clauses");
-        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
-        let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
-            q
-        } else {
-            unreachable!();
-        };
-
-        // check if we already have this query prepared
-        trace!("select::access view");
-        let qname = self.get_or_create_view(&q, true)?;
-
-        // extract result schema
-        trace!(qname = %qname, "select::extract schema");
-        let getter_schema = self
-            .inner
-            .ensure_getter(&qname)
-            .schema()
-            .expect(&format!("no schema for view '{}'", qname));
-        let schema = Schema::View(
-            getter_schema
-                .iter()
-                .cloned()
-                .filter(|c| c.column.name != "bogokey")
-                .collect(),
-        );
-
-        let key_column_indices = param_columns
-            .iter()
-            .map(|col| {
-                getter_schema
-                    .iter()
-                    // TODO: https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
-                    .position(|getter_col| getter_col.column.name == *col.name)
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        // now convert params to msql_srv types; we have to do this here because we don't have
-        // access to the schema yet when we extract them above.
-        let params: Vec<msql_srv::Column> = param_columns
-            .into_iter()
-            .map(|mut c| {
-                c.table = Some(qname.clone());
-                schema_for_column(&schema, &c)
-            })
-            .collect();
-        let schema = schema::convert_schema(&schema);
-
-        info.reply(statement_id, params.as_slice(), schema.as_slice())?;
-        trace!(id = statement_id, "select::registered");
-        Ok(PreparedStatement::Select {
-            name: qname,
-            statement: q,
-            schema,
-            key_column_indices,
-            rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
-        })
-    }
-
-    fn execute_select(
-        &mut self,
-        qname: &str,
-        q: &nom_sql::SelectStatement,
-        keys: Vec<Vec<DataType>>,
-        schema: &[msql_srv::Column],
-        key_column_indices: &[usize],
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
-        self.do_read(qname, q, keys, schema, key_column_indices, results)
-    }
-
-    fn handle_create_view(
-        &mut self,
-        q: nom_sql::CreateViewStatement,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+        q: nom_sql::CreateTableStatement,
+    ) -> std::result::Result<(), Error> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
-
-        info!(%q.definition, %q.name, "view::create");
-        match block_on!(
+        // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
+        info!(table = %q.table.name, "table::create");
+        block_on!(
             self.inner,
-            self.inner
-                .noria
-                .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
-        ) {
-            Ok(_) => {
-                // no rows to return
-                trace!("view::created");
-                results.completed(0, 0)
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-        }
+            self.inner.noria.extend_recipe(&format!("{};", q))
+        )?;
+        trace!("table::created");
+        Ok(())
     }
 }
+
 impl NoriaConnector {
     fn get_or_create_view(
         &mut self,
         q: &nom_sql::SelectStatement,
         prepared: bool,
-    ) -> io::Result<String> {
+    ) -> std::result::Result<String, Error> {
         let qname = match self.tl_cached.get(q) {
             None => {
                 // check global cache
@@ -595,7 +441,7 @@ impl NoriaConnector {
                                     .extend_recipe(&format!("QUERY {}: {};", qname, q))
                             ) {
                                 error!(error = %e, "add query failed");
-                                return Err(io::Error::new(io::ErrorKind::Other, e));
+                                return Err(NoriaRecipeError(e));
                             }
 
                             gc.insert(q.clone(), qname.clone());
@@ -613,12 +459,11 @@ impl NoriaConnector {
         Ok(qname)
     }
 
-    fn do_insert<W: io::Write>(
+    fn do_insert(
         &mut self,
         q: &InsertStatement,
         data: Vec<Vec<DataType>>,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> std::result::Result<(u64, u64), Error> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -754,28 +599,20 @@ impl NoriaConnector {
             trace!("insert::simple::complete");
             r
         };
-
         match result {
-            Ok(_) => results.completed(data.len() as u64, first_inserted_id.unwrap_or(0) as u64),
-            Err(e) => {
-                error!(error = %e, "failed");
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    format!("{:?}", e).as_bytes(),
-                )
-            }
+            Ok(_) => Ok((data.len() as u64, first_inserted_id.unwrap_or(0) as u64)),
+            Err(e) => Err(NoriaWriteError(e)),
         }
     }
 
-    fn do_read<W: io::Write>(
+    fn do_read(
         &mut self,
         qname: &str,
         q: &nom_sql::SelectStatement,
         mut keys: Vec<Vec<DataType>>,
-        schema: &[msql_srv::Column],
+        schema: &Vec<Column>,
         key_column_indices: &[usize],
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
@@ -786,61 +623,6 @@ impl NoriaConnector {
             .iter()
             .map(|i| &getter_schema[*i].sql_type)
             .collect::<Vec<_>>();
-
-        let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
-            let written = match *c {
-                DataType::None => rw.write_col(None::<i32>),
-                // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
-                // this out into a helper since i has a different time depending on the DataType
-                // variant.
-                DataType::Int(i) => {
-                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                        rw.write_col(i as usize)
-                    } else {
-                        rw.write_col(i as isize)
-                    }
-                }
-                DataType::BigInt(i) => {
-                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                        rw.write_col(i as usize)
-                    } else {
-                        rw.write_col(i as isize)
-                    }
-                }
-                DataType::UnsignedInt(i) => {
-                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                        rw.write_col(i as usize)
-                    } else {
-                        rw.write_col(i as isize)
-                    }
-                }
-                DataType::UnsignedBigInt(i) => {
-                    if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                        rw.write_col(i as usize)
-                    } else {
-                        rw.write_col(i as isize)
-                    }
-                }
-                DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
-                ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
-                ref dt @ DataType::Real(_, _) => match cs.coltype {
-                    msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
-                        let f = dt.to_string();
-                        rw.write_col(f)
-                    }
-                    msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                        let f: f64 = dt.into();
-                        rw.write_col(f)
-                    }
-                    _ => unreachable!(),
-                },
-                DataType::Timestamp(ts) => rw.write_col(ts),
-            };
-            if let Err(e) = written {
-                panic!("failed to write column: {:?}", e);
-            }
-        };
-
         trace!("select::lookup");
         let bogo = vec![vec1![DataType::from(0i32)].into()];
         let cols = Vec::from(getter.columns());
@@ -898,7 +680,8 @@ impl NoriaConnector {
             let mut binops = binops.into_iter().map(|(_, b)| b).unique();
             let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
             if let Some(other) = binops.next() {
-                panic!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
+                let e = format!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
+                return Err(UnsupportedError(e));
             }
 
             keys.drain(..)
@@ -954,50 +737,24 @@ impl NoriaConnector {
             filter,
         };
 
-        // if first lookup fails, there's no reason to try the others
-        match block_on_buffer(getter.raw_lookup(vq)) {
-            Ok(d) => {
-                trace!("select::complete");
-                let mut rw = results.start(schema).unwrap();
-                for resultsets in d {
-                    for r in resultsets {
-                        let mut r: Vec<_> = r.into();
-                        if use_bogo {
-                            // drop bogokey
-                            r.pop();
-                        }
-
-                        for c in schema {
-                            let coli =
-                                cols.iter().position(|f| f == &c.column).unwrap_or_else(|| {
-                                    panic!(
-                                        "tried to emit column {:?} not in getter for {:?} with schema {:?}",
-                                        c.column, qname, cols
-                                    );
-                                });
-                            write_column(&mut rw, &r[coli], c);
-                        }
-                        rw.end_row()?;
-                    }
-                }
-                rw.finish()
-            }
-            Err(e) => {
-                error!(error = %e, "failed");
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    "Noria returned an error".as_bytes(),
-                )
-            }
-        }
+        let data = block_on_buffer(getter.raw_lookup(vq))?;
+        trace!("select::complete");
+        let schema = schema.to_vec();
+        Ok((
+            data,
+            SelectSchema {
+                use_bogo,
+                schema,
+                columns: cols,
+            },
+        ))
     }
 
-    fn do_update<W: io::Write>(
+    fn do_update(
         &mut self,
         q: Cow<UpdateStatement>,
         params: Option<ParamParser>,
-        results: QueryResultWriter<W>,
-    ) -> io::Result<()> {
+    ) -> std::result::Result<(u64, u64), Error> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name);
 
@@ -1014,18 +771,224 @@ impl NoriaConnector {
         };
 
         trace!("update::update");
-        match block_on_buffer(mutator.update(key, updates)) {
-            Ok(..) => {
-                trace!("update::complete");
-                results.completed(1 /* TODO */, 0)
+        block_on_buffer(mutator.update(key, updates))?;
+        trace!("update::complete");
+        Ok((1, 0))
+    }
+
+    pub(crate) fn handle_select(
+        &mut self,
+        q: nom_sql::SelectStatement,
+        use_params: Vec<Literal>,
+    ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
+        trace!("query::select::access view");
+        let qname = self.get_or_create_view(&q, false)?;
+
+        let keys: Vec<_> = use_params
+            .into_iter()
+            .map(|l| vec1![l.to_datatype()].into())
+            .collect();
+
+        // we need the schema for the result writer
+        trace!(%qname, "query::select::extract schema");
+        let getter_schema = self
+            .inner
+            .ensure_getter(&qname)
+            .schema()
+            .expect(&format!("no schema for view '{}'", qname));
+
+        let schema = schema::convert_schema(&Schema::View(
+            getter_schema
+                .iter()
+                .cloned()
+                .filter(|c| c.column.name != "bogokey")
+                .collect(),
+        ));
+
+        let key_column_indices = utils::select_statement_parameter_columns(&q)
+            .into_iter()
+            .map(|col| {
+                getter_schema
+                    .iter()
+                    // TODO(grfn): Looking up columns in the resulting view by the name of the
+                    // column in the input query is a little iffy - ideally, the getter itself would
+                    // be able to tell us the types of the columns and we could skip all of this
+                    // nonsense.
+                    // https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
+                    .position(|getter_col| getter_col.column.name == *col.name)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        trace!(%qname, "query::select::do");
+        self.do_read(&qname, &q, keys, &schema, &key_column_indices)
+    }
+
+    pub(crate) fn prepare_select(
+        &mut self,
+        mut sql_q: nom_sql::SqlQuery,
+        statement_id: u32,
+    ) -> std::result::Result<(u32, Vec<msql_srv::Column>, Vec<Column>), Error> {
+        // extract parameter columns
+        // note that we have to do this *before* collapsing WHERE IN, otherwise the
+        // client will be confused about the number of parameters it's supposed to
+        // give.
+        let param_columns: Vec<nom_sql::Column> = utils::get_parameter_columns(&sql_q)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        trace!("select::collapse where-in clauses");
+        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
+        let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
+            q
+        } else {
+            unreachable!();
+        };
+
+        // check if we already have this query prepared
+        trace!("select::access view");
+        let qname = self.get_or_create_view(&q, true)?;
+
+        // extract result schema
+        trace!(qname = %qname, "select::extract schema");
+        let getter_schema = self
+            .inner
+            .ensure_getter(&qname)
+            .schema()
+            .expect(&format!("no schema for view '{}'", qname));
+
+        let schema = Schema::View(
+            getter_schema
+                .iter()
+                .cloned()
+                .filter(|c| c.column.name != "bogokey")
+                .collect(),
+        );
+
+        let key_column_indices = param_columns
+            .iter()
+            .map(|col| {
+                getter_schema
+                    .iter()
+                    // TODO: https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
+                    .position(|getter_col| getter_col.column.name == *col.name)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // now convert params to msql_srv types; we have to do this here because we don't have
+        // access to the schema yet when we extract them above.
+        let params: Vec<msql_srv::Column> = param_columns
+            .into_iter()
+            .map(|mut c| {
+                c.table = Some(qname.clone());
+                schema_for_column(&schema, &c)
+            })
+            .collect();
+        let schema = schema::convert_schema(&schema);
+        let select_schema = schema.clone();
+        trace!(id = statement_id, "select::registered");
+        let ps = PreparedStatement::Select {
+            name: qname,
+            statement: q,
+            schema: select_schema,
+            key_column_indices,
+            rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
+        };
+        self.prepared_statement_cache.insert(statement_id, ps);
+        Ok((statement_id, params, schema))
+    }
+
+    pub(crate) fn execute_prepared_select(
+        &mut self,
+        q_id: u32,
+        params: ParamParser,
+    ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
+        let prep: PreparedStatement = {
+            match self.prepared_statement_cache.get(&q_id) {
+                Some(e) => e.clone(),
+                None => {
+                    return Err(MissingPreparedStatement);
+                }
             }
-            Err(e) => {
-                error!(error = %e, "failed");
-                results.error(
-                    msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    format!("{:?}", e).as_bytes(),
-                )
+        };
+
+        match &prep {
+            PreparedStatement::Select {
+                name,
+                statement: q,
+                schema,
+                key_column_indices,
+                rewritten_columns: rewritten,
+            } => {
+                trace!("apply where-in rewrites");
+                let keys = match rewritten {
+                    Some((first_rewritten, nrewritten)) => {
+                        // this is a little tricky
+                        // the user is giving us some params [a, b, c, d]
+                        // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
+                        // that we rewrote to WHERE x = ? AND y = ? AND z = ?
+                        // so we need to turn that into the keys:
+                        // [[a, b, d], [a, c, d]]
+                        let params: Vec<_> = params
+                            .into_iter()
+                            .map(|pv| pv.value.to_datatype())
+                            .collect::<Vec<_>>();
+                        assert_ne!(
+                            params.len(),
+                            0,
+                            "empty parameters passed to a rewritten query"
+                        );
+                        (0..*nrewritten)
+                            .map(|poffset| {
+                                params
+                                    .iter()
+                                    .take(*first_rewritten)
+                                    .chain(params.iter().skip(first_rewritten + poffset).take(1))
+                                    .chain(params.iter().skip(first_rewritten + nrewritten))
+                                    .cloned()
+                                    .collect()
+                            })
+                            .collect()
+                    }
+                    None => {
+                        let keys = params
+                            .into_iter()
+                            .map(|pv| pv.value.to_datatype())
+                            .collect::<Vec<_>>();
+                        if keys.len() > 0 {
+                            vec![keys]
+                        } else {
+                            vec![]
+                        }
+                    }
+                };
+
+                return self.do_read(name, q, keys, schema, key_column_indices);
             }
-        }
+            _ => {
+                unreachable!()
+            }
+        };
+    }
+
+    pub(crate) fn handle_create_view(
+        &mut self,
+        q: nom_sql::CreateViewStatement,
+    ) -> std::result::Result<(), Error> {
+        // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
+        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
+
+        info!(%q.definition, %q.name, "view::create");
+
+        block_on!(
+            self.inner,
+            self.inner
+                .noria
+                .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
+        )?;
+
+        Ok(())
     }
 }
