@@ -171,11 +171,17 @@ named!(
 );
 
 named!(
+    empty_string<ResultValue>,
+    map!(tag!("(empty)"), |_| ResultValue::Text(String::new()))
+);
+
+named!(
     result_value<ResultValue>,
     alt!(
         complete!(float) |
         integer => { |i| ResultValue::Integer(i) } |
         tag!("NULL") => { |_| ResultValue::Null } |
+        empty_string |
         map_opt!(
             not_line_ending,
             |s: &[u8]| {
@@ -338,6 +344,14 @@ mod tests {
     #[test]
     fn parse_negative_number_result_value() {
         assert_eq!(result_value(b"-1").unwrap().1, ResultValue::Integer(-1));
+    }
+
+    #[test]
+    fn parse_empty_string() {
+        assert_eq!(
+            result_value(b"(empty)").unwrap().1,
+            ResultValue::Text(String::new())
+        );
     }
 
     #[test]
