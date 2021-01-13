@@ -197,6 +197,15 @@ impl ResultValue {
             }
         }
     }
+
+    pub fn hash_results(results: &[Self]) -> md5::Digest {
+        let mut context = md5::Context::new();
+        for result in results {
+            context.consume(&format!("{}", result));
+            context.consume("\n");
+        }
+        context.compute()
+    }
 }
 
 /// The expected results of a query. Past a [`HashThreshold`][Record::HashThreshold], an [`md5`] sum
