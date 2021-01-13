@@ -131,15 +131,24 @@ struct Verify {
 
 impl Verify {
     fn run(&self) -> anyhow::Result<()> {
+        let mut failed = false;
         for (filename, file) in input_files(&self.path)? {
             let script = TestScript::read(filename, file)?;
-            let mut run_opts: RunOptions = self.into();
-            run_opts.deployment_name = script.name().to_string();
-            script
+            let run_opts: RunOptions = self.into();
+            if let Err(e) = script
                 .run(run_opts)
-                .with_context(|| format!("Running test script {}", script.name()))?;
+                .with_context(|| format!("Running test script {}", script.name()))
+            {
+                failed = true;
+                eprintln!("{:#}", e);
+            }
         }
-        Ok(())
+
+        if failed {
+            Err(anyhow!("One or more test scripts failed"))
+        } else {
+            Ok(())
+        }
     }
 }
 
