@@ -190,11 +190,13 @@ impl TestScript {
                     .iter()
                     .enumerate()
                     .map(|(col_idx, col_type)| -> anyhow::Result<ResultValue> {
-                        let val = row.take(col_idx).ok_or(anyhow!(
-                            "Row had the wrong number of columns: expected {}, but got {}",
-                            query.column_types.len(),
-                            row.len()
-                        ))?;
+                        let val = row.take(col_idx).ok_or_else(|| {
+                            anyhow!(
+                                "Row had the wrong number of columns: expected {}, but got {}",
+                                query.column_types.len(),
+                                row.len()
+                            )
+                        })?;
                         Ok(ResultValue::from_mysql_value_with_type(val, col_type)
                             .with_context(|| format!("Converting value to {:?}", col_type))?)
                     })

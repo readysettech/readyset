@@ -162,27 +162,30 @@ named!(
 );
 
 named!(
+    integer<i64>,
+    do_parse!(
+        sign: opt!(tag!("-"))
+            >> num: flat_map!(digit1, parse_to!(i64))
+            >> (if sign.is_some() { -num } else { num })
+    )
+);
+
+named!(
     result_value<ResultValue>,
-    preceded!(
-        alt!(
-            line_ending => { |_| () } |
-            eof!() => { |_| () }
-        ),
-        alt!(
-            complete!(float) |
-            flat_map!(digit1, parse_to!(i64)) => { |i| ResultValue::Integer(i) } |
-            tag!("NULL") => { |_| ResultValue::Null } |
-            map_opt!(
-                not_line_ending,
-                |s: &[u8]| {
-                    if s.is_empty() {
-                        None
-                    } else {
-                        String::from_utf8(s.into()).ok()
-                    }
+    alt!(
+        complete!(float) |
+        integer => { |i| ResultValue::Integer(i) } |
+        tag!("NULL") => { |_| ResultValue::Null } |
+        map_opt!(
+            not_line_ending,
+            |s: &[u8]| {
+                if s.is_empty() {
+                    None
+                } else {
+                    String::from_utf8(s.into()).ok()
                 }
-            ) => { |s| ResultValue::Text(s) }
-        )
+            }
+        ) => { |s| ResultValue::Text(s) }
     )
 );
 
@@ -199,7 +202,7 @@ named!(
     alt!(
         preceded!(line_ending, hash_results) |
         many_till!(
-            complete!(result_value),
+            complete!(preceded!(line_ending, result_value)),
             end_of_query_results
         ) => { |(vals, _)| QueryResults::Results(vals) }
     )
@@ -330,6 +333,11 @@ mod tests {
             conditional(b"onlyif mysql").unwrap().1,
             Conditional::OnlyIf("mysql".to_string())
         );
+    }
+
+    #[test]
+    fn parse_negative_number_result_value() {
+        assert_eq!(result_value(b"-1").unwrap().1, ResultValue::Integer(-1));
     }
 
     #[test]
