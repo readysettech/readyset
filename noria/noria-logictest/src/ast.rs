@@ -6,6 +6,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
 
 use anyhow::bail;
+use ascii_utils::Check;
 use derive_more::{From, TryInto};
 
 /// The expected result of a statement
@@ -131,6 +132,42 @@ impl TryFrom<mysql::Value> for ResultValue {
     }
 }
 
+impl Display for ResultValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(s) => {
+                if s.is_empty() {
+                    write!(f, "(empty)")
+                } else {
+                    for chr in s.chars() {
+                        if chr.is_printable() {
+                            write!(f, "{}", chr)?;
+                        } else {
+                            write!(f, "@")?;
+                        }
+                    }
+                    Ok(())
+                }
+            }
+            Self::Integer(i) => write!(f, "{}", i),
+            Self::Real(whole, frac) => write!(f, "{}.{}", whole, &format!("{}", frac)[..3]),
+            Self::Null => write!(f, "NULL"),
+        }
+    }
+}
+
+impl PartialOrd for ResultValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ResultValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        format!("{}", self).cmp(&format!("{}", other))
+    }
+}
+
 impl ResultValue {
     pub fn typ(&self) -> Option<Type> {
         match self {
@@ -138,6 +175,26 @@ impl ResultValue {
             Self::Integer(_) => Some(Type::Integer),
             Self::Real(_, _) => Some(Type::Real),
             Self::Null => None,
+        }
+    }
+
+    pub fn from_mysql_value_with_type(
+        val: mysql::Value,
+        typ: &Type,
+    ) -> anyhow::Result<ResultValue> {
+        if val == mysql::Value::NULL {
+            return Ok(Self::Null);
+        }
+        match typ {
+            Type::Text => Ok(Self::Text(mysql::from_value_opt(val)?)),
+            Type::Integer => Ok(Self::Integer(mysql::from_value_opt(val)?)),
+            Type::Real => {
+                let f: f64 = mysql::from_value_opt(val)?;
+                Ok(Self::Real(
+                    f.trunc() as i64,
+                    (f.fract() * 1_000_000_000.0).round() as u32,
+                ))
+            }
         }
     }
 }
@@ -178,4 +235,19 @@ pub enum Record {
 
     /// Stop testing and halt immediately. Useful when debugging.
     Halt,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_result_value() {
+        assert_eq!(format!("{}", ResultValue::Text("\0".to_string())), "@");
+    }
+
+    #[test]
+    fn compare_result_value() {
+        assert!(ResultValue::Integer(9) > ResultValue::Integer(10));
+    }
 }

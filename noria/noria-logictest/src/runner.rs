@@ -1,7 +1,8 @@
 use anyhow::{anyhow, bail, Context};
 use colored::*;
+use itertools::Itertools;
 use mysql::prelude::Queryable;
-use mysql::{Row, Value};
+use mysql::Row;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use msql_srv::MysqlIntermediary;
@@ -21,7 +22,7 @@ use noria_mysql::backend::noria_connector::NoriaConnector;
 use noria_mysql::backend::Backend;
 use noria_server::Builder;
 
-use crate::ast::{Query, Record, Statement, StatementResult, Type};
+use crate::ast::{Query, QueryResults, Record, ResultValue, SortMode, Statement, StatementResult};
 use crate::parser;
 
 #[derive(Debug, Clone)]
@@ -182,43 +183,63 @@ impl TestScript {
     }
 
     fn run_query(&self, query: &Query, conn: &mut mysql::Conn) -> anyhow::Result<()> {
-        let results = conn.query_fold(&query.query, Ok(vec![]), |acc, mut row: Row| {
-            let mut acc = acc?;
-            acc.reserve(query.column_types.len());
-            for (col_idx, col_type) in query.column_types.iter().enumerate() {
-                let val: Value = row.take(col_idx).ok_or(anyhow!(
-                    "Row had the wrong number of columns: expected {}, but got {}",
-                    query.column_types.len(),
-                    row.len()
-                ))?;
-                let typ = Type::of_mysql_value(&val);
-                if val != Value::NULL && Type::of_mysql_value(&val) != Some(*col_type) {
-                    bail!(
-                        "Invalid column type at index {}: expected {}, but got {} (value: {:?})",
-                        col_idx,
-                        col_type,
-                        match typ {
-                            Some(typ) => format!("{}", typ),
-                            None => "NULL".to_string(),
-                        },
-                        val,
-                    )
-                }
-                acc.push(val);
+        let mut rows = conn.query(&query.query)?.into_iter().map(
+            |mut row: Row| -> anyhow::Result<Vec<ResultValue>> {
+                query
+                    .column_types
+                    .iter()
+                    .enumerate()
+                    .map(|(col_idx, col_type)| -> anyhow::Result<ResultValue> {
+                        let val = row.take(col_idx).ok_or(anyhow!(
+                            "Row had the wrong number of columns: expected {}, but got {}",
+                            query.column_types.len(),
+                            row.len()
+                        ))?;
+                        Ok(ResultValue::from_mysql_value_with_type(val, col_type)?)
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()
+            },
+        );
+
+        let vals: Vec<ResultValue> = match query.sort_mode.unwrap_or_default() {
+            SortMode::NoSort => rows.fold_ok(vec![], |mut acc, row| {
+                acc.extend(row);
+                acc
+            })?,
+            SortMode::RowSort => {
+                let mut rows: Vec<_> = rows.try_collect()?;
+                rows.sort();
+                rows.into_iter().flatten().collect()
             }
-            Ok(acc)
-        })??;
-        match query.results {
-            crate::ast::QueryResults::Hash { count, digest } => {
-                if count != results.len() {
+            SortMode::ValueSort => {
+                let mut vals = rows.fold_ok(vec![], |mut acc, row| {
+                    acc.extend(row);
+                    acc
+                })?;
+                vals.sort();
+                vals
+            }
+        };
+
+        match &query.results {
+            QueryResults::Hash { count, digest } => {
+                if *count != vals.len() {
                     bail!(
                         "Wrong number of results returned: expected {}, but got {}",
                         count,
-                        results.len(),
+                        vals.len(),
                     );
                 }
             }
-            crate::ast::QueryResults::Results(_) => {}
+            QueryResults::Results(expected_vals) => {
+                if &vals != expected_vals {
+                    bail!(
+                        "Invalid values resturned from query: \nexpected:\n{:#?}\ngot:\n{:#?}",
+                        expected_vals,
+                        vals
+                    )
+                }
+            }
         }
         Ok(())
     }
