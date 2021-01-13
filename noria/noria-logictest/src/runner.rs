@@ -195,7 +195,8 @@ impl TestScript {
                             query.column_types.len(),
                             row.len()
                         ))?;
-                        Ok(ResultValue::from_mysql_value_with_type(val, col_type)?)
+                        Ok(ResultValue::from_mysql_value_with_type(val, col_type)
+                            .with_context(|| format!("Converting value to {:?}", col_type))?)
                     })
                     .collect::<anyhow::Result<Vec<_>>>()
             },
