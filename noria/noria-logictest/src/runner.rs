@@ -32,15 +32,27 @@ pub struct TestScript {
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
+    pub deployment_name: String,
     pub zookeeper_host: String,
     pub zookeeper_port: u16,
+    pub use_mysql: bool,
+    pub mysql_host: String,
+    pub mysql_port: u16,
+    pub mysql_user: String,
+    pub mysql_db: String,
 }
 
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
+            deployment_name: "sqllogictest".to_string(),
             zookeeper_host: "127.0.0.1".to_string(),
             zookeeper_port: 2181,
+            use_mysql: false,
+            mysql_host: "localhost".to_string(),
+            mysql_port: 3306,
+            mysql_user: "root".to_string(),
+            mysql_db: "sqllogictest".to_string(),
         }
     }
 }
@@ -48,6 +60,38 @@ impl Default for RunOptions {
 impl RunOptions {
     pub fn zookeeper_addr(&self) -> String {
         format!("{}:{}", self.zookeeper_host, self.zookeeper_port)
+    }
+
+    pub fn mysql_opts_no_db(&self) -> mysql::Opts {
+        mysql::OptsBuilder::new()
+            .ip_or_hostname(Some(self.mysql_host.clone()))
+            .tcp_port(self.mysql_port)
+            .user(Some(self.mysql_user.clone()))
+            .into()
+    }
+
+    pub fn mysql_opts(&self) -> mysql::Opts {
+        mysql::OptsBuilder::from_opts(self.mysql_opts_no_db())
+            .db_name(Some(self.mysql_db.clone()))
+            .into()
+    }
+}
+
+impl Drop for RunOptions {
+    fn drop(&mut self) {
+        if self.use_mysql {
+            if let Ok(mut conn) = mysql::Conn::new(self.mysql_opts_no_db()) {
+                conn.query_drop(format!("DROP DATABASE {}", self.mysql_db))
+                    .unwrap_or(());
+            }
+        } else if let Ok(z) = ZooKeeper::connect(
+            &self.zookeeper_addr(),
+            Duration::from_secs(3),
+            |_: WatchedEvent| {},
+        ) {
+            z.delete_recursive(&format!("/{}", self.deployment_name))
+                .unwrap_or(());
+        }
     }
 }
 
@@ -81,9 +125,18 @@ impl TestScript {
             self.path.canonicalize()?.to_string_lossy().blue()
         );
 
-        let deployment = self.make_deployment();
-        let conn_opts = self.setup_mysql_adapter(&deployment, opts);
-        let mut conn = mysql::Conn::new(conn_opts).with_context(|| "connecting to noria-mysql")?;
+        let use_mysql = opts.use_mysql;
+        let mut conn = if opts.use_mysql {
+            let mut create_db_conn =
+                mysql::Conn::new(opts.mysql_opts_no_db()).with_context(|| "connecting to mysql")?;
+            create_db_conn
+                .query_drop(format!("CREATE DATABASE {}", opts.mysql_db))
+                .with_context(|| "creating database")?;
+            mysql::Conn::new(opts.mysql_opts()).with_context(|| "connecting to mysql")?
+        } else {
+            let conn_opts = self.setup_mysql_adapter(&opts);
+            mysql::Conn::new(conn_opts).with_context(|| "connecting to noria-mysql")?
+        };
 
         for record in &self.records {
             match record {
@@ -100,7 +153,12 @@ impl TestScript {
 
         println!(
             "{}",
-            format!("==> Successfully ran {} operations", self.records.len()).bold()
+            format!(
+                "==> Successfully ran {} operations against {}",
+                self.records.len(),
+                if use_mysql { "MySQL" } else { "Noria" }
+            )
+            .bold()
         );
 
         Ok(())
@@ -165,13 +223,9 @@ impl TestScript {
         Ok(())
     }
 
-    fn make_deployment(&self) -> Deployment {
-        Deployment::new(self.name())
-    }
-
-    fn setup_mysql_adapter(&self, deployment: &Deployment, run_opts: RunOptions) -> mysql::Opts {
+    fn setup_mysql_adapter(&self, run_opts: &RunOptions) -> mysql::Opts {
         let barrier = Arc::new(Barrier::new(2));
-        let n = deployment.name.clone();
+        let n = run_opts.deployment_name.clone();
         let b = barrier.clone();
         let zk_addr = run_opts.zookeeper_addr();
         thread::spawn(move || {
@@ -195,7 +249,7 @@ impl TestScript {
         let zk_auth = ZookeeperAuthority::new(&format!(
             "{}/{}",
             run_opts.zookeeper_addr(),
-            deployment.name
+            run_opts.deployment_name
         ))
         .unwrap();
 
@@ -222,38 +276,5 @@ impl TestScript {
         });
 
         mysql::OptsBuilder::default().tcp_port(addr.port()).into()
-    }
-}
-
-struct Deployment {
-    name: String,
-}
-
-impl Deployment {
-    fn new<S: AsRef<str>>(prefix: S) -> Self {
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        let name = format!(
-            "{}.{}.{}",
-            prefix.as_ref(),
-            current_time.as_secs(),
-            current_time.subsec_nanos()
-        );
-
-        Self { name }
-    }
-}
-
-impl Drop for Deployment {
-    fn drop(&mut self) {
-        // Remove the ZK data if we created any:
-        let zk = ZooKeeper::connect(
-            "127.0.0.1:2181",
-            Duration::from_secs(3),
-            |_: WatchedEvent| {},
-        );
-
-        if let Ok(z) = zk {
-            let _ = z.delete_recursive(&format!("/{}", self.name));
-        }
     }
 }
