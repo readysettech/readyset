@@ -3,6 +3,7 @@ use colored::*;
 use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::Row;
+use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -41,6 +42,7 @@ pub struct RunOptions {
     pub mysql_port: u16,
     pub mysql_user: String,
     pub mysql_db: String,
+    pub verbose: bool,
 }
 
 impl Default for RunOptions {
@@ -54,6 +56,7 @@ impl Default for RunOptions {
             mysql_port: 3306,
             mysql_user: "root".to_string(),
             mysql_db: "sqllogictest".to_string(),
+            verbose: false,
         }
     }
 }
@@ -256,13 +259,22 @@ impl TestScript {
     }
 
     fn setup_mysql_adapter(&self, run_opts: &RunOptions) -> mysql::Opts {
+        let logger = if run_opts.verbose {
+            noria_server::logger_pls()
+        } else {
+            slog::Logger::root(slog::Discard, o!())
+        };
+
+        let l = logger.clone();
         let barrier = Arc::new(Barrier::new(2));
         let n = run_opts.deployment_name.clone();
         let b = barrier.clone();
         let zk_addr = run_opts.zookeeper_addr();
         thread::spawn(move || {
-            let authority = ZookeeperAuthority::new(&format!("{}/{}", &zk_addr, n)).unwrap();
-            let builder = Builder::default();
+            let mut authority = ZookeeperAuthority::new(&format!("{}/{}", &zk_addr, n)).unwrap();
+            let mut builder = Builder::default();
+            authority.log_with(l.clone());
+            builder.log_with(l);
             let mut rt = tokio::runtime::Runtime::new().unwrap();
             let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
             b.wait();
@@ -278,26 +290,25 @@ impl TestScript {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let zk_auth = ZookeeperAuthority::new(&format!(
+        let mut zk_auth = ZookeeperAuthority::new(&format!(
             "{}/{}",
             run_opts.zookeeper_addr(),
             run_opts.deployment_name
         ))
         .unwrap();
+        zk_auth.log_with(logger.clone());
 
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
 
         thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-
             let reader = NoriaConnector::new(
                 rt.handle().clone(),
                 ch.clone(),
                 auto_increments.clone(),
                 query_cache.clone(),
             );
-
             let writer = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
 
             let reader = rt.block_on(reader);

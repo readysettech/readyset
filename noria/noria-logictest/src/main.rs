@@ -123,6 +123,10 @@ struct Verify {
     /// MySQL database to connect to. Ignored if `mysql` is not set
     #[clap(long, default_value = "sqllogictest")]
     mysql_db: String,
+
+    /// Enable logging in both noria and noria-mysql
+    #[clap(long, short)]
+    verbose: bool,
 }
 
 impl Verify {
@@ -149,6 +153,7 @@ impl Into<RunOptions> for &Verify {
         opts.mysql_host = self.mysql_host.clone();
         opts.mysql_port = self.mysql_port;
         opts.mysql_db = self.mysql_db.clone();
+        opts.verbose = self.verbose;
         opts
     }
 }
