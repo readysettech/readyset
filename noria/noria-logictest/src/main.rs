@@ -32,37 +32,49 @@ impl Command {
     }
 }
 
-fn input_files(path: &Path) -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
-    if path == Path::new("-") {
+fn input_files(paths: &[PathBuf]) -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
+    if paths == vec![Path::new("-")] {
         Ok(vec![("stdin".to_string().into(), Box::new(io::stdin()))])
-    } else if path.is_file() {
-        Ok(vec![(path.to_path_buf(), Box::new(File::open(path)?))])
-    } else if path.is_dir() {
-        Ok(path
-            .read_dir()?
-            .filter_map(|entry| -> Option<(PathBuf, Box<dyn io::Read>)> {
-                let path = entry.ok()?.path();
-                if path.is_file() {
-                    Some((path.clone(), Box::new(File::open(&path).unwrap())))
-                } else {
-                    None
-                }
-            })
-            .collect())
     } else {
-        Err(anyhow!(
-            "Invalid path {}, must be a filename, directory, or `-`",
-            path.to_str().unwrap()
-        ))
+        Ok(paths
+            .iter()
+            .map(
+                |path| -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
+                    if path.is_file() {
+                        Ok(vec![(path.to_path_buf(), Box::new(File::open(path)?))])
+                    } else if path.is_dir() {
+                        Ok(path
+                            .read_dir()?
+                            .filter_map(|entry| -> Option<(PathBuf, Box<dyn io::Read>)> {
+                                let path = entry.ok()?.path();
+                                if path.is_file() {
+                                    Some((path.clone(), Box::new(File::open(&path).unwrap())))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect())
+                    } else {
+                        Err(anyhow!(
+                            "Invalid path {}, must be a filename, directory, or `-`",
+                            path.to_str().unwrap()
+                        ))
+                    }
+                },
+            )
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 }
 
 /// Test the parser on one or more sqllogictest files
 #[derive(Clap)]
 struct Parse {
-    /// File or directory to parse. If `-`, will read from standard input
+    /// Files or directories to parse. If `-`, will read from standard input
     #[clap(parse(from_str))]
-    path: PathBuf,
+    paths: Vec<PathBuf>,
 
     /// Output the resulting parsed records after parsing
     #[clap(short, long)]
@@ -71,7 +83,7 @@ struct Parse {
 
 impl Parse {
     pub fn run(&self) -> anyhow::Result<()> {
-        for (filename, file) in input_files(&self.path)? {
+        for (filename, file) in input_files(&self.paths)? {
             let filename = filename.canonicalize()?;
             println!("Parsing records from {}", filename.to_string_lossy());
             match parser::read_records(file) {
@@ -96,9 +108,9 @@ impl Parse {
 /// database
 #[derive(Clap)]
 struct Verify {
-    /// File or directory containing test scripts to run. If `-`, will read from standard input
+    /// Files or directories containing test scripts to run. If `-`, will read from standard input
     #[clap(parse(from_str))]
-    path: PathBuf,
+    paths: Vec<PathBuf>,
 
     /// Zookeeper host to connect to
     #[clap(long, default_value = "127.0.0.1")]
@@ -132,7 +144,7 @@ struct Verify {
 impl Verify {
     fn run(&self) -> anyhow::Result<()> {
         let mut failed = false;
-        for (filename, file) in input_files(&self.path)? {
+        for (filename, file) in input_files(&self.paths)? {
             let script = TestScript::read(filename, file)?;
             let run_opts: RunOptions = self.into();
             if let Err(e) = script
