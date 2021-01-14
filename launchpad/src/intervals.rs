@@ -2,7 +2,7 @@
 //! [`RangeBounds`][std::ops::RangeBounds]).
 
 use std::cmp::Ordering;
-use std::iter::Step;
+use std::iter::{self, Step};
 use std::mem;
 use std::ops::{Bound, RangeBounds};
 use Bound::*;
@@ -363,43 +363,169 @@ where
     }
 }
 
+/// An iterator over the result(s) of removing one interval from another
+#[allow(clippy::type_complexity)]
+pub enum DifferenceIterator<'a, Q, R> {
+    /// Fully removed, for the case when the removed interval fully covers the operand
+    Empty,
+    /// Unchanged, for the case when the intervals dont overlap each other at all
+    Unchanged(iter::Once<&'a R>),
+    /// The case where the second interval overlaps the beginning of the first
+    Single(iter::Once<(Bound<&'a Q>, Bound<&'a Q>)>),
+    /// The case where the first interval fully covers the second (so we need to yield two ranges)
+    Double(
+        iter::Chain<
+            iter::Once<(Bound<&'a Q>, Bound<&'a Q>)>,
+            iter::Once<(Bound<&'a Q>, Bound<&'a Q>)>,
+        >,
+    ),
+}
+
+impl<'a, Q, R> Iterator for DifferenceIterator<'a, Q, R>
+where
+    R: RangeBounds<Q>,
+{
+    type Item = (Bound<&'a Q>, Bound<&'a Q>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::Unchanged(inner) => inner.next().map(|r| (r.start_bound(), r.end_bound())),
+            Self::Single(inner) => inner.next(),
+            Self::Double(inner) => inner.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Empty => (0, Some(0)),
+            Self::Unchanged(_) => (1, Some(1)),
+            Self::Single(_) => (1, Some(1)),
+            Self::Double(_) => (2, Some(2)),
+        }
+    }
+}
+
+impl<'a, Q, R> ExactSizeIterator for DifferenceIterator<'a, Q, R> where R: RangeBounds<Q> {}
+
+/// Returns an iterator over the result(s) of removing the second interval from the first.
+///
+/// The result of this is either zero, one, or two intervals:
+///   * zero, if the second interval fully covers the first,
+///   * one, if the second interval overlaps the start or end of the first, or if the intervals do
+///     not overlap at all
+///   * two, if the first interval fully covers the second
+///
+/// # Examples
+///
+/// ```rust
+/// use launchpad::intervals::difference;
+/// use std::ops::Bound::*;
+///
+/// // When the intervals don't overlap at all, the first interval is returned unchanged
+/// assert_eq!(
+///     difference(&(1..2), &(3..4)).collect::<Vec<_>>(),
+///     vec![(Included(&1), Excluded(&2))]
+/// );
+/// ```
+pub fn difference<'a, Q, R, S>(r1: &'a R, r2: &'a S) -> DifferenceIterator<'a, Q, R>
+where
+    R: RangeBounds<Q>,
+    S: RangeBounds<Q>,
+    Q: Ord,
+{
+    if !overlaps(r1, r2) {
+        DifferenceIterator::Unchanged(iter::once(r1))
+    } else {
+        let below = if matches!(
+            cmp_startbound(r2.start_bound(), r1.start_bound()),
+            Less | Equal
+        ) {
+            None
+        } else {
+            Some((
+                r1.start_bound(),
+                match r2.start_bound() {
+                    Included(x) => Excluded(x),
+                    Excluded(x) => Included(x),
+                    // This should be impossible (since -inf would always get hit by the `matches!`
+                    // above), but best to cover it anyway
+                    Unbounded => Unbounded,
+                },
+            ))
+        };
+
+        let above = if matches!(
+            cmp_endbound(r2.end_bound(), r1.end_bound()),
+            Greater | Equal
+        ) {
+            None
+        } else {
+            Some((
+                match r2.end_bound() {
+                    Included(x) => Excluded(x),
+                    Excluded(x) => Included(x),
+                    // This should be impossible (since +inf would always get hit by the `matches!`
+                    // above), but best to cover it anyway
+                    Unbounded => Unbounded,
+                },
+                r1.end_bound(),
+            ))
+        };
+
+        match (below, above) {
+            (Some(below), Some(above)) => {
+                DifferenceIterator::Double(iter::once(below).chain(iter::once(above)))
+            }
+            (Some(r), None) | (None, Some(r)) => DifferenceIterator::Single(iter::once(r)),
+            (None, None) => DifferenceIterator::Empty,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
-    use std::collections::HashSet;
-    use std::ops::Range;
 
     #[test]
     fn cmp_endbound_works() {
         assert_eq!(cmp_endbound(Included(&1), Excluded(&1)), Greater)
     }
 
-    proptest! {
-        #[test]
+    mod covers {
+        use super::*;
+        use test_strategy::proptest;
+
+        #[proptest]
         fn covers_reflexive(x: (Bound<i32>, Bound<i32>)) {
             assert!(covers(&x, &x))
         }
 
-        #[test]
+        #[proptest]
         fn covers_transitive(
             r1: (Bound<i32>, Bound<i32>),
             r2: (Bound<i32>, Bound<i32>),
-            r3: (Bound<i32>, Bound<i32>)
+            r3: (Bound<i32>, Bound<i32>),
         ) {
             if covers(&r1, &r2) && covers(&r2, &r3) {
                 assert!(covers(&r1, &r3))
             }
         }
 
-        #[test]
+        #[proptest]
         fn infinite_covers_all(r: (Bound<i8>, Bound<i8>)) {
             assert!(covers(&(..), &r));
         }
     }
 
-    proptest! {
-        #[test]
+    mod overlaps {
+        use super::*;
+        use proptest::prelude::*;
+        use std::collections::HashSet;
+        use std::ops::Range;
+        use test_strategy::proptest;
+
+        #[proptest]
         fn overlaps_is_collect_intersects(r1: Range<i8>, r2: Range<i8>) {
             prop_assume!(!r1.is_empty());
             prop_assume!(!r2.is_empty());
@@ -414,12 +540,12 @@ mod tests {
             );
         }
 
-        #[test]
+        #[proptest]
         fn overlaps_commutative(r1: Range<i8>, r2: Range<i8>) {
             assert_eq!(overlaps(&r1, &r2), overlaps(&r2, &r1));
         }
 
-        #[test]
+        #[proptest]
         fn covers_implies_overlaps(r1: Range<i8>, r2: Range<i8>) {
             if covers(&r1, &r2) {
                 assert!(overlaps(&r1, &r2))
@@ -449,5 +575,46 @@ mod tests {
         bound_pair_iter_test!(excl_excl_equal, (Excluded(0u32), Excluded(0)) => vec![]);
         bound_pair_iter_test!(excl_incl_equal, (Excluded(0u32), Included(0)) => vec![]);
         bound_pair_iter_test!(excl_incl_backwards, (Excluded(3u32), Included(0)) => vec![]);
+    }
+
+    mod difference {
+        use super::*;
+        use test_strategy::proptest;
+
+        #[test]
+        fn empty() {
+            assert_eq!(difference(&(5..7), &(1..10)).collect::<Vec<_>>(), vec![])
+        }
+
+        #[test]
+        fn overlap_beginning() {
+            assert_eq!(
+                difference(&(5..10), &(1..7)).collect::<Vec<_>>(),
+                vec![(Included(&7), Excluded(&10))]
+            )
+        }
+
+        #[test]
+        fn overlap_end() {
+            assert_eq!(
+                difference(&(5..10), &(7..15)).collect::<Vec<_>>(),
+                vec![(Included(&5), Excluded(&7))]
+            )
+        }
+
+        #[test]
+        fn two_intervals() {
+            assert_eq!(
+                difference(&(1..10), &(5..7)).collect::<Vec<_>>(),
+                vec![(Included(&1), Excluded(&5)), (Included(&7), Excluded(&10))]
+            )
+        }
+
+        #[proptest]
+        fn idempotent(r1: (Bound<i8>, Bound<i8>), r2: (Bound<i8>, Bound<i8>)) {
+            let once: Vec<_> = difference(&r1, &r2).collect();
+            let twice: Vec<_> = once.iter().flat_map(|r| difference(r, &r2)).collect();
+            assert_eq!(once, twice);
+        }
     }
 }
