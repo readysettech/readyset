@@ -4,7 +4,7 @@ use evbtree::{
     self,
     refs::{Miss, Values},
 };
-use noria::util::BoundFunctor;
+use launchpad::intervals::BoundFunctor;
 use noria::KeyComparison;
 use std::convert::{TryFrom, TryInto};
 use std::mem;

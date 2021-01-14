@@ -1556,6 +1556,9 @@ dependencies = [
 [[package]]
 name = "launchpad"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "lazy_static"
@@ -2318,6 +2321,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hyper",
+ "launchpad",
  "mysql_common 0.22.2",
  "net2",
  "nom-sql",
@@ -2387,6 +2391,7 @@ version = "0.7.0"
 dependencies = [
  "arccstr",
  "chrono",
+ "launchpad",
  "noria",
  "petgraph",
  "serde",
@@ -2408,6 +2413,7 @@ dependencies = [
  "indexmap",
  "itertools 0.9.0",
  "jemallocator",
+ "launchpad",
  "maplit",
  "nom-sql",
  "noria",
@@ -2515,6 +2521,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper",
+ "launchpad",
  "mysql 18.2.0",
  "nom 5.1.2",
  "nom-sql",
@@ -4448,6 +4455,7 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 name = "unbounded-interval-tree"
 version = "0.2.3"
 dependencies = [
+ "launchpad",
  "proptest",
  "rand 0.7.3",
 ]

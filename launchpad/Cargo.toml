@@ -8,3 +8,4 @@ description = "Extensions to the Rust standard library"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+proptest = "0.10.1"

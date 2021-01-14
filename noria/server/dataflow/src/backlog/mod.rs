@@ -3,7 +3,7 @@ use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
 use evbtree::refs::Values;
-use noria::util::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::{BoundAsRef, BoundFunctor};
 use noria::KeyComparison;
 use rand::prelude::*;
 use std::borrow::Cow;

@@ -1,5 +1,5 @@
 use derive_more::From;
-use noria::util::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::{BoundAsRef, BoundFunctor};
 use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;

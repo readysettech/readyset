@@ -1,4 +1,4 @@
-use noria::util::hash;
+use launchpad::hash::hash;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
