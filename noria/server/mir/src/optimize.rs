@@ -2,9 +2,6 @@ use crate::node::{MirNode, MirNodeType};
 use crate::query::MirQuery;
 use crate::MirNodeRef;
 use dataflow::ops::filter::FilterCondition;
-use dataflow::ops::grouped::aggregate::Aggregation;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation;
-
 use std::collections::HashMap;
 
 // Mutate the given MirQuery in order to optimize it,
@@ -164,23 +161,15 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
         let mut new_name = child.name.clone();
         new_name.push_str("_filteragg");
 
+        // Extract over column, group by cols, and aggregation kind from Aggregation node
         let (on, group_by, kind) =
             if let MirNodeType::Aggregation { on, group_by, kind } = &agg.borrow().inner {
-                (
-                    on.clone(),
-                    group_by.to_vec(),
-                    match kind {
-                        Aggregation::COUNT => FilterAggregation::COUNT,
-                        Aggregation::SUM => FilterAggregation::SUM,
-                        // TODO: average not yet supported for filter aggregations.
-                        // fix during refactor: https://app.clubhouse.io/readysettech/story/172
-                        Aggregation::AVG => FilterAggregation::SUM,
-                    },
-                )
+                (on.clone(), group_by.to_vec(), kind.clone())
             } else {
                 unimplemented!()
             };
 
+        // Create new FilterAggregation using same over, group by, and kind but with added filter
         let new_node = MirNode::new(
             &new_name,
             child.from_version,

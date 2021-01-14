@@ -2414,6 +2414,7 @@ dependencies = [
  "itertools 0.9.0",
  "jemallocator",
  "launchpad",
+ "lazy_static",
  "maplit",
  "nom-sql",
  "noria",

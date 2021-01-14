@@ -11,14 +11,16 @@ use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 use std::collections::HashMap;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
     Aggregation(ops::grouped::aggregate::Aggregation),
     Extremum(ops::grouped::extremum::Extremum),
-    FilterAggregation(ops::grouped::filteraggregate::FilterAggregation),
+    // Filter Aggregation MIR node type still exists separate from Aggregation for purpose of
+    // optimization and rewrite logic.
+    // However, the internal operator is the same as a normal aggregation.
+    FilterAggregation(ops::grouped::aggregate::Aggregation),
     GroupConcat(String),
 }
 
@@ -420,11 +422,13 @@ pub enum MirNodeType {
         conditions: Vec<(usize, FilterCondition)>,
     },
     /// filter condition and grouping
+    // FilterAggregation Mir Node type still exists, due to optimization and rewrite logic
     FilterAggregation {
         on: Column,
         else_on: Option<Literal>,
         group_by: Vec<Column>,
-        kind: FilterAggregationKind,
+        // kind is same as a normal aggregation (sum, count, avg)
+        kind: AggregationKind,
         conditions: Vec<(usize, FilterCondition)>,
     },
     /// over column, separator
@@ -890,8 +894,9 @@ impl Debug for MirNodeType {
                 conditions: _,
             } => {
                 let op_string = match *kind {
-                    FilterAggregationKind::COUNT => format!("|*|(filter {})", on.name.as_str()),
-                    FilterAggregationKind::SUM => format!("𝛴(filter {})", on.name.as_str()),
+                    AggregationKind::COUNT => format!("|*|(filter {})", on.name.as_str()),
+                    AggregationKind::SUM => format!("𝛴(filter {})", on.name.as_str()),
+                    AggregationKind::AVG => format!("Avg(filter {})", on.name.as_str()),
                 };
                 let group_cols = group_by
                     .iter()

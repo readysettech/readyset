@@ -60,6 +60,9 @@ impl GroupConcat {
     /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
     /// the individual record strings from a group string. It should therefore not appear in the
     /// record data.
+    ///
+    /// TODO: support case conditions
+    /// CH: https://app.clubhouse.io/readysettech/story/198/add-filtering-to-all-grouped-operations
     pub fn new(
         src: NodeIndex,
         components: Vec<TextComponent>,
@@ -141,12 +144,12 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
         let v = self.build(r);
         if pos {
-            Modify::Add(v)
+            Some(Modify::Add(v))
         } else {
-            Modify::Remove(v)
+            Some(Modify::Remove(v))
         }
     }
 

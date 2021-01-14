@@ -20,10 +20,11 @@ pub mod union;
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
-    Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
+    // Aggregation was previously named "Sum", but now supports Sum, Count, Avg
+    // Aggregation supports both filtered and normal Aggregations
+    Aggregation(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
-    FilterSum(grouped::GroupedOperator<grouped::filteraggregate::FilterAggregator>),
     Join(join::Join),
     Latest(latest::Latest),
     Project(project::Project),
@@ -47,7 +48,7 @@ macro_rules! nodeop_from_impl {
 }
 
 nodeop_from_impl!(
-    NodeOperator::Sum,
+    NodeOperator::Aggregation,
     grouped::GroupedOperator<grouped::aggregate::Aggregator>
 );
 nodeop_from_impl!(
@@ -58,10 +59,7 @@ nodeop_from_impl!(
     NodeOperator::Concat,
     grouped::GroupedOperator<grouped::concat::GroupConcat>
 );
-nodeop_from_impl!(
-    NodeOperator::FilterSum,
-    grouped::GroupedOperator<grouped::filteraggregate::FilterAggregator>
-);
+
 nodeop_from_impl!(NodeOperator::Join, join::Join);
 nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
 nodeop_from_impl!(NodeOperator::Project, project::Project);
@@ -76,10 +74,9 @@ nodeop_from_impl!(NodeOperator::Distinct, distinct::Distinct);
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match *$self {
-            NodeOperator::Sum(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Aggregation(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::FilterSum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
@@ -97,10 +94,9 @@ macro_rules! impl_ingredient_fn_mut {
 macro_rules! impl_ingredient_fn_ref {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match *$self {
-            NodeOperator::Sum(ref i) => i.$fn($($arg),*),
+            NodeOperator::Aggregation(ref i) => i.$fn($($arg),*),
             NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
-            NodeOperator::FilterSum(ref i) => i.$fn($($arg),*),
             NodeOperator::Join(ref i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref i) => i.$fn($($arg),*),
             NodeOperator::Project(ref i) => i.$fn($($arg),*),

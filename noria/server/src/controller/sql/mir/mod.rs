@@ -992,7 +992,6 @@ impl SqlToMirConverter {
     ) -> Vec<MirNodeRef> {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
-        use dataflow::ops::grouped::filteraggregate::FilterAggregation;
         use nom_sql::FunctionArgument;
         use nom_sql::FunctionExpression::*;
 
@@ -1034,6 +1033,8 @@ impl SqlToMirConverter {
 
         let func = func_col.function.as_ref().unwrap();
         match *func.deref() {
+            // TODO: support more types of filter expressions
+            // CH: https://app.clubhouse.io/readysettech/story/193
             Sum(FunctionArgument::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
@@ -1051,7 +1052,7 @@ impl SqlToMirConverter {
             ) => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                GroupedNodeType::FilterAggregation(Aggregation::SUM),
                 false,
                 Some(condition),
             ),
@@ -1065,7 +1066,7 @@ impl SqlToMirConverter {
             ) => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::FilterAggregation(FilterAggregation::SUM),
+                GroupedNodeType::FilterAggregation(Aggregation::SUM),
                 false,
                 Some(condition),
             ),
@@ -1095,7 +1096,7 @@ impl SqlToMirConverter {
             ) => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                GroupedNodeType::FilterAggregation(Aggregation::COUNT),
                 false,
                 Some(condition),
             ),
@@ -1109,7 +1110,7 @@ impl SqlToMirConverter {
             ) => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::FilterAggregation(FilterAggregation::COUNT),
+                GroupedNodeType::FilterAggregation(Aggregation::COUNT),
                 false,
                 Some(condition),
             ),
@@ -1120,6 +1121,36 @@ impl SqlToMirConverter {
                 distinct,
                 None,
             ),
+            Avg(
+                FunctionArgument::Conditional(CaseWhenExpression {
+                    ref condition,
+                    then_expr: ColumnOrLiteral::Column(ref col),
+                    else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
+                }),
+                false,
+            ) => mknode(
+                &Column::from(col),
+                Some(else_val.clone()),
+                GroupedNodeType::FilterAggregation(Aggregation::AVG),
+                false,
+                Some(condition),
+            ),
+            Avg(
+                FunctionArgument::Conditional(CaseWhenExpression {
+                    ref condition,
+                    then_expr: ColumnOrLiteral::Column(ref col),
+                    else_expr: None,
+                }),
+                false,
+            ) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::FilterAggregation(Aggregation::AVG),
+                false,
+                Some(condition),
+            ),
+            // TODO(atsakiris): Support Filters for Extremum/GroupConcat
+            // CH: https://app.clubhouse.io/readysettech/story/198
             Max(FunctionArgument::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,

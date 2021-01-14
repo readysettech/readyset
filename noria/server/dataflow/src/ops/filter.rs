@@ -1,3 +1,5 @@
+use derive_more::{Deref, From, Into};
+use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
@@ -6,11 +8,73 @@ use std::sync;
 use crate::prelude::*;
 pub use nom_sql::BinaryOperator;
 
-/// Filters incoming records according to some filter.
+/// FilterVec represents set of constraints on columns against which a record can be checked
+/// Used in Filter operators and aggregations with case statements
+#[derive(Debug, Clone, Serialize, Deserialize, From, Into, Deref)]
+pub struct FilterVec(Vec<(usize, FilterCondition)>);
+
+impl FilterVec {
+    /// Checks if record `r` passes the filter
+    pub fn matches(&self, r: &[DataType]) -> bool {
+        self.iter().all(|(i, cond)| {
+            let d = &r[*i];
+            match cond {
+                FilterCondition::Comparison(ref op, ref f) => {
+                    let v = match f {
+                        Value::Constant(dt) => dt,
+                        Value::Column(c) => &r[*c],
+                    };
+                    match *op {
+                        BinaryOperator::Equal => d == v,
+                        BinaryOperator::NotEqual => d != v,
+                        BinaryOperator::Greater => d > v,
+                        BinaryOperator::GreaterOrEqual => d >= v,
+                        BinaryOperator::Less => d < v,
+                        BinaryOperator::LessOrEqual => d <= v,
+                        BinaryOperator::In => {
+                            unreachable!("In operator must be handled by FilterCondition::In")
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
+                FilterCondition::In(ref fs) => fs.contains(d),
+            }
+        })
+    }
+
+    pub fn describe(&self) -> String {
+        lazy_static! {
+            static ref ESC_RE: Regex = Regex::new("([<>])").unwrap();
+        }
+        self.iter()
+            .filter_map(|(i, ref cond)| match *cond {
+                FilterCondition::Comparison(ref op, ref x) => Some(format!(
+                    "f{} {} {}",
+                    i,
+                    ESC_RE.replace_all(&format!("{}", op), "\\$1").to_string(),
+                    x
+                )),
+                FilterCondition::In(ref xs) => Some(format!(
+                    "f{} IN ({})",
+                    i,
+                    xs.iter()
+                        .map(|d| format!("{}", d))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            })
+            .collect::<Vec<_>>()
+            .as_slice()
+            .join(", ")
+    }
+}
+
+/// The actual Filter Operator
+/// Filters incoming records according to some FilterVec
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    filter: sync::Arc<Vec<(usize, FilterCondition)>>,
+    filter: sync::Arc<FilterVec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -34,6 +98,8 @@ impl Display for Value {
     }
 }
 
+// TODO: expect that this does not properly capture all possible filter conditions?
+// e.g. nested conditions?
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FilterCondition {
     Comparison(BinaryOperator, Value),
@@ -47,7 +113,7 @@ impl Filter {
     pub fn new(src: NodeIndex, filter: &[(usize, FilterCondition)]) -> Filter {
         Filter {
             src: src.into(),
-            filter: sync::Arc::new(Vec::from(filter)),
+            filter: sync::Arc::new(FilterVec(Vec::from(filter))),
         }
     }
 }
@@ -81,31 +147,7 @@ impl Ingredient for Filter {
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
-        rs.retain(|r| {
-            self.filter.iter().all(|(i, cond)| {
-                // check if this filter matches
-                let d = &r[*i];
-                match cond {
-                    FilterCondition::Comparison(ref op, ref f) => {
-                        let v = match *f {
-                            Value::Constant(ref dt) => dt,
-                            Value::Column(c) => &r[c],
-                        };
-                        match *op {
-                            BinaryOperator::Equal => d == v,
-                            BinaryOperator::NotEqual => d != v,
-                            BinaryOperator::Greater => d > v,
-                            BinaryOperator::GreaterOrEqual => d >= v,
-                            BinaryOperator::Less => d < v,
-                            BinaryOperator::LessOrEqual => d <= v,
-                            BinaryOperator::In => unreachable!(),
-                            _ => unimplemented!(),
-                        }
-                    }
-                    FilterCondition::In(ref fs) => fs.contains(d),
-                }
-            })
-        });
+        rs.retain(|r| self.filter.matches(r));
 
         ProcessingResult {
             results: rs,
@@ -122,39 +164,11 @@ impl Ingredient for Filter {
     }
 
     fn description(&self, detailed: bool) -> String {
-        use regex::Regex;
-
         if !detailed {
-            return String::from("σ");
+            String::from("σ")
+        } else {
+            format!("σ[{}]", self.filter.describe())
         }
-
-        let escape = |s: &str| {
-            Regex::new("([<>])")
-                .unwrap()
-                .replace_all(s, "\\$1")
-                .to_string()
-        };
-        format!(
-            "σ[{}]",
-            self.filter
-                .iter()
-                .filter_map(|(i, ref cond)| match *cond {
-                    FilterCondition::Comparison(ref op, ref x) => {
-                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                    }
-                    FilterCondition::In(ref xs) => Some(format!(
-                        "f{} IN ({})",
-                        i,
-                        xs.iter()
-                            .map(|d| format!("{}", d))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )),
-                })
-                .collect::<Vec<_>>()
-                .as_slice()
-                .join(", ")
-        )
     }
 
     fn can_query_through(&self) -> bool {
@@ -172,30 +186,7 @@ impl Ingredient for Filter {
         self.lookup(*self.src, columns, key, nodes, states)
             .and_then(|result| {
                 let f = self.filter.clone();
-                let filter = move |r: &[DataType]| {
-                    f.iter().all(|(i, ref cond)| {
-                        // check if this filter matches
-                        let d = &r[*i];
-                        match *cond {
-                            FilterCondition::Comparison(ref op, ref f) => {
-                                let v = match *f {
-                                    Value::Constant(ref dt) => dt,
-                                    Value::Column(c) => &r[c],
-                                };
-                                match *op {
-                                    BinaryOperator::Equal => d == v,
-                                    BinaryOperator::NotEqual => d != v,
-                                    BinaryOperator::Greater => d > v,
-                                    BinaryOperator::GreaterOrEqual => d >= v,
-                                    BinaryOperator::Less => d < v,
-                                    BinaryOperator::LessOrEqual => d <= v,
-                                    _ => unimplemented!(),
-                                }
-                            }
-                            FilterCondition::In(ref fs) => fs.contains(d),
-                        }
-                    })
-                };
+                let filter = move |r: &[DataType]| f.matches(r);
 
                 match result {
                     Some(rs) => {
