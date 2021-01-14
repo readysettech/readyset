@@ -8,7 +8,8 @@ members = [
     "noria/server",
     "noria/applications",
     "noria/noria-logictest",
-    "unbounded-interval-tree"
+    "unbounded-interval-tree",
+    "launchpad"
 ]
 [profile.release]
 debug=true

@@ -36,6 +36,7 @@ steps:
 
   - label: ':clippy: Check clippy'
     commands:
+    - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
     - "( echo '--- :rust: Checking evbtree'; cargo clippy -p evbtree -- -D warnings)"
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     depends_on:
@@ -91,6 +92,45 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
+  - label: ':rust: Build launchpad'
+    key: build-launchpad
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build -v -p launchpad
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test launchpad'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cargo test -v -p launchpad
+    depends_on:
+    - build-image
+    - build-launchpad
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+
   - label: ':rust: Build nom-sql'
     key: build-nom-sql
     commands:
@@ -98,6 +138,7 @@ steps:
     - cargo build -v -p nom-sql
     depends_on:
     - build-image
+    - build-launchpad
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -137,6 +178,7 @@ steps:
     - cargo build -v -p evbtree
     depends_on:
     - build-image
+    - build-launchpad
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -176,6 +218,7 @@ steps:
     - cargo build -v -p unbounded-interval-tree
     depends_on:
     - build-image
+    - build-launchpad
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -220,6 +263,7 @@ steps:
     - build-nom-sql
     - build-evbtree
     - build-unbounded-interval-tree
+    - build-launchpad
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
@@ -262,6 +306,7 @@ steps:
     - build-noria
     - build-nom-sql
     - build-image
+    - build-launchpad
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'

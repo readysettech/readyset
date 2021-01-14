@@ -1,0 +1,10 @@
+[package]
+name = "launchpad"
+version = "0.1.0"
+authors = ["Readyset"]
+edition = "2018"
+description = "Extensions to the Rust standard library"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
