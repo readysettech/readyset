@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn it_removes_nested_aliases() {
         use nom_sql::{
-            ConditionBase, ConditionExpression, ConditionTree, FunctionArgument,
-            FunctionExpression, Operator,
+            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, FunctionArgument,
+            FunctionExpression,
         };
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
@@ -368,7 +368,7 @@ mod tests {
             }],
             fields: vec![FieldDefinitionExpression::Col(col_small.clone())],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
+                operator: BinaryOperator::Equal,
                 left: wrap(ConditionBase::Field(col_small.clone())),
                 right: wrap(ConditionBase::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
@@ -389,7 +389,7 @@ mod tests {
                 assert_eq!(
                     tq.where_clause,
                     Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: Operator::Equal,
+                        operator: BinaryOperator::Equal,
                         left: wrap(ConditionBase::Field(col_full.clone())),
                         right: wrap(ConditionBase::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
