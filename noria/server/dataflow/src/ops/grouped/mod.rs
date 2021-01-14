@@ -12,7 +12,6 @@ use crate::prelude::*;
 pub mod aggregate;
 pub mod concat;
 pub mod extremum;
-pub mod filteraggregate;
 
 /// Trait for implementing operations that collapse a group of records into a single record.
 ///
@@ -52,7 +51,8 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn group_by(&self) -> &[usize];
 
     /// Extract the aggregation value from a single record.
-    fn to_diff(&self, record: &[DataType], is_positive: bool) -> Self::Diff;
+    /// Diff can be None if the record is filtered out by a CASE condition in the aggregator fn
+    fn to_diff(&self, record: &[DataType], is_positive: bool) -> Option<Self::Diff>;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
@@ -284,11 +284,11 @@ where
                 if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
                     handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
                 }
-
-                diffs.push(self.inner.to_diff(&r[..], r.is_positive()));
+                if let Some(diff) = self.inner.to_diff(&r[..], r.is_positive()) {
+                    diffs.push(diff);
+                }
                 group_rs.push(r);
             }
-            assert!(!diffs.is_empty());
             handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
         }
 

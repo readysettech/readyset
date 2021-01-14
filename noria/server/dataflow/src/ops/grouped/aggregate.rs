@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
+use std::sync;
 
-use nom_sql::SqlType;
-
-use crate::ops::grouped::GroupedOperation;
-use crate::ops::grouped::GroupedOperator;
+use crate::ops::{
+    filter::FilterVec,
+    grouped::{GroupedOperation, GroupedOperator},
+};
 use crate::prelude::*;
+pub use nom_sql::{BinaryOperator, Literal, SqlType};
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,13 +44,52 @@ impl Aggregation {
                 over,
                 group: group_by.into(),
                 count_sum_map: RefCell::new(Default::default()),
+                filter: None,
+                over_else: None,
+            },
+        )
+    }
+
+    /// Construct a new `Aggregator` that performs this operation.
+    ///
+    /// The aggregation will aggregate the value in column number `over` from its inputs (i.e.,
+    /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
+    /// identifier. The `over` column should not be in the `group_by` array.
+    /// This Aggregator has a supplied `filter` and `else` clause, to handle aggregations with
+    /// CASE statements, e.g. SUM(CASE WHEN col>0 THEN col ELSE 0) ...
+    ///
+    /// TODO: https://app.clubhouse.io/readysettech/story/193/robust-filtering-for-aggregations
+    /// There are many assumptions on the filter, including that the THEN clause is the `over`
+    /// column and the ELSE clause is a literal.
+    pub fn over_filtered(
+        self,
+        src: NodeIndex,
+        over: usize,
+        group_by: &[usize],
+        filter: FilterVec,
+        over_else: Option<Literal>,
+    ) -> GroupedOperator<Aggregator> {
+        assert!(
+            !group_by.iter().any(|&i| i == over),
+            "cannot group by aggregation column"
+        );
+        GroupedOperator::new(
+            src,
+            Aggregator {
+                op: self,
+                over,
+                group: group_by.into(),
+                count_sum_map: RefCell::new(Default::default()),
+                filter: Some(sync::Arc::new(filter)),
+                over_else,
             },
         )
     }
 }
 
-/// Aggregator implementas a Soup node that performans common aggregation operations such as counts
-/// and sums.
+/// Aggregator implements a Soup node that performs common aggregation operations such as counts
+/// and sums, possibly subject to a filter corresponding to a CASE statement within the aggregation
+/// function.
 ///
 /// `Aggregator` nodes are constructed through `Aggregation` variants using `Aggregation::new`.
 ///
@@ -66,6 +107,8 @@ pub struct Aggregator {
     group: Vec<usize>,
     // only needed for AVG. Stores both sum and count to avoid rounding errors.
     count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
+    filter: Option<sync::Arc<FilterVec>>,
+    over_else: Option<Literal>,
 }
 
 /// Diff type for numerical aggregations.
@@ -132,14 +175,23 @@ impl GroupedOperation for Aggregator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
         let group_hash = self.group_hash(r);
-
-        return NumericalDiff {
-            value: r[self.over].clone(),
-            positive: pos,
-            group_hash,
-        };
+        let passes_filter = self.filter.iter().all(|f| f.matches(r));
+        if passes_filter {
+            Some(NumericalDiff {
+                // Assumption that THEN clause is the `over` column
+                value: r[self.over].clone(),
+                positive: pos,
+                group_hash,
+            })
+        } else {
+            self.over_else.as_ref().map(|else_val| NumericalDiff {
+                value: DataType::from(else_val),
+                positive: pos,
+                group_hash,
+            })
+        }
     }
 
     fn apply(
@@ -174,7 +226,7 @@ impl GroupedOperation for Aggregator {
                 .apply_diff(diff)
         };
 
-        let apply_diff = |curr, diff: Self::Diff| -> DataType {
+        let apply_diff = |curr: DataType, diff: Self::Diff| -> DataType {
             match self.op {
                 Aggregation::COUNT => apply_count(curr, diff),
                 Aggregation::SUM => apply_sum(curr, diff),
@@ -189,17 +241,31 @@ impl GroupedOperation for Aggregator {
 
     fn description(&self, detailed: bool) -> String {
         if !detailed {
+            let filter_str = self.filter.as_ref().map(|_| "σ").unwrap_or("");
+
             return String::from(match self.op {
-                Aggregation::COUNT => "+",
-                Aggregation::SUM => "𝛴",
-                Aggregation::AVG => "Avg",
+                Aggregation::COUNT => format!("+{}", filter_str),
+                Aggregation::SUM => format!("𝛴{}", filter_str),
+                Aggregation::AVG => format!("Avg{}", filter_str),
             });
         }
 
+        let inner_str = self
+            .filter
+            .as_ref()
+            .map(|_| format!("σ({})", self.over))
+            .unwrap_or(self.over.to_string());
         let op_string = match self.op {
-            Aggregation::COUNT => "|*|".into(),
-            Aggregation::SUM => format!("𝛴({})", self.over),
-            Aggregation::AVG => format!("Avg({})", self.over),
+            Aggregation::COUNT => format!(
+                "|{}|",
+                self.filter
+                    .as_ref()
+                    .map(|_| inner_str)
+                    .unwrap_or(String::from("*"))
+            ),
+
+            Aggregation::SUM => format!("𝛴({})", inner_str),
+            Aggregation::AVG => format!("Avg({})", inner_str),
         };
         let group_cols = self
             .group
@@ -224,11 +290,18 @@ impl GroupedOperation for Aggregator {
     }
 }
 
+// TODO: These unit tests are lengthy, repetitive, and hard to read.
+// Could look into refactoring / creating a more robust testing infrastructure to consolidate
+// logic and create test cases more easily.
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::ops;
+    use crate::ops::{
+        self,
+        filter::{FilterCondition, Value},
+    };
 
     fn setup(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -266,6 +339,15 @@ mod tests {
 
         let a = Aggregation::AVG.over(src, 1, &[2, 0]);
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
+
+        let cf = Aggregation::COUNT.over_filtered(src, 1, &[0, 2], FilterVec::from(vec![]), None);
+        assert_eq!(cf.description(true), "|σ(1)| γ[0, 2]");
+
+        let sf = Aggregation::SUM.over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None);
+        assert_eq!(sf.description(true), "𝛴(σ(1)) γ[2, 0]");
+
+        let af = Aggregation::AVG.over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None);
+        assert_eq!(af.description(true), "Avg(σ(1)) γ[2, 0]");
     }
 
     /// Testing count emits correct records with single column group and single over column
@@ -948,6 +1030,516 @@ mod tests {
             _ => unreachable!(),
         }
     }
+
+    // ----- Following Tests Copied + Modified from FilterAggregate -------
+    // TODO: better testing infra and clean up
+
+    fn setup_filtered(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+        let filter = FilterVec::from(vec![(
+            1,
+            FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(2.into())),
+        )]);
+
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            Aggregation::COUNT.over_filtered(s.as_global(), 1, &[0], filter, None),
+            mat,
+        );
+        g
+    }
+
+    fn setup_filtered_multicolumn(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        let filter = FilterVec::from(vec![(
+            1,
+            FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(2.into())),
+        )]);
+
+        g.set_op(
+            "identity",
+            &["x", "z", "ys"],
+            Aggregation::COUNT.over_filtered(s.as_global(), 1, &[0, 2], filter, None),
+            mat,
+        );
+        g
+    }
+
+    fn setup_filtered_sum(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        // sum z's, grouped by y, where y!=x and z>1
+        let filter = FilterVec::from(vec![
+            (
+                1,
+                FilterCondition::Comparison(BinaryOperator::NotEqual, Value::Column(0)),
+            ),
+            (
+                2,
+                FilterCondition::Comparison(BinaryOperator::Greater, Value::Constant(1.into())),
+            ),
+        ]);
+        g.set_op(
+            "identity",
+            &["y", "zsum"],
+            Aggregation::SUM.over_filtered(s.as_global(), 2, &[1], filter, None),
+            mat,
+        );
+        g
+    }
+
+    fn setup_filtered_sum_with_else(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z", "g"]);
+        // sum z's if y >= 3, else x's, group by g
+        let filter = FilterVec::from(vec![(
+            1,
+            FilterCondition::Comparison(BinaryOperator::GreaterOrEqual, Value::Constant(3.into())),
+        )]);
+
+        g.set_op(
+            "identity",
+            &["g", "zsum"],
+            Aggregation::SUM.over_filtered(
+                s.as_global(),
+                2,
+                &[3],
+                filter,
+                Some(Literal::Integer(6)),
+            ),
+            mat,
+        );
+        g
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn filtered_forwards() {
+        let mut c = setup_filtered(true);
+
+        let u: Record = vec![1.into(), 1.into()].into();
+
+        // this should get filtered out
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![2.into(), 2.into()].into();
+
+        // first row for a second group should emit +1 for that new group
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 1.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![2.into(), 2.into()].into();
+
+        // second row for a group should emit -1 and +2
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 1.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = (vec![2.into(), 2.into()], false);
+
+        // negative row for a group should emit -2 and +1
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 1.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = vec![
+            (vec![1.into(), 1.into()], false),
+            (vec![1.into(), 1.into()], true),
+            (vec![1.into(), 2.into()], true),  // these are the
+            (vec![2.into(), 2.into()], false), // only rows that
+            (vec![2.into(), 2.into()], true),  // aren't ignored
+            (vec![2.into(), 3.into()], true),
+            (vec![2.into(), 1.into()], true),
+            (vec![3.into(), 3.into()], true),
+        ];
+
+        // multiple positives and negatives should update aggregation value by appropriate amount
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 3); // +- for 1, + for 3
+
+        // group 1 lost 0 and gained 1
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+            r[0] == 1.into() && r[1] == 0.into()
+        } else {
+            false
+        }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            r[0] == 1.into() && r[1] == 1.into()
+        } else {
+            false
+        }));
+
+        // group 2 lost 1 and gained 1
+
+        // group 3 lost 0 and gained 1
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            r[0] == 3.into() && r[1] == 0.into()
+        } else {
+            false
+        }));
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn filtered_groups_by_multiple_columns() {
+        let mut c = setup_filtered_multicolumn(true);
+
+        let u: Record = vec![1.into(), 1.into(), 2.into()].into();
+
+        // first row filtered, so should emit 0 for the group (1, 2)
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![2.into(), 2.into(), 2.into()].into();
+
+        // first row for a group should emit +1 for that new group
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![2.into(), 2.into(), 2.into()].into();
+
+        // second row for a group should emit -1 and +2
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = (vec![2.into(), 2.into(), 2.into()], false);
+
+        // negative row for a group should emit -2 and +1
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn it_sums_with_filter() {
+        // records [x, y, z]  --> [y, zsum]
+        // sum z's, grouped by y, where y!=x and z>1
+
+        // test:
+        // filtered out by z=1, z=0, y=x
+        // positive and negative updates
+
+        let mut c = setup_filtered_sum(true);
+
+        // some unfiltered updates first
+
+        let u: Record = vec![1.into(), 2.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 0.into(), 3.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 3.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // now filtered updates
+
+        let u: Record = vec![1.into(), 1.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 3.into(), 1.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 3.into());
+                assert_eq!(r[1], 0.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 2.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 0);
+
+        let u: Record = vec![2.into(), 2.into(), 2.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 0);
+
+        // additional update to preexisting group
+
+        let u: Record = vec![0.into(), 2.into(), 4.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 6.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // now a negative update to a group
+        let u = (vec![14.into(), 0.into(), 2.into()], false);
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 3.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 1.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn it_sums_with_filter_and_else() {
+        // records [x, y, z, g]  --> [g, zsum]
+        // sum z's if y>=3 else 6s, grouped by g
+
+        // test:
+        // y<3, y=3, y>3
+        // positive and negative updates
+
+        let mut c = setup_filtered_sum_with_else(true);
+
+        // updates from z
+
+        let u: Record = vec![1.into(), 5.into(), 2.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 3.into(), 3.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 5.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // updates by literal 6
+
+        let u: Record = vec![1.into(), 2.into(), 2.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 5.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 11.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 3.into(), 0.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 0);
+
+        let u: Record = vec![3.into(), 0.into(), 0.into(), 0.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 11.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 17.into());
+            }
+            _ => unreachable!(),
+        }
+
+        // now a negative update
+
+        let u = (vec![14.into(), 6.into(), 2.into(), 0.into()], false);
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 17.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 0.into());
+                assert_eq!(r[1], 15.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();

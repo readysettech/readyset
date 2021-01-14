@@ -52,7 +52,7 @@ fn type_for_internal_column(
                 to_sql_type(&emits.1[off])
             }
         }
-        ops::NodeOperator::Sum(ref grouped_op) => {
+        ops::NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
             if column_index == node.fields().len() - 1 {
                 grouped_op.output_col_type().or({
@@ -65,21 +65,6 @@ fn type_for_internal_column(
                 })
             } else {
                 unreachable!("non aggregation result column traced back to aggregation");
-            }
-        }
-        ops::NodeOperator::FilterSum(ref grouped_op) => {
-            // computed column is always emitted last
-            if column_index == node.fields().len() - 1 {
-                grouped_op.output_col_type().or({
-                    // if none, output column type is same as over column type
-                    let over_columns = grouped_op.over_columns();
-                    assert_eq!(over_columns.len(), 1);
-                    // use type of the "over" column
-                    column_schema(graph, next_node_on_path, recipe, over_columns[0], log)
-                        .map(|cs| cs.sql_type)
-                })
-            } else {
-                unreachable!("non aggregation result column traced back to filteraggregation");
             }
         }
         ops::NodeOperator::Extremum(ref o) => {

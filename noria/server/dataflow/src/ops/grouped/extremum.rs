@@ -18,6 +18,9 @@ impl Extremum {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
+    ///
+    /// TODO: support case conditions
+    /// CH: https://app.clubhouse.io/readysettech/story/198/add-filtering-to-all-grouped-operations
     pub fn over(
         self,
         src: NodeIndex,
@@ -77,7 +80,7 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
         let v = match r[self.over] {
             DataType::Int(n) => i128::from(n),
             DataType::UnsignedInt(n) => i128::from(n),
@@ -98,9 +101,9 @@ impl GroupedOperation for ExtremumOperator {
         };
 
         if pos {
-            DiffType::Insert(v)
+            Some(DiffType::Insert(v))
         } else {
-            DiffType::Remove(v)
+            Some(DiffType::Remove(v))
         }
     }
 

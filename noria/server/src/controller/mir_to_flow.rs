@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::controller::Migration;
 use common::DataType;
-use dataflow::ops::filter::FilterCondition;
+use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
@@ -589,12 +589,12 @@ fn make_grouped_node(
             mig.add_ingredient(
                 String::from(name),
                 column_names.as_slice(),
-                agg.over(
+                agg.over_filtered(
                     parent_na,
-                    cond,
                     over_col_indx,
-                    else_on,
                     group_col_indx.as_slice(),
+                    FilterVec::from(Vec::from(cond)),
+                    else_on,
                 ),
             )
         }

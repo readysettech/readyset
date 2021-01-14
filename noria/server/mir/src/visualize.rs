@@ -6,7 +6,6 @@ use crate::query::MirQuery;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
-use dataflow::ops::grouped::filteraggregate::FilterAggregation as FilterAggregationKind;
 
 pub trait GraphViz {
     fn to_graphviz(&self) -> Result<String, fmt::Error>;
@@ -158,8 +157,9 @@ impl GraphViz for MirNodeType {
                 ..
             } => {
                 let op_string = match *kind {
-                    FilterAggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),
-                    FilterAggregationKind::SUM => format!("𝛴(filter {})", print_col(on)),
+                    AggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),
+                    AggregationKind::SUM => format!("𝛴(filter {})", print_col(on)),
+                    AggregationKind::AVG => format!("Avg(filter {})", print_col(on)),
                 };
                 let group_cols = group_by
                     .iter()
