@@ -12,3 +12,4 @@ keywords = ["interval", "tree", "bound", "exclusive", "difference"]
 [dependencies]
 proptest = "0.10.1"
 rand = "0.7"
+launchpad = { path = "../launchpad" }

@@ -38,12 +38,10 @@ use std::ops::{Bound, RangeBounds};
 use Bound::*;
 use Ordering::*;
 
-use proptest::arbitrary::Arbitrary;
-
-mod intervals;
-use intervals::{
-    bound_ref, cmp, cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps,
+use launchpad::intervals::{
+    cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps, BoundAsRef,
 };
+use proptest::arbitrary::Arbitrary;
 
 /// A tree for storing intervals
 ///
@@ -178,7 +176,7 @@ where
         // TODO(jonathangb): Rotate tree?
         let mut curr = self.root.as_mut().unwrap();
         loop {
-            curr.maybe_update_value(bound_ref(&node.value));
+            curr.maybe_update_value(node.value.as_ref());
 
             match cmp(&curr.key, &node.key) {
                 Equal => return, // Don't insert a redundant key.
@@ -352,7 +350,7 @@ where
             Q: Ord + Clone,
             R: RangeBounds<Q>,
         {
-            if cmp_end_start(bound_ref(&node.value), range.start_bound()) == Less {
+            if cmp_end_start(node.value.as_ref(), range.start_bound()) == Less {
                 // the upper bound of all of this node's descendants is less than the start bound of
                 // the range we care about, so we can skip it entirely
                 return;
@@ -444,8 +442,8 @@ where
             // Finally, for each node, we recalculate its upper bound by  taking the max of its left
             // child's value, its right child's value, and its own upper bound
             node.value = std::iter::once(node.key.end_bound())
-                .chain(node.left.iter().map(|n| bound_ref(&n.value)))
-                .chain(node.right.iter().map(|n| bound_ref(&n.value)))
+                .chain(node.left.iter().map(|n| n.value.as_ref()))
+                .chain(node.right.iter().map(|n| n.value.as_ref()))
                 .max_by(|l, r| cmp_endbound(*l, *r))
                 .unwrap()
                 .cloned();
@@ -922,7 +920,7 @@ where
                     let max_other = if curr.right.is_none() {
                         curr_end
                     } else {
-                        let other_value = bound_ref(&curr.right.as_ref().unwrap().value);
+                        let other_value = curr.right.as_ref().unwrap().value.as_ref();
                         match cmp_endbound(curr_end, other_value) {
                             Greater | Equal => curr_end,
                             Less => other_value,
@@ -946,7 +944,7 @@ where
                     let max_other = if curr.left.is_none() {
                         curr_end
                     } else {
-                        let other_value = bound_ref(&curr.left.as_ref().unwrap().value);
+                        let other_value = curr.left.as_ref().unwrap().value.as_ref();
                         match cmp_endbound(curr_end, other_value) {
                             Greater | Equal => curr_end,
                             Less => other_value,
@@ -970,11 +968,11 @@ where
         // the ancestors' value so that they store the new max value in their
         // respective subtree.
         while let Some((value, max_other)) = path.pop() {
-            if cmp_endbound(bound_ref(value), max_other) == Equal {
+            if cmp_endbound(value.as_ref(), max_other) == Equal {
                 break;
             }
 
-            match cmp_endbound(bound_ref(value), new_max) {
+            match cmp_endbound(value.as_ref(), new_max) {
                 Equal => break,
                 Greater => *value = new_max.cloned(),
                 Less => unreachable!("Can't have a new max that is bigger"),
@@ -1177,10 +1175,55 @@ where
     }
 }
 
+fn cmp<Q, R, S>(r1: &R, r2: &S) -> Ordering
+where
+    Q: Ord,
+    R: RangeBounds<Q>,
+    S: RangeBounds<Q>,
+{
+    // Sorting by lower bound, then by upper bound.
+    //   -> Unbounded is the smallest lower bound.
+    //   -> Unbounded is the biggest upper bound.
+    //   -> Included(x) < Excluded(x) for a lower bound.
+    //   -> Included(x) > Excluded(x) for an upper bound.
+
+    let start = cmp_startbound(r1.start_bound(), r2.start_bound());
+
+    if start == Equal {
+        // Both left-bounds are equal, we have to
+        // compare the right-bounds as a tie-breaker.
+        cmp_endbound(r1.end_bound(), r2.end_bound())
+    } else {
+        start
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::ops::Bound;
+
+    #[test]
+    fn cmp_works_as_expected() {
+        let key0 = ..20;
+        let key1 = 1..=5;
+        let key2 = 1..7;
+        let key3 = 1..=7;
+        let key4 = (Excluded(5), Excluded(9));
+        let key5 = (Included(7), Included(8));
+        let key_str1 = (Included("abc"), Excluded("def"));
+        let key_str2 = (Included("bbc"), Included("bde"));
+        let key_str3: (_, Bound<&str>) = (Included("bbc"), Unbounded);
+
+        assert_eq!(cmp(&key1, &key1), Equal);
+        assert_eq!(cmp(&key1, &key2), Less);
+        assert_eq!(cmp(&key2, &key3), Less);
+        assert_eq!(cmp(&key0, &key1), Less);
+        assert_eq!(cmp(&key4, &key5), Less);
+        assert_eq!(cmp::<&str, _, _>(&key_str1, &key_str2), Less);
+        assert_eq!(cmp::<&str, _, _>(&key_str2, &key_str3), Less);
+    }
 
     fn node_children<Q: Clone + Ord>(node: &Node<Q>) -> Vec<Node<Q>> {
         let mut res = vec![node.clone()];
@@ -1216,7 +1259,7 @@ mod tests {
             if let Some(max) = max {
                 assert!(
                     matches!(
-                        cmp_endbound(node.key.end_bound(), bound_ref(max)),
+                        cmp_endbound(node.key.end_bound(), max.as_ref()),
                         Ordering::Less | Ordering::Equal
                     ),
                     "end bound of node {:?} outside parent's max of {:?}",

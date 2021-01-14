@@ -25,7 +25,7 @@ pub(super) trait MakeKey<A> {
         I: Borrow<[A]>,
         Self: Sized,
     {
-        use noria::util::BoundFunctor;
+        use launchpad::intervals::BoundFunctor;
         (
             range.start_bound().map(|k| Self::from_key(k.borrow())),
             range.end_bound().map(|k| Self::from_key(k.borrow())),

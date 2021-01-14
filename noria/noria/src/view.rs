@@ -1,12 +1,12 @@
 use crate::data::*;
 use crate::errors::wrap_boxed_error;
-use crate::util::{BoundAsRef, BoundFunctor};
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
+use launchpad::intervals::{BoundAsRef, BoundFunctor};
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;

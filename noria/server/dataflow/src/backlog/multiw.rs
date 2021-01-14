@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use super::{key_to_double, key_to_single, Key};
 use crate::prelude::*;
 use ahash::RandomState;
-use noria::util::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::{BoundAsRef, BoundFunctor};
 
 pub(super) enum Handle {
     Single(evbtree::handles::WriteHandle<DataType, Vec<DataType>, i64, RandomState>),

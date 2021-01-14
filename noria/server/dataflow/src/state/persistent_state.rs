@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use noria::util::BoundFunctor;
+use launchpad::intervals::BoundFunctor;
 use noria::KeyComparison;
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,

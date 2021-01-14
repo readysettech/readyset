@@ -1,5 +1,5 @@
+use launchpad::intervals::BoundFunctor;
 use noria::internal::LocalNodeIndex;
-use noria::util::BoundFunctor;
 use noria::DataType;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

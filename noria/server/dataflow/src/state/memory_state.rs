@@ -305,7 +305,7 @@ mod tests {
         use vec1::vec1;
 
         mod partial {
-            use noria::util::BoundFunctor;
+            use launchpad::intervals::BoundFunctor;
             use vec1::Vec1;
 
             use super::*;

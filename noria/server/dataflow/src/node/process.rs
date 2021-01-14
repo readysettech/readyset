@@ -1,7 +1,7 @@
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
-use noria::util::hash;
+use launchpad::hash::hash;
 use noria::KeyComparison;
 use slog::Logger;
 use std::collections::HashSet;

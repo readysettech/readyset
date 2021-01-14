@@ -50,6 +50,7 @@ async-bincode = "0.5.0"
 tracing = "0.1"
 streamunordered = "0.5.0"
 stream-cancel = "0.6.1"
+vec1 = "1.6.0"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
@@ -65,7 +66,7 @@ dataflow = { version = "0.7.0", path = "dataflow", package = "noria-dataflow" }
 mir = { version = "0.7.0", path = "mir", package = "noria-mir" }
 common = { version = "0.7.0", path = "common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../noria" }
-vec1 = "1.6.0"
+launchpad = { path = "../../launchpad" }
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }

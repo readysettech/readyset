@@ -9,7 +9,7 @@ use super::partial_map::PartialMap;
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
-use noria::util::BoundFunctor;
+use launchpad::intervals::BoundFunctor;
 
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
