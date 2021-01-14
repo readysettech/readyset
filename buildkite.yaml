@@ -174,7 +174,7 @@ steps:
     key: build-noria
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p noria
+    - cargo build -v -p noria -p noria-server -p noria-applications
     depends_on:
     - build-image
     - build-nom-sql
@@ -196,7 +196,7 @@ steps:
   - label: ':rust: Test noria'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria
+    - cargo test -v -p noria -p noria-server -p noria-applications
     depends_on:
     - build-image
     - build-noria
