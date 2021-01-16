@@ -1,0 +1,405 @@
+use anyhow::{anyhow, Result};
+use arccstr::ArcCStr;
+use noria::{DataType, Modification};
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::convert::TryInto;
+
+#[derive(Debug, Deserialize)]
+pub struct EventKey {
+    pub schema: Schema,
+    pub payload: KeyPayload,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeyPayload {
+    #[serde(flatten)]
+    pub fields: HashMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum EventValue {
+    SchemaChange(SchemaChange),
+    DataChange(DataChange),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SchemaChange {
+    pub schema: Schema,
+    pub payload: SchemaChangePayload,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DataChange {
+    pub schema: Schema,
+    pub payload: DataChangePayload,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Schema {
+    pub name: String,
+    pub optional: bool,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaChangePayload {
+    pub ddl: String,
+    pub database_name: String,
+    pub source: Source,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "op")]
+pub enum DataChangePayload {
+    #[serde(rename = "c")]
+    Create(CreatePayload),
+    #[serde(rename = "u")]
+    Update(UpdatePayload),
+    #[serde(rename = "d")]
+    Delete { source: Source },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayload {
+    pub source: Source,
+    pub after: HashMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePayload {
+    pub source: Source,
+    pub before: HashMap<String, Value>,
+    pub after: HashMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Source {
+    pub table: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Field {
+    StructField { fields: Vec<PrimitiveField> },
+    PrimitiveField(PrimitiveField),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PrimitiveField {
+    pub field: String,
+    #[serde(rename = "type")]
+    pub typ: String,
+    pub optional: bool,
+}
+
+pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
+    match v {
+        Value::Null => Ok(DataType::None),
+        Value::Bool(v) => Ok(DataType::Int(*v as i32)),
+        Value::String(v) => Ok(DataType::Text(ArcCStr::try_from(v.to_owned()).unwrap())),
+        Value::Number(v) => {
+            let field_type = f.typ.to_owned();
+            if matches!(field_type.as_str(), "int32" | "int16") {
+                Ok(DataType::Int(v.as_i64().unwrap().try_into()?))
+            } else if field_type == "int64" {
+                Ok(DataType::BigInt(v.as_i64().unwrap()))
+            } else {
+                unimplemented!("Type not implemented!")
+            }
+        }
+        _ => Ok(DataType::None),
+    }
+}
+
+impl EventKey {
+    pub fn get_pk_datatype(&self) -> Result<DataType> {
+        let pk_field = &self.schema.fields[0];
+        match pk_field {
+            Field::PrimitiveField(f) => field_to_datatype(&f, &self.payload.fields[&f.field]),
+            _ => Err(anyhow!("Primary Key can only be a primitive field.")),
+        }
+    }
+}
+
+impl CreatePayload {
+    pub fn get_create_vector(&self, after_schema: &Field) -> Result<Vec<DataType>> {
+        match after_schema {
+            Field::StructField {
+                fields: after_field_schema,
+            } => {
+                let mut insert_vec = Vec::new();
+                for f in after_field_schema.iter() {
+                    let field_value = &self.after[&f.field];
+                    let new_datatype = field_to_datatype(f, field_value)?;
+                    insert_vec.push(new_datatype)
+                }
+                Ok(insert_vec)
+            }
+            _ => Err(anyhow!("After Field has to be a struct field.")),
+        }
+    }
+}
+
+impl UpdatePayload {
+    pub fn get_update_vector(
+        &self,
+        after_schema: &Field,
+    ) -> Result<Vec<(usize, Modification)>, anyhow::Error> {
+        match after_schema {
+            Field::StructField {
+                fields: after_field_schema,
+            } => {
+                let mut modifications = Vec::new();
+                for (i, f) in after_field_schema.iter().enumerate() {
+                    let field_value = &self.after[&f.field];
+                    let new_datatype = field_to_datatype(f, field_value)?;
+                    let modification: Modification = Modification::Set(new_datatype);
+                    modifications.push((i, modification))
+                }
+                Ok(modifications)
+            }
+            _ => Err(anyhow!("After Field has to be a struct field.")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_change_event_key_event() {
+        let json = r#"
+        {
+            "schema": { 
+               "type": "struct",
+               "name": "mysql-server-1.inventory.customers.Key", 
+               "optional": false, 
+               "fields": [ 
+                 {
+                   "field": "id",
+                   "type": "int32",
+                   "optional": false
+                 }
+               ]
+             },
+            "payload": { 
+               "id": 1001
+            }
+        }"#;
+        let parsed: EventKey = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.payload.fields["id"], 1001);
+        assert_eq!(parsed.schema.fields.len(), 1);
+    }
+
+    #[test]
+    fn parse_schema_change_event_event() {
+        let json = r#"
+        {
+            "schema": { 
+               "type": "struct",
+               "name": "mysql-server-1.inventory.customers.Key", 
+               "optional": false, 
+               "fields": [ 
+                {
+                    "field": "ddl",
+                    "type": "string",
+                    "optional": false
+                  }
+               ]
+             },
+            "payload": { 
+                "databaseName": "inventory",
+                "ddl": "CREATE TABLE products ( id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, description VARCHAR(512), weight FLOAT ); ALTER TABLE products AUTO_INCREMENT = 101;",
+                "source" : {
+                    "table": "products"
+                }
+            }
+        }"#;
+        let parsed: EventValue = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            parsed,
+            EventValue::SchemaChange(SchemaChange {
+                schema: _,
+                payload:
+                    SchemaChangePayload {
+                        ddl: _,
+                        database_name: _,
+                        source: _,
+                    },
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_create_change_event_event() {
+        let json = r#"
+        {
+            "schema": { 
+              "type": "struct",
+              "fields": [
+                {
+                  "type": "struct",
+                  "fields": [],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "field": "before"
+                },
+                {
+                  "type": "struct",
+                  "fields": [
+                    {
+                      "type": "int32",
+                      "optional": false,
+                      "field": "id"
+                    }
+                  ],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value",
+                  "field": "after"
+                }
+              ],
+              "optional": false,
+              "name": "mysql-server-1.inventory.customers.Envelope" 
+            },
+            "payload": { 
+              "op": "c",
+              "before": null, 
+              "after": { 
+                "id": 1004
+              },
+              "source": { 
+                "db": "inventory",
+                "table": "customers"
+              }
+            }
+          }"#;
+        let parsed: EventValue = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            parsed,
+            EventValue::DataChange(DataChange {
+                schema: _,
+                payload: DataChangePayload::Create(_),
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_update_change_event_event() {
+        let json = r#"
+        {
+            "schema": { 
+              "type": "struct",
+              "fields": [
+                {
+                  "type": "struct",
+                  "fields": [{
+                    "type": "int32",
+                    "optional": false,
+                    "field": "id"
+                  }],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "field": "before"
+                },
+                {
+                  "type": "struct",
+                  "fields": [
+                    {
+                      "type": "int32",
+                      "optional": false,
+                      "field": "id"
+                    }
+                  ],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value",
+                  "field": "after"
+                }
+              ],
+              "optional": false,
+              "name": "mysql-server-1.inventory.customers.Envelope" 
+            },
+            "payload": { 
+              "op": "u",
+              "before": { 
+                "id": 1002
+              },
+              "after": { 
+                "id": 1004
+              },
+              "source": { 
+                "db": "inventory",
+                "table": "customers"
+              }
+            }
+          }"#;
+        let parsed: EventValue = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            parsed,
+            EventValue::DataChange(DataChange {
+                schema: _,
+                payload: DataChangePayload::Update(_),
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_delete_change_event_event() {
+        let json = r#"
+        {
+            "schema": { 
+              "type": "struct",
+              "fields": [
+                {
+                  "type": "struct",
+                  "fields": [{
+                    "type": "int32",
+                    "optional": false,
+                    "field": "id"
+                  }],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "field": "before"
+                },
+                {
+                  "type": "struct",
+                  "fields": [
+                    {
+                      "type": "int32",
+                      "optional": false,
+                      "field": "id"
+                    }
+                  ],
+                  "optional": true,
+                  "name": "mysql-server-1.inventory.customers.Value",
+                  "field": "after"
+                }
+              ],
+              "optional": false,
+              "name": "mysql-server-1.inventory.customers.Envelope" 
+            },
+            "payload": { 
+              "op": "d",
+              "before": null, 
+              "after": null,
+              "source": { 
+                "db": "inventory",
+                "table": "customers"
+              }
+            }
+          }"#;
+        let parsed: EventValue = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            parsed,
+            EventValue::DataChange(DataChange {
+                schema: _,
+                payload: DataChangePayload::Delete { source: _ },
+            })
+        ));
+    }
+}
