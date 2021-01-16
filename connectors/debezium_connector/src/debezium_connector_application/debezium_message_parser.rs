@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use arccstr::ArcCStr;
+use chrono::Duration;
+use chrono::NaiveDateTime;
 use noria::{DataType, Modification};
 use serde::Deserialize;
 use serde_json::Value;
@@ -98,16 +99,48 @@ pub struct PrimitiveField {
 }
 
 pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
+    let field_type = f.typ.to_owned();
+    let semantic_type = f.field.to_owned();
     match v {
         Value::Null => Ok(DataType::None),
         Value::Bool(v) => Ok(DataType::Int(*v as i32)),
-        Value::String(v) => Ok(DataType::Text(ArcCStr::try_from(v.to_owned()).unwrap())),
+        Value::String(v) => {
+            if semantic_type == "io.debezium.time.ZonedTimestamp" {
+                Ok(DataType::Timestamp(NaiveDateTime::parse_from_str(
+                    v.as_str(),
+                    "%+",
+                )?))
+            } else if (field_type == "bytes")
+                && (semantic_type == "org.apache.kafka.connect.data.Decimal")
+            {
+                unimplemented!("Set decimal.handling.mode to double in SQL Connector Conf.")
+            } else {
+                Ok(DataType::try_from(v.as_str())?)
+            }
+        }
         Value::Number(v) => {
-            let field_type = f.typ.to_owned();
-            if matches!(field_type.as_str(), "int32" | "int16") {
-                Ok(DataType::Int(v.as_i64().unwrap().try_into()?))
+            if semantic_type == "org.apache.kafka.connect.data.Date" {
+                Ok(DataType::Timestamp(
+                    NaiveDateTime::from_timestamp(0, 0)
+                        .checked_add_signed(Duration::days(v.as_i64().unwrap()))
+                        .unwrap(),
+                ))
+            } else if semantic_type == "org.apache.kafka.connect.data.Time" {
+                // Noria doesnt have a time datatype, thus using BigInt as an alternative
+                // It stores the number of microseconds since midnight as an int64
+                Ok(DataType::BigInt(v.as_i64().unwrap()))
+            } else if semantic_type == "org.apache.kafka.connect.data.Timestamp" {
+                Ok(DataType::Timestamp(
+                    NaiveDateTime::from_timestamp(0, 0)
+                        .checked_add_signed(Duration::milliseconds(v.as_i64().unwrap()))
+                        .unwrap(),
+                ))
+            } else if matches!(field_type.as_str(), "int32" | "int16" | "int8") {
+                Ok(DataType::Int(v.as_i64().unwrap().try_into().unwrap()))
             } else if field_type == "int64" {
                 Ok(DataType::BigInt(v.as_i64().unwrap()))
+            } else if matches!(field_type.as_str(), "double" | "float32" | "float64") {
+                Ok(DataType::from(v.as_f64().unwrap()))
             } else {
                 unimplemented!("Type not implemented!")
             }
@@ -401,5 +434,101 @@ mod tests {
                 payload: DataChangePayload::Delete { source: _ },
             })
         ));
+    }
+
+    // Using the following link for type information
+    // https://debezium.io/documentation/reference/connectors/mysql.html#mysql-data-types
+    fn test_json_to_datatype_helper(
+        json_str: &str,
+        field_type: &str,
+        semantic_type: &str,
+    ) -> DataType {
+        let field = PrimitiveField {
+            field: semantic_type.to_string(),
+            typ: field_type.to_string(),
+            optional: false,
+        };
+        let parsed_value: Value = serde_json::from_str(json_str).unwrap();
+
+        field_to_datatype(&field, &parsed_value).unwrap()
+    }
+    #[test]
+    fn parse_basic_types() {
+        assert_eq!(
+            test_json_to_datatype_helper("true", "boolean", ""),
+            DataType::Int(1)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("false", "boolean", ""),
+            DataType::Int(0)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("42", "int16", ""),
+            DataType::Int(42)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("-42", "int32", ""),
+            DataType::Int(-42)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("2020", "int32", "io.debezium.time.Year"),
+            DataType::Int(2020)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("42", "int64", ""),
+            DataType::BigInt(42)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("-4.14", "float32", ""),
+            DataType::from(-4.14)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper("4.14", "float64", ""),
+            DataType::from(4.14)
+        );
+        assert!(matches!(
+            test_json_to_datatype_helper("\"noria\"", "string", ""),
+            DataType::TinyText(_)
+        ));
+        assert!(matches!(
+            test_json_to_datatype_helper(
+                "\"string with more than TINYTEXT(15) width\"",
+                "string",
+                ""
+            ),
+            DataType::Text(_)
+        ));
+    }
+
+    #[test]
+    fn parse_temporal_types() {
+        assert_eq!(
+            test_json_to_datatype_helper(
+                "18646", // Number of days from Unix time for Date: 01-19-2020
+                "int32",
+                "org.apache.kafka.connect.data.Date"
+            ),
+            DataType::Timestamp(
+                NaiveDateTime::parse_from_str("2021-01-19T00:00:00+00:00", "%+").unwrap()
+            )
+        );
+        assert_eq!(
+            test_json_to_datatype_helper(
+                "1611080613",
+                "int64",
+                "org.apache.kafka.connect.data.Time"
+            ),
+            DataType::BigInt(1611080613)
+        );
+        assert_eq!(
+            test_json_to_datatype_helper(
+                "1611080613000", // Milliseconds from unix time
+                "int64",
+                "org.apache.kafka.connect.data.Timestamp"
+            ),
+            DataType::Timestamp(
+                NaiveDateTime::parse_from_str("2021-01-19T18:23:33+00:00", "%+").unwrap()
+            )
+        );
     }
 }
