@@ -9,7 +9,8 @@ members = [
     "noria/applications",
     "noria/noria-logictest",
     "unbounded-interval-tree",
-    "launchpad"
+    "launchpad",
+    "connectors/debezium_connector"
 ]
 [profile.release]
 debug=true

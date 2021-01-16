@@ -18,9 +18,11 @@ RUN printf '[build]\nrustc-wrapper=/bin/sccache\n' > ~/.cargo/config
 RUN apt-get update
 RUN apt-get install -y \
     clang \
+    cmake \
     libclang-dev \
     libssl-dev \
     liblz4-dev \
+    librdkafka-dev \
     build-essential
 
 ENV CXX /bin/sccache c++
