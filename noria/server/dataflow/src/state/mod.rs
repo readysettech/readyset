@@ -274,4 +274,12 @@ impl<'a> RangeLookupResult<'a> {
     pub fn unwrap(self) -> RecordResult<'a> {
         self.records().unwrap()
     }
+
+    /// Convert this RangeLookupResult into a [`Result<RecordResult<'a>, Misses>`]
+    pub fn as_result(self) -> Result<RecordResult<'a>, Misses> {
+        match self {
+            Self::Some(records) => Ok(records),
+            Self::Missing(misses) => Err(misses),
+        }
+    }
 }
