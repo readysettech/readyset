@@ -100,9 +100,12 @@ use std::io::prelude::*;
 use std::iter;
 use std::net;
 
+use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
+
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 
 mod commands;
+mod constants;
 mod errorcodes;
 mod packet;
 mod params;
@@ -219,6 +222,8 @@ struct StatementData {
     params: u16,
 }
 
+const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED;
+
 impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
@@ -242,10 +247,10 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
         self.writer.write_all(&[0x08, 0x00, 0x00, 0x00])?; // TODO: connection ID
         self.writer.write_all(&b";X,po_k}\0"[..])?; // auth seed
-        self.writer.write_all(&[0x00, 0x42])?; // just 4.1 proto
+        self.writer.write_all(&CAPABILITIES.to_le_bytes()[..2])?; // just 4.1 proto
         self.writer.write_all(&[0x21])?; // UTF8_GENERAL_CI
         self.writer.write_all(&[0x00, 0x00])?; // status flags
-        self.writer.write_all(&[0x00, 0x00])?; // extended capabilities
+        self.writer.write_all(&CAPABILITIES.to_le_bytes()[2..])?; // extended capabilities
         self.writer.write_all(&[0x00])?; // no plugins
         self.writer.write_all(&[0x00; 6][..])?; // filler
         self.writer.write_all(&[0x00; 4][..])?; // filler
