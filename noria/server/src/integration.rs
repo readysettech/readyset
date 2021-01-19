@@ -3211,3 +3211,74 @@ async fn non_sql_range_upquery() {
         &[(2..5).map(|n| vec![n.into(), n.into()]).collect::<Vec<_>>()]
     )
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn range_upquery_after_point_queries() {
+    let mut g = {
+        let mut builder = Builder::default();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
+        builder.start_local()
+    }
+    .await
+    .unwrap()
+    .0;
+
+    g.migrate(|mig| {
+        let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
+        let b = mig.add_base("b", &["a", "c"], Base::default().with_key(vec![0]));
+        let join = mig.add_ingredient(
+            "join",
+            &["a", "a_b", "b_c"],
+            Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
+        );
+
+        mig.maintain("reader".to_string(), join, &[0], BinaryOperator::Equal);
+    })
+    .await;
+
+    let mut a = g.table("a").await.unwrap();
+    let mut b = g.table("b").await.unwrap();
+    let mut reader = g.view("reader").await.unwrap();
+    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+        .await
+        .unwrap();
+    b.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n * 10)]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // Do some point queries so we get keys covered by our range
+    assert_eq!(
+        &*reader.lookup(&[3.into()], true).await.unwrap(),
+        &[vec![
+            DataType::from(3),
+            DataType::from(3),
+            DataType::from(30)
+        ]]
+    );
+    assert_eq!(
+        &*reader.lookup(&[3.into()], true).await.unwrap(),
+        &[vec![
+            DataType::from(3),
+            DataType::from(3),
+            DataType::from(30)
+        ]]
+    );
+
+    let res = reader
+        .multi_lookup(
+            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            true,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        &*res,
+        &[(2..5)
+            .map(|n| vec![n.into(), n.into(), (n * 10).into()])
+            .collect::<Vec<_>>()]
+    )
+}
