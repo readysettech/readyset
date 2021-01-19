@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::mem;
 use std::net::SocketAddr;
+use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
@@ -1734,16 +1735,10 @@ impl Domain {
             return;
         }
 
-        let (m, source, is_miss) = match self.replay_paths[&tag] {
+        let (m, source, misses) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
-                trigger: TriggerEndpoint::Start(ref cols),
-                ref path,
-                ..
-            }
-            | ReplayPath {
-                source: Some(source),
-                trigger: TriggerEndpoint::Local(ref cols),
+                trigger: TriggerEndpoint::Start(ref cols) | TriggerEndpoint::Local(ref cols),
                 ref path,
                 ..
             } => {
@@ -1752,55 +1747,66 @@ impl Domain {
                     .get(source)
                     .expect("migration replay path started with non-materialized node");
                 let rs = match key.as_ref() {
-                    KeyComparison::Equal(equal) => {
-                        state.lookup(&cols[..], &KeyType::from(equal)).records()
-                    }
+                    KeyComparison::Equal(equal) => state
+                        .lookup(&cols[..], &KeyType::from(equal))
+                        .records()
+                        .ok_or_else(|| vec![key.clone()]),
                     KeyComparison::Range(range) => state
                         .lookup_range(&cols[..], &RangeKey::from(range))
-                        .records(),
+                        .as_result()
+                        .map_err(|misses| {
+                            misses
+                                .into_iter()
+                                .map(|miss| Cow::Owned(KeyComparison::try_from(miss).unwrap()))
+                                .collect()
+                        }),
                 };
 
-                let mut k = HashSet::new();
-                k.insert(key.clone().into_owned());
-                if let Some(rs) = rs {
-                    use std::iter::FromIterator;
-                    let data = Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
+                match rs {
+                    Ok(rs) => {
+                        use std::iter::FromIterator;
+                        let data =
+                            Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
 
-                    let m = Some(Box::new(Packet::ReplayPiece {
-                        link: Link::new(source, path[0].node),
-                        tag,
-                        context: ReplayPieceContext::Partial {
-                            for_keys: k,
-                            unishard: single_shard, // if we are the only source, only one path
-                            ignore: false,
-                            requesting_shard,
-                        },
-                        data,
-                    }));
-                    (m, source, None)
-                } else {
-                    (None, source, Some(cols.clone()))
+                        let mut k = HashSet::new();
+                        k.insert(key.clone().into_owned());
+                        let m = Some(Box::new(Packet::ReplayPiece {
+                            link: Link::new(source, path[0].node),
+                            tag,
+                            context: ReplayPieceContext::Partial {
+                                for_keys: k,
+                                unishard: single_shard, // if we are the only source, only one path
+                                ignore: false,
+                                requesting_shard,
+                            },
+                            data,
+                        }));
+                        (m, source, None)
+                    }
+                    Err(misses) => (None, source, Some((misses, cols.clone()))),
                 }
             }
             _ => unreachable!(),
         };
 
-        if let Some(cols) = is_miss {
+        if let Some((misses, cols)) = misses {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag,
                    "key" => ?key);
-            self.on_replay_miss(
-                source,
-                &cols[..],
-                key.clone().into_owned(),
-                key.into_owned(),
-                single_shard,
-                requesting_shard,
-                tag,
-            );
+            for miss in misses {
+                self.on_replay_miss(
+                    source,
+                    &cols[..],
+                    key.clone().into_owned(),
+                    miss.into_owned(),
+                    single_shard,
+                    requesting_shard,
+                    tag,
+                );
+            }
         } else {
             trace!(self.log,
                    "satisfied replay request";

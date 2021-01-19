@@ -1,4 +1,10 @@
-#![feature(bound_cloned, iter_order_by, trait_alias, btree_drain_filter)]
+#![feature(
+    bound_cloned,
+    iter_order_by,
+    trait_alias,
+    btree_drain_filter,
+    or_patterns
+)]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.
 #![cfg_attr(debug, feature(is_sorted))]
