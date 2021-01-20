@@ -19,7 +19,7 @@ use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
 use nom_sql::{parser as sql_parser, ArithmeticItem};
-use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
+use nom_sql::{ArithmeticBase, BinaryOperator, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use petgraph::graph::NodeIndex;
 
@@ -288,6 +288,20 @@ impl SqlIncorporator {
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     });
 
+                    // The reuse implementation below may only be performed when all parameters
+                    // are equality operators. Query Graphs constructed for other operator types
+                    // may contain nodes such as ParamFilter that contain materializations specific
+                    // to their parameters and are not suitable for reuse with alternative
+                    // parameters. (Note that simple range queries are expected to be implemented
+                    // with range key lookups over equality parameter views. These views will be
+                    // reused because of the equality parameters.)
+                    let are_all_parameters_equalities =
+                        qg.parameters().iter().all(|p| p.1 == BinaryOperator::Equal)
+                            && existing_qg
+                                .parameters()
+                                .iter()
+                                .all(|p| p.1 == BinaryOperator::Equal);
+
                     // Leaf queries with no parameters require that a "bogokey" dummy literal column
                     // be projected to support lookups. The ReaderOntoExisting optimization below
                     // does not support projecting a new bogokey if the existing query graph has
@@ -296,9 +310,12 @@ impl SqlIncorporator {
                         && qg.parameters().is_empty()
                         && !existing_qg.parameters().is_empty();
 
-                    if predicates_match && no_grouped_columns && !is_new_bogokey_needed {
+                    if predicates_match
+                        && no_grouped_columns
+                        && are_all_parameters_equalities
+                        && !is_new_bogokey_needed
+                    {
                         use ::mir::node::MirNodeType;
-
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -1111,6 +1128,217 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    async fn it_parses_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_parses_parameter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), age int);",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with a parameter
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 1);
+            let node = get_node(&inc, mig, &qfp.name);
+            // fields should be projected correctly in query order
+            assert_eq!(node.fields(), &["id", "name"]);
+            assert_eq!(node.description(true), "π[0, 1]");
+            // reader key column should be correct
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_parses_unprojected_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_parses_unprojected_parameter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), age int);",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with a parameter
+            let res = inc.add_query("SELECT id FROM users WHERE users.name = ?;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 1);
+            let node = get_node(&inc, mig, &qfp.name);
+            // fields should be projected correctly in query order, with the
+            // absent parameter column included
+            assert_eq!(node.fields(), &["id", "name"]);
+            assert_eq!(node.description(true), "π[0, 1]");
+            // reader key column should be correct
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_parses_filter_and_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_parses_filter_and_parameter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), age int);",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with a parameter
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.age > 20 AND users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 2);
+
+            // Check filter node
+            let qid = query_id_hash(
+                &["users"],
+                &[&Column::from("users.age")],
+                &[&Column::from("users.id"), &Column::from("users.name")],
+            );
+            let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
+            assert_eq!(filter.description(true), "σ[f2 \\> 20]");
+
+            // Check projection node
+            let projection = get_node(&inc, mig, &qfp.name);
+            // fields should be projected correctly in query order
+            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(projection.description(true), "π[0, 1]");
+
+            // TODO Check that the filter and projection nodes are ordered properly.
+            // println!("graph: {:?}", mig.graph());
+
+            // Check reader
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_parses_like_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_parses_like_parameter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), age int);",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with a LIKE predicate parameter
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 2);
+
+            // Check param filter node
+            let qid = query_id_hash(
+                &["users"],
+                &[],
+                &[&Column::from("users.id"), &Column::from("users.name")],
+            );
+            let param_filter = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(param_filter.description(true), "σφ[LIKE 1 → 3]");
+
+            // Check projection node
+            let projection = get_node(&inc, mig, &qfp.name);
+            // fields should be projected correctly in query order, with the __filter_key available for lookups
+            assert_eq!(projection.fields(), &["id", "name", "__filter_key"]);
+            assert_eq!(projection.description(true), "π[0, 1, 3]");
+
+            // reader key column should be correct
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_parses_ilike_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple("it_parses_ilike_parameter_column").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, age int, name varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query with an ILIKE predicate parameter
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name ILIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 2);
+
+            // Check param filter node
+            let qid = query_id_hash(
+                &["users"],
+                &[],
+                &[&Column::from("users.id"), &Column::from("users.name")],
+            );
+            let param_filter = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(param_filter.description(true), "σφ[ILIKE 2 → 3]");
+
+            // Check projection node
+            let projection = get_node(&inc, mig, &qfp.name);
+            // fields should be projected correctly in query order, with the __filter_key available for lookups
+            assert_eq!(projection.fields(), &["id", "name", "__filter_key"]);
+            assert_eq!(projection.description(true), "π[0, 2, 3]");
+
+            // reader key column should be correct
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_simple_join() {
         // set up graph
         let mut g = integration::start_simple("it_incorporates_simple_join").await;
@@ -1461,6 +1689,7 @@ mod tests {
             let projection = get_node(&inc, mig, &qfp.name);
             assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
             assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1706,6 +1935,198 @@ mod tests {
             // Check that the parent of the identity is the paramaterized query.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(top_node.ancestors(), [param_address]);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_reuses_identical_like_filter_parameter_query() {
+        // set up graph
+        let mut g =
+            integration::start_simple("it_reuses_identical_like_filter_parameter_query").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new query
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            let qid = query_id_hash(
+                &["users"],
+                &[],
+                &[&Column::from("users.id"), &Column::from("users.name")],
+            );
+            let param_filter_address = inc
+                .get_flow_node_address(&format!("q_{:x}_n0", qid), 0)
+                .unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "__filter_key"]);
+            assert_eq!(projection.description(true), "π[0, 1, 3]");
+            let leaf = qfp.query_leaf;
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+
+            // Add the same query again
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // should have added no more nodes
+            assert_eq!(qfp.new_nodes, vec![]);
+            assert_eq!(mig.graph().node_count(), ncount);
+            // should have ended up with the same leaf node
+            assert_eq!(qfp.query_leaf, leaf);
+
+            // Add the same query again, but project columns in a different order
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT name, id FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["name", "id", "__filter_key"]);
+            assert_eq!(projection.description(true), "π[1, 0, 3]");
+            // should have added two more nodes (project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+            // Check that the parent of the top node is param filter
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [param_filter_address]);
+
+            // Add a query with an additional field projected
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT name, id, address FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(
+                projection.fields(),
+                &["name", "id", "address", "__filter_key"]
+            );
+            assert_eq!(projection.description(true), "π[1, 0, 2, 3]");
+            // should have added two more nodes (project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[3]))
+                .unwrap();
+            // Check that the parent of the top node is param filter
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [param_filter_address]);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_does_not_reuse_mismatched_filter_parameter_query() {
+        // set up graph
+        let mut g =
+            integration::start_simple("it_does_not_reuse_mismatched_filter_parameter_query").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+            let base = inc.get_flow_node_address("users", 0).unwrap();
+
+            // Add a new query
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check that two nodes were added
+            assert_eq!(qfp.new_nodes.len(), 2);
+            // Check that the parent of the top node is the base table
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base]);
+
+            // Add a query with a LIKE parameter on a different field.
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.address LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check that two nodes were added
+            assert_eq!(qfp.new_nodes.len(), 2);
+            // Check that the parent of the top node is the base table
+            // (ie is not a view node created by a query above)
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base]);
+
+            // Add a query with a (different) ILIKE parameter on the original field.
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name ILIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check that two nodes were added
+            assert_eq!(qfp.new_nodes.len(), 2);
+            // Check that the parent of the top node is the base table
+            // (ie is not a view node created by a query above)
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base]);
+
+            // Add a query with a simple equality parameter on the original field.
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check that one (projection) node was added
+            assert_eq!(qfp.new_nodes.len(), 1);
+            // Check that the parent of the top node is the base table
+            // (ie is not a view node created by a query above)
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base]);
         })
         .await;
     }
@@ -2573,6 +2994,94 @@ mod tests {
                 edge.description(true),
                 "π[((lit: 2) * 1), ((lit: 2) * (lit: 10)), lit: 0]"
             );
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_arithmetic_projection_with_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple(
+            "it_incorporates_arithmetic_projection_with_parameter_column",
+        )
+        .await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, age int, name varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            let res = inc.add_query(
+                "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 1);
+
+            // Check projection node
+            let node = get_node(&inc, mig, &qfp.name);
+            assert_eq!(node.fields(), &["name", "2 * users.age", "twenty"]);
+            assert_eq!(
+                node.description(true),
+                "π[2, ((lit: 2) * 1), ((lit: 2) * (lit: 10))]"
+            );
+
+            // Check reader
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_arithmetic_projection_with_like_parameter_column() {
+        // set up graph
+        let mut g = integration::start_simple(
+            "it_incorporates_arithmetic_projection_with_like_parameter_column",
+        )
+        .await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, age int, name varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            let res = inc.add_query(
+                "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name LIKE ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            assert_eq!(qfp.new_nodes.len(), 2);
+
+            // Check param filter node
+            let param_filter = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(param_filter.description(true), "σφ[LIKE 2 → 3]");
+
+            // Check projection node
+            let node = get_node(&inc, mig, &qfp.name);
+            assert_eq!(node.fields(), &["__filter_key", "2 * users.age", "twenty"]);
+            assert_eq!(
+                node.description(true),
+                "π[3, ((lit: 2) * 1), ((lit: 2) * (lit: 10))]"
+            );
+
+            // Check reader
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
         })
         .await;
     }

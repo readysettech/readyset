@@ -1,6 +1,6 @@
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ColumnConstraint,
-    ColumnSpecification, Literal, OrderType,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator,
+    ColumnConstraint, ColumnSpecification, Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -9,6 +9,7 @@ use common::DataType;
 use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
+use dataflow::ops::param_filter::ParamFilter;
 use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
@@ -206,6 +207,24 @@ fn mir_node_to_flow_parts(
                         project,
                         JoinType::Inner,
                         mig,
+                    )
+                }
+                MirNodeType::ParamFilter {
+                    ref col,
+                    ref emit_key,
+                    ref operator,
+                } => {
+                    assert_eq!(mir_node.ancestors.len(), 1);
+                    let parent = mir_node.ancestors[0].clone();
+                    make_param_filter_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        col,
+                        emit_key,
+                        operator,
+                        mig,
+                        table_mapping,
                     )
                 }
                 MirNodeType::Latest { ref group_by } => {
@@ -743,6 +762,39 @@ fn make_join_node(
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
 
     FlowNode::New(n)
+}
+
+fn make_param_filter_node(
+    name: &str,
+    parent: MirNodeRef,
+    columns: &[Column],
+    col: &Column,
+    emit_key: &Column,
+    operator: &BinaryOperator,
+    mig: &mut Migration,
+    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+) -> FlowNode {
+    use nom_sql::BinaryOperator as nom_op;
+    use ops::param_filter::Operator as pf_op;
+
+    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let column_names = column_names(columns);
+    let col = parent.borrow().column_id_for_column(col, table_mapping);
+    let emit_key = column_names
+        .iter()
+        .rposition(|c| *c == emit_key.name)
+        .unwrap();
+    let operator = match operator {
+        nom_op::ILike => pf_op::ILike,
+        nom_op::Like => pf_op::Like,
+        _ => unreachable!("Only supported operators are expected in a mir ParamFilter."),
+    };
+    let node = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ParamFilter::new(parent_na, col, emit_key, operator),
+    );
+    FlowNode::New(node)
 }
 
 fn make_latest_node(

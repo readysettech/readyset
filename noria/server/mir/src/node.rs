@@ -1,4 +1,4 @@
-use nom_sql::{ArithmeticExpression, ColumnSpecification, Literal, OrderType};
+use nom_sql::{ArithmeticExpression, BinaryOperator, ColumnSpecification, Literal, OrderType};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
@@ -493,6 +493,12 @@ pub enum MirNodeType {
         column: String,
         key: String,
     },
+    /// Param Filter node
+    ParamFilter {
+        col: Column,
+        emit_key: Column,
+        operator: BinaryOperator,
+    },
 }
 
 impl MirNodeType {
@@ -768,6 +774,18 @@ impl MirNodeType {
                 } => (value == our_value && our_key == key && our_col == column),
                 _ => false,
             },
+            MirNodeType::ParamFilter {
+                col: ref our_col,
+                emit_key: ref our_emit_key,
+                operator: ref our_operator,
+            } => match *other {
+                MirNodeType::ParamFilter {
+                    ref col,
+                    ref emit_key,
+                    ref operator,
+                } => (col == our_col && emit_key == our_emit_key && operator == our_operator),
+                _ => false,
+            },
             _ => unimplemented!(),
         }
     }
@@ -1038,6 +1056,11 @@ impl Debug for MirNodeType {
                 write!(f, "{}", cols)
             }
             MirNodeType::Rewrite { ref column, .. } => write!(f, "Rw [{}]", column),
+            MirNodeType::ParamFilter {
+                ref col,
+                ref emit_key,
+                ref operator,
+            } => write!(f, "σφ [{:?}, {:?}, {:?}]", col, emit_key, operator),
         }
     }
 }
