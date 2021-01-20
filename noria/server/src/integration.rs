@@ -11,7 +11,7 @@ use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
-use noria::{DataType, KeyComparison};
+use noria::{DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -3315,4 +3315,65 @@ async fn query_reuse_aliases() {
     assert!(g.view("q2").await.is_ok());
     assert!(g.view("q3").await.is_ok());
     assert!(g.view("q4").await.is_ok());
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn post_read_ilike() {
+    let mut g = {
+        let mut builder = Builder::default();
+        builder.disable_partial();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
+        builder.start_local()
+    }
+    .await
+    .unwrap()
+    .0;
+
+    g.migrate(|mig| {
+        let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
+        mig.maintain_anonymous(a, &[0]);
+    })
+    .await;
+
+    let mut a = g.table("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap();
+    a.insert_many(vec![
+        vec![DataType::from("foo"), DataType::from(1i32)],
+        vec![DataType::from("bar"), DataType::from(2i32)],
+        vec![DataType::from("baz"), DataType::from(3i32)],
+        vec![DataType::from("BAZ"), DataType::from(4i32)],
+        vec![
+            DataType::from("something else entirely"),
+            DataType::from(5i32),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let res = reader
+        .raw_lookup(ViewQuery {
+            key_comparisons: vec![KeyComparison::from_range(&(..))],
+            block: true,
+            order_by: Some((1, false)),
+            limit: None,
+            filter: Some(ViewQueryFilter {
+                column: 0,
+                operator: ViewQueryOperator::ILike,
+                value: "%a%".to_string(),
+            }),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res[0],
+        vec![
+            vec![DataType::from("bar"), DataType::from(2)],
+            vec![DataType::from("baz"), DataType::from(3)],
+            vec![DataType::from("BAZ"), DataType::from(4)],
+        ]
+    )
 }

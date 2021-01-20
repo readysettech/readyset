@@ -9,11 +9,13 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
+use noria::util::like::LikePattern;
+use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::mem;
 use std::time;
 use std::{future::Future, task::Poll};
@@ -207,6 +209,7 @@ fn handle_normal_read_query(
         block,
         order_by,
         limit,
+        filter,
     } = query;
     let immediate = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
@@ -228,7 +231,7 @@ fn handle_normal_read_query(
             }
 
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key_comparison, order_by, limit) {
+            match do_lookup(reader, &key_comparison, order_by, limit, &filter) {
                 Ok(rs) => {
                     // immediate hit!
                     ret.push(rs);
@@ -295,6 +298,7 @@ fn handle_normal_read_query(
                         warned: false,
                         order_by,
                         limit,
+                        filter,
                     },
                     tx,
                 ));
@@ -437,27 +441,63 @@ where
     }
 }
 
+fn post_lookup<'a, I>(
+    iter: I,
+    order_by: Option<(usize, bool)>,
+    limit: Option<usize>,
+    filter: &Option<ViewQueryFilter>,
+) -> impl Iterator<Item = &'a Vec<DataType>>
+where
+    I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
+{
+    let ordered_limited = do_order_limit(iter, order_by, limit);
+    let like_pattern = filter.as_ref().map(
+        |ViewQueryFilter {
+             value,
+             operator,
+             column,
+         }| { (LikePattern::new(value, (*operator).into()), *column) },
+    );
+    ordered_limited.filter(move |rec| {
+        like_pattern
+            .as_ref()
+            .map(|(pat, col)| {
+                pat.matches(
+                    (&rec[*col])
+                        .try_into()
+                        .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
+                )
+            })
+            .unwrap_or(true)
+    })
+}
+
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
     order_by: Option<(usize, bool)>,
     limit: Option<usize>,
+    filter: &Option<ViewQueryFilter>,
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(&*equal, |rs| {
-                serialize(do_order_limit(rs.into_iter(), order_by, limit))
+                serialize(post_lookup(rs.into_iter(), order_by, limit, filter).collect::<Vec<_>>())
             })
             .map(|r| r.0)
     } else {
         reader
             .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
             .map(|(rs, _)| {
-                serialize(do_order_limit(
-                    rs.into_iter().flatten().collect::<Vec<_>>().iter(),
-                    order_by,
-                    limit,
-                ))
+                serialize(
+                    post_lookup(
+                        rs.into_iter().flatten().collect::<Vec<_>>().iter(),
+                        order_by,
+                        limit,
+                        filter,
+                    )
+                    .collect::<Vec<_>>(),
+                )
             })
     }
 }
@@ -475,6 +515,7 @@ struct BlockingRead {
     // index in self.read that each entyr in keys corresponds to
     pending: Vec<usize>,
     truth: Readers,
+    filter: Option<ViewQueryFilter>,
 
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
@@ -522,7 +563,7 @@ impl BlockingRead {
             while let Some(read_i) = self.pending.pop() {
                 let key = self.keys.pop().expect("pending.len() == keys.len()");
 
-                match do_lookup(reader, &key, self.order_by, self.limit) {
+                match do_lookup(reader, &key, self.order_by, self.limit, &self.filter) {
                     Ok(rs) => {
                         read[read_i] = rs;
                     }
