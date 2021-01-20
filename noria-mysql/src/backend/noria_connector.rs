@@ -1,4 +1,6 @@
-use noria::{ControllerHandle, DataType, Table, TableOperation, View, ZookeeperAuthority};
+use noria::{
+    ControllerHandle, DataType, Table, TableOperation, View, ViewQuery, ZookeeperAuthority,
+};
 
 use anyhow;
 use futures_executor::block_on as block_on_buffer;
@@ -547,11 +549,20 @@ impl NoriaConnector {
                             } else {
                                 info!(query = %q, name = %qname, "adding ad-hoc query");
                             }
+                            // HACK(eta): unless a TopK operator would be made, null out the ORDER
+                            // BY clause in order to get around the issue PR #11 was trying to fix
+                            let q_noria = if q.order.is_some() && !q.limit.is_some() {
+                                let mut q_hack = q.clone();
+                                q_hack.order = None;
+                                q_hack
+                            } else {
+                                q.clone()
+                            };
                             if let Err(e) = block_on!(
                                 self.inner,
                                 self.inner
                                     .noria
-                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                                    .extend_recipe(&format!("QUERY {}: {};", qname, q_noria))
                             ) {
                                 error!(error = %e, "add query failed");
                                 return Err(io::Error::new(io::ErrorKind::Other, e));
@@ -819,9 +830,37 @@ impl NoriaConnector {
                 })
                 .collect()
         };
+        let order_by = q.order.as_ref().map(|oc| {
+            // TODO(eta): support this. It isn't necessarily hard, just a pain.
+            assert_eq!(
+                oc.columns.len(),
+                1,
+                "ORDER BY expressions with more than one column are not supported yet"
+            );
+            // TODO(eta): figure out whether this error is actually possible
+            let col_idx = schema
+                .iter()
+                .position(|x| x.column == oc.columns[0].0.name)
+                .expect("ORDER BY column not in schema!");
+            (
+                col_idx,
+                oc.columns[0].1 == nom_sql::OrderType::OrderDescending,
+            )
+        });
+        let limit = q.limit.as_ref().map(|lc| {
+            assert_eq!(lc.offset, 0, "OFFSET is not supported yet");
+            // FIXME(eta): this cast is ugly!
+            lc.limit as usize
+        });
+        let vq = ViewQuery {
+            key_comparisons: keys,
+            block: true,
+            order_by,
+            limit,
+        };
 
         // if first lookup fails, there's no reason to try the others
-        match block_on_buffer(getter.multi_lookup(keys, true)) {
+        match block_on_buffer(getter.raw_lookup(vq)) {
             Ok(d) => {
                 trace!("select::complete");
                 let mut rw = results.start(schema).unwrap();

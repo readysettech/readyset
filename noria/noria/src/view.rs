@@ -128,6 +128,7 @@ pub(crate) type BoundPair<T> = (Bound<T>, Bound<T>);
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
 pub enum KeyComparison {
     /// Look up exactly one key
+    /// TODO(eta): this comment is crap
     Equal(Vec1<DataType>),
 
     /// Look up all keys within a range
@@ -358,10 +359,8 @@ pub enum ReadQuery {
     Normal {
         /// Where to read from
         target: (NodeIndex, usize),
-        /// Keys to read with
-        key_comparisons: Vec<KeyComparison>,
-        /// Whether to block if a partial replay is triggered
-        block: bool,
+        /// View query to run
+        query: ViewQuery,
     },
     /// Read the size of a leaf view
     Size {
@@ -482,9 +481,34 @@ impl fmt::Debug for View {
 }
 
 pub(crate) mod results;
+
 use self::results::{Results, Row};
 
-impl Service<(Vec<KeyComparison>, bool)> for View {
+/// A read query to be run against a view.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ViewQuery {
+    /// Key comparisons to read with.
+    pub key_comparisons: Vec<KeyComparison>,
+    /// Whether the query should block.
+    pub block: bool,
+    /// Column index to order by, and whether or not to reverse
+    pub order_by: Option<(usize, bool)>,
+    /// Maximum number of records to return
+    pub limit: Option<usize>,
+}
+
+impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
+    fn from((key_comparisons, block): (Vec<KeyComparison>, bool)) -> Self {
+        Self {
+            key_comparisons,
+            block,
+            order_by: None,
+            limit: None,
+        }
+    }
+}
+
+impl Service<ViewQuery> for View {
     type Response = Vec<Results>;
     type Error = ViewError;
 
@@ -500,11 +524,11 @@ impl Service<(Vec<KeyComparison>, bool)> for View {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, (key_comparisons, block): (Vec<KeyComparison>, bool)) -> Self::Future {
+    fn call(&mut self, mut query: ViewQuery) -> Self::Future {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "view-request",
-                ?key_comparisons,
+                ?query.key_comparisons,
                 node = self.node.index()
             ))
         } else {
@@ -515,8 +539,7 @@ impl Service<(Vec<KeyComparison>, bool)> for View {
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
-                key_comparisons,
-                block,
+                query,
             });
 
             let _guard = span.as_ref().map(tracing::Span::enter);
@@ -543,7 +566,7 @@ impl Service<(Vec<KeyComparison>, bool)> for View {
             span.in_scope(|| tracing::trace!("shard request"));
         }
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
-        for comparison in key_comparisons {
+        for comparison in query.key_comparisons.drain(..) {
             for shard in comparison.shard_keys(self.shards.len()) {
                 shard_queries[shard].push(comparison.clone());
             }
@@ -569,8 +592,13 @@ impl Service<(Vec<KeyComparison>, bool)> for View {
                 .map(move |((shardi, shard), shard_queries)| {
                     let request = Tagged::from(ReadQuery::Normal {
                         target: (node, shardi),
-                        key_comparisons: shard_queries,
-                        block,
+                        query: ViewQuery {
+                            key_comparisons: shard_queries,
+                            block: query.block,
+                            // TODO(eta): is it valid to copy across the order_by like this?
+                            order_by: query.order_by,
+                            limit: query.limit,
+                        },
                     });
 
                     let _guard = span.as_ref().map(tracing::Span::enter);
@@ -675,6 +703,16 @@ impl View {
         Ok(vec)
     }
 
+    /// Issue a raw `ViewQuery` against this view, and return the results.
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
+    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
+    /// missing state will be backfilled (asynchronously if `block` is `false`).
+    pub async fn raw_lookup(&mut self, query: ViewQuery) -> Result<Vec<Results>, ViewError> {
+        future::poll_fn(|cx| self.poll_ready(cx)).await?;
+        self.call(query).await
+    }
+
     /// Retrieve the query results for the given parameter values.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
@@ -685,8 +723,7 @@ impl View {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
     ) -> Result<Vec<Results>, ViewError> {
-        future::poll_fn(|cx| self.poll_ready(cx)).await?;
-        self.call((key_comparisons, block)).await
+        self.raw_lookup((key_comparisons, block).into()).await
     }
 
     /// Retrieve the query results for the given parameter value.

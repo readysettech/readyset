@@ -132,7 +132,7 @@ impl Service<ReadRequest> for LocalNoria {
             .map(|article_id| vec1![(article_id as i32).into()].into())
             .collect();
 
-        let fut = self.r.as_mut().unwrap().call((arg, true));
+        let fut = self.r.as_mut().unwrap().call((arg, true).into());
         async move {
             let rows = fut.await?;
             // TODO: assert_eq!(rows.map(|rows| rows.len()), Ok(1));
