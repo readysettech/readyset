@@ -848,6 +848,7 @@ impl NoriaConnector {
             block: true,
             order_by,
             limit,
+            filter: None,
         };
 
         // if first lookup fails, there's no reason to try the others

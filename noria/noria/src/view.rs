@@ -1,5 +1,6 @@
 use crate::data::*;
 use crate::errors::wrap_boxed_error;
+use crate::util::like::CaseSensitivityMode;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
@@ -484,6 +485,36 @@ pub(crate) mod results;
 
 use self::results::{Results, Row};
 
+/// Binary predicate operator for a [`ViewQueryFilter`]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum ViewQueryOperator {
+    /// String matching with LIKE
+    Like,
+    /// String matching with case-insensitive LIKE
+    ILike,
+}
+
+impl From<ViewQueryOperator> for CaseSensitivityMode {
+    fn from(op: ViewQueryOperator) -> Self {
+        match op {
+            ViewQueryOperator::Like => Self::CaseSensitive,
+            ViewQueryOperator::ILike => Self::CaseInsensitive,
+        }
+    }
+}
+
+/// Filter the results of a view query after they're returned from the underlying reader
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ViewQueryFilter {
+    /// Column in the record to filter against
+    pub column: usize,
+    /// Operator to use when filtering
+    pub operator: ViewQueryOperator,
+    /// Value to match against. This is a String right now because the only supported operations are
+    /// LIKE and ILIKE, which are string-only
+    pub value: String,
+}
+
 /// A read query to be run against a view.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ViewQuery {
@@ -495,6 +526,8 @@ pub struct ViewQuery {
     pub order_by: Option<(usize, bool)>,
     /// Maximum number of records to return
     pub limit: Option<usize>,
+    /// Filter to apply to values after they're returned from the underlying reader
+    pub filter: Option<ViewQueryFilter>,
 }
 
 impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
@@ -504,6 +537,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
             block,
             order_by: None,
             limit: None,
+            filter: None,
         }
     }
 }
@@ -598,6 +632,7 @@ impl Service<ViewQuery> for View {
                             // TODO(eta): is it valid to copy across the order_by like this?
                             order_by: query.order_by,
                             limit: query.limit,
+                            filter: query.filter.clone(),
                         },
                     });
 
