@@ -334,6 +334,19 @@ impl GraphViz for MirNodeType {
             MirNodeType::Rewrite { ref column, .. } => {
                 write!(out, "Rw | column: {}", column)?;
             }
+            MirNodeType::ParamFilter {
+                ref col,
+                ref emit_key,
+                ref operator,
+            } => {
+                write!(
+                    out,
+                    "σφ | col: {}, emit_key: {}, operator: {}",
+                    print_col(col),
+                    print_col(emit_key),
+                    operator
+                )?;
+            }
         }
         Ok(out)
     }

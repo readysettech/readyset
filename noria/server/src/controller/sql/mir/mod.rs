@@ -1428,6 +1428,36 @@ impl SqlToMirConverter {
         )
     }
 
+    fn make_param_filter_node(
+        &self,
+        name: &str,
+        parent_node: MirNodeRef,
+        col: &Column,
+        emit_key: &Column,
+        operator: &BinaryOperator,
+    ) -> MirNodeRef {
+        let fields = parent_node
+            .borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .chain(std::iter::once(emit_key.clone()))
+            .collect();
+
+        MirNode::new(
+            name,
+            self.schema_version,
+            fields,
+            MirNodeType::ParamFilter {
+                col: col.clone(),
+                emit_key: emit_key.clone(),
+                operator: operator.clone(),
+            },
+            vec![parent_node.clone()],
+            vec![],
+        )
+    }
+
     fn make_distinct_node(
         &self,
         name: &str,
@@ -1448,6 +1478,7 @@ impl SqlToMirConverter {
             vec![],
         )
     }
+
     fn make_topk_node(
         &self,
         name: &str,
@@ -1983,7 +2014,7 @@ impl SqlToMirConverter {
                 ancestors.push(final_node);
             }
 
-            let final_node = if ancestors.len() > 1 {
+            let mut final_node = if ancestors.len() > 1 {
                 // If we have multiple queries, reconcile them.
                 sec_round = true;
                 if uid != "global".into() {
@@ -2029,13 +2060,6 @@ impl SqlToMirConverter {
                 final_node_cols.to_vec()
             };
 
-            for (pc, _) in qg.parameters() {
-                let pc = Column::from(pc);
-                if !projected_columns.contains(&pc) {
-                    projected_columns.push(pc);
-                }
-            }
-
             // We may already have added some of the arithmetic and literal columns
             let (_, already_computed): (Vec<_>, Vec<_>) =
                 value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
@@ -2078,15 +2102,61 @@ impl SqlToMirConverter {
                 projected_columns.push(Column::new(None, "bogokey"));
             }
 
-            // if this query does not have any parameters, we must add a bogokey
-            let has_bogokey = if has_leaf && qg.parameters().is_empty() {
-                // only add the bogokey if we haven't already added it prior to a TopK above
-                if !projected_columns.contains(&Column::new(None, "bogokey")) {
-                    projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+            // Convert the query parameters to an ordered list of columns that will comprise the
+            // lookup key if a leaf node is attached.
+            let key_columns = match qg.parameters()[..] {
+                _ if !has_leaf => {
+                    // If no leaf node is to be attached, the key_columns are unnecessary.
+                    None
                 }
-                true
-            } else {
-                false
+
+                [] => {
+                    // If there are no parameters, use a dummy "bogokey" for the lookup key.
+                    // Ensure the "bogokey" is projected if that has not been done already.
+                    if !projected_columns.contains(&Column::new(None, "bogokey")) {
+                        projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+                    }
+                    Some(vec![Column::new(None, "bogokey")])
+                }
+
+                [(column, operator @ (BinaryOperator::ILike | BinaryOperator::Like))] => {
+                    // If parameters have non equality operators, insert a ParamFilter node to
+                    // support key lookups over the query, and use the ParamFilter's emitted
+                    // key column as the lookup key. Only a subset of non equality operators are
+                    // supported.
+                    let filter_key_column = Column::new(None, "__filter_key");
+                    final_node = self.make_param_filter_node(
+                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
+                        final_node,
+                        &Column::from(column),
+                        &filter_key_column,
+                        operator,
+                    );
+                    nodes_added.push(final_node.clone());
+                    projected_columns.push(filter_key_column.clone());
+                    new_node_count += 1;
+                    Some(vec![filter_key_column])
+                }
+
+                _ => {
+                    // If parameters have equality operators only, ensure their columns are
+                    // projected and collect them into the lookup key.
+                    // FIXME: Only equality parameters are expected here (ie
+                    // qg.parameters().iter().all(|p| p.1 == BinaryOperator::Equal)), however in
+                    // some cases non equality parameters are passed through and must be accepted.
+                    for (pc, _) in qg.parameters() {
+                        let pc = Column::from(pc);
+                        if !projected_columns.contains(&pc) {
+                            projected_columns.push(pc);
+                        }
+                    }
+                    Some(
+                        qg.parameters()
+                            .into_iter()
+                            .map(|(col, _)| Column::from(col))
+                            .collect(),
+                    )
+                }
             };
 
             let ident = if has_leaf {
@@ -2106,7 +2176,7 @@ impl SqlToMirConverter {
 
             nodes_added.push(leaf_project_node.clone());
 
-            if has_leaf {
+            if let Some(key_columns) = key_columns {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
                 let columns = leaf_project_node
@@ -2119,14 +2189,6 @@ impl SqlToMirConverter {
                         c
                     })
                     .collect();
-                let query_params = if has_bogokey {
-                    vec![Column::new(None, "bogokey")]
-                } else {
-                    qg.parameters()
-                        .into_iter()
-                        .map(|(col, _)| Column::from(col))
-                        .collect()
-                };
 
                 let operator = match &st.where_clause {
                     Some(ConditionExpression::ComparisonOp(ConditionTree { operator, .. })) => {
@@ -2141,7 +2203,7 @@ impl SqlToMirConverter {
                     columns,
                     MirNodeType::Leaf {
                         node: leaf_project_node.clone(),
-                        keys: query_params,
+                        keys: key_columns,
                         operator,
                     },
                     vec![leaf_project_node.clone()],
