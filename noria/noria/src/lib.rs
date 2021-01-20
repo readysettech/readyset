@@ -308,7 +308,7 @@ pub use crate::view::View;
 pub use crate::table::Input;
 
 #[doc(hidden)]
-pub use crate::view::{KeyComparison, ReadQuery, ReadReply, ReadReplyBatch};
+pub use crate::view::{KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, ViewQuery};
 
 #[doc(hidden)]
 pub mod builders {

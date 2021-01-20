@@ -942,3 +942,121 @@ fn absurdly_simple_select() {
     rows.sort_by_key(|(a, _)| *a);
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
 }
+
+#[test]
+fn order_by_basic() {
+    let d = Deployment::new("order_by_basic");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (1, 3)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (2, 4)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
+    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test ORDER BY x DESC", ()).unwrap();
+    assert_eq!(rows, vec![(4, 2), (2, 4), (1, 3)]);
+    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test ORDER BY y ASC", ()).unwrap();
+    assert_eq!(rows, vec![(4, 2), (1, 3), (2, 4)]);
+    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test ORDER BY y DESC", ()).unwrap();
+    assert_eq!(rows, vec![(2, 4), (1, 3), (4, 2)]);
+}
+
+#[test]
+#[ignore] // why doesn't this work?
+fn exec_insert() {
+    let d = Deployment::new("exec_insert");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE posts (id int, number int)")
+        .unwrap();
+    sleep();
+
+    conn.exec_drop("INSERT INTO posts (id, number) VALUES (?, 1)", (5,))
+        .unwrap();
+}
+
+#[test]
+#[ignore] // hangs noria indefinitely; should look into this
+fn design_doc_topk_with_preload() {
+    let d = Deployment::new("design_doc_topk_with_preload");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE posts (id int, number int)")
+        .unwrap();
+    sleep();
+
+    for id in 5..10 {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 1)", id))
+            .unwrap();
+    }
+    for id in &[10, 4, 2, 1] {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 2)", id))
+            .unwrap();
+    }
+    for id in &[11, 3, 0, -1] {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 3)", id))
+            .unwrap();
+    }
+    sleep();
+
+    let simple_topk = conn
+        .prep("SELECT * FROM posts WHERE number = ? ORDER BY id DESC LIMIT 3")
+        .unwrap();
+
+    let problem_topk = conn
+        .prep("SELECT * FROM posts WHERE number < ? ORDER BY id DESC LIMIT 3")
+        .unwrap();
+
+    eprintln!("doing normal topk");
+    // normal topk behaviour (sanity check)
+    let rows: Vec<(i32, i32)> = conn.exec(&simple_topk, (1,)).unwrap();
+    assert_eq!(rows, vec![(9, 1), (8, 1), (7, 1)]);
+    let rows: Vec<(i32, i32)> = conn.exec(&simple_topk, (2,)).unwrap();
+    assert_eq!(rows, vec![(10, 2), (4, 2), (2, 2)]);
+    let rows: Vec<(i32, i32)> = conn.exec(&simple_topk, (3,)).unwrap();
+    assert_eq!(rows, vec![(11, 3), (3, 3), (0, 3)]);
+
+    eprintln!("doing bad topk");
+    // problematic new topk behaviour
+    let rows: Vec<(i32, i32)> = conn.exec(&problem_topk, (3,)).unwrap();
+    assert_eq!(rows, vec![(10, 2), (9, 1), (8, 1)]);
+}
+
+#[test]
+fn design_doc_topk() {
+    let d = Deployment::new("design_doc_topk");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE posts (id int, number int)")
+        .unwrap();
+    sleep();
+
+    for id in 5..10 {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 1)", id))
+            .unwrap();
+    }
+    for id in &[10, 4, 2, 1] {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 2)", id))
+            .unwrap();
+    }
+    for id in &[11, 3, 0, -1] {
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 3)", id))
+            .unwrap();
+    }
+    sleep();
+
+    let problem_topk = conn
+        .prep("SELECT * FROM posts WHERE number < ? ORDER BY id DESC LIMIT 3")
+        .unwrap();
+
+    let rows: Vec<(i32, i32)> = conn.exec(&problem_topk, (3,)).unwrap();
+    assert_eq!(rows, vec![(10, 2), (9, 1), (8, 1)]);
+}

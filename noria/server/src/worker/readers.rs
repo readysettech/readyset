@@ -9,7 +9,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use noria::{KeyComparison, ReadQuery, ReadReply, Tagged};
+use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use std::cell::RefCell;
@@ -183,18 +183,9 @@ fn handle_message(
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let tag = m.tag;
     match m.v {
-        ReadQuery::Normal {
-            target,
-            key_comparisons,
-            block,
-        } => Either::Left(handle_normal_read_query(
-            tag,
-            s,
-            wait,
-            target,
-            key_comparisons,
-            block,
-        )),
+        ReadQuery::Normal { target, query } => {
+            Either::Left(handle_normal_read_query(tag, s, wait, target, query))
+        }
         ReadQuery::Size { target } => {
             Either::Right(Either::Left(handle_size_query(tag, s, target)))
         }
@@ -209,9 +200,14 @@ fn handle_normal_read_query(
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     target: (NodeIndex, usize),
-    mut key_comparisons: Vec<KeyComparison>,
-    block: bool,
+    query: ViewQuery,
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    let ViewQuery {
+        mut key_comparisons,
+        block,
+        order_by,
+        limit,
+    } = query;
     let immediate = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
         let reader = readers_cache.entry(target).or_insert_with(|| {
@@ -232,7 +228,7 @@ fn handle_normal_read_query(
             }
 
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key_comparison) {
+            match do_lookup(reader, &key_comparison, order_by, limit) {
                 Ok(rs) => {
                     // immediate hit!
                     ret.push(rs);
@@ -297,6 +293,8 @@ fn handle_normal_read_query(
                         next_trigger: now,
                         first: now,
                         warned: false,
+                        order_by,
+                        limit,
                     },
                     tx,
                 ));
@@ -354,18 +352,113 @@ fn handle_keys_query(
     }))
 }
 
+/// A container for four different exact-size iterators.
+///
+/// This type exists to avoid having to return a `dyn Iterator` when applying an ORDER BY / LIMIT
+/// to the results of a query. It implements `Iterator` and `ExactSizeIterator` iff all of its
+/// type parameters implement `Iterator<Item = &Vec<DataType>>`.
+enum OrderedLimitedIter<I, J, K, L> {
+    Original(I),
+    Ordered(J),
+    Limited(K),
+    OrderedLimited(L),
+}
+
+/// WARNING: This impl does NOT delegate calls to `len()` to the underlying iterators.
+impl<'a, I, J, K, L> ExactSizeIterator for OrderedLimitedIter<I, J, K, L>
+where
+    I: Iterator<Item = &'a Vec<DataType>>,
+    J: Iterator<Item = &'a Vec<DataType>>,
+    K: Iterator<Item = &'a Vec<DataType>>,
+    L: Iterator<Item = &'a Vec<DataType>>,
+{
+}
+
+impl<'a, I, J, K, L> Iterator for OrderedLimitedIter<I, J, K, L>
+where
+    I: Iterator<Item = &'a Vec<DataType>>,
+    J: Iterator<Item = &'a Vec<DataType>>,
+    K: Iterator<Item = &'a Vec<DataType>>,
+    L: Iterator<Item = &'a Vec<DataType>>,
+{
+    type Item = &'a Vec<DataType>;
+    fn next(&mut self) -> Option<Self::Item> {
+        use self::OrderedLimitedIter::*;
+        match self {
+            Original(i) => i.next(),
+            Ordered(i) => i.next(),
+            Limited(i) => i.next(),
+            OrderedLimited(i) => i.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        use self::OrderedLimitedIter::*;
+        match self {
+            Original(i) => i.size_hint(),
+            Ordered(i) => i.size_hint(),
+            Limited(i) => i.size_hint(),
+            OrderedLimited(i) => i.size_hint(),
+        }
+    }
+}
+
+fn do_order<'a, I>(iter: I, idx: usize, reverse: bool) -> impl Iterator<Item = &'a Vec<DataType>>
+where
+    I: Iterator<Item = &'a Vec<DataType>>,
+{
+    // TODO(eta): is there a way to avoid buffering all the results?
+    let mut results = iter.collect::<Vec<_>>();
+    results.sort_by(|a, b| {
+        let ret = a[idx].cmp(&b[idx]);
+        if reverse {
+            ret.reverse()
+        } else {
+            ret
+        }
+    });
+    results.into_iter()
+}
+
+fn do_order_limit<'a, I>(
+    iter: I,
+    order_by: Option<(usize, bool)>,
+    limit: Option<usize>,
+) -> impl Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator
+where
+    I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
+{
+    match (order_by, limit) {
+        (None, None) => OrderedLimitedIter::Original(iter),
+        (Some((idx, reverse)), None) => OrderedLimitedIter::Ordered(do_order(iter, idx, reverse)),
+        (None, Some(lim)) => OrderedLimitedIter::Limited(iter.take(lim)),
+        (Some((idx, reverse)), Some(lim)) => {
+            OrderedLimitedIter::OrderedLimited(do_order(iter, idx, reverse).take(lim))
+        }
+    }
+}
+
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
+    order_by: Option<(usize, bool)>,
+    limit: Option<usize>,
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
-            .try_find_and(&*equal, |rs| serialize(rs))
+            .try_find_and(&*equal, |rs| {
+                serialize(do_order_limit(rs.into_iter(), order_by, limit))
+            })
             .map(|r| r.0)
     } else {
         reader
             .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
-            .map(|(rs, _)| serialize(&rs.into_iter().flatten().collect::<Vec<_>>()))
+            .map(|(rs, _)| {
+                serialize(do_order_limit(
+                    rs.into_iter().flatten().collect::<Vec<_>>().iter(),
+                    order_by,
+                    limit,
+                ))
+            })
     }
 }
 
@@ -373,6 +466,8 @@ fn do_lookup(
 struct BlockingRead {
     tag: u32,
     target: (NodeIndex, usize),
+    order_by: Option<(usize, bool)>,
+    limit: Option<usize>,
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read
@@ -427,7 +522,7 @@ impl BlockingRead {
             while let Some(read_i) = self.pending.pop() {
                 let key = self.keys.pop().expect("pending.len() == keys.len()");
 
-                match do_lookup(reader, &key) {
+                match do_lookup(reader, &key, self.order_by, self.limit) {
                     Ok(rs) => {
                         read[read_i] = rs;
                     }
