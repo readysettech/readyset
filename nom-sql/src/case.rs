@@ -39,6 +39,7 @@ impl fmt::Display for CaseWhenExpression {
         if let Some(ref expr) = self.else_expr {
             write!(f, " ELSE {}", expr)?;
         }
+        write!(f, " END")?;
         Ok(())
     }
 }
@@ -72,4 +73,42 @@ pub fn case_when_column(i: &[u8]) -> IResult<&[u8], CaseWhenExpression> {
             else_expr,
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{BinaryOperator, ConditionBase, ConditionTree, Literal};
+
+    use super::*;
+
+    #[test]
+    fn it_displays() {
+        let c1 = Column {
+            name: String::from("foo"),
+            alias: None,
+            table: None,
+            function: None,
+        };
+
+        let exp = CaseWhenExpression {
+            condition: ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field(c1.clone()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Integer(0),
+                ))),
+            }),
+            then_expr: ColumnOrLiteral::Column(c1.clone()),
+            else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(1))),
+        };
+
+        assert_eq!(format!("{}", exp), "CASE WHEN foo = 0 THEN foo ELSE 1 END");
+
+        let exp_no_else = CaseWhenExpression {
+            else_expr: None,
+            ..exp
+        };
+
+        assert_eq!(format!("{}", exp_no_else), "CASE WHEN foo = 0 THEN foo END");
+    }
 }
