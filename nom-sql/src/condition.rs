@@ -1039,4 +1039,17 @@ mod tests {
         assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
         assert_eq!(result, expected);
     }
+
+    #[test]
+    fn ilike() {
+        let qs = b"name ILIKE ?";
+        let expected = flat_condition_tree(
+            BinaryOperator::ILike,
+            ConditionBase::Field("name".into()),
+            ConditionBase::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+        );
+        let (remaining, result) = condition_expr(qs).unwrap();
+        assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+        assert_eq!(result, expected);
+    }
 }

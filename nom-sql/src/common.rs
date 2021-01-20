@@ -209,6 +209,8 @@ pub enum BinaryOperator {
     Or,
     Like,
     NotLike,
+    ILike,
+    NotILike,
     Equal,
     NotEqual,
     Greater,
@@ -246,7 +248,9 @@ impl Display for BinaryOperator {
             BinaryOperator::And => "AND",
             BinaryOperator::Or => "OR",
             BinaryOperator::Like => "LIKE",
-            BinaryOperator::NotLike => "NOT_LIKE",
+            BinaryOperator::NotLike => "NOT LIKE",
+            BinaryOperator::ILike => "LIKE",
+            BinaryOperator::NotILike => "NOT LIKE",
             BinaryOperator::Equal => "=",
             BinaryOperator::NotEqual => "!=",
             BinaryOperator::Greater => ">",
@@ -829,8 +833,16 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 // Parse binary comparison operators
 pub fn binary_comparison_operator(i: &[u8]) -> IResult<&[u8], BinaryOperator> {
     alt((
-        map(tag_no_case("not_like"), |_| BinaryOperator::NotLike),
+        map(
+            tuple((tag_no_case("not"), multispace1, tag_no_case("like"))),
+            |_| BinaryOperator::NotLike,
+        ),
         map(tag_no_case("like"), |_| BinaryOperator::Like),
+        map(
+            tuple((tag_no_case("not"), multispace1, tag_no_case("ilike"))),
+            |_| BinaryOperator::NotILike,
+        ),
+        map(tag_no_case("ilike"), |_| BinaryOperator::ILike),
         map(tag_no_case("!="), |_| BinaryOperator::NotEqual),
         map(tag_no_case("<>"), |_| BinaryOperator::NotEqual),
         map(tag_no_case(">="), |_| BinaryOperator::GreaterOrEqual),
