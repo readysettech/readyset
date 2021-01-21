@@ -431,7 +431,7 @@ fn update_basic() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Rusty\""));
+    assert_eq!(name, String::from("Rusty"));
 }
 
 #[test]
@@ -462,7 +462,7 @@ fn update_basic_prepared() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Rusty\""));
+    assert_eq!(name, String::from("Rusty"));
 
     {
         let updated = conn
@@ -479,7 +479,7 @@ fn update_basic_prepared() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Bob\""));
+    assert_eq!(name, String::from("Bob"));
 }
 
 #[test]
@@ -508,11 +508,11 @@ fn update_compound_primary_key() {
 
     let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
     let name: String = conn.query_first(q).unwrap().unwrap();
-    assert_eq!(name, String::from("\"better\""));
+    assert_eq!(name, String::from("better"));
 
     let q = "SELECT Vote.reason FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 3";
     let name: String = conn.query_first(q).unwrap().unwrap();
-    assert_eq!(name, String::from("\"still okay\""));
+    assert_eq!(name, String::from("still okay"));
 }
 
 #[test]
@@ -541,7 +541,7 @@ fn update_only_constraint() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Rusty\""));
+    assert_eq!(name, String::from("Rusty"));
 }
 
 #[test]
@@ -568,7 +568,7 @@ fn update_pkey() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 10")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Rusty\""));
+    assert_eq!(name, String::from("Rusty"));
     let old_row = conn
         .query_first::<mysql::Row, _>("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap();
@@ -608,7 +608,7 @@ fn update_separate() {
         .query_first("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .unwrap()
         .unwrap();
-    assert_eq!(name, String::from("\"Rusty II\""));
+    assert_eq!(name, String::from("Rusty II"));
 }
 
 #[test]
@@ -698,8 +698,8 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
-    assert!(names.iter().any(|s| s == "\"Jane\""));
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
 
     let names: Vec<String> = conn
         .exec("SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)", (1, 2))
@@ -708,8 +708,8 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
-    assert!(names.iter().any(|s| s == "\"Jane\""));
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
 
     // some lookups give empty results
     let names: Vec<String> = conn
@@ -719,8 +719,8 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
-    assert!(names.iter().any(|s| s == "\"Jane\""));
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
 
     let names: Vec<String> = conn
         .exec(
@@ -732,8 +732,8 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
-    assert!(names.iter().any(|s| s == "\"Jane\""));
+    assert!(names.iter().any(|s| s == "Bob"));
+    assert!(names.iter().any(|s| s == "Jane"));
 
     // also track another parameter
     let names: Vec<String> = conn
@@ -743,7 +743,7 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "Bob"));
 
     let names: Vec<String> = conn
         .exec(
@@ -755,7 +755,7 @@ fn select_collapse_where_in() {
         .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
-    assert!(names.iter().any(|s| s == "\"Bob\""));
+    assert!(names.iter().any(|s| s == "Bob"));
 }
 
 #[test]
@@ -778,6 +778,23 @@ fn basic_select() {
         rows.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>(),
         vec![vec!["4".into(), "2".into()]]
     );
+}
+
+#[test]
+fn strings() {
+    let d = Deployment::new("strings");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x TEXT)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x) VALUES ('foo')")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(String,)> = conn.query("SELECT test.* FROM test").unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows, vec![("foo".to_string(),)]);
 }
 
 #[test]
