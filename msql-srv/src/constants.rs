@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Manually extracted from mysql-5.5.23/include/mysql_com.h
 
 /// new more secure passwords
