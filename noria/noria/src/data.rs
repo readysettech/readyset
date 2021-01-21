@@ -641,6 +641,13 @@ impl From<String> for DataType {
     }
 }
 
+impl From<&'_ DataType> for String {
+    fn from(dt: &DataType) -> Self {
+        let s: &str = dt.into();
+        s.into()
+    }
+}
+
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
         DataType::try_from(s.as_bytes()).unwrap()
@@ -874,6 +881,7 @@ impl Arbitrary for DataType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_strategy::proptest;
 
     #[test]
     fn mysql_value_to_datatype() {
@@ -1050,8 +1058,6 @@ mod tests {
     where
         T: PartialEq + fmt::Debug,
     {
-        use std::convert::TryFrom;
-
         let txt1: DataType = "hi".into();
         let txt12: DataType = "no".into();
         let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
@@ -1324,6 +1330,11 @@ mod tests {
         _data_type_conversion_test_eq_i64_panic(&ubigint_u64_max);
         _data_type_conversion_test_eq_u64(&ubigint_u64_max);
         _data_type_conversion_test_eq_i128(&ubigint_u64_max);
+    }
+
+    #[proptest]
+    fn data_type_string_conversion_roundtrip(s: String) {
+        assert_eq!(String::try_from(&DataType::from(s.clone())), Ok(s))
     }
 
     #[test]

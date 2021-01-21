@@ -2335,6 +2335,7 @@ dependencies = [
  "serde_json",
  "slab",
  "slog",
+ "test-strategy",
  "thiserror",
  "tokio 0.2.24",
  "tokio-tower",
@@ -3677,6 +3678,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test-strategy"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2328963c69243416e811c88066d18f670792b2e36e17fa57f4b1a124f85d18a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

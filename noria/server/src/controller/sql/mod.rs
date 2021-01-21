@@ -23,7 +23,6 @@ use nom_sql::{ArithmeticBase, CreateTableStatement, SqlQuery};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
 use petgraph::graph::NodeIndex;
 
-use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
@@ -781,14 +780,7 @@ impl SqlIncorporator {
     fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> Result<SqlQuery, String> {
         // TODO: make this not take &mut self
 
-        use passes::alias_removal::AliasRemoval;
-        use passes::count_star_rewrite::CountStarRewrite;
-        use passes::implied_tables::ImpliedTableExpansion;
-        use passes::key_def_coalescing::KeyDefinitionCoalescing;
-        use passes::negation_removal::NegationRemoval;
-        use passes::rewrite_between::RewriteBetween;
-        use passes::star_expansion::StarExpansion;
-        use passes::subqueries::SubQueries;
+        use passes::*;
         use query_utils::ReferredTables;
 
         // need to increment here so that each subquery has a unique name.
@@ -867,6 +859,7 @@ impl SqlIncorporator {
             .expand_table_aliases(mig.context())
             .rewrite_between()
             .remove_negation()
+            .strip_post_filters()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)

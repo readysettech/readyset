@@ -915,7 +915,7 @@ fn prepare_conflicting_ranged_query() {
     sleep();
 
     // panics because you can't mix and match range operators like this yet
-    let res: Vec<(i32, i32)> = conn
+    let _res: Vec<(i32, i32)> = conn
         .exec("SELECT * FROM test WHERE y > ? AND x < ?", (1i32, 5i32))
         .unwrap();
 }
@@ -939,6 +939,7 @@ fn prepare_ranged_query_partial() {
         .unwrap();
     assert_eq!(res, vec![(4, 2)]);
 }
+
 #[test]
 fn absurdly_simple_select() {
     let d = Deployment::new("absurdly_simple_select");
@@ -1099,4 +1100,50 @@ fn design_doc_topk() {
 
     let rows: Vec<(i32, i32)> = conn.exec(&problem_topk, (3,)).unwrap();
     assert_eq!(rows, vec![(10, 2), (9, 1), (8, 1)]);
+}
+
+#[test]
+fn ilike() {
+    let d = Deployment::new("ilike");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE notes(id INTEGER PRIMARY KEY, title TEXT)")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO notes (id, title) VALUES (1, 'foo')")
+        .unwrap();
+    conn.query_drop("INSERT INTO notes (id, title) VALUES (2, 'bar')")
+        .unwrap();
+    conn.query_drop("INSERT INTO notes (id, title) VALUES (3, 'baz')")
+        .unwrap();
+    conn.query_drop("INSERT INTO notes (id, title) VALUES (4, 'BAZ')")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, String)> = conn
+        .exec(
+            "SELECT id, title FROM notes WHERE title ILIKE ? ORDER BY id ASC",
+            ("%a%",),
+        )
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (2, "bar".to_string()),
+            (3, "baz".to_string()),
+            (4, "BAZ".to_string())
+        ]
+    );
+
+    let with_other_constraint: Vec<(i32, String)> = conn
+        .exec(
+            "SELECT id, title FROM notes WHERE title ILIKE ? AND id >= ? ORDER BY id ASC",
+            ("%a%", 3),
+        )
+        .unwrap();
+    assert_eq!(
+        with_other_constraint,
+        vec![(3, "baz".to_string()), (4, "BAZ".to_string()),]
+    );
 }
