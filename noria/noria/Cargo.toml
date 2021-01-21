@@ -60,6 +60,7 @@ net2 = "0.2"
 async-bincode = "0.5.0"
 regex = "1.4.3"
 lazy_static = "1.4.0"
+test-strategy = "0.1.1"
 
 # Local dependencies
 launchpad = { path = "../../launchpad" }

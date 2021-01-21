@@ -1,6 +1,7 @@
 #![feature(box_syntax, box_patterns)]
 #![feature(nll)]
 #![feature(allow_fail)]
+#![feature(drain_filter)]
 
 #[macro_use]
 extern crate anyhow;

@@ -503,6 +503,18 @@ impl From<ViewQueryOperator> for CaseSensitivityMode {
     }
 }
 
+impl TryFrom<nom_sql::BinaryOperator> for ViewQueryOperator {
+    type Error = nom_sql::BinaryOperator;
+
+    fn try_from(op: nom_sql::BinaryOperator) -> Result<Self, Self::Error> {
+        match op {
+            nom_sql::BinaryOperator::Like => Ok(Self::Like),
+            nom_sql::BinaryOperator::ILike => Ok(Self::ILike),
+            op => Err(op),
+        }
+    }
+}
+
 /// Filter the results of a view query after they're returned from the underlying reader
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ViewQueryFilter {

@@ -1,8 +1,8 @@
 use noria::{
-    ControllerHandle, DataType, Table, TableOperation, View, ViewQuery, ZookeeperAuthority,
+    ControllerHandle, DataType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
+    ViewQueryOperator, ZookeeperAuthority,
 };
 
-use anyhow;
 use futures_executor::block_on as block_on_buffer;
 use msql_srv::{self, *};
 use nom_sql::{
@@ -13,7 +13,7 @@ use vec1::vec1;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::io;
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
@@ -798,16 +798,55 @@ impl NoriaConnector {
         };
 
         trace!("select::lookup");
-        let cols = Vec::from(getter.columns());
         let bogo = vec![vec1![DataType::from(0i32)].into()];
+        let cols = Vec::from(getter.columns());
+        let mut binops = utils::get_select_statement_binops(q);
+        let mut filter_op_idx = None;
+        let filter = binops
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (col, binop))| {
+                ViewQueryOperator::try_from(*binop)
+                    .ok()
+                    .map(|op| (i, col, op))
+            })
+            .next()
+            .map(|(idx, col, operator)| {
+                let mut key = keys.drain(0..1).next().expect("Expected at least one key");
+                assert!(
+                    keys.is_empty(),
+                    "LIKE/ILIKE not currently supported for more than one lookup key at a time"
+                );
+                let column = schema
+                    .iter()
+                    .position(|x| x.column == col.name)
+                    .expect("Filter column not in schema!");
+                let value = String::from(&key.remove(idx));
+                if !key.is_empty() {
+                    // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
+                    keys.push(key);
+                }
+
+                filter_op_idx = Some(idx);
+
+                ViewQueryFilter {
+                    column,
+                    operator,
+                    value,
+                }
+            });
+
+        if let Some(filter_op_idx) = filter_op_idx {
+            // if we're using a column for a post-lookup filter, remove it from our list of binops
+            // so we can use the remaining list for our keys
+            binops.remove(filter_op_idx);
+        }
+
         let use_bogo = keys.is_empty();
         let keys = if use_bogo {
             bogo
         } else {
-            let mut binops = utils::get_select_statement_binops(q)
-                .into_iter()
-                .map(|(_, b)| b)
-                .unique();
+            let mut binops = binops.into_iter().map(|(_, b)| b).unique();
             let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
             if let Some(other) = binops.next() {
                 panic!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
@@ -821,6 +860,7 @@ impl NoriaConnector {
                 })
                 .collect()
         };
+
         let order_by = q.order.as_ref().map(|oc| {
             // TODO(eta): support this. It isn't necessarily hard, just a pain.
             assert_eq!(
@@ -838,17 +878,19 @@ impl NoriaConnector {
                 oc.columns[0].1 == nom_sql::OrderType::OrderDescending,
             )
         });
+
         let limit = q.limit.as_ref().map(|lc| {
             assert_eq!(lc.offset, 0, "OFFSET is not supported yet");
             // FIXME(eta): this cast is ugly!
             lc.limit as usize
         });
+
         let vq = ViewQuery {
             key_comparisons: keys,
             block: true,
             order_by,
             limit,
-            filter: None,
+            filter,
         };
 
         // if first lookup fails, there's no reason to try the others
