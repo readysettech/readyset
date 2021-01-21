@@ -777,7 +777,7 @@ impl NoriaConnector {
                     }
                 }
                 DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
-                ref dt @ DataType::TinyText(_) => rw.write_col(dt.to_string()),
+                ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
                 ref dt @ DataType::Real(_, _) => match cs.coltype {
                     msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
                         let f = dt.to_string();
