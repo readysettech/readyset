@@ -202,7 +202,7 @@ where
     ///
     /// All its ancestors are present, but this node and its children may not have been connected
     /// yet.
-    fn on_connected(&mut self, graph: &Graph);
+    fn on_connected(&mut self, graph: &Graph) {}
 
     /// Called when a domain is finalized and is about to be booted.
     ///
