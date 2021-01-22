@@ -31,8 +31,8 @@ use std::vec::Vec;
 type UniverseId = (DataType, Option<DataType>);
 
 #[derive(Clone, Debug)]
-enum QueryGraphReuse {
-    ExactMatch(MirNodeRef),
+enum QueryGraphReuse<'a> {
+    ExactMatch(&'a str, MirNodeRef),
     ExtendExisting(Vec<(u64, UniverseId)>),
     /// (node, columns to re-project if necessary, parameters)
     ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>),
@@ -235,7 +235,10 @@ impl SqlIncorporator {
                         existing_qg,
                     );
 
-                    return Ok((qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone())));
+                    return Ok((
+                        qg,
+                        QueryGraphReuse::ExactMatch(&mir_query.name, mir_query.leaf.clone()),
+                    ));
                 } else if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() != qg.parameters()
                 {
@@ -489,10 +492,10 @@ impl SqlIncorporator {
     ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
         let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq)?;
         Ok(match reuse {
-            QueryGraphReuse::ExactMatch(mn) => {
+            QueryGraphReuse::ExactMatch(name, mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                 let qfp = QueryFlowParts {
-                    name: String::from(query_name),
+                    name: name.to_owned(),
                     new_nodes: vec![],
                     reused_nodes: vec![flow_node],
                     query_leaf: flow_node,
