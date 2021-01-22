@@ -1008,7 +1008,6 @@ fn exec_insert() {
 }
 
 #[test]
-#[ignore] // hangs noria indefinitely; should look into this
 fn design_doc_topk_with_preload() {
     let d = Deployment::new("design_doc_topk_with_preload");
     let opts = setup(&d, true);
