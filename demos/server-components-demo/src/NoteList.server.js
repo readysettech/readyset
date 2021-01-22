@@ -18,9 +18,9 @@ export default function NoteList({searchText}) {
   // We don't encourage this in real apps. There are far safer ways to access
   // data in a real application!
   const notes = db.query(
-    `select * from notes where title ilike $1 order by id desc`,
+    `select * from notes where title ilike ? order by id desc`,
     ['%' + searchText + '%']
-  ).rows;
+  );
 
   // Now let's see how the Suspense boundary above lets us not block on this.
   // fetch('http://localhost:4000/sleep/3000');

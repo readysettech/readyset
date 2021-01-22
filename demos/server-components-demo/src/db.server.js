@@ -6,7 +6,7 @@
  *
  */
 
-import {Pool} from 'react-pg';
+import {Pool} from '../server/react-mysql.server';
 import credentials from '../credentials';
 
 // Don't keep credentials in the source tree in a real app!

@@ -8,15 +8,17 @@
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
-const {Pool} = require('pg');
+const {createPool} = require('mysql2');
+const {promisify} = require('util');
 const {readdir, unlink, writeFile} = require('fs/promises');
 const startOfYear = require('date-fns/startOfYear');
 const credentials = require('../credentials');
+const {escape} = require('sqlstring');
 
 const NOTES_PATH = './notes';
-const pool = new Pool(credentials);
+const pool = createPool(credentials);
+const query = promisify(pool.query).bind(pool);
 
 const now = new Date();
 const startOfThisYear = startOfYear(now);
@@ -29,15 +31,15 @@ function randomDateBetween(start, end) {
 
 const dropTableStatement = 'DROP TABLE IF EXISTS notes;';
 const createTableStatement = `CREATE TABLE notes (
-  id SERIAL PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTO_INCREMENT,
   created_at TIMESTAMP NOT NULL,
   updated_at TIMESTAMP NOT NULL,
   title TEXT,
   body TEXT
 );`;
-const insertNoteStatement = `INSERT INTO notes(title, body, created_at, updated_at)
-  VALUES ($1, $2, $3, $3)
-  RETURNING *`;
+const insertNote = ([title, body, created_at]) =>
+  `INSERT INTO notes(title, body, created_at, updated_at)
+   VALUES (${escape(title)}, ${escape(body)}, '${created_at}', '${created_at}')`;
 const seedData = [
   [
     'Meeting Notes',
@@ -62,11 +64,9 @@ notes in this app! These note live on the server in the \`notes\` folder.
 ];
 
 async function seed() {
-  await pool.query(dropTableStatement);
-  await pool.query(createTableStatement);
-  const res = await Promise.all(
-    seedData.map((row) => pool.query(insertNoteStatement, row))
-  );
+  await query(dropTableStatement);
+  await query(createTableStatement);
+  const res = await Promise.all(seedData.map((row) => query(insertNote(row))));
 
   const oldNotes = await readdir(path.resolve(NOTES_PATH));
   await Promise.all(
@@ -75,18 +75,20 @@ async function seed() {
       .map((filename) => unlink(path.resolve(NOTES_PATH, filename)))
   );
 
-  await Promise.all(
-    res.map(({rows}) => {
-      const id = rows[0].id;
-      const content = rows[0].body;
-      const data = new Uint8Array(Buffer.from(content));
-      return writeFile(path.resolve(NOTES_PATH, `${id}.md`), data, (err) => {
-        if (err) {
-          throw err;
-        }
-      });
-    })
-  );
+  // TODO: Bring this back once we have INSERT RETURNING or something like it
+  // 
+  // await Promise.all(
+  //   res.map(({rows}) => {
+  //     const id = rows[0].id;
+  //     const content = rows[0].body;
+  //     const data = new Uint8Array(Buffer.from(content));
+  //     return writeFile(path.resolve(NOTES_PATH, `${id}.md`), data, (err) => {
+  //       if (err) {
+  //         throw err;
+  //       }
+  //     });
+  //   })
+  // );
 }
 
 seed();

@@ -23,13 +23,15 @@ const compress = require('compression');
 const {readFileSync} = require('fs');
 const {unlink, writeFile} = require('fs').promises;
 const {pipeToNodeWritable} = require('react-server-dom-webpack/writer');
+const {promisify} = require('util');
 const path = require('path');
-const {Pool} = require('pg');
+const mysql = require('mysql');
 const React = require('react');
 const ReactApp = require('../src/App.server').default;
 
 // Don't keep credentials in the source tree in a real app!
-const pool = new Pool(require('../credentials'));
+const pool = mysql.createPool(require('../credentials'));
+const query = promisify(pool.query).bind(pool);
 
 const PORT = 4000;
 const app = express();
@@ -99,9 +101,9 @@ app.post(
   '/notes',
   handleErrors(async function(req, res) {
     const now = new Date();
-    const result = await pool.query(
-      'insert into notes (title, body, created_at, updated_at) values ($1, $2, $3, $3) returning id',
-      [req.body.title, req.body.body, now]
+    const result = await query(
+      'insert into notes (title, body, created_at, updated_at) values (?, ?, ?, ?)',
+      [req.body.title, req.body.body, now, now]
     );
     const insertedId = result.rows[0].id;
     await writeFile(
@@ -118,7 +120,7 @@ app.put(
   handleErrors(async function(req, res) {
     const now = new Date();
     const updatedId = Number(req.params.id);
-    await pool.query(
+    await query(
       'update notes set title = $1, body = $2, updated_at = $3 where id = $4',
       [req.body.title, req.body.body, now, updatedId]
     );
@@ -134,7 +136,7 @@ app.put(
 app.delete(
   '/notes/:id',
   handleErrors(async function(req, res) {
-    await pool.query('delete from notes where id = $1', [req.params.id]);
+    await query('delete from notes where id = $1', [req.params.id]);
     await unlink(path.resolve(NOTES_PATH, `${req.params.id}.md`));
     sendResponse(req, res, null);
   })
@@ -143,15 +145,15 @@ app.delete(
 app.get(
   '/notes',
   handleErrors(async function(_req, res) {
-    const {rows} = await pool.query('select * from notes order by id desc');
-    res.json(rows);
+    const result = await query('select * from notes order by id desc');
+    res.json(result);
   })
 );
 
 app.get(
   '/notes/:id',
   handleErrors(async function(req, res) {
-    const {rows} = await pool.query('select * from notes where id = $1', [
+    const {rows} = await query('select * from notes where id = $1', [
       req.params.id,
     ]);
     res.json(rows[0]);
