@@ -11,7 +11,6 @@ use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 
 use nom_sql::CreateTableStatement;
-use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
@@ -339,42 +338,31 @@ impl Recipe {
             }
         }
 
-        for expr in self.expressions.values() {
-            let (n, q, is_leaf) = expr.clone();
-
+        for (n, q, is_leaf) in self.expressions.values() {
             // add the universe-specific query
             // don't use query name to avoid conflict with global queries
             let (id, group) = mig.universe();
-            let new_name = if n.is_some() {
-                match group {
-                    Some(ref g) => Some(format!(
-                        "{}_{}{}",
-                        n.clone().unwrap(),
-                        g.to_string(),
-                        id.to_string()
-                    )),
-                    None => Some(format!("{}_u{}", n.clone().unwrap(), id.to_string())),
-                }
-            } else {
-                None
-            };
+            let new_name = n.as_ref().map(|n| match group {
+                Some(ref g) => format!("{}_{}{}", n, g.to_string(), id.to_string()),
+                None => format!("{}_u{}", n, id.to_string()),
+            });
 
-            let is_leaf = if group.is_some() { false } else { is_leaf };
+            let is_leaf = if group.is_some() { false } else { *is_leaf };
 
-            let qfp = self
-                .inc
-                .as_mut()
-                .unwrap()
-                .add_parsed_query(q, new_name, is_leaf, mig)?;
+            let qfp =
+                self.inc
+                    .as_mut()
+                    .unwrap()
+                    .add_parsed_query(q.clone(), new_name, is_leaf, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
             let query_name = match n {
                 Some(name) => name,
-                None => qfp.name.clone(),
+                None => &qfp.name,
             };
 
-            result.new_nodes.insert(query_name, qfp.query_leaf);
+            result.new_nodes.insert(query_name.clone(), qfp.query_leaf);
         }
 
         Ok(result)
@@ -461,13 +449,16 @@ impl Recipe {
                 .unwrap()
                 .add_parsed_query(q, n.clone(), is_leaf, mig)?;
 
+            if qfp.reused_nodes.get(0) == Some(&qfp.query_leaf) && qfp.reused_nodes.len() == 1 {
+                if let Some(ref name) = n {
+                    self.alias_query(&qfp.name, name.clone())
+                        .expect("SqlIncorporator told recipe about a query it doesn't know about!");
+                }
+            }
+
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
-            let query_name = match n {
-                Some(name) => name,
-                None => qfp.name.clone(),
-            };
-
+            let query_name = n.unwrap_or_else(|| qfp.name.clone());
             result.new_nodes.insert(query_name, qfp.query_leaf);
         }
 
@@ -687,6 +678,24 @@ impl Recipe {
             }
         }
         false
+    }
+
+    /// Alias `query` as `alias`. Subsequent calls to `node_addr_for(alias)` will return the node
+    /// addr for `query`.
+    ///
+    /// Returns an Err if `query` is not found in the recipe
+    pub(super) fn alias_query(&mut self, query: &str, alias: String) -> Result<(), String> {
+        // NOTE: this is (consciously) O(n) because we don't have a reverse index from query name to
+        // QueryID and I don't feel like it's worth the time-space tradeoff given this is only
+        // called on migration
+        let qid = self
+            .expressions
+            .iter()
+            .find(|(_, (name, _, _))| name.as_ref().map(|n| n.as_str()) == Some(query))
+            .ok_or_else(|| "Query not found".to_string())?
+            .0;
+        self.aliases.insert(alias, *qid);
+        Ok(())
     }
 
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only

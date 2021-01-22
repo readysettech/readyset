@@ -3282,3 +3282,37 @@ async fn range_upquery_after_point_queries() {
             .collect::<Vec<_>>()]
     )
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn query_reuse_aliases() {
+    let mut g = start_simple_logging("it_works_basic").await;
+    g.install_recipe(
+        "CREATE TABLE t1 (a INT, b INT);
+         QUERY q1: SELECT * FROM t1 WHERE a != 1;
+         QUERY q2: SELECT * FROM t1 WHERE a != 1;",
+    )
+    .await
+    .unwrap();
+
+    assert!(g.view("q1").await.is_ok());
+    assert!(g.view("q2").await.is_ok());
+
+    g.extend_recipe("QUERY q3: SELECT * FROM t1 WHERE a != 1")
+        .await
+        .unwrap();
+
+    assert!(g.view("q1").await.is_ok());
+    assert!(g.view("q2").await.is_ok());
+    assert!(g.view("q3").await.is_ok());
+
+    // query rewriting means this ends up being identical to the above query, even though the source
+    // is different - let's make sure that still aliases successfully.
+    g.extend_recipe("QUERY q4: SELECT * FROM t1 WHERE NOT (a = 1)")
+        .await
+        .unwrap();
+
+    assert!(g.view("q1").await.is_ok());
+    assert!(g.view("q2").await.is_ok());
+    assert!(g.view("q3").await.is_ok());
+    assert!(g.view("q4").await.is_ok());
+}
