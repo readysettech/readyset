@@ -1,3 +1,4 @@
+use derive_more::From;
 use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;
@@ -17,7 +18,7 @@ pub mod topk;
 pub mod trigger;
 pub mod union;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, From)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
     // Aggregation was previously named "Sum", but now supports Sum, Count, Avg
@@ -36,40 +37,6 @@ pub enum NodeOperator {
     Rewrite(rewrite::Rewrite),
     Distinct(distinct::Distinct),
 }
-
-macro_rules! nodeop_from_impl {
-    ($variant:path, $type:ty) => {
-        impl From<$type> for NodeOperator {
-            fn from(other: $type) -> Self {
-                $variant(other)
-            }
-        }
-    };
-}
-
-nodeop_from_impl!(
-    NodeOperator::Aggregation,
-    grouped::GroupedOperator<grouped::aggregate::Aggregator>
-);
-nodeop_from_impl!(
-    NodeOperator::Extremum,
-    grouped::GroupedOperator<grouped::extremum::ExtremumOperator>
-);
-nodeop_from_impl!(
-    NodeOperator::Concat,
-    grouped::GroupedOperator<grouped::concat::GroupConcat>
-);
-
-nodeop_from_impl!(NodeOperator::Join, join::Join);
-nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
-nodeop_from_impl!(NodeOperator::Project, project::Project);
-nodeop_from_impl!(NodeOperator::Union, union::Union);
-nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
-nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
-nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
-nodeop_from_impl!(NodeOperator::Trigger, trigger::Trigger);
-nodeop_from_impl!(NodeOperator::Rewrite, rewrite::Rewrite);
-nodeop_from_impl!(NodeOperator::Distinct, distinct::Distinct);
 
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
