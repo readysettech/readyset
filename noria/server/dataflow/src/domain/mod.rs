@@ -1601,7 +1601,10 @@ impl Domain {
 
                 let mut rs = Vec::new();
                 let mut new_keys = HashSet::new();
-                let mut misses = HashSet::new();
+                // `misses` is a tuple of (replay_key, miss_key), where `replay_key` is the key we're trying
+                // to replay and `miss_key` is the part of it we missed on.
+                // This is only relevant for range queries; for non-range queries the two are the same.
+                let mut misses: HashSet<(KeyComparison, KeyComparison)> = HashSet::new();
                 for key in &keys {
                     match key {
                         KeyComparison::Equal(equal) => {
@@ -1611,7 +1614,7 @@ impl Domain {
                                     new_keys.insert(key.clone());
                                 }
                                 LookupResult::Missing => {
-                                    misses.insert(key.clone());
+                                    misses.insert((key.clone(), key.clone()));
                                 }
                             }
                         }
@@ -1623,7 +1626,11 @@ impl Domain {
                                 }
                                 RangeLookupResult::Missing(ms) => {
                                     misses.extend(ms.into_iter().map(|m| {
-                                        KeyComparison::try_from(m).expect("Miss on empty key")
+                                        // This is the only point where the replay_key and miss_key are different.
+                                        (
+                                            key.clone(),
+                                            KeyComparison::try_from(m).expect("Miss on empty key"),
+                                        )
                                     }));
                                 }
                             }
@@ -1661,16 +1668,21 @@ impl Domain {
         if let Some((cols, misses)) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            for key in misses {
+            for (replay_key, miss_key) in misses {
                 trace!(self.log,
                        "missed during replay request";
                        "tag" => tag,
-                       "key" => ?key);
+                       "replay_key" => ?replay_key,
+                       "miss_key" => ?miss_key);
                 self.on_replay_miss(
                     source,
                     &cols[..],
-                    key.clone(),
-                    key,
+                    // NOTE: As described above, replay_key and miss_key are different in the case
+                    // of range queries.
+                    // Assuming they were the same was a whole bug that eta had to spend like 2
+                    // hours tracking down, only to find it was as simple as this.
+                    replay_key,
+                    miss_key,
                     single_shard,
                     requesting_shard,
                     tag,
