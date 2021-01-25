@@ -30,19 +30,26 @@ impl Default for CaseSensitivityMode {
 struct LikeTokenReplacer;
 impl regex::Replacer for LikeTokenReplacer {
     fn replace_append(&mut self, caps: &regex::Captures<'_>, dst: &mut String) {
-        dst.push_str(match &caps[0] {
-            "%" => ".*",
-            "_" => ".",
-            r"\%" => "%",
-            r"\_" => "_",
-            s => s,
-        })
+        match &caps[0] {
+            "%" => dst.push_str(".*"),
+            "_" => dst.push('.'),
+            r"\%" => dst.push('%'),
+            r"\_" => dst.push('_'),
+            s
+            @
+            ("{" | "}" | "." | "*" | "+" | "?" | "|" | "(" | ")" | "[" | "]" | "$" | "^"
+            | r"\") => {
+                dst.push('\\');
+                dst.push_str(s);
+            }
+            s => dst.push_str(s),
+        }
     }
 }
 
 fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> Regex {
     lazy_static! {
-        static ref TOKEN: Regex = Regex::new(r"\\?[%_]").unwrap();
+        static ref TOKEN: Regex = Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap();
     }
     let mut re = if mode == CaseInsensitive {
         "(?i)^".to_string()
@@ -92,6 +99,7 @@ impl From<String> for LikePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_strategy::proptest;
 
     #[test]
     fn like_matching() {
@@ -120,5 +128,15 @@ mod tests {
         assert!(!LikePattern::new(r"\%", CaseSensitive).matches(r"\foo"));
         assert!(LikePattern::new(r"\_", CaseSensitive).matches("_"));
         assert!(!LikePattern::new(r"\_", CaseSensitive).matches(r"\a"));
+    }
+
+    #[proptest]
+    fn pattern_matches_itself(pat: String) {
+        lazy_static! {
+            static ref ESCAPER: Regex = Regex::new(r"(\\)+(?P<tok>[%_])").unwrap();
+        }
+        let pat = ESCAPER.replace_all(&pat, "$tok");
+        let pattern = LikePattern::new(&pat, CaseSensitive);
+        assert!(pattern.matches(&pat));
     }
 }
