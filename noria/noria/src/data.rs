@@ -2,14 +2,16 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime};
 
-use nom_sql::Literal;
+use nom_sql::{Literal, SqlType};
 
+use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
 
-use proptest::prelude::Arbitrary;
+use proptest::prelude::{prop_oneof, Arbitrary};
+use thiserror::Error;
 
 const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
@@ -98,6 +100,9 @@ impl fmt::Debug for DataType {
     }
 }
 
+/// The format for timestamps when parsed as text
+pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
 impl DataType {
     /// Generates the minimum DataType corresponding to the type of a given DataType.
     pub fn min_value(other: &Self) -> Self {
@@ -156,34 +161,203 @@ impl DataType {
 
     /// Checks if this value is of an integral data type (i.e., can be converted into integral types).
     pub fn is_integer(&self) -> bool {
-        match *self {
-            DataType::Int(_) | DataType::BigInt(_) => true,
-            _ => false,
-        }
+        matches!(*self, DataType::Int(_) | DataType::BigInt(_))
     }
 
     /// Checks if this value is of a real data type (i.e., can be converted into `f64`).
     pub fn is_real(&self) -> bool {
-        match *self {
-            DataType::Real(_, _) => true,
-            _ => false,
-        }
+        matches!(*self, DataType::Real(_, _))
     }
 
     /// Checks if this value is of a string data type (i.e., can be converted into `String` and
     /// `&str`).
     pub fn is_string(&self) -> bool {
-        match *self {
-            DataType::Text(_) | DataType::TinyText(_) => true,
-            _ => false,
+        matches!(*self, DataType::Text(_) | DataType::TinyText(_))
+    }
+
+    /// Checks if this value is of a timestamp data type.
+    pub fn is_datetime(&self) -> bool {
+        matches!(*self, DataType::Timestamp(_))
+    }
+
+    /// Returns the SqlType for this DataType, or None if [`DataType::None`] (which is valid for any
+    /// type)
+    pub fn sql_type(&self) -> Option<SqlType> {
+        use SqlType::*;
+        match self {
+            Self::None => None,
+            Self::Int(_) => Some(Int(32)),
+            Self::UnsignedInt(_) => Some(UnsignedInt(32)),
+            Self::BigInt(_) => Some(Bigint(64)),
+            Self::UnsignedBigInt(_) => Some(UnsignedBigint(64)),
+            Self::Real(_, _) => Some(Real),
+            Self::Text(_) => Some(Text),
+            Self::TinyText(_) => Some(Tinytext),
+            Self::Timestamp(_) => Some(Timestamp),
         }
     }
 
-    /// Checks if this values is of a timestamp data type.
-    pub fn is_datetime(&self) -> bool {
-        match *self {
-            DataType::Timestamp(_) => true,
-            _ => false,
+    /// Attempt to coerce the given DataType to a value of the given `SqlType`.
+    ///
+    /// Currently, this entails:
+    ///
+    /// * Coercing values to the type they already are
+    /// * Parsing strings ([`Text`], [`Tinytext`], [`Mediumtext`]) as integers
+    /// * Parsing strings ([`Text`], [`Tinytext`], [`Mediumtext`]) as timestamps
+    /// * Changing numeric type sizes (bigint -> int, int -> bigint, etc)
+    /// * Converting [`Real`]s with a zero fractional part to an integer
+    ///
+    /// More coercions will likely need to be added in the future
+    ///
+    /// # Examples
+    ///
+    /// Reals can be converted to integers
+    ///
+    /// ```rust
+    /// use noria::DataType;
+    /// use nom_sql::SqlType;
+    ///
+    /// let real = DataType::Real(123, 0);
+    /// let int = real.coerce_to(&SqlType::Int(32)).unwrap();
+    /// assert_eq!(int.into_owned(), DataType::Int(123));
+    /// ```
+    ///
+    /// Text can be parsed as a timestamp using the SQL `%Y-%m-%d %H:%M:%S` format:
+    ///
+    /// ```rust
+    /// use noria::DataType;
+    /// use nom_sql::SqlType;
+    /// use chrono::NaiveDate;
+    /// use std::borrow::Borrow;
+    ///
+    /// let text = DataType::from("2021-01-26 10:20:37");
+    /// let timestamp = text.coerce_to(&SqlType::Timestamp).unwrap();
+    /// assert_eq!(
+    ///   timestamp.into_owned(),
+    ///   DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
+    /// );
+    /// ```
+    pub fn coerce_to<'a>(&'a self, ty: &'a SqlType) -> Result<Cow<'a, Self>, ValueCoerceError<'a>> {
+        let mk_err = |message: String, source: Option<anyhow::Error>| ValueCoerceError {
+            value: self,
+            expected_type: ty,
+            message,
+            source,
+        };
+
+        use SqlType::*;
+        match (self, self.sql_type(), ty) {
+            (_, None, _) => Ok(Cow::Borrowed(self)),
+            (_, Some(src_type), tgt_type) if src_type == *tgt_type => Ok(Cow::Borrowed(self)),
+            (_, Some(Text | Tinytext | Mediumtext), Text | Tinytext | Mediumtext) => {
+                Ok(Cow::Borrowed(self))
+            }
+            (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
+                let actual_len = <&str>::from(self).len();
+                if actual_len <= (*max_len).into() {
+                    Ok(Cow::Borrowed(self))
+                } else {
+                    Err(mk_err(
+                        format!(
+                            "Value ({} characters long) longer than maximum length of {} characters",
+                            actual_len,
+                            max_len
+                        ),
+                        None
+                    ))
+                }
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp) => {
+                NaiveDateTime::parse_from_str(self.into(), TIMESTAMP_FORMAT)
+                    .map_err(|e| {
+                        mk_err(
+                            "Could not parse value as timestamp".to_owned(),
+                            Some(e.into()),
+                        )
+                    })
+                    .map(Self::Timestamp)
+                    .map(Cow::Owned)
+            }
+            (_, Some(Bigint(_)), Int(_)) => {
+                Ok(Cow::Owned(DataType::Int(i32::try_from(self).map_err(
+                    |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
+                )?)))
+            }
+            (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::from(self)))),
+            (Self::Real(n, 0), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
+                Ok(Cow::Owned(DataType::Int(i32::try_from(*n).map_err(
+                    |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
+                )?)))
+            }
+            (Self::Real(n, 0), Some(Real), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(*n))),
+            (
+                Self::Real(n, 0),
+                Some(Real),
+                UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
+            ) => Ok(Cow::Owned(DataType::UnsignedInt(
+                u32::try_from(*n).map_err(|e| {
+                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                })?,
+            ))),
+            (Self::Real(n, 0), Some(Real), UnsignedBigint(_)) => Ok(Cow::Owned(
+                DataType::UnsignedBigInt(u64::try_from(*n).map_err(|e| {
+                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                })?),
+            )),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => <&str>::from(self)
+                .parse::<i8>()
+                .map(|x| (Cow::Owned(DataType::from(x))))
+                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Smallint(_)) => <&str>::from(self)
+                .parse::<i16>()
+                .map(|x| (Cow::Owned(DataType::from(x))))
+                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_)) => <&str>::from(self)
+                .parse::<i32>()
+                .map(|x| (Cow::Owned(DataType::from(x))))
+                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_)) => <&str>::from(self)
+                .parse::<i64>()
+                .map(|x| (Cow::Owned(DataType::from(x))))
+                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedTinyint(_)) => {
+                <&str>::from(self)
+                    .parse::<u8>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedSmallint(_)) => {
+                <&str>::from(self)
+                    .parse::<u16>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedInt(_)) => {
+                <&str>::from(self)
+                    .parse::<u32>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedBigint(_)) => {
+                <&str>::from(self)
+                    .parse::<u64>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(src_type), tgt_type) => Err(ValueCoerceError {
+                value: self,
+                expected_type: ty,
+                message: format!("Cannot coerce {:?} to {:?}", src_type, tgt_type),
+                source: None,
+            }),
         }
     }
 }
@@ -362,6 +536,30 @@ impl From<i64> for DataType {
 impl From<u64> for DataType {
     fn from(s: u64) -> Self {
         DataType::UnsignedBigInt(s)
+    }
+}
+
+impl From<i8> for DataType {
+    fn from(s: i8) -> Self {
+        DataType::Int(s.into())
+    }
+}
+
+impl From<u8> for DataType {
+    fn from(s: u8) -> Self {
+        DataType::UnsignedInt(s.into())
+    }
+}
+
+impl From<i16> for DataType {
+    fn from(s: i16) -> Self {
+        DataType::Int(s.into())
+    }
+}
+
+impl From<u16> for DataType {
+    fn from(s: u16) -> Self {
+        DataType::UnsignedInt(s.into())
     }
 }
 
@@ -876,6 +1074,20 @@ impl Arbitrary for DataType {
         ]
         .boxed()
     }
+}
+
+/// Errors that can occur when coercing a [`DataType`] to a different [`SqlType`] with
+/// [`DataType::coerce_to`]
+#[derive(Debug, Error)]
+#[error("error coercing value {value:?} to {expected_type:?}: {message}")]
+pub struct ValueCoerceError<'a> {
+    /// The value that was being coerced
+    pub value: &'a DataType,
+    /// The type that we were trying to coerce to
+    pub expected_type: &'a SqlType,
+    /// A human-readable message for the error
+    pub message: String,
+    source: Option<anyhow::Error>,
 }
 
 #[cfg(test)]
@@ -1485,5 +1697,66 @@ mod tests {
         assert_ne!(ulong.cmp(&time), Ordering::Equal);
         assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
+    }
+
+    mod coerce_to {
+        use super::*;
+        use crate::util::arbitrary::arbitrary_naive_date_time;
+        use proptest::sample::select;
+        use proptest::strategy::Strategy;
+        use test_strategy::proptest;
+        use SqlType::*;
+
+        #[proptest]
+        fn same_type_is_identity(dt: DataType) {
+            if let Some(ty) = dt.sql_type() {
+                assert_eq!(dt.coerce_to(&ty).as_deref().unwrap(), &dt);
+            }
+        }
+
+        #[proptest]
+        fn timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
+            let expected = DataType::from(ndt);
+            let input = DataType::from(ndt.format(TIMESTAMP_FORMAT).to_string());
+            let result = input.coerce_to(&Timestamp).unwrap();
+            assert_eq!(*result, expected);
+        }
+
+        #[proptest]
+        fn bigint_to_int(int: i32) {
+            assert_eq!(
+                *DataType::from(int as i64).coerce_to(&Int(32)).unwrap(),
+                DataType::from(int as i32)
+            );
+        }
+
+        fn int_type() -> impl Strategy<Value = SqlType> {
+            use SqlType::*;
+            select(vec![Tinyint(8), Smallint(16), Int(32), Bigint(64)])
+        }
+
+        #[proptest]
+        fn real_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
+            let real = DataType::Real(whole_part.into(), 0);
+            let result = real.coerce_to(&int_type).unwrap();
+            assert_eq!(i32::from(result.into_owned()), whole_part);
+        }
+
+        fn unsigned_type() -> impl Strategy<Value = SqlType> {
+            use SqlType::*;
+            select(vec![
+                UnsignedTinyint(8),
+                UnsignedSmallint(16),
+                UnsignedInt(32),
+                UnsignedBigint(64),
+            ])
+        }
+
+        #[proptest]
+        fn real_to_unsigned(whole_part: u32, #[strategy(unsigned_type())] unsigned_type: SqlType) {
+            let real = DataType::Real(whole_part as i64, 0);
+            let result = real.coerce_to(&unsigned_type).unwrap();
+            assert_eq!(u32::from(result.into_owned()), whole_part);
+        }
     }
 }
