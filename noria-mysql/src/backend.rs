@@ -23,23 +23,25 @@ use writer::Writer;
 #[derive(Clone)]
 pub enum PreparedStatement {
     /// Query name, Query, result schema, optional parameter rewrite map
-    /// TODO(eta): make these into actual struct-y things?
-    Select(
-        String,
-        nom_sql::SelectStatement,
-        Vec<msql_srv::Column>,
-        Option<(usize, usize)>,
-    ),
+    Select {
+        name: String,
+        statement: nom_sql::SelectStatement,
+        schema: Vec<msql_srv::Column>,
+        key_column_indices: Vec<usize>,
+        rewritten_columns: Option<(usize, usize)>,
+    },
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
 }
 
 impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match *self {
-            PreparedStatement::Select(ref qname, ref s, _, _) => write!(f, "{}: {}", qname, s),
-            PreparedStatement::Insert(ref s) => write!(f, "{}", s),
-            PreparedStatement::Update(ref s) => write!(f, "{}", s),
+        match self {
+            PreparedStatement::Select {
+                name, statement, ..
+            } => write!(f, "{}: {}", name, statement),
+            PreparedStatement::Insert(s) => write!(f, "{}", s),
+            PreparedStatement::Update(s) => write!(f, "{}", s),
         }
     }
 }
@@ -173,8 +175,14 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
         };
 
         trace!("delegate");
-        let res = match prep {
-            PreparedStatement::Select(ref qname, ref q, ref schema, ref rewritten) => {
+        let res = match &prep {
+            PreparedStatement::Select {
+                name,
+                statement: q,
+                schema,
+                key_column_indices,
+                rewritten_columns: rewritten,
+            } => {
                 trace!("apply where-in rewrites");
                 let key = match rewritten {
                     Some((first_rewritten, nrewritten)) => {
@@ -218,7 +226,8 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
                     }
                 };
 
-                self.reader.execute_select(&qname, q, key, schema, results)
+                self.reader
+                    .execute_select(&name, q, key, schema, &key_column_indices, results)
             }
             PreparedStatement::Insert(ref q) => {
                 let values: Vec<DataType> = params
@@ -234,10 +243,10 @@ impl<W: io::Write> MysqlShim<W> for Backend<W> {
         if self.slowlog {
             let took = start.elapsed();
             if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                let query: &dyn std::fmt::Display = match prep {
-                    PreparedStatement::Select(_, ref q, ..) => q,
-                    PreparedStatement::Insert(ref q) => q,
-                    PreparedStatement::Update(ref q) => q,
+                let query: &dyn std::fmt::Display = match &prep {
+                    PreparedStatement::Select { statement, .. } => statement,
+                    PreparedStatement::Insert(q) => q,
+                    PreparedStatement::Update(q) => q,
                 };
                 warn!(
                     %query,

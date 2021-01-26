@@ -1147,3 +1147,26 @@ fn ilike() {
         vec![(3, "baz".to_string()), (4, "BAZ".to_string()),]
     );
 }
+
+#[test]
+fn key_type_coercion() {
+    let d = Deployment::new("key_type_coercion");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE posts (id int, title TEXT)")
+        .unwrap();
+    conn.query_drop("INSERT INTO posts (id, title) VALUES (1, 'hi')")
+        .unwrap();
+
+    let same_type_result: (u32, String) = conn
+        .exec_first("SELECT id, title FROM posts WHERE id = ?", (1,))
+        .unwrap()
+        .unwrap();
+    assert_eq!(same_type_result, (1, "hi".to_owned()));
+
+    let float_to_int_result: (u32, String) = conn
+        .exec_first("SELECT id, title FROM posts WHERE id = ?", (1f32,))
+        .unwrap()
+        .unwrap();
+    assert_eq!(float_to_int_result, (1, "hi".to_owned()));
+}

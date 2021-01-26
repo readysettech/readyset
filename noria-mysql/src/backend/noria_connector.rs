@@ -11,7 +11,7 @@ use nom_sql::{
 };
 use vec1::vec1;
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::io;
@@ -435,19 +435,44 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
+        let getter_schema = self
+            .inner
+            .ensure_getter(&qname)
+            .schema()
+            .expect(&format!("no schema for view '{}'", qname));
         let schema = schema::convert_schema(&Schema::View(
-            self.inner
-                .ensure_getter(&qname)
-                .schema()
-                .expect(&format!("no schema for view '{}'", qname))
+            getter_schema
                 .iter()
                 .cloned()
                 .filter(|c| c.column.name != "bogokey")
                 .collect(),
         ));
 
+        let key_column_indices = utils::select_statement_parameter_columns(&q)
+            .into_iter()
+            .map(|col| {
+                dbg!(&getter_schema, col);
+                getter_schema
+                    .iter()
+                    // TODO(grfn): Looking up columns in the resulting view by the name of the
+                    // column in the input query is a little iffy - ideally, the getter itself would
+                    // be able to tell us the types of the columns and we could skip all of this
+                    // nonsense.
+                    // https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
+                    .position(|getter_col| getter_col.column.name == *col.name)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &q, keys, schema.as_slice(), results)
+        self.do_read(
+            &qname,
+            &q,
+            keys,
+            schema.as_slice(),
+            &key_column_indices,
+            results,
+        )
     }
 
     fn prepare_select(
@@ -460,7 +485,7 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
         // give.
-        let params: Vec<nom_sql::Column> = utils::get_parameter_columns(&sql_q)
+        let param_columns: Vec<nom_sql::Column> = utils::get_parameter_columns(&sql_q)
             .into_iter()
             .cloned()
             .collect();
@@ -479,20 +504,33 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
+        let getter_schema = self
+            .inner
+            .ensure_getter(&qname)
+            .schema()
+            .expect(&format!("no schema for view '{}'", qname));
         let schema = Schema::View(
-            self.inner
-                .ensure_getter(&qname)
-                .schema()
-                .expect(&format!("no schema for view '{}'", qname))
+            getter_schema
                 .iter()
                 .cloned()
                 .filter(|c| c.column.name != "bogokey")
                 .collect(),
         );
 
+        let key_column_indices = param_columns
+            .iter()
+            .map(|col| {
+                getter_schema
+                    .iter()
+                    // TODO: https://app.clubhouse.io/readysettech/story/203/add-a-key-types-method-to-view
+                    .position(|getter_col| getter_col.column.name == *col.name)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
         // now convert params to msql_srv types; we have to do this here because we don't have
         // access to the schema yet when we extract them above.
-        let params: Vec<msql_srv::Column> = params
+        let params: Vec<msql_srv::Column> = param_columns
             .into_iter()
             .map(|mut c| {
                 c.table = Some(qname.clone());
@@ -503,12 +541,13 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
 
         info.reply(statement_id, params.as_slice(), schema.as_slice())?;
         trace!(id = statement_id, "select::registered");
-        Ok(PreparedStatement::Select(
-            qname,
-            q,
+        Ok(PreparedStatement::Select {
+            name: qname,
+            statement: q,
             schema,
-            rewritten.map(|(a, b)| (a, b.len())),
-        ))
+            key_column_indices,
+            rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
+        })
     }
 
     fn execute_select(
@@ -517,9 +556,10 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
         q: &nom_sql::SelectStatement,
         keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
+        key_column_indices: &[usize],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
-        self.do_read(qname, q, keys, schema, results)
+        self.do_read(qname, q, keys, schema, key_column_indices, results)
     }
 }
 impl NoriaConnector {
@@ -734,6 +774,7 @@ impl NoriaConnector {
         q: &nom_sql::SelectStatement,
         mut keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
+        key_column_indices: &[usize],
         results: QueryResultWriter<W>,
     ) -> io::Result<()> {
         // create a getter if we don't have one for this query already
@@ -741,6 +782,11 @@ impl NoriaConnector {
         // earlier one of the same name
         trace!("select::access view");
         let getter = self.inner.ensure_getter(&qname);
+        let getter_schema = getter.schema().expect("No schema for view");
+        let mut key_types = key_column_indices
+            .iter()
+            .map(|i| &getter_schema[*i].sql_type)
+            .collect::<Vec<_>>();
 
         let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
             let written = match *c {
@@ -791,9 +837,8 @@ impl NoriaConnector {
                 },
                 DataType::Timestamp(ts) => rw.write_col(ts),
             };
-            match written {
-                Ok(_) => (),
-                Err(e) => panic!("failed to write column: {:?}", e),
+            if let Err(e) = written {
+                panic!("failed to write column: {:?}", e);
             }
         };
 
@@ -821,7 +866,12 @@ impl NoriaConnector {
                     .iter()
                     .position(|x| x.column == col.name)
                     .expect("Filter column not in schema!");
-                let value = String::from(&key.remove(idx));
+                let value = String::from(
+                    &key.remove(idx)
+                        .coerce_to(&key_types.remove(idx))
+                        .unwrap()
+                        .into_owned(),
+                );
                 if !key.is_empty() {
                     // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                     keys.push(key);
@@ -853,8 +903,20 @@ impl NoriaConnector {
             }
 
             keys.drain(..)
-                .map(|k_op| {
-                    (k_op, binop_to_use)
+                .map(|mut key| {
+                    let k = key
+                        .drain(..)
+                        .zip(&key_types)
+                        .map(|(val, col_type)| {
+                            val.coerce_to(col_type)
+                                .map(Cow::into_owned)
+                                // TODO(grfn): Drop this unwrap once we have real error return
+                                // values here (#50)
+                                .unwrap()
+                        })
+                        .collect::<Vec<DataType>>();
+
+                    (k, binop_to_use)
                         .try_into()
                         .expect("Input key cannot be empty")
                 })

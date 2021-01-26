@@ -306,18 +306,20 @@ pub(crate) fn get_select_statement_binops(
     }
 }
 
+pub(crate) fn select_statement_parameter_columns(query: &SelectStatement) -> Vec<&Column> {
+    if let Some(ref wc) = query.where_clause {
+        get_parameter_columns_recurse(wc)
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     match *query {
-        SqlQuery::Select(ref query) => {
-            if let Some(ref wc) = query.where_clause {
-                get_parameter_columns_recurse(wc)
-                    .into_iter()
-                    .map(|(c, _)| c)
-                    .collect()
-            } else {
-                vec![]
-            }
-        }
+        SqlQuery::Select(ref query) => select_statement_parameter_columns(query),
         SqlQuery::Insert(ref query) => {
             assert_eq!(query.data.len(), 1);
             // need to find for which fields we *actually* have a parameter
