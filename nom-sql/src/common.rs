@@ -29,6 +29,8 @@ pub enum SqlType {
     UnsignedBigint(u16),
     Tinyint(u16),
     UnsignedTinyint(u16),
+    Smallint(u16),
+    UnsignedSmallint(u16),
     Blob,
     Longblob,
     Mediumblob,
@@ -61,6 +63,8 @@ impl fmt::Display for SqlType {
             SqlType::UnsignedBigint(len) => write!(f, "BIGINT({}) UNSIGNED", len),
             SqlType::Tinyint(len) => write!(f, "TINYINT({})", len),
             SqlType::UnsignedTinyint(len) => write!(f, "TINYINT({}) UNSIGNED", len),
+            SqlType::Smallint(len) => write!(f, "SMALLINT({})", len),
+            SqlType::UnsignedSmallint(len) => write!(f, "SMALLINT({}) UNSIGNED", len),
             SqlType::Blob => write!(f, "BLOB"),
             SqlType::Longblob => write!(f, "LONGBLOB"),
             SqlType::Mediumblob => write!(f, "MEDIUMBLOB"),
@@ -436,109 +440,31 @@ fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
     delimited(tag("("), digit1, tag(")"))(i)
 }
 
-// TODO: rather than copy paste these functions, should create a function that returns a parser
-// based on the sql int type, just like nom does
-fn tiny_int(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (remaining_input, (_, len, _, signed)) = tuple((
-        tag_no_case("tinyint"),
-        opt(delim_digit),
-        multispace0,
-        opt_signed,
-    ))(i)?;
+fn int_type<'a, F, G>(
+    tag: &str,
+    mk_unsigned: F,
+    mk_signed: G,
+    default_len: u16,
+    i: &'a [u8],
+) -> IResult<&'a [u8], SqlType>
+where
+    F: Fn(u16) -> SqlType + 'static,
+    G: Fn(u16) -> SqlType + 'static,
+{
+    let (remaining_input, (_, len, _, signed)) =
+        tuple((tag_no_case(tag), opt(delim_digit), multispace0, opt_signed))(i)?;
+
+    let len = len.map(|l| len_as_u16(l)).unwrap_or(default_len);
 
     match signed {
-        Some(sign) => {
+        Some(sign)
             if str::from_utf8(sign)
                 .unwrap()
-                .eq_ignore_ascii_case("unsigned")
-            {
-                Ok((
-                    remaining_input,
-                    SqlType::UnsignedTinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-                ))
-            } else {
-                Ok((
-                    remaining_input,
-                    SqlType::Tinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-                ))
-            }
+                .eq_ignore_ascii_case("unsigned") =>
+        {
+            Ok((remaining_input, mk_unsigned(len)))
         }
-        None => Ok((
-            remaining_input,
-            SqlType::Tinyint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-        )),
-    }
-}
-
-// TODO: rather than copy paste these functions, should create a function that returns a parser
-// based on the sql int type, just like nom does
-fn big_int(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (remaining_input, (_, len, _, signed)) = tuple((
-        tag_no_case("bigint"),
-        opt(delim_digit),
-        multispace0,
-        opt_signed,
-    ))(i)?;
-
-    match signed {
-        Some(sign) => {
-            if str::from_utf8(sign)
-                .unwrap()
-                .eq_ignore_ascii_case("unsigned")
-            {
-                Ok((
-                    remaining_input,
-                    SqlType::UnsignedBigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-                ))
-            } else {
-                Ok((
-                    remaining_input,
-                    SqlType::Bigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-                ))
-            }
-        }
-        None => Ok((
-            remaining_input,
-            SqlType::Bigint(len.map(|l| len_as_u16(l)).unwrap_or(1)),
-        )),
-    }
-}
-
-// TODO: rather than copy paste these functions, should create a function that returns a parser
-// based on the sql int type, just like nom does
-fn sql_int_type(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (remaining_input, (_, len, _, signed)) = tuple((
-        alt((
-            tag_no_case("integer"),
-            tag_no_case("int"),
-            tag_no_case("smallint"),
-        )),
-        opt(delim_digit),
-        multispace0,
-        opt_signed,
-    ))(i)?;
-
-    match signed {
-        Some(sign) => {
-            if str::from_utf8(sign)
-                .unwrap()
-                .eq_ignore_ascii_case("unsigned")
-            {
-                Ok((
-                    remaining_input,
-                    SqlType::UnsignedInt(len.map(|l| len_as_u16(l)).unwrap_or(32)),
-                ))
-            } else {
-                Ok((
-                    remaining_input,
-                    SqlType::Int(len.map(|l| len_as_u16(l)).unwrap_or(32)),
-                ))
-            }
-        }
-        None => Ok((
-            remaining_input,
-            SqlType::Int(len.map(|l| len_as_u16(l)).unwrap_or(32)),
-        )),
+        _ => Ok((remaining_input, mk_signed(len))),
     }
 }
 
@@ -561,9 +487,19 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
 
 fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
-        tiny_int,
-        big_int,
-        sql_int_type,
+        |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, 8, i),
+        |i| {
+            int_type(
+                "smallint",
+                SqlType::UnsignedSmallint,
+                SqlType::Smallint,
+                16,
+                i,
+            )
+        },
+        |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, 32, i),
+        |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, 32, i),
+        |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, 64, i),
         map(tag_no_case("bool"), |_| SqlType::Bool),
         map(
             tuple((
@@ -1171,7 +1107,7 @@ mod tests {
             vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime(16)]
         );
 
-        assert!(res_not_ok.into_iter().all(|r| r == false));
+        assert!(res_not_ok.into_iter().all(|r| !r));
     }
 
     #[test]
