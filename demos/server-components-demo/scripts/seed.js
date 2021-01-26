@@ -15,6 +15,7 @@ const {readdir, unlink, writeFile} = require('fs/promises');
 const startOfYear = require('date-fns/startOfYear');
 const credentials = require('../credentials');
 const {escape} = require('sqlstring');
+const {DateTime} = require('luxon');
 
 const NOTES_PATH = './notes';
 const pool = createPool(credentials);
@@ -37,9 +38,18 @@ const createTableStatement = `CREATE TABLE notes (
   title TEXT,
   body TEXT
 );`;
-const insertNote = ([title, body, created_at]) =>
-  `INSERT INTO notes(title, body, created_at, updated_at)
-   VALUES (${escape(title)}, ${escape(body)}, '${created_at}', '${created_at}')`;
+const insertNote = ([title, body, created_at]) => {
+  const createdAtStr = DateTime.fromJSDate(created_at).toFormat(
+    'yyyy-MM-dd HH:mm:ss'
+  );
+  return `
+    INSERT INTO notes(title, body, created_at, updated_at)
+    VALUES (
+      ${escape(title)},
+      ${escape(body)},
+      '${createdAtStr}',
+      '${createdAtStr}')`;
+};
 const seedData = [
   [
     'Meeting Notes',
@@ -76,7 +86,7 @@ async function seed() {
   );
 
   // TODO: Bring this back once we have INSERT RETURNING or something like it
-  // 
+  //
   // await Promise.all(
   //   res.map(({rows}) => {
   //     const id = rows[0].id;

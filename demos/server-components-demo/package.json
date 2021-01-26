@@ -17,6 +17,7 @@
     "excerpts": "^0.0.3",
     "express": "^4.17.1",
     "html-webpack-plugin": "4.5.0",
+    "luxon": "^1.25.0",
     "marked": "^1.2.5",
     "mysql": "^2.18.1",
     "mysql2": "^2.2.5",

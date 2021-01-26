@@ -25,13 +25,15 @@ const {unlink, writeFile} = require('fs').promises;
 const {pipeToNodeWritable} = require('react-server-dom-webpack/writer');
 const {promisify} = require('util');
 const path = require('path');
-const mysql = require('mysql');
+const {createPool} = require('mysql2');
+const {DateTime} = require('luxon');
+const {escape} = require('sqlstring');
 const React = require('react');
 const ReactApp = require('../src/App.server').default;
 
 // Don't keep credentials in the source tree in a real app!
-const pool = mysql.createPool(require('../credentials'));
-const query = promisify(pool.query).bind(pool);
+const pool = createPool(require('../credentials'));
+const query = promisify(pool.execute).bind(pool);
 
 const PORT = 4000;
 const app = express();
@@ -52,6 +54,10 @@ function handleErrors(fn) {
     }
   };
 }
+
+const sqlDate = (date) => DateTime.fromJSDate(date).toFormat(
+  'yyyy-MM-dd HH:mm:ss'
+);
 
 app.get(
   '/',
@@ -101,11 +107,16 @@ app.post(
   '/notes',
   handleErrors(async function(req, res) {
     const now = new Date();
+    const nowStr = sqlDate(now);
+    const q =
+       `insert into notes (title, body, created_at, updated_at)
+        values (?, ?, ?, ?)`;
     const result = await query(
-      'insert into notes (title, body, created_at, updated_at) values (?, ?, ?, ?)',
-      [req.body.title, req.body.body, now, now]
+      q,
+      [req.body.title, req.body.body, nowStr, nowStr]
     );
-    const insertedId = result.rows[0].id;
+
+    const insertedId = result.insertId;
     await writeFile(
       path.resolve(NOTES_PATH, `${insertedId}.md`),
       req.body.body,
@@ -121,8 +132,12 @@ app.put(
     const now = new Date();
     const updatedId = Number(req.params.id);
     await query(
-      'update notes set title = $1, body = $2, updated_at = $3 where id = $4',
-      [req.body.title, req.body.body, now, updatedId]
+      `update notes set
+         title = ${escape(req.body.title)},
+         body = ${escape(req.body.body)},
+         updated_at = ${escape(sqlDate(now))}
+       where id = ${updatedId}`,
+      []
     );
     await writeFile(
       path.resolve(NOTES_PATH, `${updatedId}.md`),
@@ -153,8 +168,8 @@ app.get(
 app.get(
   '/notes/:id',
   handleErrors(async function(req, res) {
-    const {rows} = await query('select * from notes where id = $1', [
-      req.params.id,
+    const rows = await query('select * from notes where id = ?', [
+      parseInt(req.params.id),
     ]);
     res.json(rows[0]);
   })
