@@ -26,6 +26,7 @@ pub trait Reader<W: io::Write> {
         q: &nom_sql::SelectStatement,
         keys: Vec<Vec<DataType>>,
         schema: &[msql_srv::Column],
+        key_column_indices: &[usize],
         results: QueryResultWriter<W>,
     ) -> io::Result<()>;
 }
