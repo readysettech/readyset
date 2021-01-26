@@ -427,7 +427,15 @@ pub(crate) fn extract_update_params_and_fields(
                     value: ref v,
                     alias: None,
                 }) => {
-                    updates.push((i, Modification::Set(DataType::from(v))));
+                    updates.push((
+                        i,
+                        Modification::Set(
+                            DataType::from(v)
+                                .coerce_to(&field.sql_type)
+                                .unwrap()
+                                .into_owned(),
+                        ),
+                    ));
                 }
                 FieldValueExpression::Arithmetic(ref ae) => {
                     // we only support "column = column +/- literal"
