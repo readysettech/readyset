@@ -612,7 +612,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         Column::from("django_admin_log.action_flag"),
-                        SqlType::UnsignedInt(32),
+                        SqlType::UnsignedSmallint(16),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(

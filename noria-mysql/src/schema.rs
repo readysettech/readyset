@@ -1,4 +1,3 @@
-use msql_srv;
 use nom_sql::{self, ColumnConstraint, ColumnSpecification, CreateTableStatement, SqlType};
 
 #[derive(Debug)]
@@ -32,6 +31,11 @@ pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
             SqlType::UnsignedTinyint(_) => {
                 flags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
                 MYSQL_TYPE_TINY
+            }
+            SqlType::Smallint(_) => MYSQL_TYPE_SHORT,
+            SqlType::UnsignedSmallint(_) => {
+                flags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+                MYSQL_TYPE_SHORT
             }
             SqlType::Bool => MYSQL_TYPE_BIT,
             SqlType::DateTime(_) => MYSQL_TYPE_DATETIME,
