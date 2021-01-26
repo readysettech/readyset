@@ -251,7 +251,7 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
         let data: Vec<Vec<DataType>> = q
             .data
             .iter()
-            .map(|row| row.iter().map(|v| DataType::from(v)).collect())
+            .map(|row| row.iter().map(DataType::from).collect())
             .collect();
 
         self.do_insert(&q, data, results)
@@ -718,12 +718,15 @@ impl NoriaConnector {
             }
 
             for (ci, c) in columns_specified.iter().enumerate() {
-                let idx = schema
+                let (idx, field) = schema
                     .fields
                     .iter()
-                    .position(|f| f.column == *c)
+                    .find_position(|f| f.column == *c)
                     .expect(&format!("no column '{:?}' in table '{}'", c, schema.table));
-                buf[ri][idx] = row.get(ci).unwrap().clone();
+                // TODO(grfn): Convert this unwrap() to an actual user error once we have proper
+                // error return values (PR#50)
+                let value = row.get(ci).unwrap().coerce_to(&field.sql_type).unwrap();
+                buf[ri][idx] = value.into_owned();
             }
         }
 
@@ -747,10 +750,7 @@ impl NoriaConnector {
             r
         } else {
             trace!("insert::simple");
-            let buf: Vec<_> = buf
-                .into_iter()
-                .map(|r| TableOperation::Insert(r.into()))
-                .collect();
+            let buf: Vec<_> = buf.into_iter().map(TableOperation::Insert).collect();
             let r = block_on_buffer(putter.perform_all(buf));
             trace!("insert::simple::complete");
             r

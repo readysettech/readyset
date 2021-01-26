@@ -9,6 +9,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::{NaiveDate, NaiveDateTime};
 use msql_srv::MysqlIntermediary;
 use mysql::prelude::*;
 use nom_sql::SelectStatement;
@@ -1169,4 +1170,38 @@ fn key_type_coercion() {
         .unwrap()
         .unwrap();
     assert_eq!(float_to_int_result, (1, "hi".to_owned()));
+}
+
+#[test]
+fn write_timestamps() {
+    let d = Deployment::new("insert_timestamps");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE posts (id int primary key, created_at TIMESTAMP)")
+        .unwrap();
+    conn.query_drop("INSERT INTO posts (id, created_at) VALUES (1, '2020-01-23 17:08:24')")
+        .unwrap();
+    let result: (u32, NaiveDateTime) = conn
+        .exec_first("SELECT id, created_at FROM posts WHERE id = ?", (1,))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.0, 1);
+    assert_eq!(
+        result.1,
+        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 08, 24)
+    );
+
+    conn.query_drop("UPDATE posts SET created_at = '2021-01-25 17:08:24' WHERE id = 1")
+        .unwrap();
+    let result: (u32, NaiveDateTime) = conn
+        .exec_first("SELECT id, created_at FROM posts WHERE id = ?", (1,))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.0, 1);
+    assert_eq!(
+        result.1,
+        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 08, 24)
+    );
 }
