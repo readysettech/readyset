@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5a80fc0968dfe48ffb59b253b06b4db0c6de4c557ae22bc099f5b6ae5be09c27 # shrinks to input = _RealToIntArgs { whole_part: 0, int_type: Int(0) }
