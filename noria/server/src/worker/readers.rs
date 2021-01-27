@@ -599,8 +599,17 @@ impl BlockingRead {
                 let waited = now - self.first;
                 if waited > time::Duration::from_secs(7) && !self.warned {
                     eprintln!(
-                        "warning: read has been stuck waiting on {:?} for {:?}",
-                        self.keys, waited
+                        "warning: read has been stuck waiting on {} for {:?}",
+                        if self.keys.len() < 8 {
+                            format!("{:?}", self.keys)
+                        } else {
+                            format!(
+                                "{:?} (and {} more keys)",
+                                &self.keys[..8],
+                                self.keys.len() - 8
+                            )
+                        },
+                        waited
                     );
                     self.warned = true;
                 }

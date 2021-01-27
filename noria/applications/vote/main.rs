@@ -1,9 +1,11 @@
 #![feature(type_alias_impl_trait)]
+#![deny(unused_must_use)]
 
-use anyhow::Context as AnyhowContext;
+use anyhow::{anyhow, Context as AnyhowContext};
 use clap::value_t_or_exit;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use futures_util::stream::futures_unordered::FuturesUnordered;
+use hdrhistogram::Histogram;
 use noria_applications::Timeline;
 use rand::prelude::*;
 use rand_distr::Exp;
@@ -31,7 +33,7 @@ const MAX_BATCH_TIME: time::Duration = time::Duration::from_millis(10);
 mod clients;
 use self::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 
-fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches)
+fn run<C>(global_args: &clap::ArgMatches, local_args: &clap::ArgMatches) -> anyhow::Result<()>
 where
     C: VoteClient + Unpin + 'static,
     C: Service<ReadRequest, Response = (), Error = anyhow::Error> + Clone + Send,
@@ -79,10 +81,7 @@ where
                 ts.1.lock().unwrap().merge(&hs.1);
             })
         })
-        .build()
-        .unwrap();
-
-    eprintln!("setting up client");
+        .build()?;
 
     let handle: C = {
         let local_args = local_args.clone();
@@ -92,8 +91,6 @@ where
     };
 
     rt.block_on(async { tokio::time::delay_for(time::Duration::from_secs(1)).await });
-
-    eprintln!("setup completed");
 
     let start = std::time::SystemTime::now();
     let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
@@ -157,21 +154,62 @@ where
     read_t.set_total_duration(duration);
 
     if let Some(h) = global_args.value_of("histogram") {
-        match fs::File::create(h) {
-            Ok(mut f) => {
-                use hdrhistogram::serialization::interval_log;
-                use hdrhistogram::serialization::V2DeflateSerializer;
-                let mut s = V2DeflateSerializer::new();
-                let mut w = interval_log::IntervalLogWriterBuilder::new()
-                    .with_base_time(start)
-                    .begin_log_with(&mut f, &mut s)
-                    .unwrap();
-                write_t.write(&mut w).unwrap();
-                read_t.write(&mut w).unwrap();
-            }
-            Err(e) => {
-                eprintln!("failed to open histogram file for writing: {:?}", e);
-            }
+        let mut f = fs::File::create(h).context("Opening histogram file for writing")?;
+        use hdrhistogram::serialization::interval_log;
+        use hdrhistogram::serialization::V2DeflateSerializer;
+        let mut s = V2DeflateSerializer::new();
+        let mut w = interval_log::IntervalLogWriterBuilder::new()
+            .with_base_time(start)
+            .begin_log_with(&mut f, &mut s)
+            .unwrap();
+        write_t.write(&mut w)?;
+        read_t.write(&mut w)?;
+    }
+    if let Some(csv_path) = global_args.value_of("csv") {
+        let mut wtr = csv::Writer::from_path(csv_path).context("Opening CSV file for writing")?;
+        wtr.write_record(&[
+            "benchmark-name",
+            "value",
+            "lower-quartile",
+            "upper-quartile",
+        ])?;
+        let benchmark_prefix = format!(
+            "vote-{}",
+            global_args.subcommand_name().unwrap_or("default")
+        );
+        let benchmark_name =
+            move |rw: &str, sjrn_rmt: &str| format!("{}/{}/{}", benchmark_prefix, rw, sjrn_rmt);
+        let quantile = |hist: &Histogram<u64>, qtile| {
+            ((hist.value_at_quantile(qtile) as f64) / 1000000.0).to_string()
+        };
+        if let Some((rmt_w_t, sjrn_w_t)) = write_t.last() {
+            wtr.write_record(&[
+                benchmark_name("write", "remote"),
+                quantile(rmt_w_t, 0.5),
+                quantile(rmt_w_t, 0.25),
+                quantile(rmt_w_t, 0.75),
+            ])?;
+            wtr.write_record(&[
+                benchmark_name("write", "sojourn"),
+                quantile(sjrn_w_t, 0.5),
+                quantile(sjrn_w_t, 0.25),
+                quantile(sjrn_w_t, 0.75),
+            ])?;
+        }
+
+        if let Some((rmt_r_t, sjrn_r_t)) = read_t.last() {
+            wtr.write_record(&[
+                benchmark_name("read", "remote"),
+                quantile(rmt_r_t, 0.5),
+                quantile(rmt_r_t, 0.25),
+                quantile(rmt_r_t, 0.75),
+            ])?;
+            wtr.write_record(&[
+                benchmark_name("read", "sojourn"),
+                quantile(sjrn_r_t, 0.5),
+                quantile(sjrn_r_t, 0.25),
+                quantile(sjrn_r_t, 0.75),
+            ])?;
         }
     }
 
@@ -220,6 +258,7 @@ where
             rmt_r_t.max()
         );
     }
+    Ok(())
 }
 
 fn run_generator<C, R>(
@@ -505,7 +544,7 @@ where
     (gen, worker_ops, took)
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     use clap::{App, Arg, SubCommand};
 
     let args = App::new("vote")
@@ -544,6 +583,12 @@ fn main() {
                      There are four histograms, written out in order: \
                      sojourn-write, sojourn-read, remote-write, and remote-read",
                 ),
+        )
+        .arg(
+            Arg::with_name("csv")
+                .long("csv")
+                .help("Output serialized CSV to a file")
+                .takes_value(true)
         )
         .arg(
             Arg::with_name("ops")
@@ -757,6 +802,6 @@ fn main() {
         ("redis", Some(largs)) => run::<clients::redis::Conn>(&args, largs),
         //("hybrid", Some(largs)) => run::<clients::hybrid::Conf>(&args, largs),
         //("null", Some(largs)) => run::<()>(&args, largs),
-        (name, _) => eprintln!("unrecognized backend type '{}'", name),
+        (name, _) => Err(anyhow!("unrecognized backend type '{}'", name)),
     }
 }

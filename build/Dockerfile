@@ -22,3 +22,7 @@ RUN apt-get install -y \
     libssl-dev \
     liblz4-dev \
     build-essential
+
+ENV CXX /bin/sccache c++
+
+RUN mkdir -p /root/.sccache

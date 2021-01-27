@@ -38,6 +38,7 @@ zipf = "6"
 zookeeper = "0.5.3"
 mysql = "*"
 vec1 = "1.6.0"
+csv = "1.1.5"
 
 # mssql
 # disabled due to lack of async/await support
