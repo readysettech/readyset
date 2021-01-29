@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# Ensure that the `target` volume exists, so that steps that expect it to
+# already exist (the ones that use docker-compose) can run even if they're the
+# first steps to run on an agent
+docker volume create target
