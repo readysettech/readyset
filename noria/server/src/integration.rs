@@ -1972,6 +1972,44 @@ async fn full_aggregation_with_bogokey() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn pkey_then_full_table_with_bogokey() {
+    let mut g = start_simple_unsharded("pkey_then_full_table_with_bogokey").await;
+    g.install_recipe("CREATE TABLE posts (id int, title text)")
+        .await
+        .unwrap();
+    g.extend_recipe("QUERY by_id: SELECT id, title FROM posts WHERE id = ?")
+        .await
+        .unwrap();
+    g.extend_recipe("QUERY all_posts: SELECT id, title FROM posts")
+        .await
+        .unwrap();
+
+    let mut posts = g.table("posts").await.unwrap();
+    let mut by_id = g.view("by_id").await.unwrap();
+    let mut all_posts = g.view("all_posts").await.unwrap();
+
+    let rows: Vec<Vec<DataType>> = (0..10)
+        .map(|n| vec![n.into(), format!("post {}", n).into()])
+        .collect();
+    posts.insert_many(rows.clone()).await.unwrap();
+
+    // Looking up post with id 1 should return the correct post.
+    assert_eq!(
+        by_id.lookup(&[1.into()], true).await.unwrap(),
+        vec![vec![DataType::from(1), DataType::from("post 1")]]
+    );
+
+    // Looking up all posts using a 0 bogokey should return all posts.
+    let rows_with_bogokey: Vec<Vec<DataType>> = (0..10)
+        .map(|n| vec![n.into(), format!("post {}", n).into(), 0.into()])
+        .collect();
+    assert_eq!(
+        all_posts.lookup(&[0.into()], true).await.unwrap(),
+        rows_with_bogokey
+    );
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn materialization_frontier() {
     // set up graph
     let mut g = start_simple_unsharded("materialization_frontier").await;

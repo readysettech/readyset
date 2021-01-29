@@ -189,6 +189,7 @@ impl SqlIncorporator {
         query_name: &str,
         universe: UniverseId,
         st: &SelectStatement,
+        is_leaf: bool,
     ) -> Result<(QueryGraph, QueryGraphReuse), String> {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
@@ -287,7 +288,15 @@ impl SqlIncorporator {
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     });
 
-                    if predicates_match && no_grouped_columns {
+                    // Leaf queries with no parameters require that a "bogokey" dummy literal column
+                    // be projected to support lookups. The ReaderOntoExisting optimization below
+                    // does not support projecting a new bogokey if the existing query graph has
+                    // parameters and therefore lacks a bogokey in its leaf projection.
+                    let is_new_bogokey_needed = is_leaf
+                        && qg.parameters().is_empty()
+                        && !existing_qg.parameters().is_empty();
+
+                    if predicates_match && no_grouped_columns && !is_new_bogokey_needed {
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -489,7 +498,7 @@ impl SqlIncorporator {
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
-        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq)?;
+        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq, is_leaf)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(name, mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
@@ -1383,6 +1392,254 @@ mod tests {
             // we should be based off the new projection as our leaf
             let id_node = qfp.new_nodes.iter().next().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_reuses_bogokey_projection_with_different_parameter() {
+        // set up graph
+        let mut g = integration::start_simple("it_reuses_bogokey_with_different_parameter").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new "full table" query. The view is expected to contain projected columns plus
+            // the special 'bogokey' literal column.
+            let res = inc.add_query("SELECT id, name FROM users;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let bogo_projection_address = inc.get_flow_node_address(&qfp.name, 0).unwrap();
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+            let leaf = qfp.query_leaf;
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+
+            // Add the same query again
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query("SELECT id, name FROM users;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // should have added no more nodes
+            assert_eq!(qfp.new_nodes, vec![]);
+            assert_eq!(mig.graph().node_count(), ncount);
+            // should have ended up with the same leaf node
+            assert_eq!(qfp.query_leaf, leaf);
+
+            // Add the same query again, but now with a parameter on a column.
+            // Project the same columns, so we can reuse the projection that already exists and only
+            // add an identity node.
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let identity = get_node(&inc, mig, &qfp.name);
+            assert_eq!(identity.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(identity.description(true), "≡");
+            // should have added two more nodes (identity and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
+                .unwrap();
+            // Check that the parent of the projection is the bogokey projection.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [bogo_projection_address]);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_does_not_reuse_bogokey_projection_for_different_projection() {
+        // set up graph
+        let mut g = integration::start_simple(
+            "it_does_not_reuse_bogokey_projection_with_different_projection",
+        )
+        .await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+
+            // Add a new "full table" query. The view is expected to contain projected columns plus
+            // the special 'bogokey' literal column.
+            let res = inc.add_query("SELECT id, name FROM users;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+            let leaf = qfp.query_leaf;
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+
+            // Add the name query again, but with a parameter and project columns in a different
+            // order.
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT name, id FROM users WHERE users.name = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["name", "id"]);
+            assert_eq!(projection.description(true), "π[1, 0]");
+            // should have added two more nodes (project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
+
+            // Check that the parent of the projection is the base table, and NOT the earlier
+            // bogokey projection.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base_address]);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_does_not_reuse_parameter_projection_for_bogokey_projection() {
+        // set up graph
+        let mut g = integration::start_simple(
+            "it_does_not_reuse_parameter_projection_with_bogokey_projection",
+        )
+        .await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+
+            // Add a new parameterized query.
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(projection.description(true), "π[0, 1]");
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
+
+            // Add a new "full table" query. The view is expected to contain projected columns plus
+            // the special 'bogokey' literal column.
+            let res = inc.add_query("SELECT id, name FROM users;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+
+            // Check that the parent of the projection node is the base table, and NOT the earlier
+            // parameterized projection.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base_address]);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_reuses_projection_for_non_bogokey_table_query() {
+        use super::sql_parser;
+        // set up graph
+        let mut g = integration::start_simple(
+            "it_does_not_reuse_bogokey_projection_with_different_projection",
+        )
+        .await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a new parameterized query.
+            let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            let leaf = qfp.query_leaf;
+            let param_address = inc.get_flow_node_address(&qfp.name, 0).unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(projection.description(true), "π[0, 1]");
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
+
+            // Add a new "full table" query as a non leaf query. The view does not contain a
+            // 'bogokey' literal column because it is for a non leaf query.
+            let res = inc.add_parsed_query(
+                sql_parser::parse_query("SELECT id, name FROM users;").unwrap(),
+                Some("short_users".into()),
+                false,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let identity = get_node(&inc, mig, &qfp.name);
+            assert_eq!(identity.fields(), &["id", "name"]);
+            assert_eq!(identity.description(true), "≡");
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check that the parent of the identity is the paramaterized query.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [param_address]);
         })
         .await;
     }
