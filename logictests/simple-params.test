@@ -1,0 +1,35 @@
+statement ok
+CREATE TABLE notes(
+  id INTEGER PRIMARY KEY,
+  title TEXT,
+  body TEXT
+)
+
+statement ok
+INSERT INTO notes (id, title, body) VALUES (1, 'test_1', 'test_1')
+
+query ITT nosort
+SELECT * FROM notes WHERE id = 1;
+----
+1
+test_1
+test_1
+
+query ITT nosort
+SELECT * FROM notes WHERE id = ?;
+? = 1
+----
+1
+test_1
+test_1
+
+statement ok
+INSERT INTO notes (id, title, body) VALUES (2, 'test_2', 'test_2')
+
+query ITT nosort
+SELECT * FROM notes WHERE id = ?
+? = 2
+----
+2
+test_2
+test_2

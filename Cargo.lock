@@ -2488,6 +2488,7 @@ dependencies = [
  "derive_more",
  "hex 0.4.2",
  "itertools 0.10.0",
+ "maplit",
  "md5 0.7.0",
  "msql-srv",
  "mysql 20.1.0",

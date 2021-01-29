@@ -23,7 +23,7 @@ use noria_mysql::backend::noria_connector::NoriaConnector;
 use noria_mysql::backend::Backend;
 use noria_server::Builder;
 
-use crate::ast::{Query, QueryResults, Record, ResultValue, SortMode, Statement, StatementResult};
+use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
 use crate::parser;
 
 #[derive(Debug, Clone)]
@@ -186,13 +186,20 @@ impl TestScript {
     }
 
     fn run_query(&self, query: &Query, conn: &mut mysql::Conn) -> anyhow::Result<()> {
-        let mut rows = conn.query(&query.query)?.into_iter().map(
-            |mut row: Row| -> anyhow::Result<Vec<ResultValue>> {
+        let results = if query.params.is_empty() {
+            conn.query(&query.query)?
+        } else {
+            conn.exec(&query.query, &query.params)?
+        };
+
+        let mut rows = results
+            .into_iter()
+            .map(|mut row: Row| -> anyhow::Result<Vec<Value>> {
                 query
                     .column_types
                     .iter()
                     .enumerate()
-                    .map(|(col_idx, col_type)| -> anyhow::Result<ResultValue> {
+                    .map(|(col_idx, col_type)| -> anyhow::Result<Value> {
                         let val = row.take(col_idx).ok_or_else(|| {
                             anyhow!(
                                 "Row had the wrong number of columns: expected {}, but got {}",
@@ -200,14 +207,13 @@ impl TestScript {
                                 row.len()
                             )
                         })?;
-                        Ok(ResultValue::from_mysql_value_with_type(val, col_type)
+                        Ok(Value::from_mysql_value_with_type(val, col_type)
                             .with_context(|| format!("Converting value to {:?}", col_type))?)
                     })
                     .collect::<anyhow::Result<Vec<_>>>()
-            },
-        );
+            });
 
-        let vals: Vec<ResultValue> = match query.sort_mode.unwrap_or_default() {
+        let vals: Vec<Value> = match query.sort_mode.unwrap_or_default() {
             SortMode::NoSort => rows.fold_ok(vec![], |mut acc, row| {
                 acc.extend(row);
                 acc
@@ -236,7 +242,7 @@ impl TestScript {
                         vals.len(),
                     );
                 }
-                let actual_digest = ResultValue::hash_results(&vals);
+                let actual_digest = Value::hash_results(&vals);
                 if actual_digest != *digest {
                     bail!(
                         "Incorrect values returned from query, expected values hashing to {:x}, but got {:x}",
