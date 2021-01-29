@@ -2,6 +2,7 @@
 //!
 //! [1]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
 
@@ -97,16 +98,16 @@ impl Default for SortMode {
     }
 }
 
-/// An expected result value from a query
+/// A SQL literal value, used for expected result values and values for parameters
 #[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
-pub enum ResultValue {
+pub enum Value {
     Text(String),
     Integer(i64),
     Real(i64, u32),
     Null,
 }
 
-impl TryFrom<mysql::Value> for ResultValue {
+impl TryFrom<mysql::Value> for Value {
     type Error = anyhow::Error;
 
     fn try_from(value: mysql::Value) -> Result<Self, Self::Error> {
@@ -132,7 +133,18 @@ impl TryFrom<mysql::Value> for ResultValue {
     }
 }
 
-impl Display for ResultValue {
+impl From<Value> for mysql::Value {
+    fn from(val: Value) -> Self {
+        match val {
+            Value::Text(x) => x.into(),
+            Value::Integer(x) => x.into(),
+            Value::Real(i, f) => (i as f64 + (f64::from(f) / 1_000_000_000.0)).into(),
+            Value::Null => mysql::Value::NULL,
+        }
+    }
+}
+
+impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Text(s) => {
@@ -156,19 +168,19 @@ impl Display for ResultValue {
     }
 }
 
-impl PartialOrd for ResultValue {
+impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ResultValue {
+impl Ord for Value {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         format!("{}", self).cmp(&format!("{}", other))
     }
 }
 
-impl ResultValue {
+impl Value {
     pub fn typ(&self) -> Option<Type> {
         match self {
             Self::Text(_) => Some(Type::Text),
@@ -178,10 +190,7 @@ impl ResultValue {
         }
     }
 
-    pub fn from_mysql_value_with_type(
-        val: mysql::Value,
-        typ: &Type,
-    ) -> anyhow::Result<ResultValue> {
+    pub fn from_mysql_value_with_type(val: mysql::Value, typ: &Type) -> anyhow::Result<Value> {
         if val == mysql::Value::NULL {
             return Ok(Self::Null);
         }
@@ -217,7 +226,52 @@ impl ResultValue {
 #[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
 pub enum QueryResults {
     Hash { count: usize, digest: md5::Digest },
-    Results(Vec<ResultValue>),
+    Results(Vec<Value>),
+}
+
+/// The parameters passed to a prepared query, either positional or named
+#[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
+pub enum QueryParams {
+    PositionalParams(Vec<Value>),
+    NumberedParams(HashMap<u32, Value>),
+}
+
+impl QueryParams {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::PositionalParams(p) => p.is_empty(),
+            Self::NumberedParams(p) => p.is_empty(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::PositionalParams(p) => p.len(),
+            Self::NumberedParams(p) => p.len(),
+        }
+    }
+}
+
+impl Default for QueryParams {
+    fn default() -> Self {
+        QueryParams::PositionalParams(vec![])
+    }
+}
+
+impl Into<mysql::Params> for QueryParams {
+    fn into(self) -> mysql::Params {
+        match self {
+            qp if qp.is_empty() => mysql::Params::Empty,
+            Self::PositionalParams(vs) => {
+                mysql::Params::Positional(vs.into_iter().map(mysql::Value::from).collect())
+            }
+            Self::NumberedParams(nps) => mysql::Params::Named(
+                nps.into_iter()
+                    .map(|(n, v)| (n.to_string(), mysql::Value::from(v)))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 /// Run a query against the database engine and check the results against an expected result set
@@ -229,6 +283,7 @@ pub struct Query {
     pub conditionals: Vec<Conditional>,
     pub query: String,
     pub results: QueryResults,
+    pub params: QueryParams,
 }
 
 /// Top level expression in a sqllogictest test script
@@ -256,11 +311,11 @@ mod tests {
 
     #[test]
     fn display_result_value() {
-        assert_eq!(format!("{}", ResultValue::Text("\0".to_string())), "@");
+        assert_eq!(format!("{}", Value::Text("\0".to_string())), "@");
     }
 
     #[test]
     fn compare_result_value() {
-        assert!(ResultValue::Integer(9) > ResultValue::Integer(10));
+        assert!(Value::Integer(9) > Value::Integer(10));
     }
 }

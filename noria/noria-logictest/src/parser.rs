@@ -18,7 +18,7 @@ use nom::character::complete::{
 use nom::character::is_space;
 use nom::{
     alt, char, complete, count, do_parse, eof, flat_map, many0, many1, many_till, map, map_opt,
-    named, one_of, opt, parse_to, preceded, tag, take_while, take_while1, terminated,
+    named, one_of, opt, parse_to, peek, preceded, tag, take_while, take_while1, terminated,
 };
 
 named!(
@@ -152,12 +152,12 @@ named!(
 );
 
 named!(
-    float<ResultValue>,
+    float<Value>,
     do_parse!(
         whole: flat_map!(digit1, parse_to!(i64))
             >> tag!(".")
             >> fractional: flat_map!(digit1, parse_to!(u32))
-            >> (ResultValue::Real(whole, fractional))
+            >> (Value::Real(whole, fractional))
     )
 );
 
@@ -171,16 +171,16 @@ named!(
 );
 
 named!(
-    empty_string<ResultValue>,
-    map!(tag!("(empty)"), |_| ResultValue::Text(String::new()))
+    empty_string<Value>,
+    map!(tag!("(empty)"), |_| Value::Text(String::new()))
 );
 
 named!(
-    result_value<ResultValue>,
+    value<Value>,
     alt!(
         complete!(float) |
-        integer => { |i| ResultValue::Integer(i) } |
-        tag!("NULL") => { |_| ResultValue::Null } |
+        integer => { |i| Value::Integer(i) } |
+        tag!("NULL") => { |_| Value::Null } |
         empty_string |
         map_opt!(
             not_line_ending,
@@ -191,8 +191,47 @@ named!(
                     String::from_utf8(s.into()).ok()
                 }
             }
-        ) => { |s| ResultValue::Text(s) }
+        ) => { |s| Value::Text(s) }
     )
+);
+
+named!(
+    positional_param<Value>,
+    do_parse!(tag!("?") >> multispace1 >> tag!("=") >> multispace1 >> val: value >> (val))
+);
+
+named!(
+    positional_params<QueryParams>,
+    map!(
+        many1!(terminated!(positional_param, line_ending)),
+        QueryParams::PositionalParams
+    )
+);
+
+named!(
+    numbered_param<(u32, Value)>,
+    do_parse!(
+        tag!("$")
+            >> n: flat_map!(digit1, parse_to!(u32))
+            >> multispace1
+            >> tag!("=")
+            >> multispace1
+            >> val: value
+            >> ((n, val))
+    )
+);
+
+named!(
+    numbered_params<QueryParams>,
+    map!(many1!(terminated!(numbered_param, line_ending)), |ps| {
+        QueryParams::NumberedParams(ps.into_iter().collect())
+    })
+);
+
+named!(
+    query_params<QueryParams>,
+    map!(opt!(alt!(positional_params | numbered_params)), |ps| ps
+        .unwrap_or_default())
 );
 
 named!(
@@ -208,9 +247,20 @@ named!(
     alt!(
         preceded!(line_ending, hash_results) |
         many_till!(
-            complete!(preceded!(line_ending, result_value)),
+            complete!(preceded!(line_ending, value)),
             end_of_query_results
         ) => { |(vals, _)| QueryResults::Results(vals) }
+    )
+);
+
+named!(
+    end_of_query<()>,
+    preceded!(
+        line_ending,
+        peek!(alt!(
+            tag!("----") => { |_| () } |
+            alt!(numbered_param => { |_| () } | positional_param => { |_| () })
+        ))
     )
 );
 
@@ -231,10 +281,12 @@ named!(
                 ))
             >> line_ending
             >> query:
-                map!(many_till!(anychar, tag!("\n----")), |(s, _)| s
+                map!(many_till!(anychar, end_of_query), |(s, _)| s
                     .into_iter()
                     .collect::<String>(
                 ))
+            >> params: query_params
+            >> tag!("----")
             >> opt!(preceded!(line_ending, comment))
             >> results: query_results
             >> (Query {
@@ -243,7 +295,8 @@ named!(
                 sort_mode,
                 conditionals,
                 query,
-                results
+                results,
+                params,
             })
     )
 );
@@ -318,6 +371,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use maplit::hashmap;
     use nom::combinator::complete;
     use pretty_assertions::assert_eq;
 
@@ -342,16 +396,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_negative_number_result_value() {
-        assert_eq!(result_value(b"-1").unwrap().1, ResultValue::Integer(-1));
+    fn parse_negative_number_value() {
+        assert_eq!(value(b"-1").unwrap().1, Value::Integer(-1));
     }
 
     #[test]
     fn parse_empty_string() {
-        assert_eq!(
-            result_value(b"(empty)").unwrap().1,
-            ResultValue::Text(String::new())
-        );
+        assert_eq!(value(b"(empty)").unwrap().1, Value::Text(String::new()));
     }
 
     #[test]
@@ -413,7 +464,8 @@ ORDER BY 1"
                             .try_into()
                             .unwrap()
                     )
-                }
+                },
+                params: Default::default(),
             }
         )
     }
@@ -460,7 +512,8 @@ SELECT a,
                     182.into(),
                     1.into(),
                     183.into(),
-                ])
+                ]),
+                params: Default::default(),
             }
         )
     }
@@ -496,7 +549,8 @@ a";
                     label: None,
                     conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
-                    results: QueryResults::Results(vec![])
+                    results: QueryResults::Results(vec![]),
+                    params: Default::default(),
                 }),
                 Record::Statement(Statement {
                     result: StatementResult::Ok,
@@ -509,7 +563,8 @@ a";
                     sort_mode: Some(SortMode::ValueSort),
                     conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
-                    results: QueryResults::Results(vec![ResultValue::Text("a".to_string())]),
+                    results: QueryResults::Results(vec![Value::Text("a".to_string())]),
+                    params: Default::default(),
                 }),
             ]
         )
@@ -541,9 +596,56 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                             .try_into()
                             .unwrap()
                     )
-                }
+                },
+                params: Default::default(),
             }
         );
+    }
+
+    #[test]
+    fn parse_query_with_positional_params() {
+        let input = b"query III nosort
+SELECT * FROM t1 WHERE id = ?
+? = 1
+----
+131
+1";
+        let result = complete(query)(input);
+        assert_eq!(
+            result.unwrap().1,
+            Query {
+                column_types: vec![Type::Integer, Type::Integer, Type::Integer],
+                sort_mode: Some(SortMode::NoSort),
+                label: None,
+                conditionals: vec![],
+                query: "SELECT * FROM t1 WHERE id = ?".to_owned(),
+                results: QueryResults::Results(vec![131.into(), 1.into(),]),
+                params: QueryParams::PositionalParams(vec![1.into()]),
+            }
+        )
+    }
+
+    #[test]
+    fn parse_query_with_numbered_params() {
+        let input = b"query III nosort
+SELECT * FROM t1 WHERE id = $1
+$1 = 1
+----
+131
+1";
+        let result = complete(query)(input);
+        assert_eq!(
+            result.unwrap().1,
+            Query {
+                column_types: vec![Type::Integer, Type::Integer, Type::Integer],
+                sort_mode: Some(SortMode::NoSort),
+                label: None,
+                conditionals: vec![],
+                query: "SELECT * FROM t1 WHERE id = $1".to_owned(),
+                results: QueryResults::Results(vec![131.into(), 1.into()]),
+                params: QueryParams::NumberedParams(hashmap! {1 => 1.into()}),
+            }
+        )
     }
 
     #[test]
@@ -574,6 +676,7 @@ SELECT * FROM t1
   FROM t1"
                         .to_string(),
                     results: QueryResults::Results(vec![123.into(), 456.into()]),
+                    params: Default::default(),
                 }),
                 Record::Query(Query {
                     column_types: vec![Type::Integer, Type::Integer],
@@ -582,6 +685,7 @@ SELECT * FROM t1
                     conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
                     results: QueryResults::Results(vec![123.into(), 456.into(), 789.into(),]),
+                    params: Default::default(),
                 })
             ]
         );
@@ -615,7 +719,8 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                             .try_into()
                             .unwrap()
                     )
-                }
+                },
+                params: Default::default(),
             })]
         );
     }
