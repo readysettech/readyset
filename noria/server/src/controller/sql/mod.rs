@@ -1244,6 +1244,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_parses_like_parameter_column() {
         // set up graph
@@ -1291,6 +1292,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_parses_ilike_parameter_column() {
         // set up graph
@@ -1664,6 +1666,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_reuses_bogokey_projection_with_different_parameter() {
         // set up graph
@@ -1939,6 +1942,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_reuses_identical_like_filter_parameter_query() {
         // set up graph
@@ -2052,6 +2056,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_does_not_reuse_mismatched_filter_parameter_query() {
         // set up graph
@@ -3040,6 +3045,7 @@ mod tests {
         .await;
     }
 
+    #[cfg(feature = "param_filter")]
     #[tokio::test(threaded_scheduler)]
     async fn it_incorporates_arithmetic_projection_with_like_parameter_column() {
         // set up graph
