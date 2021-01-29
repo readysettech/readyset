@@ -6,8 +6,6 @@
 #[macro_use]
 extern crate clap;
 #[macro_use]
-extern crate anyhow;
-#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate tracing;
@@ -214,8 +212,12 @@ fn main() {
                 let writer = NoriaConnector::new(ex.clone(), ch, auto_increments, query_cache);
 
                 ex.spawn(async move {
-                    reader_sender.send(reader.await);
-                    writer_sender.send(writer.await);
+                    reader_sender
+                        .send(reader.await)
+                        .unwrap_or_else(|_| panic!("Could not send reader"));
+                    writer_sender
+                        .send(writer.await)
+                        .unwrap_or_else(|_| panic!("Could not send writer"));
                 });
                 let reader = futures_executor::block_on(reader_reciever).unwrap();
                 let writer = futures_executor::block_on(writer_reciever).unwrap();

@@ -107,16 +107,13 @@ fn collapse_where_in_recursive(
                 ))),
             );
 
-            mem::replace(
-                ct,
-                ConditionTree {
-                    operator: BinaryOperator::Equal,
-                    left: c,
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                        Literal::Placeholder(ItemPlaceholder::QuestionMark),
-                    ))),
-                },
-            );
+            *ct = ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: c,
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                ))),
+            };
 
             if literals.is_empty() {
                 eprintln!("spotted empty WHERE IN ()");

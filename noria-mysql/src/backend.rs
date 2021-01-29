@@ -3,7 +3,7 @@ use noria::DataType;
 use msql_srv::{self, *};
 use nom_sql::{self, SqlQuery};
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::time;
@@ -74,13 +74,13 @@ impl<W: io::Write> Backend<W> {
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
         Backend {
-            sanitize: sanitize,
-            parsed_query_cache: parsed_query_cache,
-            prepared_queries: prepared_queries,
-            prepared_count: prepared_count,
-            static_responses: static_responses,
-            reader: reader,
-            writer: writer,
+            sanitize,
+            parsed_query_cache,
+            prepared_queries,
+            prepared_count,
+            static_responses,
+            reader,
+            writer,
             slowlog,
             permissive,
         }

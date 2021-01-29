@@ -129,6 +129,7 @@ impl<'a> ReplayContext<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn tag(&self) -> Option<Tag> {
         match self {
             Self::Partial { tag, .. } => Some(*tag),
@@ -202,7 +203,7 @@ where
     ///
     /// All its ancestors are present, but this node and its children may not have been connected
     /// yet.
-    fn on_connected(&mut self, graph: &Graph) {}
+    fn on_connected(&mut self, _graph: &Graph) {}
 
     /// Called when a domain is finalized and is about to be booted.
     ///

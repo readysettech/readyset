@@ -57,7 +57,7 @@ steps:
     key: build-noria-logictest
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p noria-logictest
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria-logictest
     depends_on:
     - build-image
     plugins:
@@ -135,7 +135,7 @@ steps:
     key: build-nom-sql
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p nom-sql
+    - RUSTFLAGS='-D warnings' cargo build -v -p nom-sql
     depends_on:
     - build-image
     - build-launchpad
@@ -175,7 +175,7 @@ steps:
     key: build-evbtree
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p evbtree
+    - RUSTFLAGS='-D warnings' cargo build -v -p evbtree
     depends_on:
     - build-image
     - build-launchpad
@@ -215,7 +215,7 @@ steps:
     key: build-unbounded-interval-tree
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p unbounded-interval-tree
+    - RUSTFLAGS='-D warnings' cargo build -v -p unbounded-interval-tree
     depends_on:
     - build-image
     - build-launchpad
@@ -257,7 +257,7 @@ steps:
     key: build-noria
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p noria -p noria-server -p noria-applications
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria -p noria-server -p noria-applications
     depends_on:
     - build-image
     - build-nom-sql
@@ -301,7 +301,7 @@ steps:
     key: build-noria-mysql
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - cargo build -v -p noria-mysql
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria-mysql
     depends_on:
     - build-noria
     - build-nom-sql
