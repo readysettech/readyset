@@ -336,3 +336,22 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
+
+  - label: 'Run logictest'
+    command:
+    - 'echo +++ Running noria-logictest'
+    - cargo run --bin noria-logictest -- verify logictests --zookeeper-host zookeeper
+    depends_on:
+    - build-image
+    - build-noria-mysql
+    - build-noria-logictest
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readyset-sccache
+          config: noria-mysql/build/docker-compose.yaml
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
