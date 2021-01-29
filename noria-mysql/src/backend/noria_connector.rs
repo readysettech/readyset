@@ -451,7 +451,6 @@ impl<W: io::Write> Reader<W> for NoriaConnector {
         let key_column_indices = utils::select_statement_parameter_columns(&q)
             .into_iter()
             .map(|col| {
-                dbg!(&getter_schema, col);
                 getter_schema
                     .iter()
                     // TODO(grfn): Looking up columns in the resulting view by the name of the
