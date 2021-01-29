@@ -2973,6 +2973,103 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
     assert_eq!(get!(private, public, 4, "q").len(), 1);
 }
 
+// FIXME: The test is disabled because UNION views do not deduplicate results as they should.
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn union_basic() {
+    use itertools::sorted;
+
+    // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
+
+    let mut g = start_simple("union_basic").await;
+    g.install_recipe(
+        "CREATE TABLE twos (id INTEGER PRIMARY KEY);
+         CREATE TABLE threes (id INTEGER PRIMARY KEY);
+         VIEW twos_union_threes: (SELECT id FROM twos) UNION (SELECT id FROM threes);
+         QUERY query: SELECT id FROM twos_union_threes;",
+    )
+    .await
+    .unwrap();
+
+    let mut twos = g.table("twos").await.unwrap();
+    twos.insert_many((0..10).filter(|i| i % 2 == 0).map(|i| vec![i.into()]))
+        .await
+        .unwrap();
+
+    let mut threes = g.table("threes").await.unwrap();
+    threes
+        .insert_many((0..10).filter(|i| i % 3 == 0).map(|i| vec![i.into()]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // Check that a UNION query returns deduplicated results. (Each number appearing in either
+    // 'twos' or 'threes' appears just once.)
+    let mut query = g.view("query").await.unwrap();
+    let result_ids: Vec<i32> = sorted(
+        query
+            .lookup(&[0.into()], true)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get("id").unwrap()),
+    )
+    .collect();
+    let expected_ids: Vec<i32> = (0..10).filter(|i| i % 2 == 0 || i % 3 == 0).collect();
+    assert_eq!(result_ids, expected_ids);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn union_all_basic() {
+    use itertools::sorted;
+
+    // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
+
+    let mut g = start_simple("union_all_basic").await;
+    g.install_recipe(
+        "CREATE TABLE twos (id INTEGER PRIMARY KEY);
+         CREATE TABLE threes (id INTEGER PRIMARY KEY);
+         VIEW twos_union_threes: (SELECT id FROM twos) UNION ALL (SELECT id FROM threes);
+         QUERY query: SELECT id FROM twos_union_threes;",
+    )
+    .await
+    .unwrap();
+
+    let mut twos = g.table("twos").await.unwrap();
+    twos.insert_many((0..10).filter(|i| i % 2 == 0).map(|i| vec![i.into()]))
+        .await
+        .unwrap();
+
+    let mut threes = g.table("threes").await.unwrap();
+    threes
+        .insert_many((0..10).filter(|i| i % 3 == 0).map(|i| vec![i.into()]))
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // Check that a UNION ALL query includes duplicate results. (Every entry from 'twos' and
+    // 'threes' appear once.)
+    let mut query = g.view("query").await.unwrap();
+    let result_ids: Vec<i32> = sorted(
+        query
+            .lookup(&[0.into()], true)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get("id").unwrap()),
+    )
+    .collect();
+    let expected_ids: Vec<i32> = sorted(
+        (0..10)
+            .filter(|i| i % 2 == 0)
+            .chain((0..10).filter(|i| i % 3 == 0)),
+    )
+    .collect();
+    assert_eq!(result_ids, expected_ids);
+}
+
 #[tokio::test(threaded_scheduler)]
 async fn between() {
     let mut g = start_simple("between_query").await;
