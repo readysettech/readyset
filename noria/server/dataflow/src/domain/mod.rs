@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::mem;
 use std::net::SocketAddr;
-use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;

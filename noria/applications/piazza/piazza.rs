@@ -1,9 +1,9 @@
+#![allow(dead_code, unused_variables)]
 use clap::value_t_or_exit;
 use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
 use std::future::Future;
-use std::io::Write;
 use std::time;
 
 #[macro_use]

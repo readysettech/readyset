@@ -11,7 +11,7 @@ use nom_sql::{
 };
 use vec1::vec1;
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::io;
@@ -387,7 +387,7 @@ impl<W: io::Write> Writer<W> for NoriaConnector {
 
         trace!(id = statement_id, "update::registered");
 
-        info.reply(statement_id, &params[..], &[]);
+        info.reply(statement_id, &params[..], &[])?;
         Ok(PreparedStatement::Update(q))
     }
 

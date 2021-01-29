@@ -163,8 +163,6 @@ impl<'a> Packet<'a> {
                 self.1.extend(bytes);
             }
         } else {
-            use std::mem;
-
             assert!(self.1.is_empty());
             let mut v = self.0.to_vec();
             v.extend(bytes);

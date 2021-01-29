@@ -273,12 +273,14 @@ impl BenchmarkApplication {
         self.g.install_recipe(noria_sql_string).await.unwrap();
 
         println!("Attempting to drop all mysql tables in case they already exist.");
-        self.mysql.query_drop(
-            r"DROP TABLE employees;
+        self.mysql
+            .query_drop(
+                r"DROP TABLE employees;
         DROP TABLE dept_manager;
         DROP TABLE dept_emp;
         DROP TABLE salaries;",
-        );
+            )
+            .unwrap();
 
         println!("Initializing all mysql tables.");
         self.mysql
