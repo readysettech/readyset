@@ -297,6 +297,8 @@ impl SqlIncorporator {
                         && !existing_qg.parameters().is_empty();
 
                     if predicates_match && no_grouped_columns && !is_new_bogokey_needed {
+                        use ::mir::node::MirNodeType;
+
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -306,6 +308,30 @@ impl SqlIncorporator {
                             mir_query.name,
                         );
 
+                        let params: Vec<_> = qg
+                            .parameters()
+                            .into_iter()
+                            .map(|(col, _)| Column::from(col))
+                            .collect();
+
+                        let parent = mir_query
+                            .leaf
+                            .borrow()
+                            .ancestors()
+                            .iter()
+                            .next()
+                            .unwrap()
+                            .clone();
+
+                        // If the existing leaf's parent contains all required parameter columns,
+                        // reuse based on this parent.
+                        if params.iter().all(|p| parent.borrow().columns().contains(p)) {
+                            return Ok((
+                                qg,
+                                QueryGraphReuse::ReaderOntoExisting(parent, None, params),
+                            ));
+                        }
+
                         // We want to hang the new leaf off the last non-leaf node of the query that
                         // has the parameter columns we need, so backtrack until we find this place.
                         // Typically, this unwinds only two steps, above the final projection.
@@ -313,17 +339,34 @@ impl SqlIncorporator {
                         // present in the query graph (because a later migration added the column to
                         // a base schema after the query was added to the graph). In this case, we
                         // move on to other reuse options.
-                        let params: Vec<_> = qg
-                            .parameters()
-                            .into_iter()
-                            .map(|(col, _)| Column::from(col))
-                            .collect();
-                        if let Some(mn) =
-                            mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
-                        {
-                            use ::mir::node::MirNodeType;
-                            let project_columns = match mn.borrow().inner {
-                                MirNodeType::Project { .. } => None,
+
+                        // If parent does not introduce any new columns absent in its ancestors,
+                        // traverse its ancestor chain to find an ancestor with the necessary
+                        // parameter columns.
+                        let may_rewind = match parent.borrow().inner {
+                            MirNodeType::Identity => true,
+                            MirNodeType::Project {
+                                arithmetic: ref a,
+                                literals: ref l,
+                                ..
+                            } => a.is_empty() && l.is_empty(),
+                            _ => false,
+                        };
+                        let ancestor = if may_rewind {
+                            mir_reuse::rewind_until_columns_found(parent.clone(), &params)
+                        } else {
+                            None
+                        };
+
+                        // Reuse based on ancestor, which contains the required parameter columns.
+                        if let Some(ancestor) = ancestor {
+                            let project_columns = match ancestor.borrow().inner {
+                                MirNodeType::Project { .. } => {
+                                    // FIXME Ensure ancestor includes all columns in qg, with the
+                                    // proper names.
+                                    None
+                                }
+
                                 _ => {
                                     // N.B.: we can't just add an identity here, since we might
                                     // have backtracked above a projection in order to get the
@@ -333,22 +376,19 @@ impl SqlIncorporator {
                                     // columns. The latter get added later; here we simply
                                     // extract the columns that need reprojecting and pass them
                                     // along with the reuse instruction.
-                                    let existing_projection = mir_query
-                                        .leaf
-                                        .borrow()
-                                        .ancestors()
-                                        .iter()
-                                        .next()
-                                        .unwrap()
-                                        .clone();
-                                    let project_columns =
-                                        existing_projection.borrow().columns().to_vec();
-                                    Some(project_columns)
+                                    // FIXME Ensure ancestor includes all columns in parent, with
+                                    // the proper names.
+                                    Some(parent.borrow().columns().to_vec())
                                 }
                             };
+
                             return Ok((
                                 qg,
-                                QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
+                                QueryGraphReuse::ReaderOntoExisting(
+                                    ancestor,
+                                    project_columns,
+                                    params,
+                                ),
                             ));
                         }
                     }
@@ -1529,6 +1569,32 @@ mod tests {
             // bogokey projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(top_node.ancestors(), [base_address]);
+
+            // Add a query with a parameter on a new field
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name FROM users WHERE users.address = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "address"]);
+            assert_eq!(projection.description(true), "π[0, 1, 2]");
+            // should have added two more nodes (project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+            // Check that the parent of the projection is the base table, and NOT the earlier
+            // bogokey projection.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base_address]);
         })
         .await;
     }
@@ -1692,6 +1758,71 @@ mod tests {
             assert_eq!(mig.graph().node_count(), ncount + 3);
             // only the join and projection nodes are returned in the vector of new nodes
             assert_eq!(qfp.new_nodes.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_does_not_reuse_ancestor_lacking_parent_key() {
+        // set up graph
+        let mut g =
+            integration::start_simple("it_does_not_reuse_ancestor_lacking_parent_key").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            // Establish a base write type
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
+                    None,
+                    mig
+                )
+                .is_ok());
+            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+
+            // Add a query with a parameter and a literal projection.
+            let res = inc.add_query(
+                "SELECT id, name, 1 as one FROM users WHERE id = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "one"]);
+            assert_eq!(projection.description(true), "π[0, 1, lit: 1]");
+            let leaf = qfp.query_leaf;
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
+                .unwrap();
+
+            // Add a query with the same literal projection but a different parameter from the base
+            // table.
+            let ncount = mig.graph().node_count();
+            let res = inc.add_query(
+                "SELECT id, name, 1 as one FROM users WHERE address = ?;",
+                None,
+                mig,
+            );
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+            // Check projection
+            let projection = get_node(&inc, mig, &qfp.name);
+            assert_eq!(projection.fields(), &["id", "name", "address", "one"]);
+            assert_eq!(projection.description(true), "π[0, 1, 2, lit: 1]");
+            // should have added two more nodes (identity and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should NOT have ended up with the same leaf node
+            assert_ne!(qfp.query_leaf, leaf);
+            // Check reader column
+            let n = get_reader(&inc, mig, &qfp.name);
+            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
+                .unwrap();
+            // Check that the parent of the projection is the original table, NOT the earlier
+            // projection.
+            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(top_node.ancestors(), [base_address]);
         })
         .await;
     }
