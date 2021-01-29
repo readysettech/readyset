@@ -19,8 +19,9 @@ maintenance = { status = "experimental" }
 
 [features]
 default = []
-profiling = ["timekeeper/default"]
 generate_mysql_tests = ["default"]
+param_filter = []
+profiling = ["timekeeper/default"]
 
 [dependencies]
 clap = "2.25.0"

@@ -13,6 +13,7 @@ pub trait StripPostFilters {
 impl StripPostFilters for Option<ConditionExpression> {
     fn strip_post_filters(self) -> Self {
         self.and_then(|conds| match conds {
+            #[cfg(not(feature = "param_filter"))]
             ComparisonOp(ConditionTree {
                 operator: BinaryOperator::ILike | BinaryOperator::Like,
                 left: box Base(ConditionBase::Field(_)),

@@ -2119,6 +2119,7 @@ impl SqlToMirConverter {
                     Some(vec![Column::new(None, "bogokey")])
                 }
 
+                #[cfg(feature = "param_filter")]
                 [(column, operator @ (BinaryOperator::ILike | BinaryOperator::Like))] => {
                     // If parameters have non equality operators, insert a ParamFilter node to
                     // support key lookups over the query, and use the ParamFilter's emitted
