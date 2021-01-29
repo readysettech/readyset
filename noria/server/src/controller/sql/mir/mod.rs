@@ -333,7 +333,7 @@ impl SqlToMirConverter {
                 })
                 .collect(),
             MirNodeType::Leaf {
-                node: parent.clone(),
+                node: n.clone(),
                 keys: Vec::from(params),
                 operator: BinaryOperator::Equal,
             },
