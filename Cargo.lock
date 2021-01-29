@@ -2560,6 +2560,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper",
+ "itertools 0.10.0",
  "launchpad",
  "mysql 18.2.0",
  "nom 5.1.2",
