@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 5a80fc0968dfe48ffb59b253b06b4db0c6de4c557ae22bc099f5b6ae5be09c27 # shrinks to input = _RealToIntArgs { whole_part: 0, int_type: Int(0) }
+cc fd7bab9140b47020588225d322c9232f4358f7bac97a0b517d1e52f188a9e403 # shrinks to input = _CharEqualLengthArgs { text: "\u{0}   " }

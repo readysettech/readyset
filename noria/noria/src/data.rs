@@ -267,6 +267,20 @@ impl DataType {
                     ))
                 }
             }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(len)) => {
+                let actual_len = <&str>::from(self).len();
+                if actual_len == usize::from(*len) {
+                    Ok(Cow::Borrowed(self))
+                } else {
+                    Err(mk_err(
+                        format!(
+                            "Value ({} characters long) is not required length of {} characters",
+                            actual_len, len
+                        ),
+                        None,
+                    ))
+                }
+            }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp) => {
                 NaiveDateTime::parse_from_str(self.into(), TIMESTAMP_FORMAT)
                     .map_err(|e| {
@@ -1757,6 +1771,27 @@ mod tests {
             let real = DataType::Real(whole_part as i64, 0);
             let result = real.coerce_to(&unsigned_type).unwrap();
             assert_eq!(u32::from(result.into_owned()), whole_part);
+        }
+
+        #[proptest]
+        fn char_unequal_length(
+            #[strategy(1..30u16)] chlen: u16,
+            #[strategy("a{1,30}")]
+            #[filter(#chlen != u16::try_from(#text.len()).unwrap())]
+            text: String,
+        ) {
+            use SqlType::*;
+            let input = DataType::from(text.as_str());
+            assert!(input.coerce_to(&Char(chlen)).is_err());
+        }
+
+        #[proptest]
+        fn char_equal_length(#[strategy("a{1,30}")] text: String) {
+            use SqlType::*;
+            let input = DataType::from(text.as_str());
+            let intermediate = Char(u16::try_from(text.len()).unwrap());
+            let result = input.coerce_to(&intermediate).unwrap();
+            assert_eq!(String::from(&result.into_owned()).as_str(), text.as_str());
         }
     }
 }
