@@ -1428,6 +1428,7 @@ impl SqlToMirConverter {
         )
     }
 
+    #[cfg(feature = "param_filter")]
     fn make_param_filter_node(
         &self,
         name: &str,
@@ -2014,6 +2015,7 @@ impl SqlToMirConverter {
                 ancestors.push(final_node);
             }
 
+            #[allow(unused_mut)]
             let mut final_node = if ancestors.len() > 1 {
                 // If we have multiple queries, reconcile them.
                 sec_round = true;
