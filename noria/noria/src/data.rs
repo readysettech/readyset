@@ -1,6 +1,6 @@
 use arccstr::ArcCStr;
 
-use chrono::{self, NaiveDate, NaiveDateTime};
+use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 
 use nom_sql::{Literal, SqlType};
 
@@ -102,6 +102,8 @@ impl fmt::Debug for DataType {
 
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+/// The format for dates when parsed as text
+pub const DATE_FORMAT: &str = "%Y-%m-%d";
 
 impl DataType {
     /// Generates the minimum DataType corresponding to the type of a given DataType.
@@ -290,6 +292,14 @@ impl DataType {
                         )
                     })
                     .map(Self::Timestamp)
+                    .map(Cow::Owned)
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Date) => {
+                NaiveDate::parse_from_str(self.into(), DATE_FORMAT)
+                    .map_err(|e| mk_err("Could not parse value as date".to_owned(), Some(e.into())))
+                    .map(|date| {
+                        Self::Timestamp(NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0)))
+                    })
                     .map(Cow::Owned)
             }
             (_, Some(Bigint(_)), Int(_)) => {
@@ -1715,7 +1725,7 @@ mod tests {
 
     mod coerce_to {
         use super::*;
-        use crate::util::arbitrary::arbitrary_naive_date_time;
+        use crate::util::arbitrary::{arbitrary_naive_date, arbitrary_naive_date_time};
         use proptest::sample::select;
         use proptest::strategy::Strategy;
         use test_strategy::proptest;
@@ -1733,6 +1743,14 @@ mod tests {
             let expected = DataType::from(ndt);
             let input = DataType::from(ndt.format(TIMESTAMP_FORMAT).to_string());
             let result = input.coerce_to(&Timestamp).unwrap();
+            assert_eq!(*result, expected);
+        }
+
+        #[proptest]
+        fn dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
+            let expected = DataType::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
+            let input = DataType::from(nd.format(DATE_FORMAT).to_string());
+            let result = input.coerce_to(&Date).unwrap();
             assert_eq!(*result, expected);
         }
 
