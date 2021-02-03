@@ -19,6 +19,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
 use dataflow::{DurabilityMode, PersistenceParameters, PostLookup};
+use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::OrderType;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -39,6 +40,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
 use test_utils::skip_with_flaky_finder;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use vec1::vec1;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6697,6 +6700,166 @@ async fn straddled_join_range_query() {
         .collect::<Vec<(i32, i32)>>();
 
     assert_eq!(res, vec![(2, 2)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+async fn overlapping_range_queries() {
+    readyset_logging::init_test_logging();
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
+        builder.set_allow_range_queries(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe(
+        "CREATE TABLE t (x int);
+         QUERY q: SELECT x FROM t WHERE x >= ?",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+
+    let n = 1000i32;
+    t.insert_many((0..n).map(|n| vec![DataType::from(n)]))
+        .await
+        .unwrap();
+
+    let (tx, rx) = mpsc::channel(n as _);
+
+    let readers = (0..(n / 10)).map(|m| {
+        let tx = tx.clone();
+        let mut g = g.clone();
+        tokio::spawn(async move {
+            let mut q = g.view("q").await.unwrap();
+            let results = q
+                .multi_lookup(
+                    vec![KeyComparison::Range((
+                        Bound::Included(vec1![DataType::from(m * 10)]),
+                        Bound::Unbounded,
+                    ))],
+                    true,
+                )
+                .await
+                .unwrap();
+            let ns = results
+                .into_iter()
+                .flatten()
+                .map(|r| i32::try_from(r[0].clone()).unwrap())
+                .collect::<Vec<i32>>();
+            tx.send(ns).await.unwrap();
+        })
+    });
+
+    futures::future::join_all(readers)
+        .await
+        .into_iter()
+        .for_each(|r| r.unwrap());
+
+    let mut results = ReceiverStream::new(rx)
+        .take((n / 10) as _)
+        .collect::<Vec<_>>()
+        .await;
+
+    results.sort();
+    assert_eq!(
+        results,
+        (0..(n / 10))
+            .map(|m| ((m * 10)..n).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+async fn overlapping_remapped_range_queries() {
+    readyset_logging::init_test_logging();
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("overlapping_remapped_range_queries"));
+        builder.set_allow_range_queries(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe(
+        "CREATE TABLE a (a1 int, a2 int);
+         CREATE TABLE b (b1 int, b2 int);
+         QUERY q: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut a = g.table("a").await.unwrap();
+    let mut b = g.table("b").await.unwrap();
+
+    let n = 1000i32;
+    a.insert_many((0..n).map(|n| vec![DataType::from(n), DataType::from(n)]))
+        .await
+        .unwrap();
+    b.insert_many((0..n).map(|n| vec![DataType::from(n), DataType::from(n)]))
+        .await
+        .unwrap();
+
+    let (tx, rx) = mpsc::channel(n as _);
+
+    let readers = (0..(n / 10)).map(|m| {
+        let tx = tx.clone();
+        let mut g = g.clone();
+        tokio::spawn(async move {
+            let mut q = g.view("q").await.unwrap();
+            let results = q
+                .multi_lookup(
+                    vec![KeyComparison::Range((
+                        Bound::Included(vec1![DataType::from(m * 10), DataType::from(m * 10)]),
+                        Bound::Unbounded,
+                    ))],
+                    true,
+                )
+                .await
+                .unwrap();
+            let ns = results
+                .into_iter()
+                .flatten()
+                .map(|r| {
+                    (
+                        i32::try_from(r[0].clone()).unwrap(),
+                        i32::try_from(r[0].clone()).unwrap(),
+                    )
+                })
+                .collect::<Vec<(i32, i32)>>();
+            tx.send(ns).await.unwrap();
+        })
+    });
+
+    futures::future::join_all(readers)
+        .await
+        .into_iter()
+        .for_each(|r| r.unwrap());
+
+    let mut results = ReceiverStream::new(rx)
+        .take((n / 10) as _)
+        .collect::<Vec<_>>()
+        .await;
+
+    results.sort();
+    assert_eq!(
+        results,
+        (0..(n / 10))
+            .map(|m| ((m * 10)..n).map(|p| (p, p)).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

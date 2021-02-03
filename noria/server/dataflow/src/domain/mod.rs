@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
-use ahash::RandomState;
-use futures_util::{future::FutureExt, stream::StreamExt};
+use futures_util::future::FutureExt;
+use futures_util::stream::StreamExt;
 use launchpad::Indices;
 use metrics::{counter, gauge, histogram};
 use noria::internal::Index;
@@ -20,6 +20,7 @@ use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::info_span;
 use tracing::{debug, error, info, trace, warn};
+use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
 
 pub use internal::DomainIndex;
@@ -320,7 +321,12 @@ pub struct Domain {
     /// These include the whole replay path, not just the parts relevant to this domain, and don't
     /// include the domain-specific information in `ReplayPath` and `ReplayPathSegment`.
     raw_replay_paths: HashMap<Tag, Vec<IndexRef>>,
-    reader_triggered: NodeMap<HashSet<KeyComparison, RandomState>>,
+
+    /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
+    /// node
+    // TODO(grfn): Interval trees are slow; we should make this conditionally use an IntervalTree or
+    // a HashSet depending on the index type of the reader.
+    reader_triggered: NodeMap<IntervalTree<Vec1<DataType>>>,
 
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
     /// as part of the implementation of materialization frontiers
@@ -2022,12 +2028,16 @@ impl Domain {
                 drop(n); // NLL needs a little help. don't we all, sometimes?
 
                 // ensure that we haven't already requested a replay of this key
-                keys.retain(|key| {
-                    self.reader_triggered
-                        .entry(node)
-                        .or_default()
-                        .insert(key.clone())
-                });
+                let already_requested = self.reader_triggered.entry(node).or_default();
+                keys = keys
+                    .iter()
+                    .flat_map(|key| {
+                        let diff = already_requested.get_interval_difference(key);
+                        already_requested.insert(key);
+                        diff
+                    })
+                    .map(|r| KeyComparison::from_range(&r))
+                    .collect();
                 if !keys.is_empty() {
                     self.find_tags_and_replay(keys, &cols[..], node)?;
                 }
@@ -2556,8 +2566,18 @@ impl Domain {
                                     }
                                 }
                             } else if let Some(prev) = self.reader_triggered.get(dst) {
-                                // discard all the keys that we aren't waiting for
-                                for_keys.retain(|k| prev.contains(k));
+                                // discard all the keys or subranges of keys that we aren't waiting
+                                // for
+                                if !prev.is_empty() {
+                                    *for_keys = for_keys
+                                        .iter()
+                                        .flat_map(|key| {
+                                            prev.get_interval_intersection(key)
+                                                .into_iter()
+                                                .map(|r| KeyComparison::from_range(&r))
+                                        })
+                                        .collect();
+                                }
                             } else {
                                 // this packet contained no keys that we're waiting for, so it's
                                 // useless to us.

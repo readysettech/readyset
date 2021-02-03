@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
@@ -252,7 +253,7 @@ pub(crate) type ViewRpc =
     Buffer<Timeout<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>>, Tagged<ReadQuery>>;
 
 /// Representation for a comparison predicate against a set of keys
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum KeyComparison {
     /// Look up exactly one key
     /// TODO(eta): this comment is crap
@@ -265,10 +266,15 @@ pub enum KeyComparison {
 #[allow(clippy::len_without_is_empty)] // can never be empty
 impl KeyComparison {
     /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
-    /// predicate
+    /// predicate. Handles both [`Equal`] and single-length [`Range`]s
     pub fn equal(&self) -> Option<&Vec1<DataType>> {
         match self {
             KeyComparison::Equal(ref key) => Some(key),
+            KeyComparison::Range((Bound::Included(ref key), Bound::Included(ref key2)))
+                if key == key2 =>
+            {
+                Some(key)
+            }
             _ => None,
         }
     }
@@ -282,12 +288,20 @@ impl KeyComparison {
         }
     }
 
-    /// Build a [`KeyComparison`] from a range of keys
+    /// Build a [`KeyComparison`] from a range of keys.
+    ///
+    /// If the range has length 1 (both the ends are inclusive bounds on the same value) will return
+    /// [`KeyComparison::Equal`].
     pub fn from_range<R>(range: &R) -> Self
     where
         R: RangeBounds<Vec1<DataType>>,
     {
-        KeyComparison::Range((range.start_bound().cloned(), range.end_bound().cloned()))
+        match (range.start_bound(), range.end_bound()) {
+            (Bound::Included(key1), Bound::Included(key2)) if key1 == key2 => {
+                KeyComparison::Equal(key1.clone())
+            }
+            (start, end) => KeyComparison::Range((start.cloned(), end.cloned())),
+        }
     }
 
     /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
@@ -366,6 +380,31 @@ impl KeyComparison {
     /// [`Range`]: KeyComparison::Range
     pub fn is_range(&self) -> bool {
         matches!(self, KeyComparison::Range(..))
+    }
+}
+
+impl PartialEq for KeyComparison {
+    fn eq(&self, other: &Self) -> bool {
+        use KeyComparison::*;
+        match (self, other) {
+            (Equal(k1), Equal(k2)) => k1 == k2,
+            (Range(r1), Range(r2)) => r1 == r2,
+            (Equal(eq), Range((Bound::Included(k1), Bound::Included(k2)))) => eq == k1 && k1 == k2,
+            (Equal(_), Range(_)) => false,
+            (Range(_), Equal(_)) => other == self,
+        }
+    }
+}
+
+impl Eq for KeyComparison {}
+
+impl Hash for KeyComparison {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Equal(k) => k.hash(state),
+            Self::Range((Bound::Included(k1), Bound::Included(k2))) if k1 == k2 => k1.hash(state),
+            Self::Range(r) => r.hash(state),
+        }
     }
 }
 
@@ -463,6 +502,30 @@ impl RangeBounds<Vec<DataType>> for KeyComparison {
 
     fn end_bound(&self) -> Bound<&Vec<DataType>> {
         self.end_bound().map(Vec1::as_vec)
+    }
+}
+
+impl RangeBounds<Vec1<DataType>> for &KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec1<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) => Included(key),
+            Range((Unbounded, _)) => Unbounded,
+            Range((Included(ref k), _)) => Included(k),
+            Range((Excluded(ref k), _)) => Excluded(k),
+        }
+    }
+
+    fn end_bound(&self) -> Bound<&Vec1<DataType>> {
+        use Bound::*;
+        use KeyComparison::*;
+        match self {
+            Equal(ref key) => Included(key),
+            Range((_, Unbounded)) => Unbounded,
+            Range((_, Included(ref k))) => Included(k),
+            Range((_, Excluded(ref k))) => Excluded(k),
+        }
     }
 }
 
@@ -1198,5 +1261,37 @@ impl std::ops::Deref for ReadReplyBatch {
 impl std::ops::DerefMut for ReadReplyBatch {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[allow(clippy::eq_op)]
+    mod key_comparison {
+        use super::*;
+        use launchpad::hash::hash;
+        use test_strategy::proptest;
+
+        #[proptest]
+        fn hash_matches_eq(k1: KeyComparison, k2: KeyComparison) {
+            assert_eq!(hash(&k1) == hash(&k2), k1 == k2);
+        }
+
+        #[proptest]
+        fn eq_reflexive(k1: KeyComparison) {
+            assert!(k1 == k1);
+        }
+
+        #[proptest]
+        fn eq_symmetric(k1: KeyComparison, k2: KeyComparison) {
+            assert_eq!(k1 == k2, k2 == k1);
+        }
+
+        #[proptest]
+        fn eq_transitive(k1: KeyComparison, k2: KeyComparison, k3: KeyComparison) {
+            assert_eq!(k1 == k2 && k2 == k3, k1 == k3)
+        }
     }
 }

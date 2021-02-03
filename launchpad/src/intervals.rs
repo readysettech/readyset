@@ -1,7 +1,7 @@
 //! Utilities for dealing with intervals ([`Bound`][std::ops::Bound]s and instances of
 //! [`RangeBounds`][std::ops::RangeBounds]).
 
-use std::cmp::Ordering;
+use std::cmp::{max_by, min_by, Ordering};
 use std::iter::{self, Step};
 use std::mem;
 use std::ops::{Bound, RangeBounds};
@@ -483,6 +483,46 @@ where
     }
 }
 
+/// Returns the (non-empty) intersection of the two ranges, if any exists
+///
+/// # Examples
+///
+/// ```rust
+/// use launchpad::intervals::intersection;
+/// use std::ops::Bound::*;
+///
+/// // If the intervals don't intersect, returns None
+/// assert_eq!(intersection(&(1..3), &(4..8)), None);
+///
+/// assert_eq!(intersection(&(1..8), &(7..10)), Some((Included(&7), Excluded(&8))));
+///
+/// // If one interval fully covers another, the smaller interval will be returned unchanged
+/// assert_eq!(intersection(&(1..10), &(2..9)), Some((Included(&2), Excluded(&9))));
+/// ```
+pub fn intersection<'a, Q, R, S>(r1: &'a R, r2: &'a S) -> Option<(Bound<&'a Q>, Bound<&'a Q>)>
+where
+    R: RangeBounds<Q>,
+    S: RangeBounds<Q>,
+    Q: Ord,
+{
+    if cmp_end_start(r1.end_bound(), r2.start_bound()) == Less
+        || cmp_end_start(r2.end_bound(), r1.start_bound()) == Less
+    {
+        return None;
+    }
+
+    let lower = max_by(r1.start_bound(), r2.start_bound(), |x, y| {
+        cmp_startbound(*x, *y)
+    });
+    let upper = min_by(r1.end_bound(), r2.end_bound(), |x, y| cmp_endbound(*x, *y));
+
+    if cmp_start_end(lower, upper) == Ordering::Greater {
+        None
+    } else {
+        Some((lower, upper))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,6 +655,25 @@ mod tests {
             let once: Vec<_> = difference(&r1, &r2).collect();
             let twice: Vec<_> = once.iter().flat_map(|r| difference(r, &r2)).collect();
             assert_eq!(once, twice);
+        }
+    }
+
+    mod intersection {
+        use super::*;
+        use proptest::prop_assume;
+        use std::ops::Range;
+        use test_strategy::proptest;
+
+        #[proptest]
+        fn commutative(r1: Range<i8>, r2: Range<i8>) {
+            assert_eq!(intersection(&r1, &r2), intersection(&r2, &r1));
+        }
+
+        #[proptest]
+        fn is_some_implies_overlaps(r1: Range<i8>, r2: Range<i8>) {
+            prop_assume!(!r1.is_empty());
+            let int = intersection(&r1, &r2);
+            assert_eq!(int.is_some(), overlaps(&r1, &r2));
         }
     }
 }

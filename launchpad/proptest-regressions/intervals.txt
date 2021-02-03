@@ -1,2 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
 cc 9abb342c1a58d6ccc4c72245ae3e4f443fe878a5f31e6e7450f1b74bfa1f4f52
 cc 76517c7ebee7b98b39a24269458932fdaa7fcd0b9671e68a3a91f0473ebd9760 # shrinks to r = (Included(43), Excluded(43))
+cc 7326069b1f3eceb3fb4a0c3ed4e8ea3bfe8f919872bf4f3c4c841449ca16d6a6 # shrinks to input = _IsSomeImpliesOverlapsArgs { r1: -17..-17, r2: -17..0 }
+cc 8095ebb19f141119e5448d4c9a28f36eba725004c6c736c211370d5fe1173fa6 # shrinks to input = _IsSomeImpliesOverlapsArgs { r1: -11..-11, r2: -12..0 }
+cc 8941df2b29734752dae9bd1a7499014feaae278580994470de4086bec8255c68 # shrinks to input = _IsSomeImpliesOverlapsArgs { r1: 10..10, r2: 0..10 }
+cc 844d03757cb20c85a452b01bc4ac12573b0ecea4cdc7e961822752a694fc6f6d # shrinks to input = _IdempotentArgs { r1: (Unbounded, Included(80)), r2: (Included(0), Included(-1)) }

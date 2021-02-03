@@ -40,7 +40,7 @@ use Bound::*;
 use Ordering::*;
 
 use launchpad::intervals::{
-    cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps,
+    cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, intersection, overlaps,
 };
 use proptest::arbitrary::Arbitrary;
 
@@ -694,18 +694,18 @@ where
     /// tree.insert((Included(0), Included(5)));
     /// tree.insert((Included(7), Excluded(10)));
     ///
-    /// assert_eq!(tree.get_interval_overlaps((Included(-5), Excluded(7))),
+    /// assert_eq!(tree.get_interval_overlaps(&(Included(-5), Excluded(7))),
     ///            vec![&(Included(0), Included(5))]);
-    /// assert!(tree.get_interval_overlaps((Included(10), Unbounded)).is_empty());
+    /// assert!(tree.get_interval_overlaps(&(Included(10), Unbounded)).is_empty());
     /// ```
-    pub fn get_interval_overlaps<R>(&self, q: R) -> Vec<&(Bound<Q>, Bound<Q>)>
+    pub fn get_interval_overlaps<R>(&self, q: &R) -> Vec<&(Bound<Q>, Bound<Q>)>
     where
         R: RangeBounds<Q>,
     {
         let curr = &self.root;
         let mut acc = Vec::new();
 
-        Self::get_interval_overlaps_rec(curr, &q, &mut acc);
+        Self::get_interval_overlaps_rec(curr, q, &mut acc);
         acc
     }
 
@@ -733,9 +733,9 @@ where
     /// ```
     pub fn get_interval_difference<R>(&self, q: R) -> Vec<(Bound<Q>, Bound<Q>)>
     where
-        R: RangeBounds<Q> + Clone,
+        R: RangeBounds<Q>,
     {
-        let overlaps = self.get_interval_overlaps(q.clone());
+        let overlaps = self.get_interval_overlaps(&q);
 
         // If there is no overlap, then the difference is the query `q` itself.
         if overlaps.is_empty() {
@@ -958,6 +958,59 @@ where
 
         // Search right subtree.
         Self::get_interval_overlaps_rec(&node.right, q, acc);
+    }
+
+    /// Returns a list of intervals given by the intersection of the given interval with the
+    /// intervals in the tree
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use std::ops::Bound::*;
+    /// let mut tree = unbounded_interval_tree::IntervalTree::default();
+    ///
+    /// tree.insert(1..10);
+    /// assert_eq!(tree.get_interval_intersection(&(5..15)), vec![(Included(&5), Excluded(&10))])
+    /// ```
+    pub fn get_interval_intersection<'a, R>(
+        &'a self,
+        range: &'a R,
+    ) -> Vec<(Bound<&'a Q>, Bound<&'a Q>)>
+    where
+        R: RangeBounds<Q>,
+    {
+        fn walk_tree<'a, R, Q>(
+            node: &'a Option<Box<Node<Q>>>,
+            q: &'a R,
+            acc: &mut Vec<(Bound<&'a Q>, Bound<&'a Q>)>,
+        ) where
+            R: RangeBounds<Q>,
+            Q: Ord + Clone,
+        {
+            if let Some(node) = node {
+                if let Some(intersection) = intersection(q, &node.key) {
+                    acc.push(intersection);
+                }
+
+                if cmp_end_start(node.value.as_ref(), q.start_bound()) == Less {
+                    // the upper bound of all of this node's descendants is less than the start
+                    // bound of the range we care about, so we can skip it entirely
+                    return;
+                }
+
+                walk_tree(&node.left, q, acc);
+
+                if matches!(
+                    cmp_start_end(node.key.start_bound(), q.end_bound()),
+                    Less | Equal
+                ) {
+                    walk_tree(&node.right, q, acc);
+                }
+            }
+        }
+        let mut res = Vec::new();
+        walk_tree(&self.root, range, &mut res);
+        res
     }
 
     /// Returns the number of ranges stored in the interval tree.
@@ -1702,49 +1755,49 @@ mod tests {
 
         tree.insert(root_key);
         tree.insert(left_key);
-        assert_eq!(tree.get_interval_overlaps(root_key), vec![&root_key]);
+        assert_eq!(tree.get_interval_overlaps(&root_key), vec![&root_key]);
 
         tree.insert(left_left_key);
         assert_eq!(
-            tree.get_interval_overlaps((Unbounded::<i32>, Unbounded)),
+            tree.get_interval_overlaps(&(Unbounded::<i32>, Unbounded)),
             vec![&left_left_key, &left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Included(100), Unbounded)),
+            tree.get_interval_overlaps(&(Included(100), Unbounded)),
             Vec::<&(Bound<i32>, Bound<i32>)>::new()
         );
 
         tree.insert(right_key);
         assert_eq!(
-            tree.get_interval_overlaps(root_key),
+            tree.get_interval_overlaps(&root_key),
             vec![&left_left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Unbounded::<i32>, Unbounded)),
+            tree.get_interval_overlaps(&(Unbounded::<i32>, Unbounded)),
             vec![&left_left_key, &left_key, &root_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Included(100), Unbounded)),
+            tree.get_interval_overlaps(&(Included(100), Unbounded)),
             vec![&right_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Included(3), Excluded(10))),
+            tree.get_interval_overlaps(&(Included(3), Excluded(10))),
             vec![&left_left_key, &root_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Excluded(3), Excluded(10))),
+            tree.get_interval_overlaps(&(Excluded(3), Excluded(10))),
             vec![&left_left_key, &right_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Unbounded, Excluded(2))),
+            tree.get_interval_overlaps(&(Unbounded, Excluded(2))),
             vec![&left_left_key, &left_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Unbounded, Included(2))),
+            tree.get_interval_overlaps(&(Unbounded, Included(2))),
             vec![&left_left_key, &left_key, &root_key]
         );
         assert_eq!(
-            tree.get_interval_overlaps((Unbounded, Included(3))),
+            tree.get_interval_overlaps(&(Unbounded, Included(3))),
             vec![&left_left_key, &left_key, &root_key]
         );
     }
@@ -1760,10 +1813,10 @@ mod tests {
         tree.insert(right_key);
 
         assert!(tree
-            .get_interval_overlaps((Included((2, 0)), Included((2, 30))))
+            .get_interval_overlaps(&(Included((2, 0)), Included((2, 30))))
             .is_empty());
         assert_eq!(
-            tree.get_interval_overlaps((Included((1, 3)), Included((1, 5)))),
+            tree.get_interval_overlaps(&(Included((1, 3)), Included((1, 5)))),
             vec![&root_key]
         );
         assert_eq!(
