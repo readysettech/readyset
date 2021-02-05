@@ -60,6 +60,10 @@
 //!         rw.write_col("b's value")?;
 //!         rw.finish()
 //!     }
+//!
+//!     fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
+//!         Some(b"password".to_vec())
+//!     }
 //! }
 //!
 //! fn main() {
@@ -72,7 +76,8 @@
 //!         }
 //!     });
 //!
-//!     let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
+//!     let mut db =
+//!         mysql::Conn::new(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap();
 //!     assert_eq!(db.ping(), true);
 //!     assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 1);
 //!     drop(db);
@@ -81,6 +86,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
+#![feature(min_const_generics)]
 
 // Note to developers: you can find decent overviews of the protocol at
 //
@@ -100,10 +106,12 @@ use std::io::prelude::*;
 use std::iter;
 use std::net;
 
+use authentication::{generate_auth_data, hash_password};
 use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 
+mod authentication;
 mod commands;
 mod constants;
 mod errorcodes;
@@ -186,6 +194,11 @@ pub trait MysqlShim<W: Write> {
     fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    /// Retrieve the password for the user with the given username, if any.
+    ///
+    /// If the user doesn't exist, return [`None`].
+    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>>;
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -235,18 +248,23 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             reader: r,
             writer: w,
         };
-        mi.init()?;
-        mi.run()
+        if mi.init()? {
+            mi.run()?;
+        }
+        Ok(())
     }
 
-    fn init(&mut self) -> Result<(), B::Error> {
+    fn init(&mut self) -> Result<bool, B::Error> {
+        let auth_data = generate_auth_data();
+
         self.writer.write_all(&[10])?; // protocol 10
 
         // 5.1.10 because that's what Ruby's ActiveRecord requires
         self.writer.write_all(&b"5.1.10-alpha-msql-proxy\0"[..])?;
 
         self.writer.write_all(&[0x08, 0x00, 0x00, 0x00])?; // TODO: connection ID
-        self.writer.write_all(&b";X,po_k}\0"[..])?; // auth seed
+        self.writer.write_all(&auth_data[..8])?;
+        self.writer.write_all(&b"\0"[..])?;
         self.writer.write_all(&CAPABILITIES.to_le_bytes()[..2])?; // just 4.1 proto
         self.writer.write_all(&[0x21])?; // UTF8_GENERAL_CI
         self.writer.write_all(&[0x00, 0x00])?; // status flags
@@ -254,45 +272,62 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
         self.writer.write_all(&[0x00])?; // no plugins
         self.writer.write_all(&[0x00; 6][..])?; // filler
         self.writer.write_all(&[0x00; 4][..])?; // filler
-        self.writer.write_all(&b">o6^Wz!/kM}N\0"[..])?; // 4.1+ servers must extend salt
+        self.writer.write_all(&auth_data[8..])?;
+        self.writer.write_all(&b"\0"[..])?;
         self.writer.flush()?;
 
-        {
-            let (seq, handshake) = self.reader.next()?.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    "peer terminated connection",
-                )
-            })?;
-            let _handshake = commands::client_handshake(&handshake)
-                .map_err(|e| match e {
-                    nom::Err::Incomplete(_) => io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "client sent incomplete handshake",
-                    ),
-                    nom::Err::Failure((input, nom_e_kind))
-                    | nom::Err::Error((input, nom_e_kind)) => {
-                        if let nom::error::ErrorKind::Eof = nom_e_kind {
-                            io::Error::new(
-                                io::ErrorKind::UnexpectedEof,
-                                format!("client did not complete handshake; got {:?}", input),
-                            )
-                        } else {
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!("bad client handshake; got {:?} ({:?})", input, nom_e_kind),
-                            )
-                        }
+        let (seq, handshake_bytes) = self.reader.next()?.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "peer terminated connection",
+            )
+        })?;
+        let handshake = commands::client_handshake(&handshake_bytes)
+            .map_err(|e| match e {
+                nom::Err::Incomplete(_) => io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "client sent incomplete handshake",
+                ),
+                nom::Err::Failure((input, nom_e_kind)) | nom::Err::Error((input, nom_e_kind)) => {
+                    if let nom::error::ErrorKind::Eof = nom_e_kind {
+                        io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            format!("client did not complete handshake; got {:?}", input),
+                        )
+                    } else {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("bad client handshake; got {:?} ({:?})", input, nom_e_kind),
+                        )
                     }
-                })?
-                .1;
-            self.writer.set_seq(seq + 1);
-        }
+                }
+            })?
+            .1;
 
-        writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+        self.writer.set_seq(seq + 1);
+
+        let auth_success = self
+            .shim
+            .password_for_username(handshake.username)
+            .map(|password| hash_password(&password, &auth_data) == handshake.password)
+            .unwrap_or(false);
+
+        if auth_success {
+            writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+        } else {
+            writers::write_err(
+                ErrorKind::ER_ACCESS_DENIED_ERROR,
+                format!(
+                    "Access denied for user {}",
+                    String::from_utf8_lossy(handshake.username)
+                )
+                .as_bytes(),
+                &mut self.writer,
+            )?;
+        }
         self.writer.flush()?;
 
-        Ok(())
+        Ok(auth_success)
     }
 
     fn run(mut self) -> Result<(), B::Error> {

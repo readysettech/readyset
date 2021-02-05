@@ -22,6 +22,7 @@ use crate::backend::mysql_connector::MySqlConnector;
 use crate::backend::noria_connector::NoriaConnector;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
+use maplit::hashmap;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
@@ -107,6 +108,23 @@ fn main() {
                 .takes_value(false)
                 .help("Disable query sanitization. Improves latency."),
         )
+        .arg(
+            Arg::with_name("username")
+                .long("username")
+                .short("u")
+                .takes_value(true)
+                .default_value("root")
+                .help("Allow database connections authenticated as this user")
+        )
+        .arg(
+            Arg::with_name("password")
+                .long("password")
+                .short("p")
+                .takes_value(true)
+                .required(true)
+                .empty_values(false)
+                .help("Password to authenticate database connections with")
+        )
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .arg(
             Arg::with_name("mysql-url")
@@ -119,7 +137,7 @@ fn main() {
 
     let listen_addr = value_t_or_exit!(matches, "address", String);
     let deployment = matches.value_of("deployment").unwrap().to_owned();
-    assert!(!deployment.contains("-"));
+    assert!(!deployment.contains('-'));
 
     let histograms = matches.is_present("time");
     let slowlog = matches.is_present("slowlog");
@@ -128,6 +146,11 @@ fn main() {
     let permissive = matches.is_present("permissive");
     let static_responses = !matches.is_present("no-static-responses");
     let mysql_url = matches.value_of("mysql-url").map(|s| s.to_owned());
+
+    let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
+        matches.value_of("username").unwrap().to_owned() =>
+            matches.value_of("password").unwrap().to_owned()
+    }));
 
     use tracing_subscriber::Layer;
     let filter = tracing_subscriber::EnvFilter::from_default_env();
@@ -228,8 +251,7 @@ fn main() {
 
                 // there is a lot of duplication between these two arms. It isn't ideal. however, the
                 // alternative was implementing Future for the writer on the backend.
-                let b: Backend = if mysql_url.is_some() {
-                    let url = mysql_url.unwrap();
+                let b: Backend = if let Some(url) = mysql_url {
                     let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
                     let connector = MySqlConnector::new(url);
                     ex.spawn(async move {
@@ -247,6 +269,7 @@ fn main() {
                         reader,
                         slowlog,
                         permissive,
+                        users.clone(),
                     )
                 } else {
                     let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
@@ -267,6 +290,7 @@ fn main() {
                         reader,
                         slowlog,
                         permissive,
+                        users.clone(),
                     )
                 };
 

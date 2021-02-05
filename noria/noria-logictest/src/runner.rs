@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
+use maplit::hashmap;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use slog::o;
@@ -327,11 +328,16 @@ impl TestScript {
                 reader,
                 false,
                 false,
+                hashmap! { "root".to_owned() => "password".to_owned() },
             );
             MysqlIntermediary::run_on_tcp(b, s).unwrap();
             drop(rt);
         });
 
-        mysql::OptsBuilder::default().tcp_port(addr.port()).into()
+        mysql::OptsBuilder::default()
+            .tcp_port(addr.port())
+            .user(Some("root"))
+            .pass(Some("password"))
+            .into()
     }
 }

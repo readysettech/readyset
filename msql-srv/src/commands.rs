@@ -1,12 +1,12 @@
 use crate::myc::constants::{CapabilityFlags, Command as CommandByte};
-use nom;
 
 #[derive(Debug)]
 pub struct ClientHandshake<'a> {
-    capabilities: CapabilityFlags,
-    maxps: u32,
-    collation: u16,
-    username: &'a [u8],
+    pub capabilities: CapabilityFlags,
+    pub maxps: u32,
+    pub collation: u16,
+    pub username: &'a [u8],
+    pub password: &'a [u8],
 }
 
 pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
@@ -15,7 +15,9 @@ pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
     let (i, collation) = nom::bytes::complete::take(1u8)(i)?;
     let (i, _) = nom::bytes::complete::take(23u8)(i)?;
     let (i, username) = nom::bytes::complete::take_until(&b"\0"[..])(i)?;
-    let (i, _) = nom::bytes::complete::tag(b"\0")(i)?;
+    let (i, _) = nom::bytes::complete::take(1u8)(i)?;
+    let (i, auth_token_length) = nom::number::complete::le_u8(i)?;
+    let (i, password) = nom::bytes::complete::take(auth_token_length)(i)?;
     Ok((
         i,
         ClientHandshake {
@@ -23,6 +25,7 @@ pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
             maxps,
             collation: u16::from(collation[0]),
             username,
+            password,
         },
     ))
 }

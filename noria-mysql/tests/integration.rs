@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{NaiveDate, NaiveDateTime};
+use maplit::hashmap;
 use msql_srv::MysqlIntermediary;
 use mysql::prelude::*;
 use nom_sql::SelectStatement;
@@ -143,12 +144,17 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
             reader,
             false,
             false,
+            hashmap! {"root".to_owned() => "password".to_owned()},
         );
         MysqlIntermediary::run_on_tcp(b, s).unwrap();
         drop(rt);
     });
 
-    mysql::OptsBuilder::default().tcp_port(addr.port()).into()
+    mysql::OptsBuilder::default()
+        .tcp_port(addr.port())
+        .user(Some("root"))
+        .pass(Some("password"))
+        .into()
 }
 
 #[test]
