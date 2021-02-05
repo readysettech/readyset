@@ -28,6 +28,8 @@ mysql_common = "0.19"
 byteorder = "1"
 chrono = "0.4"
 time = "=0.2.7"
+getrandom = "0.2.2"
+rust-crypto = "0.2.36"
 
 [dev-dependencies]
 postgres = "0.15.2"

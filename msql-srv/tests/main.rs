@@ -62,6 +62,14 @@ where
     ) -> io::Result<()> {
         (self.on_q)(query, results)
     }
+
+    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
+        if username == b"user" {
+            Some(b"password".to_vec())
+        } else {
+            None
+        }
+    }
 }
 
 impl<Q, P, E, I> TestingShim<Q, P, E, I>
@@ -105,7 +113,8 @@ where
             MysqlIntermediary::run_on_tcp(self, s)
         });
 
-        let mut db = mysql::Conn::new(&format!("mysql://127.0.0.1:{}", port)).unwrap();
+        let mut db =
+            mysql::Conn::new(&format!("mysql://user:password@127.0.0.1:{}", port)).unwrap();
         c(&mut db);
         drop(db);
         jh.join().unwrap().unwrap();
@@ -121,6 +130,34 @@ fn it_connects() {
         |_, _| unreachable!(),
     )
     .test(|_| {})
+}
+
+#[test]
+fn failed_authentication() {
+    let shim = TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_, _| unreachable!(),
+    );
+    let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let jh = thread::spawn(move || {
+        let (s, _) = listener.accept().unwrap();
+        MysqlIntermediary::run_on_tcp(shim, s)
+    });
+
+    let res = mysql::Conn::new(&format!("mysql://user:bad_password@127.0.0.1:{}", port));
+    assert!(res.is_err());
+    match res.err().unwrap() {
+        mysql::Error::MySqlError(err) => {
+            assert_eq!(err.code, u16::from(ErrorKind::ER_ACCESS_DENIED_ERROR));
+            assert_eq!(err.message, "Access denied for user user".to_owned());
+        }
+        err => panic!("Not a mysql error: {:?}", err),
+    }
+
+    jh.join().unwrap().unwrap();
 }
 
 #[test]

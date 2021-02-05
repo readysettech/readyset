@@ -60,6 +60,10 @@ where
     ) -> io::Result<()> {
         (self.on_q)(query, results)
     }
+
+    fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
+        Some(b"password".to_vec())
+    }
 }
 
 impl<Q, P, E> TestingShim<Q, P, E>
@@ -103,7 +107,8 @@ where
         });
 
         tokio::runtime::current_thread::block_on_all(
-            mysql_async::Conn::new(format!("mysql://127.0.0.1:{}", port)).and_then(|conn| c(conn)),
+            mysql_async::Conn::new(format!("mysql://root:password@127.0.0.1:{}/test", port))
+                .and_then(|conn| c(conn)),
         )
         .unwrap();
 

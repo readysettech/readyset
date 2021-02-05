@@ -33,6 +33,10 @@ impl<W: io::Write> MysqlShim<W> for Backend {
     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
         results.start(&[])?.finish()
     }
+
+    fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
+        Some(b"password".to_vec())
+    }
 }
 
 fn main() {

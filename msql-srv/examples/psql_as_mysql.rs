@@ -231,6 +231,10 @@ impl<W: io::Write> MysqlShim<W> for Postgres {
     fn on_query(&mut self, query: &str, results: QueryResultWriter<W>) -> Result<(), Self::Error> {
         answer_rows(results, self.connection.query(query, &[]))
     }
+
+    fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
+        Some(b"password".to_vec())
+    }
 }
 
 impl Drop for Postgres {

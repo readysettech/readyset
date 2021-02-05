@@ -39,6 +39,8 @@ pub struct Backend {
     reader: NoriaConnector,
     slowlog: bool,
     permissive: bool,
+    /// Map from username to password for all users allowed to connect to the db
+    users: HashMap<String, String>,
 }
 
 pub struct SelectSchema {
@@ -54,6 +56,7 @@ impl Backend {
         reader: NoriaConnector,
         slowlog: bool,
         permissive: bool,
+        users: HashMap<String, String>,
     ) -> Self {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
@@ -68,6 +71,7 @@ impl Backend {
             writer,
             slowlog,
             permissive,
+            users,
         }
     }
 
@@ -607,5 +611,13 @@ impl<W: io::Write> MysqlShim<W> for Backend {
             }
         }
         Ok(res?)
+    }
+
+    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
+        String::from_utf8(username.to_vec())
+            .ok()
+            .and_then(|un| self.users.get(&un))
+            .cloned()
+            .map(String::into_bytes)
     }
 }
