@@ -1,0 +1,46 @@
+{
+  "name": "server-components-next",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node scripts/build",
+    "dev": "next",
+    "build": "next build",
+    "start": "next start",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@babel/core": "^7.12.10",
+    "@babel/plugin-transform-modules-commonjs": "^7.12.1",
+    "@babel/preset-react": "^7.12.10",
+    "@babel/register": "^7.12.10",
+    "babel-loader": "^8.2.2",
+    "date-fns": "^2.16.1",
+    "excerpts": "^0.0.3",
+    "ioredis": "^4.19.4",
+    "luxon": "^1.25.0",
+    "marked": "^1.2.7",
+    "micro-cookie-session": "^2.0.0-beta.1",
+    "mysql2": "^2.2.5",
+    "next": "^10.0.4",
+    "oauth": "^0.9.15",
+    "react": "0.0.0-experimental-3310209d0",
+    "react-dom": "0.0.0-experimental-3310209d0",
+    "react-error-boundary": "^3.1.0",
+    "react-fetch": "0.0.0-experimental-3310209d0",
+    "react-server-dom-webpack": "0.0.0-experimental-3310209d0",
+    "sanitize-html": "^2.3.0",
+    "sqlstring": "^2.3.2",
+    "webpack": "4.44.1"
+  },
+  "devDependencies": {
+    "prettier": "2.2.1"
+  },
+  "prettier": {
+    "semi": false,
+    "singleQuote": true,
+    "jsxBracketSameLine": false,
+    "arrowParens": "avoid"
+  }
+}

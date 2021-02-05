@@ -1,0 +1,12 @@
+.next
+node_modules
+yarn-error.log
+.DS_Store
+.vscode
+
+.vercel
+
+.env
+
+libs/react-client-manifest.json
+libs/send-res.build.js
