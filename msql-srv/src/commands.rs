@@ -123,8 +123,8 @@ mod tests {
     use crate::packet::PacketReader;
     use std::io::Cursor;
 
-    #[test]
-    fn it_parses_handshake() {
+    #[tokio::test]
+    async fn it_parses_handshake() {
         let data = &[
             0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -132,7 +132,7 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, p) = pr.next().await.unwrap().unwrap();
         let (_, handshake) = client_handshake(&p).unwrap();
         println!("{:?}", handshake);
         assert!(handshake
@@ -152,8 +152,8 @@ mod tests {
         assert_eq!(handshake.maxps, 16777216);
     }
 
-    #[test]
-    fn it_parses_request() {
+    #[tokio::test]
+    async fn it_parses_request() {
         let data = &[
             0x21, 0x00, 0x00, 0x00, 0x03, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,
@@ -161,7 +161,7 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, p) = pr.next().await.unwrap().unwrap();
         let (_, cmd) = parse(&p).unwrap();
         assert_eq!(
             cmd,
@@ -169,8 +169,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn it_handles_list_fields() {
+    #[tokio::test]
+    async fn it_handles_list_fields() {
         // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
         // in a future version. The mysql command line tool issues one of these commands after
         // switching databases with USE <DB>.
@@ -181,7 +181,7 @@ mod tests {
         ];
         let r = Cursor::new(&data[..]);
         let mut pr = PacketReader::new(r);
-        let (_, p) = pr.next().unwrap().unwrap();
+        let (_, p) = pr.next().await.unwrap().unwrap();
         let (_, cmd) = parse(&p).unwrap();
         assert_eq!(
             cmd,

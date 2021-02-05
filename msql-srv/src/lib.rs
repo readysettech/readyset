@@ -19,27 +19,28 @@
 //! # use std::net;
 //! # use std::thread;
 //! use msql_srv::*;
+//! use tokio::io::AsyncWrite;
+//! use async_trait::async_trait;
 //!
 //! struct Backend;
-//! impl<W: io::Write> MysqlShim<W> for Backend {
+//! #[async_trait]
+//! impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
 //!     type Error = io::Error;
 //!
-//!     fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
-//!         info.reply(42, &[], &[])
+//!     async fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<'_, W>) -> io::Result<()> {
+//!         info.reply(42, &[], &[]).await
 //!     }
-//!     fn on_execute(
+//!     async fn on_execute(
 //!         &mut self,
 //!         _: u32,
-//!         _: ParamParser,
-//!         results: QueryResultWriter<W>,
+//!         _: ParamParser<'_>,
+//!         results: QueryResultWriter<'_, W>,
 //!     ) -> io::Result<()> {
-//!         results.completed(0, 0)
+//!         results.completed(0, 0).await
 //!     }
-//!     fn on_close(&mut self, _: u32) {}
+//!     async fn on_close(&mut self, _: u32) {}
 //!
-//!     fn on_init(&mut self, _: &str, writer: InitWriter<W>) -> io::Result<()> { Ok(()) }
-//!
-//!     fn on_query(&mut self, _: &str, results: QueryResultWriter<W>) -> io::Result<()> {
+//!     async fn on_query(&mut self, _: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
 //!         let cols = [
 //!             Column {
 //!                 table: "foo".to_string(),
@@ -55,10 +56,10 @@
 //!             },
 //!         ];
 //!
-//!         let mut rw = results.start(&cols)?;
-//!         rw.write_col(42)?;
-//!         rw.write_col("b's value")?;
-//!         rw.finish()
+//!         let mut rw = results.start(&cols).await?;
+//!         rw.write_col(42).await?;
+//!         rw.write_col("b's value").await?;
+//!         rw.finish().await
 //!     }
 //!
 //!     fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
@@ -69,10 +70,12 @@
 //! fn main() {
 //!     let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
 //!     let port = listener.local_addr().unwrap().port();
+//!     let mut rt = tokio::runtime::Runtime::new().unwrap();
 //!
 //!     let jh = thread::spawn(move || {
 //!         if let Ok((s, _)) = listener.accept() {
-//!             MysqlIntermediary::run_on_tcp(Backend, s).unwrap();
+//!             let s = rt.handle().enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+//!             rt.block_on(MysqlIntermediary::run_on_tcp(Backend, s)).unwrap();
 //!         }
 //!     });
 //!
@@ -100,11 +103,12 @@
 
 extern crate mysql_common as myc;
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::io;
-use std::io::prelude::*;
 use std::iter;
-use std::net;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::net;
 
 use authentication::{generate_auth_data, hash_password};
 use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
@@ -147,7 +151,8 @@ pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMe
 pub use crate::value::{ToMysqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
-pub trait MysqlShim<W: Write> {
+#[async_trait]
+pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     /// The error type produced by operations on this shim.
     ///
     /// Must implement `From<io::Error>` so that transport-level errors can be lifted.
@@ -158,7 +163,7 @@ pub trait MysqlShim<W: Write> {
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
     /// notify the client of the statement id assigned to the prepared statement, as well as to
     /// give metadata about the types of parameters and returned columns.
-    fn on_prepare(
+    async fn on_prepare(
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, W>,
@@ -169,7 +174,7 @@ pub trait MysqlShim<W: Write> {
     /// Any parameters included with the client's command is given in `params`.
     /// A response to the query should be given using the provided
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    fn on_execute(
+    async fn on_execute(
         &mut self,
         id: u32,
         params: ParamParser<'_>,
@@ -178,20 +183,20 @@ pub trait MysqlShim<W: Write> {
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
     /// statement.
-    fn on_close(&mut self, stmt: u32);
+    async fn on_close(&mut self, stmt: u32);
 
     /// Called when the client issues a query for immediate execution.
     ///
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    fn on_query(
+    async fn on_query(
         &mut self,
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> Result<(), Self::Error>;
 
     /// Called when client switches database.
-    fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error> {
+    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -208,28 +213,32 @@ pub trait MysqlShim<W: Write> {
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
 /// that implements [`MysqlShim`](trait.MysqlShim.html).
-pub struct MysqlIntermediary<B, R: Read, W: Write> {
+pub struct MysqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     shim: B,
     reader: packet::PacketReader<R>,
     writer: packet::PacketWriter<W>,
 }
 
-impl<B: MysqlShim<net::TcpStream>> MysqlIntermediary<B, net::TcpStream, net::TcpStream> {
+impl<B: MysqlShim<net::tcp::OwnedWriteHalf> + Send>
+    MysqlIntermediary<B, net::TcpStream, net::TcpStream>
+{
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), B::Error> {
-        let w = stream.try_clone()?;
-        MysqlIntermediary::run_on(shim, stream, w)
+    pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), B::Error> {
+        let (reader, writer) = stream.into_split();
+        MysqlIntermediary::run_on(shim, reader, writer).await
     }
 }
 
-impl<B: MysqlShim<S>, S: Read + Write + Clone> MysqlIntermediary<B, S, S> {
+impl<B: MysqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
+    MysqlIntermediary<B, S, S>
+{
     /// Create a new server over a two-way stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub fn run_on_stream(shim: B, stream: S) -> Result<(), B::Error> {
-        MysqlIntermediary::run_on(shim, stream.clone(), stream)
+    pub async fn run_on_stream(shim: B, stream: S) -> Result<(), B::Error> {
+        MysqlIntermediary::run_on(shim, stream.clone(), stream).await
     }
 }
 
@@ -242,10 +251,12 @@ struct StatementData {
 
 const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED;
 
-impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
+impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
+    MysqlIntermediary<B, R, W>
+{
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
-    pub fn run_on(shim: B, reader: R, writer: W) -> Result<(), B::Error> {
+    pub async fn run_on(shim: B, reader: R, writer: W) -> Result<(), B::Error> {
         let r = packet::PacketReader::new(reader);
         let w = packet::PacketWriter::new(writer);
         let mut mi = MysqlIntermediary {
@@ -253,35 +264,40 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
             reader: r,
             writer: w,
         };
-        if mi.init()? {
-            mi.run()?;
+        if mi.init().await? {
+            mi.run().await?;
         }
         Ok(())
     }
 
-    fn init(&mut self) -> Result<bool, B::Error> {
+    async fn init(&mut self) -> Result<bool, B::Error> {
         let auth_data = generate_auth_data();
-
-        self.writer.write_all(&[10])?; // protocol 10
+        self.writer.write_all(&[10]).await?; // protocol 10
 
         // 5.1.10 because that's what Ruby's ActiveRecord requires
-        self.writer.write_all(&b"5.1.10-alpha-msql-proxy\0"[..])?;
+        self.writer
+            .write_all(&b"5.1.10-alpha-msql-proxy\0"[..])
+            .await?;
 
-        self.writer.write_all(&[0x08, 0x00, 0x00, 0x00])?; // TODO: connection ID
-        self.writer.write_all(&auth_data[..8])?;
-        self.writer.write_all(&b"\0"[..])?;
-        self.writer.write_all(&CAPABILITIES.to_le_bytes()[..2])?; // just 4.1 proto
-        self.writer.write_all(&[0x21])?; // UTF8_GENERAL_CI
-        self.writer.write_all(&[0x00, 0x00])?; // status flags
-        self.writer.write_all(&CAPABILITIES.to_le_bytes()[2..])?; // extended capabilities
-        self.writer.write_all(&[0x00])?; // no plugins
-        self.writer.write_all(&[0x00; 6][..])?; // filler
-        self.writer.write_all(&[0x00; 4][..])?; // filler
-        self.writer.write_all(&auth_data[8..])?;
-        self.writer.write_all(&b"\0"[..])?;
-        self.writer.flush()?;
+        self.writer.write_all(&[0x08, 0x00, 0x00, 0x00]).await?; // TODO: connection ID
+        self.writer.write_all(&auth_data[..8]).await?;
+        self.writer.write_all(&b"\0"[..]).await?;
+        self.writer
+            .write_all(&CAPABILITIES.to_le_bytes()[..2])
+            .await?; // just 4.1 proto
+        self.writer.write_all(&[0x21]).await?; // UTF8_GENERAL_CI
+        self.writer.write_all(&[0x00, 0x00]).await?; // status flags
+        self.writer
+            .write_all(&CAPABILITIES.to_le_bytes()[2..])
+            .await?; // extended capabilities
+        self.writer.write_all(&[0x00]).await?; // no plugins
+        self.writer.write_all(&[0x00; 6][..]).await?; // filler
+        self.writer.write_all(&[0x00; 4][..]).await?; // filler
+        self.writer.write_all(&auth_data[8..]).await?;
+        self.writer.write_all(&b"\0"[..]).await?;
+        self.writer.flush().await?;
 
-        let (seq, handshake_bytes) = self.reader.next()?.ok_or_else(|| {
+        let (seq, handshake_bytes) = self.reader.next().await?.ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::ConnectionAborted,
                 "peer terminated connection",
@@ -320,7 +336,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                 });
 
         if auth_success {
-            writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+            writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
         } else {
             writers::write_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
@@ -330,18 +346,19 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                 )
                 .as_bytes(),
                 &mut self.writer,
-            )?;
+            )
+            .await?;
         }
-        self.writer.flush()?;
+        self.writer.flush().await?;
 
         Ok(auth_success)
     }
 
-    fn run(mut self) -> Result<(), B::Error> {
+    async fn run(mut self) -> Result<(), B::Error> {
         use crate::commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
-        while let Some((seq, packet)) = self.reader.next()? {
+        while let Some((seq, packet)) = self.reader.next().await? {
             self.writer.set_seq(seq + 1);
             let cmd = commands::parse(&packet).unwrap().1;
             match cmd {
@@ -357,20 +374,22 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                                     coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
                                     colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                                 }];
-                                let mut w = w.start(cols)?;
-                                w.write_row(iter::once(67108864u32))?;
-                                w.finish()?;
+                                let mut w = w.start(cols).await?;
+                                w.write_row(iter::once(67108864u32)).await?;
+                                w.finish().await?;
                             }
                             _ => {
-                                w.completed(0, 0)?;
+                                w.completed(0, 0).await?;
                             }
                         }
                     } else {
-                        self.shim.on_query(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                        )?;
+                        self.shim
+                            .on_query(
+                                ::std::str::from_utf8(q)
+                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                                w,
+                            )
+                            .await?;
                     }
                 }
                 Command::Prepare(q) => {
@@ -379,11 +398,13 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         stmts: &mut stmts,
                     };
 
-                    self.shim.on_prepare(
-                        ::std::str::from_utf8(q)
-                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                        w,
-                    )?;
+                    self.shim
+                        .on_prepare(
+                            ::std::str::from_utf8(q)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                            w,
+                        )
+                        .await?;
                 }
                 Command::ResetStmtData(stmt) => {
                     stmts
@@ -396,7 +417,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         })?
                         .long_data
                         .clear();
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
                 }
                 Command::Execute { stmt, params } => {
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
@@ -408,7 +429,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                     {
                         let params = params::ParamParser::new(params, state);
                         let w = QueryResultWriter::new(&mut self.writer, true);
-                        self.shim.on_execute(stmt, params, w)?;
+                        self.shim.on_execute(stmt, params, w).await?;
                     }
                     state.long_data.clear();
                 }
@@ -427,7 +448,7 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         .extend(data);
                 }
                 Command::Close(stmt) => {
-                    self.shim.on_close(stmt);
+                    self.shim.on_close(stmt).await;
                     stmts.remove(&stmt);
                     // NOTE: spec dictates no response from server
                 }
@@ -438,26 +459,28 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
                         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                     }];
-                    writers::write_column_definitions(cols, &mut self.writer, true)?;
+                    writers::write_column_definitions(cols, &mut self.writer, true).await?;
                 }
                 Command::Init(schema) => {
                     let w = InitWriter {
                         writer: &mut self.writer,
                     };
-                    self.shim.on_init(
-                        ::std::str::from_utf8(schema)
-                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                        w,
-                    )?;
+                    self.shim
+                        .on_init(
+                            ::std::str::from_utf8(schema)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                            w,
+                        )
+                        .await?;
                 }
                 Command::Ping => {
-                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
                 }
                 Command::Quit => {
                     break;
                 }
             }
-            self.writer.flush()?;
+            self.writer.flush().await?;
         }
         Ok(())
     }

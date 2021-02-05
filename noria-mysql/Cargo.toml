@@ -14,6 +14,7 @@ futures-executor = "0.3.0"
 futures-util = "0.3.0"
 lazy_static = "1.0.0"
 mysql = "20.1.0"
+mysql_async = "0.23"
 nom-sql = { version =  "0.0.11", path = "../nom-sql" }
 slog = "2.4.0"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
@@ -28,6 +29,7 @@ vec1 = "1.6.0"
 itertools = "0.9"
 maplit = "1.0.2"
 derive_more = "0.99.11"
+async-trait = "0.1"
 
 [dev-dependencies]
 zookeeper = "0.5.4"

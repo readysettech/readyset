@@ -123,14 +123,12 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
     // no need for a barrier here since accept() acts as one
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
+        let s = rt
+            .handle()
+            .enter(|| tokio::net::TcpStream::from_std(s).unwrap());
 
-        let writer = NoriaConnector::new(
-            rt.handle().clone(),
-            ch.clone(),
-            auto_increments.clone(),
-            query_cache.clone(),
-        );
-        let reader = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
+        let writer = NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
+        let reader = NoriaConnector::new(ch, auto_increments, query_cache);
 
         let backend = BackendBuilder::new()
             .writer(rt.block_on(writer))
@@ -138,7 +136,8 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
             .require_authentication(false)
             .build();
 
-        MysqlIntermediary::run_on_tcp(backend, s).unwrap();
+        rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
+            .unwrap();
         drop(rt);
     });
 

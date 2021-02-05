@@ -4,9 +4,11 @@ use derive_more::From;
 use msql_srv::{self, *};
 use nom_sql::{self, SqlQuery};
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::io;
 use std::time;
+use tokio::io::AsyncWrite;
 use tracing::Level;
 
 use crate::rewrite;
@@ -21,6 +23,65 @@ use crate::backend::error::Error;
 use crate::backend::error::Error::{IOError, ParseError};
 use mysql_connector::MySqlConnector;
 use noria_connector::NoriaConnector;
+
+async fn write_column<W: AsyncWrite + Unpin>(
+    rw: &mut RowWriter<'_, W>,
+    c: &DataType,
+    cs: &msql_srv::Column,
+) {
+    let written = match *c {
+        DataType::None => rw.write_col(None::<i32>).await,
+        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
+        // this out into a helper since i has a different time depending on the DataType
+        // variant.
+        DataType::Int(i) => {
+            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                rw.write_col(i as usize).await
+            } else {
+                rw.write_col(i as isize).await
+            }
+        }
+        DataType::BigInt(i) => {
+            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                rw.write_col(i as usize).await
+            } else {
+                rw.write_col(i as isize).await
+            }
+        }
+        DataType::UnsignedInt(i) => {
+            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                rw.write_col(i as usize).await
+            } else {
+                rw.write_col(i as isize).await
+            }
+        }
+        DataType::UnsignedBigInt(i) => {
+            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+                rw.write_col(i as usize).await
+            } else {
+                rw.write_col(i as isize).await
+            }
+        }
+        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()).await,
+        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()).await,
+        ref dt @ DataType::Real(_, _) => match cs.coltype {
+            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
+                let f = dt.to_string();
+                rw.write_col(f).await
+            }
+            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                let f: f64 = dt.into();
+                rw.write_col(f).await
+            }
+            _ => unreachable!(),
+        },
+        DataType::Timestamp(ts) => rw.write_col(ts).await,
+    };
+    match written {
+        Ok(_) => (),
+        Err(e) => panic!("failed to write column: {:?}", e),
+    }
+}
 
 #[derive(From)]
 pub enum Writer {
@@ -145,36 +206,41 @@ pub struct SelectSchema {
 }
 
 impl Backend {
-    fn handle_failure<W: io::Write>(
+    async fn handle_failure<W: AsyncWrite + Unpin>(
         &mut self,
         q: &str,
-        results: QueryResultWriter<W>,
+        results: QueryResultWriter<'_, W>,
+        e: String,
     ) -> io::Result<()> {
         if let Writer::MySqlConnector(connector) = &mut self.writer {
-            Backend::write_query_results(connector.on_query(q), results)
+            Backend::write_query_results(connector.on_query(q).await, results).await
         } else {
+            results
+                .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
+                .await?;
             Ok(())
         }
     }
 
-    fn write_query_results<W: io::Write>(
+    async fn write_query_results<W: AsyncWrite + Unpin>(
         r: Result<(u64, u64), Error>,
-        results: QueryResultWriter<W>,
+        results: QueryResultWriter<'_, W>,
     ) -> io::Result<()> {
         match r {
-            Ok((row_count, last_insert)) => results.completed(row_count, last_insert),
-            Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+            Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
+            Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
         }
     }
 }
 
-impl<W: io::Write> MysqlShim<W> for Backend {
+#[async_trait]
+impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
     type Error = Error;
 
-    fn on_prepare(
+    async fn on_prepare(
         &mut self,
         query: &str,
-        info: StatementMetaWriter<W>,
+        info: StatementMetaWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
@@ -203,7 +269,8 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                     let e_string = format!("query can't be parsed: \"{}\"", query);
                     error!(%query, "query can't be parsed: \"{}\"", query);
                     let error = ParseError(e_string);
-                    info.error(error.error_kind(), error.message().as_bytes())?;
+                    info.error(error.error_kind(), error.message().as_bytes())
+                        .await?;
                     return Err(error);
                 }
             }
@@ -220,37 +287,46 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                 //todo : also prepare in writer if it is mysql
                 let (id, params, schema) = self
                     .reader
-                    .prepare_select(sql_q.clone(), self.prepared_count)?;
-                info.reply(id, params.as_slice(), schema.as_slice())
+                    .prepare_select(sql_q.clone(), self.prepared_count)
+                    .await?;
+                info.reply(id, params.as_slice(), schema.as_slice()).await
             }
             nom_sql::SqlQuery::Insert(_) => {
                 match &mut self.writer {
                     Writer::NoriaConnector(connector) => {
-                        match connector.prepare_insert(sql_q.clone(), self.prepared_count) {
+                        match connector
+                            .prepare_insert(sql_q.clone(), self.prepared_count)
+                            .await
+                        {
                             Ok((id, params, schema)) => {
-                                info.reply(id, params.as_slice(), schema.as_slice())
+                                info.reply(id, params.as_slice(), schema.as_slice()).await
                             }
-                            Err(e) => info.error(e.error_kind(), e.message().as_bytes()),
+                            Err(e) => info.error(e.error_kind(), e.message().as_bytes()).await,
                         }
                     }
                     Writer::MySqlConnector(connector) => {
                         // todo : handle params correctly. dont just leave them blank.
-                        connector.on_prepare(&sql_q.to_string(), self.prepared_count)?;
-                        info.reply(self.prepared_count, &[], &[])
+                        connector
+                            .on_prepare(&sql_q.to_string(), self.prepared_count)
+                            .await?;
+                        info.reply(self.prepared_count, &[], &[]).await
                     }
                 }
             }
             nom_sql::SqlQuery::Update(_) => {
                 match &mut self.writer {
                     Writer::NoriaConnector(connector) => {
-                        let (_, params) =
-                            connector.prepare_update(sql_q.clone(), self.prepared_count)?;
-                        info.reply(self.prepared_count, &params[..], &[])
+                        let (_, params) = connector
+                            .prepare_update(sql_q.clone(), self.prepared_count)
+                            .await?;
+                        info.reply(self.prepared_count, &params[..], &[]).await
                     }
                     Writer::MySqlConnector(connector) => {
                         // todo : handle params correctly. dont just leave them blank.
-                        connector.on_prepare(&sql_q.to_string(), self.prepared_count)?;
-                        info.reply(self.prepared_count, &[], &[])
+                        connector
+                            .on_prepare(&sql_q.to_string(), self.prepared_count)
+                            .await?;
+                        info.reply(self.prepared_count, &[], &[]).await
                     }
                 }
             }
@@ -261,11 +337,11 @@ impl<W: io::Write> MysqlShim<W> for Backend {
         Ok(res?)
     }
 
-    fn on_execute(
+    async fn on_execute(
         &mut self,
         id: u32,
-        params: ParamParser,
-        results: QueryResultWriter<W>,
+        params: ParamParser<'_>,
+        results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
@@ -281,6 +357,7 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                     let e = Error::MissingPreparedStatement;
                     return results
                         .error(e.error_kind(), "non-existent statement".as_bytes())
+                        .await
                         .map_err(|e| IOError(e));
                 }
             }
@@ -289,62 +366,8 @@ impl<W: io::Write> MysqlShim<W> for Backend {
         trace!("delegate");
         let res = match prep {
             SqlQuery::Select(_) => {
-                let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
-                    let written = match *c {
-                        DataType::None => rw.write_col(None::<i32>),
-                        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
-                        // this out into a helper since i has a different time depending on the DataType
-                        // variant.
-                        DataType::Int(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::BigInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::UnsignedInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::UnsignedBigInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
-                        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
-                        ref dt @ DataType::Real(_, _) => match cs.coltype {
-                            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
-                                let f = dt.to_string();
-                                rw.write_col(f)
-                            }
-                            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                                let f: f64 = dt.into();
-                                rw.write_col(f)
-                            }
-                            _ => unreachable!(),
-                        },
-                        DataType::Timestamp(ts) => rw.write_col(ts),
-                    };
-                    match written {
-                        Ok(_) => (),
-                        Err(e) => panic!("failed to write column: {:?}", e),
-                    }
-                };
-                let (data, select_schema) = self.reader.execute_prepared_select(id, params)?;
-                let mut rw = results.start(&select_schema.schema).unwrap();
+                let (data, select_schema) = self.reader.execute_prepared_select(id, params).await?;
+                let mut rw = results.start(&select_schema.schema).await.unwrap();
                 for resultsets in data {
                     for r in resultsets {
                         let mut r: Vec<_> = r.into();
@@ -364,29 +387,37 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                                         c.column, select_schema.columns
                                     );
                                 });
-                            write_column(&mut rw, &r[coli], &c);
+                            write_column(&mut rw, &r[coli], &c).await;
                         }
-                        rw.end_row()?;
+                        rw.end_row().await?;
                     }
                 }
-                rw.finish()
+                rw.finish().await
             }
             SqlQuery::Insert(ref _q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => Backend::write_query_results(
-                    connector.execute_prepared_insert(id, params),
-                    results,
-                ),
+                Writer::NoriaConnector(connector) => {
+                    Backend::write_query_results(
+                        connector.execute_prepared_insert(id, params).await,
+                        results,
+                    )
+                    .await
+                }
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_execute(id, params), results)
+                    Backend::write_query_results(connector.on_execute(id, params).await, results)
+                        .await
                 }
             },
             SqlQuery::Update(ref _q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => Backend::write_query_results(
-                    connector.execute_prepared_update(id, params),
-                    results,
-                ),
+                Writer::NoriaConnector(connector) => {
+                    Backend::write_query_results(
+                        connector.execute_prepared_update(id, params).await,
+                        results,
+                    )
+                    .await
+                }
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_execute(id, params), results)
+                    Backend::write_query_results(connector.on_execute(id, params).await, results)
+                        .await
                 }
             },
             _ => unreachable!(),
@@ -411,12 +442,12 @@ impl<W: io::Write> MysqlShim<W> for Backend {
         Ok(res?)
     }
 
-    fn on_close(&mut self, _: u32) {}
+    async fn on_close(&mut self, _: u32) {}
 
-    fn on_query(
+    async fn on_query(
         &mut self,
         query: &str,
-        results: QueryResultWriter<W>,
+        results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
@@ -438,7 +469,7 @@ impl<W: io::Write> MysqlShim<W> for Backend {
             || query_lc.starts_with("commit")
         {
             trace!("ignoring transaction bits");
-            return Ok(results.completed(0, 0)?);
+            return Ok(results.completed(0, 0).await?);
         }
 
         if query_lc.starts_with("show databases")
@@ -449,7 +480,7 @@ impl<W: io::Write> MysqlShim<W> for Backend {
             || query_lc.starts_with("create fulltext index")
         {
             warn!("unsupported query; returning empty results");
-            return Ok(results.completed(0, 0)?);
+            return Ok(results.completed(0, 0).await?);
         }
 
         if query_lc.starts_with("show tables") {
@@ -460,9 +491,9 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                 colflags: ColumnFlags::empty(),
             }];
             // TODO(malte): we could find out which tables exist via RPC to Soup and return them
-            let writer = results.start(&cols)?;
+            let writer = results.start(&cols).await?;
             trace!("mocking show tables");
-            return Ok(writer.finish()?);
+            return Ok(writer.finish().await?);
         }
 
         if self.static_responses {
@@ -478,11 +509,11 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                             colflags: ColumnFlags::empty(),
                         })
                         .collect();
-                    let mut writer = results.start(&cols[..])?;
+                    let mut writer = results.start(&cols[..]).await?;
                     for &(_, ref r) in columns {
-                        writer.write_col(String::from(*r))?;
+                        writer.write_col(String::from(*r)).await?;
                     }
-                    return Ok(writer.end_row()?);
+                    return Ok(writer.end_row().await?);
                 }
             }
         }
@@ -502,14 +533,17 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                         .insert(query.to_owned(), (q.clone(), use_params.clone()));
                 }
 
-                Err(_e) => {
+                Err(e) => {
                     // if nom-sql rejects the query, there is no chance Noria will like it
                     error!(%query, "query can't be parsed: \"{}\"", query);
                     if self.permissive {
                         warn!("permissive flag enabled, so returning success despite query parse failure");
-                        return Ok(results.completed(0, 0)?);
+                        return Ok(results.completed(0, 0).await?);
                     } else {
-                        return self.handle_failure(&query, results).map_err(|e| IOError(e));
+                        return self
+                            .handle_failure(&query, results, e.to_string())
+                            .await
+                            .map_err(|e| IOError(e));
                     }
                 }
             }
@@ -523,83 +557,31 @@ impl<W: io::Write> MysqlShim<W> for Backend {
         trace!("delegating");
         let res = match q {
             nom_sql::SqlQuery::CreateTable(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => match connector.handle_create_table(q) {
-                    Ok(()) => results.completed(0, 0),
-                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+                Writer::NoriaConnector(connector) => match connector.handle_create_table(q).await {
+                    Ok(()) => results.completed(0, 0).await,
+                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
                 },
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
             },
-            nom_sql::SqlQuery::CreateView(q) => match self.reader.handle_create_view(q) {
-                Ok(()) => results.completed(0, 0),
-                Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+            nom_sql::SqlQuery::CreateView(q) => match self.reader.handle_create_view(q).await {
+                Ok(()) => results.completed(0, 0).await,
+                Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
             },
             nom_sql::SqlQuery::Insert(q) => match &mut self.writer {
                 Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(connector.handle_insert(q), results)
+                    Backend::write_query_results(connector.handle_insert(q).await, results).await
                 }
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
             },
             nom_sql::SqlQuery::Select(q) => {
-                let (d, select_result) = self.reader.handle_select(q, use_params)?;
-                let write_column = |rw: &mut RowWriter<W>, c: &DataType, cs: &msql_srv::Column| {
-                    let written = match *c {
-                        DataType::None => rw.write_col(None::<i32>),
-                        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
-                        // this out into a helper since i has a different time depending on the DataType
-                        // variant.
-                        DataType::Int(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::BigInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::UnsignedInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::UnsignedBigInt(i) => {
-                            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                                rw.write_col(i as usize)
-                            } else {
-                                rw.write_col(i as isize)
-                            }
-                        }
-                        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()),
-                        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()),
-                        ref dt @ DataType::Real(_, _) => match cs.coltype {
-                            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
-                                let f = dt.to_string();
-                                rw.write_col(f)
-                            }
-                            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                                let f: f64 = dt.into();
-                                rw.write_col(f)
-                            }
-                            _ => unreachable!(),
-                        },
-                        DataType::Timestamp(ts) => rw.write_col(ts),
-                    };
-                    match written {
-                        Ok(_) => (),
-                        Err(e) => panic!("failed to write column: {:?}", e),
-                    }
-                };
-                let mut rw = results.start(&select_result.schema)?;
+                let (d, select_result) = self.reader.handle_select(q, use_params).await?;
+                let mut rw = results.start(&select_result.schema).await?;
                 for resultsets in d {
                     for r in resultsets {
                         let mut r: Vec<_> = r.into();
@@ -619,37 +601,44 @@ impl<W: io::Write> MysqlShim<W> for Backend {
                                         c.column, &select_result.columns
                                     );
                                 });
-                            write_column(&mut rw, &r[coli], &c);
+                            write_column(&mut rw, &r[coli], &c).await;
                         }
-                        rw.end_row()?;
+                        rw.end_row().await?;
                     }
                 }
-                rw.finish()
+                rw.finish().await
             }
-            nom_sql::SqlQuery::Set(_) => results.error(
-                msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                "unsupported set query".as_bytes(),
-            ),
+            nom_sql::SqlQuery::Set(_) => {
+                results
+                    .error(
+                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                        "unsupported set query".as_bytes(),
+                    )
+                    .await
+            }
             nom_sql::SqlQuery::Update(q) => match &mut self.writer {
                 Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(connector.handle_update(q), results)
+                    Backend::write_query_results(connector.handle_update(q).await, results).await
                 }
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
             },
             nom_sql::SqlQuery::Delete(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => match connector.handle_delete(q) {
-                    Ok(row_count) => results.completed(row_count, 0),
-                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()),
+                Writer::NoriaConnector(connector) => match connector.handle_delete(q).await {
+                    Ok(row_count) => results.completed(row_count, 0).await,
+                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
                 },
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
             },
             nom_sql::SqlQuery::DropTable(q) => match &mut self.writer {
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
                 _ => {
                     warn!("ignoring drop table");
@@ -658,14 +647,17 @@ impl<W: io::Write> MysqlShim<W> for Backend {
             },
             _ => match &mut self.writer {
                 Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()), results)
+                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+                        .await
                 }
                 _ => {
                     error!("unsupported query");
-                    results.error(
-                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                        "unsupported query".as_bytes(),
-                    )
+                    results
+                        .error(
+                            msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
+                            "unsupported query".as_bytes(),
+                        )
+                        .await
                 }
             },
         };
