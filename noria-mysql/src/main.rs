@@ -28,10 +28,10 @@ use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use std::collections::HashMap;
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
-use std::thread;
+
 use tracing::Level;
 
 use crate::backend::Writer;
@@ -208,116 +208,66 @@ fn main() {
             .into_stream(),
     ));
 
-    let mut threads = Vec::new();
-    let mut i = 0;
     while let Some(Ok(s)) = rt.block_on(listener.next()) {
-        // one day, when msql-srv is async, this won't be necessary
-        let s = {
-            use std::os::unix::io::AsRawFd;
-            use std::os::unix::io::FromRawFd;
-            let s2 = unsafe { std::net::TcpStream::from_raw_fd(s.as_raw_fd()) };
-            std::mem::forget(s); // don't drop, which would close
-            s2.set_nonblocking(false).unwrap();
-            s2
-        };
-        s.set_nodelay(true).unwrap();
-
-        let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
-        connection.in_scope(|| debug!("accepted"));
-
-        let builder = thread::Builder::new().name(format!("conn-{}", i));
-
-        let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
-
-        let ex = rt.handle().clone();
         let ch = ch.clone();
+        let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
         let mysql_url = mysql_url.clone();
+        let fut = async move {
+            let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
+            connection.in_scope(|| debug!("accepted"));
 
-        let jh = builder
-            .spawn(move || {
-                // initially, our instinct was that constructing this twice (once for reader and once for writer) did not make sense and we should instead
-                // call clone() or use an Arc<RwLock<NoriaConnector>> as both the reader and writer.
-                // however, after more thought, there is no benefit to sharing any implentation between the two.
-                // the only potential shared state is the query_cache, however, the set of queries handles by a reader and writer are
-                // disjoint
-                let (reader_sender, reader_reciever) = tokio::sync::oneshot::channel();
-                let reader = NoriaConnector::new(
-                    ex.clone(),
-                    ch.clone(),
-                    auto_increments.clone(),
-                    query_cache.clone(),
-                );
-                ex.spawn(async move {
-                    reader_sender
-                        .send(reader.await)
-                        .unwrap_or_else(|_| panic!("Could not send reader"));
-                });
+            // initially, our instinct was that constructing this twice (once for reader and once for writer) did not make sense and we should instead
+            // call clone() or use an Arc<RwLock<NoriaConnector>> as both the reader and writer.
+            // however, after more thought, there is no benefit to sharing any implentation between the two.
+            // the only potential shared state is the query_cache, however, the set of queries handles by a reader and writer are
+            // disjoint
+            let reader =
+                NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone()).await;
 
-                let reader = futures_executor::block_on(reader_reciever).unwrap();
-                let _g = connection.enter();
+            let _g = connection.enter();
 
-                let writer: Writer = if let Some(url) = mysql_url {
-                    let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
-                    let connector = MySqlConnector::new(url);
-                    ex.spawn(async move {
-                        writer_sender
-                            .send(connector.await)
-                            .unwrap_or_else(|_| panic!("Could not send writer"));
-                    });
+            // there is a lot of duplication between these two arms. It isn't ideal. however, the
+            // alternative was implementing Future for the writer on the backend.
+            let writer: Writer = if mysql_url.is_some() {
+                let url = mysql_url.unwrap();
+                let writer = MySqlConnector::new(url).await;
 
-                    futures_executor::block_on(writer_reciever).unwrap().into()
-                } else {
-                    let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
-                    let connector =
-                        NoriaConnector::new(ex.clone(), ch, auto_increments, query_cache);
-                    ex.spawn(async move {
-                        writer_sender
-                            .send(connector.await)
-                            .unwrap_or_else(|_| panic!("Could not send writer"));
-                    });
+                Writer::MySqlConnector(writer)
+            } else {
+                let writer = NoriaConnector::new(ch, auto_increments, query_cache).await;
+                Writer::NoriaConnector(writer)
+            };
 
-                    futures_executor::block_on(writer_reciever).unwrap().into()
-                };
+            let b = BackendBuilder::new()
+                .sanitize(sanitize)
+                .static_responses(static_responses)
+                .writer(writer)
+                .reader(reader)
+                .slowlog(slowlog)
+                .permissive(permissive)
+                .users(users.clone())
+                .require_authentication(require_authentication)
+                .build();
 
-                let backend = BackendBuilder::new()
-                    .sanitize(sanitize)
-                    .static_responses(static_responses)
-                    .writer(writer)
-                    .reader(reader)
-                    .slowlog(slowlog)
-                    .permissive(permissive)
-                    .users(users.clone())
-                    .require_authentication(require_authentication)
-                    .build();
-
-                let rs = s.try_clone().unwrap();
-                if let Err(backend::error::Error::IOError(e)) =
-                    MysqlIntermediary::run_on(backend, BufReader::new(rs), BufWriter::new(s))
-                {
-                    match e.kind() {
-                        io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
-                        _ => {
-                            error!(err = ?e, "connection lost");
-                            return;
-                        }
+            if let Err(backend::error::Error::IOError(e)) =
+                MysqlIntermediary::run_on_tcp(b, s).await
+            {
+                match e.kind() {
+                    io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
+                    _ => {
+                        error!(err = ?e, "connection lost");
+                        return;
                     }
                 }
+            }
 
-                debug!("disconnected");
-            })
-            .unwrap();
-        threads.push(jh);
-        i += 1;
+            debug!("disconnected");
+        };
+        rt.handle().spawn(fut);
     }
 
     drop(ch);
     slog::info!(log, "Exiting...");
-
-    for t in threads.drain(..) {
-        t.join()
-            .map_err(|e| e.downcast::<io::Error>().unwrap())
-            .unwrap();
-    }
 
     drop(rt);
 

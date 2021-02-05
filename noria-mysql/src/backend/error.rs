@@ -8,6 +8,7 @@ use std::{fmt, io};
 #[derive(Debug)]
 pub enum Error {
     MySqlError(mysql::error::Error),
+    MySqlAsyncError(mysql_async::error::Error),
     NoriaReadError(ViewError),
     NoriaWriteError(TableError),
     NoriaRecipeError(anyhow::Error),
@@ -24,6 +25,7 @@ impl Error {
     pub fn error_kind(&self) -> ErrorKind {
         match self {
             MySqlError(_) => ErrorKind::ER_UNKNOWN_ERROR,
+            MySqlAsyncError(_) => ErrorKind::ER_UNKNOWN_ERROR,
             NoriaReadError(_) => ErrorKind::ER_ERROR_ON_READ,
             NoriaWriteError(_) => ErrorKind::ER_ERROR_ON_WRITE,
             NoriaRecipeError(_) => ErrorKind::ER_UNKNOWN_ERROR,
@@ -38,6 +40,10 @@ impl Error {
     pub fn message(&self) -> String {
         match self {
             MySqlError(e) => format!(
+                "There was an error executing this query in the mysql connector : {:?}",
+                e
+            ),
+            MySqlAsyncError(e) => format!(
                 "There was an error executing this query in the mysql connector : {:?}",
                 e
             ),
@@ -63,6 +69,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             MySqlError(e) => Some(e),
+            MySqlAsyncError(e) => Some(e),
             NoriaReadError(e) => Some(e),
             NoriaWriteError(e) => Some(e),
             NoriaRecipeError(_) => None,
@@ -78,6 +85,12 @@ impl std::error::Error for Error {
 impl From<mysql::error::Error> for Error {
     fn from(e: mysql::error::Error) -> Self {
         MySqlError(e)
+    }
+}
+
+impl From<mysql_async::error::Error> for Error {
+    fn from(e: mysql_async::error::Error) -> Self {
+        MySqlAsyncError(e)
     }
 }
 

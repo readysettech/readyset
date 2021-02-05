@@ -2,6 +2,7 @@
 #![feature(nll)]
 #![feature(allow_fail)]
 #![feature(drain_filter)]
+#![feature(async_closure)]
 
 #[macro_use]
 extern crate lazy_static;

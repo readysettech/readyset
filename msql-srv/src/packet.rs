@@ -1,57 +1,109 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
-use std::io::prelude::*;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const U24_MAX: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
     to_write: Vec<u8>,
+    bytes_written: usize,
     seq: u8,
     w: W,
 }
 
-impl<W: Write> Write for PacketWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl<W: AsyncWrite + Unpin> AsyncWrite for PacketWriter<W> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, tokio::io::Error>> {
         use std::cmp::min;
+        if self.to_write.len() == U24_MAX {
+            match self.as_mut().poll_end_packet(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(x) => x?,
+            }
+        }
         let left = min(buf.len(), U24_MAX - self.to_write.len());
         self.to_write.extend(&buf[..left]);
-
-        if self.to_write.len() == U24_MAX {
-            self.end_packet()?;
-        }
-        Ok(left)
+        Poll::Ready(Ok(left))
     }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.maybe_end_packet()?;
-        self.w.flush()
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), tokio::io::Error>> {
+        match self.as_mut().poll_end_packet(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(x) => x?,
+        }
+        match self.as_mut().project_writer().poll_flush(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(x) => x?,
+        }
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), tokio::io::Error>> {
+        self.project_writer().poll_shutdown(cx)
     }
 }
 
-impl<W: Write> PacketWriter<W> {
+impl<W: AsyncWrite + Unpin> PacketWriter<W> {
+    fn project_writer(self: Pin<&mut Self>) -> Pin<&mut W> {
+        // SAFETY: W is Unpin anyway, so pinning doesn't matter
+        unsafe { self.map_unchecked_mut(|s| &mut s.w) }
+    }
     pub fn new(w: W) -> Self {
         PacketWriter {
             to_write: vec![0, 0, 0, 0],
+            bytes_written: 0,
             seq: 0,
             w,
         }
     }
 
-    fn maybe_end_packet(&mut self) -> io::Result<()> {
+    fn poll_end_packet(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), tokio::io::Error>> {
         let len = self.to_write.len() - 4;
-        if len != 0 {
-            LittleEndian::write_u24(&mut self.to_write[0..3], len as u32);
-            self.to_write[3] = self.seq;
-            self.seq = self.seq.wrapping_add(1);
-
-            self.w.write_all(&self.to_write[..])?;
-            self.to_write.truncate(4); // back to just header
+        if len != 0 || self.bytes_written > 0 {
+            if self.bytes_written == 0 {
+                LittleEndian::write_u24(&mut self.to_write[0..3], len as u32);
+                self.to_write[3] = self.seq;
+            }
+            let s = Pin::into_inner(self);
+            loop {
+                let written =
+                    match Pin::new(&mut s.w).poll_write(cx, &s.to_write[s.bytes_written..]) {
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(x) => x?,
+                    };
+                s.bytes_written += written;
+                if s.bytes_written < s.to_write.len() {
+                    continue;
+                }
+                s.bytes_written = 0;
+                s.seq = s.seq.wrapping_add(1);
+                s.to_write.truncate(4); // back to just header
+                break;
+            }
         }
+        Poll::Ready(Ok(()))
+    }
+
+    pub async fn write_buf_and_flush(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.write_all(buf).await?;
+        self.flush().await?;
         Ok(())
     }
 
-    pub fn end_packet(&mut self) -> io::Result<()> {
-        self.maybe_end_packet()
+    pub async fn end_packet(&mut self) -> io::Result<()> {
+        self.flush().await?;
+        Ok(())
     }
 }
 
@@ -79,8 +131,8 @@ impl<R> PacketReader<R> {
     }
 }
 
-impl<R: Read> PacketReader<R> {
-    pub fn next(&mut self) -> io::Result<Option<(u8, Packet<'_>)>> {
+impl<R: AsyncRead + Unpin> PacketReader<R> {
+    pub async fn next(&mut self) -> io::Result<Option<(u8, Packet<'_>)>> {
         self.start = self.bytes.len() - self.remaining;
 
         loop {
@@ -115,7 +167,7 @@ impl<R: Read> PacketReader<R> {
             self.bytes.resize(std::cmp::max(4096, end * 2), 0);
             let read = {
                 let mut buf = &mut self.bytes[end..];
-                self.r.read(&mut buf)?
+                self.r.read(&mut buf).await?
             };
             self.bytes.truncate(end + read);
             self.remaining = self.bytes.len();
@@ -183,6 +235,8 @@ impl<'a> AsRef<[u8]> for Packet<'a> {
 }
 
 use std::ops::Deref;
+use std::pin::Pin;
+
 impl<'a> Deref for Packet<'a> {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {

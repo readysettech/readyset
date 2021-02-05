@@ -309,13 +309,12 @@ impl TestScript {
 
         thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-            let reader = NoriaConnector::new(
-                rt.handle().clone(),
-                ch.clone(),
-                auto_increments.clone(),
-                query_cache.clone(),
-            );
-            let writer = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
+            let s = rt
+                .handle()
+                .enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+            let reader =
+                NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
+            let writer = NoriaConnector::new(ch, auto_increments, query_cache);
 
             let backend = BackendBuilder::new()
                 .writer(rt.block_on(writer))
@@ -323,7 +322,8 @@ impl TestScript {
                 .require_authentication(false)
                 .build();
 
-            MysqlIntermediary::run_on_tcp(backend, s).unwrap();
+            rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
+                .unwrap();
             drop(rt);
         });
 

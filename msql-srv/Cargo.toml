@@ -30,11 +30,12 @@ chrono = "0.4"
 time = "=0.2.7"
 getrandom = "0.2.2"
 rust-crypto = "0.2.36"
+async-trait = "0.1"
+tokio = { version = "0.2", features = ["io-util", "net"] }
 
 [dev-dependencies]
 postgres = "0.15.2"
 mysql = "17.0.0"
-mysql_async = "0.20.0"
+mysql_async = "0.23.0"
 slab = "0.4.2"
-tokio = "0.1.19"
 futures = "0.1.26"

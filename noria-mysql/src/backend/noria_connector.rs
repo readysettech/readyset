@@ -3,7 +3,6 @@ use noria::{
     ViewQueryOperator, ZookeeperAuthority,
 };
 
-use futures_executor::block_on as block_on_buffer;
 use msql_srv::{self, *};
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement,
@@ -60,23 +59,22 @@ impl fmt::Debug for PreparedStatement {
 }
 
 pub struct NoriaBackendInner {
-    executor: tokio::runtime::Handle,
     noria: ControllerHandle<ZookeeperAuthority>,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
 }
 
-macro_rules! block_on {
+macro_rules! noria_await {
     ($self:expr, $fut:expr) => {{
         let noria = &mut $self.noria;
-        futures_executor::block_on(futures_util::future::poll_fn(|cx| noria.poll_ready(cx)))
-            .unwrap();
-        futures_executor::block_on($self.executor.spawn($fut)).unwrap()
+
+        futures_util::future::poll_fn(|cx| noria.poll_ready(cx)).await?;
+        $fut.await
     }};
 }
 
 impl NoriaBackendInner {
-    async fn new(ex: tokio::runtime::Handle, mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
+    async fn new(mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
         ch.ready().await.unwrap();
         let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
         let mut i = BTreeMap::new();
@@ -94,40 +92,41 @@ impl NoriaBackendInner {
             o.insert(n, t);
         }
         NoriaBackendInner {
-            executor: ex,
             inputs: i,
             outputs: o,
             noria: ch,
         }
     }
 
-    fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
+    async fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
         self.get_or_make_mutator(table)
+            .await
             .expect(&format!("no table named '{}'!", table))
     }
 
-    fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
+    async fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
         self.get_or_make_getter(view)
+            .await
             .expect(&format!("no view named '{}'!", view))
     }
 
-    fn get_or_make_mutator<'a, 'b>(
+    async fn get_or_make_mutator<'a, 'b>(
         &'a mut self,
         table: &'b str,
     ) -> Result<&'a mut Table, anyhow::Error> {
         if !self.inputs.contains_key(table) {
-            let t = block_on!(self, self.noria.table(table))?;
+            let t = noria_await!(self, self.noria.table(table))?;
             self.inputs.insert(table.to_owned(), t);
         }
         Ok(self.inputs.get_mut(table).unwrap())
     }
 
-    fn get_or_make_getter<'a, 'b>(
+    async fn get_or_make_getter<'a, 'b>(
         &'a mut self,
         view: &'b str,
     ) -> Result<&'a mut View, anyhow::Error> {
         if !self.outputs.contains_key(view) {
-            let vh = block_on!(self, self.noria.view(view))?;
+            let vh = noria_await!(self, self.noria.view(view))?;
             self.outputs.insert(view.to_owned(), vh);
         }
         Ok(self.outputs.get_mut(view).unwrap())
@@ -146,13 +145,12 @@ pub struct NoriaConnector {
 
 impl NoriaConnector {
     pub async fn new(
-        ex: tokio::runtime::Handle,
         ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
     ) -> Self {
         NoriaConnector {
-            inner: NoriaBackendInner::new(ex, ch).await,
+            inner: NoriaBackendInner::new(ch).await,
             auto_increments,
             cached: query_cache,
             tl_cached: HashMap::new(),
@@ -160,7 +158,7 @@ impl NoriaConnector {
         }
     }
 
-    pub fn handle_insert(
+    pub async fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
     ) -> std::result::Result<(u64, u64), Error> {
@@ -168,7 +166,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "query::insert::access mutator");
-        let putter = self.inner.ensure_mutator(table);
+        let putter = self.inner.ensure_mutator(table).await;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
@@ -185,10 +183,10 @@ impl NoriaConnector {
             .map(|row| row.iter().map(DataType::from).collect())
             .collect();
 
-        self.do_insert(&q, data)
+        self.do_insert(&q, data).await
     }
 
-    pub fn prepare_insert(
+    pub async fn prepare_insert(
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
@@ -200,7 +198,7 @@ impl NoriaConnector {
         };
 
         trace!(table = %q.table.name, "insert::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let mutator = self.inner.ensure_mutator(&q.table.name).await;
         trace!("insert::extract schema");
         let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
@@ -254,10 +252,10 @@ impl NoriaConnector {
         Ok((statement_id, params, schema))
     }
 
-    pub(crate) fn execute_prepared_insert(
+    pub(crate) async fn execute_prepared_insert(
         &mut self,
         q_id: u32,
-        params: ParamParser,
+        params: ParamParser<'_>,
     ) -> std::result::Result<(u64, u64), Error> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -271,7 +269,7 @@ impl NoriaConnector {
                     .into_iter()
                     .map(|pv| pv.value.to_datatype())
                     .collect();
-                return self.do_insert(&q, vec![values]);
+                return self.do_insert(&q, vec![values]).await;
             }
             _ => {
                 unreachable!(
@@ -281,7 +279,7 @@ impl NoriaConnector {
         };
     }
 
-    pub(crate) fn handle_delete(
+    pub(crate) async fn handle_delete(
         &mut self,
         q: nom_sql::DeleteStatement,
     ) -> std::result::Result<u64, Error> {
@@ -291,7 +289,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let mutator = self.inner.ensure_mutator(&q.table.name).await;
 
         trace!("delete::extract schema");
         let pkey = if let Some(cts) = mutator.schema() {
@@ -315,7 +313,7 @@ impl NoriaConnector {
                 let count = flattened.len() as u64;
                 trace!("delete::execute");
                 for key in flattened {
-                    if let Err(e) = block_on_buffer(mutator.delete(key)) {
+                    if let Err(e) = mutator.delete(key).await {
                         error!(error = %e, "failed");
                         return Err(NoriaWriteError(e));
                     };
@@ -326,14 +324,14 @@ impl NoriaConnector {
         }
     }
 
-    pub(crate) fn handle_update(
+    pub(crate) async fn handle_update(
         &mut self,
         q: nom_sql::UpdateStatement,
     ) -> std::result::Result<(u64, u64), Error> {
-        self.do_update(Cow::Owned(q), None)
+        self.do_update(Cow::Owned(q), None).await
     }
 
-    pub(crate) fn prepare_update(
+    pub(crate) async fn prepare_update(
         &mut self,
         sql_q: nom_sql::SqlQuery,
         statement_id: u32,
@@ -346,7 +344,7 @@ impl NoriaConnector {
         };
 
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let mutator = self.inner.ensure_mutator(&q.table.name).await;
         trace!("update::extract schema");
         let schema = Schema::Table(mutator.schema().unwrap().clone());
 
@@ -371,10 +369,10 @@ impl NoriaConnector {
         Ok((statement_id as u64, params))
     }
 
-    pub(crate) fn execute_prepared_update(
+    pub(crate) async fn execute_prepared_update(
         &mut self,
         q_id: u32,
-        params: ParamParser,
+        params: ParamParser<'_>,
     ) -> std::result::Result<(u64, u64), Error> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -384,21 +382,21 @@ impl NoriaConnector {
 
         trace!("delegate");
         match prep {
-            PreparedStatement::Update(ref q) => {
-                return self.do_update(Cow::Borrowed(q), Some(params))
+            PreparedStatement::Update(q) => {
+                return self.do_update(Cow::Owned(q), Some(params)).await
             }
             _ => unreachable!(),
         };
     }
 
-    pub(crate) fn handle_create_table(
+    pub(crate) async fn handle_create_table(
         &mut self,
         q: nom_sql::CreateTableStatement,
     ) -> std::result::Result<(), Error> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
         info!(table = %q.table.name, "table::create");
-        block_on!(
+        noria_await!(
             self.inner,
             self.inner.noria.extend_recipe(&format!("{};", q))
         )?;
@@ -408,7 +406,7 @@ impl NoriaConnector {
 }
 
 impl NoriaConnector {
-    fn get_or_create_view(
+    async fn get_or_create_view(
         &mut self,
         q: &nom_sql::SelectStatement,
         prepared: bool,
@@ -416,37 +414,35 @@ impl NoriaConnector {
         let qname = match self.tl_cached.get(q) {
             None => {
                 // check global cache
-                let gc = self.cached.read().unwrap();
-                let qname = match gc.get(q) {
-                    Some(qname) => qname.clone(),
+                let qname_opt = {
+                    let gc = tokio::task::block_in_place(|| self.cached.read().unwrap());
+                    gc.get(q).cloned()
+                };
+                let qname = match qname_opt {
+                    Some(qname) => qname,
                     None => {
-                        drop(gc);
-                        let mut gc = self.cached.write().unwrap();
-                        if let Some(qname) = gc.get(q) {
-                            qname.clone()
+                        let qh = utils::hash_select_query(q);
+                        let qname = format!("q_{:x}", qh);
+
+                        // add the query to Noria
+                        if prepared {
+                            info!(query = %q, name = %qname, "adding parameterized query");
                         } else {
-                            let qh = utils::hash_select_query(q);
-                            let qname = format!("q_{:x}", qh);
-
-                            // add the query to Noria
-                            if prepared {
-                                info!(query = %q, name = %qname, "adding parameterized query");
-                            } else {
-                                info!(query = %q, name = %qname, "adding ad-hoc query");
-                            }
-                            if let Err(e) = block_on!(
-                                self.inner,
-                                self.inner
-                                    .noria
-                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
-                            ) {
-                                error!(error = %e, "add query failed");
-                                return Err(NoriaRecipeError(e));
-                            }
-
-                            gc.insert(q.clone(), qname.clone());
-                            qname
+                            info!(query = %q, name = %qname, "adding ad-hoc query");
                         }
+                        if let Err(e) = noria_await!(
+                            self.inner,
+                            self.inner
+                                .noria
+                                .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                        ) {
+                            error!(error = %e, "add query failed");
+                            return Err(NoriaRecipeError(e));
+                        }
+
+                        let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());
+                        gc.insert(q.clone(), qname.clone());
+                        qname
                     }
                 };
 
@@ -459,7 +455,7 @@ impl NoriaConnector {
         Ok(qname)
     }
 
-    fn do_insert(
+    async fn do_insert(
         &mut self,
         q: &InsertStatement,
         data: Vec<Vec<DataType>>,
@@ -468,7 +464,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "insert::access mutator");
-        let putter = self.inner.ensure_mutator(table);
+        let putter = self.inner.ensure_mutator(table).await;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -496,83 +492,82 @@ impl NoriaConnector {
         // can only have zero or one AUTO_INCREMENT columns
         assert!(auto_increment_columns.len() <= 1);
 
-        {
-            let ai_lock = self.auto_increments.read().unwrap();
+        let ai = &mut self.auto_increments;
+        tokio::task::block_in_place(|| {
+            let ai_lock = ai.read().unwrap();
             if ai_lock.get(table).is_none() {
                 drop(ai_lock);
-                self.auto_increments
-                    .write()
+                ai.write()
                     .unwrap()
                     .entry(table.to_owned())
                     .or_insert(atomic::AtomicUsize::new(0));
             }
-        };
-        let ai_lock = self.auto_increments.read().unwrap();
-        let last_insert_id = &ai_lock[table];
-
-        // handle default values
-        trace!("insert::default values");
-        let mut default_value_columns: Vec<_> = schema
-            .fields
-            .iter()
-            .filter_map(|ref c| {
-                for cc in &c.constraints {
-                    match *cc {
-                        ColumnConstraint::DefaultValue(ref v) => {
-                            return Some((c.column.clone(), v.clone()))
-                        }
-                        _ => (),
-                    }
-                }
-                None
-            })
-            .collect();
-
-        trace!("insert::construct ops");
+        });
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
-
         let mut first_inserted_id = None;
-        for (ri, ref row) in data.iter().enumerate() {
-            if let Some(col) = auto_increment_columns.iter().next() {
-                let idx = schema
-                    .fields
-                    .iter()
-                    .position(|f| f == *col)
-                    .expect(&format!("no column named '{}'", col.column.name));
-                // query can specify an explicit AUTO_INCREMENT value
-                if !columns_specified.contains(&col.column) {
-                    let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
-                    if first_inserted_id.is_none() {
-                        first_inserted_id = Some(id);
+        tokio::task::block_in_place(|| {
+            let ai_lock = ai.read().unwrap();
+            let last_insert_id = &ai_lock[table];
+
+            // handle default values
+            trace!("insert::default values");
+            let mut default_value_columns: Vec<_> = schema
+                .fields
+                .iter()
+                .filter_map(|ref c| {
+                    for cc in &c.constraints {
+                        if let ColumnConstraint::DefaultValue(ref v) = *cc {
+                            return Some((c.column.clone(), v.clone()));
+                        }
                     }
-                    buf[ri][idx] = DataType::from(id);
+                    None
+                })
+                .collect();
+
+            trace!("insert::construct ops");
+
+            for (ri, ref row) in data.iter().enumerate() {
+                if let Some(col) = auto_increment_columns.iter().next() {
+                    let idx = schema
+                        .fields
+                        .iter()
+                        .position(|f| f == *col)
+                        .expect(&format!("no column named '{}'", col.column.name));
+                    // query can specify an explicit AUTO_INCREMENT value
+                    if !columns_specified.contains(&col.column) {
+                        let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
+                        if first_inserted_id.is_none() {
+                            first_inserted_id = Some(id);
+                        }
+                        buf[ri][idx] = DataType::from(id);
+                    }
+                }
+
+                for (c, v) in default_value_columns.drain(..) {
+                    let idx = schema
+                        .fields
+                        .iter()
+                        .position(|f| f.column == c)
+                        .expect(&format!("no column named '{}'", c.name));
+                    // only use default value if query doesn't specify one
+                    if !columns_specified.contains(&c) {
+                        buf[ri][idx] = v.into();
+                    }
+                }
+
+                for (ci, c) in columns_specified.iter().enumerate() {
+                    let (idx, field) = schema
+                        .fields
+                        .iter()
+                        .find_position(|f| f.column == *c)
+                        .expect(&format!("no column '{:?}' in table '{}'", c, schema.table));
+                    // TODO(grfn): Convert this unwrap() to an actual user error once we have proper
+                    // error return values (PR#50)
+                    let value = row.get(ci).unwrap().coerce_to(&field.sql_type).unwrap();
+                    buf[ri][idx] = value.into_owned();
                 }
             }
-
-            for (c, v) in default_value_columns.drain(..) {
-                let idx = schema
-                    .fields
-                    .iter()
-                    .position(|f| f.column == c)
-                    .expect(&format!("no column named '{}'", c.name));
-                // only use default value if query doesn't specify one
-                if !columns_specified.contains(&c) {
-                    buf[ri][idx] = v.into();
-                }
-            }
-
-            for (ci, c) in columns_specified.iter().enumerate() {
-                let (idx, field) = schema
-                    .fields
-                    .iter()
-                    .find_position(|f| f.column == *c)
-                    .expect(&format!("no column '{:?}' in table '{}'", c, schema.table));
-                // TODO(grfn): Convert this unwrap() to an actual user error once we have proper
-                // error return values (PR#50)
-                let value = row.get(ci).unwrap().coerce_to(&field.sql_type).unwrap();
-                buf[ri][idx] = value.into_owned();
-            }
-        }
+        });
 
         let result = if let Some(ref update_fields) = q.on_duplicate {
             trace!("insert::complex");
@@ -589,13 +584,13 @@ impl NoriaConnector {
             };
 
             // TODO(malte): why can't I consume buf here?
-            let r = block_on_buffer(putter.insert_or_update(buf[0].clone(), updates));
+            let r = putter.insert_or_update(buf[0].clone(), updates).await;
             trace!("insert::complex::complete");
             r
         } else {
             trace!("insert::simple");
             let buf: Vec<_> = buf.into_iter().map(TableOperation::Insert).collect();
-            let r = block_on_buffer(putter.perform_all(buf));
+            let r = putter.perform_all(buf).await;
             trace!("insert::simple::complete");
             r
         };
@@ -605,7 +600,7 @@ impl NoriaConnector {
         }
     }
 
-    fn do_read(
+    async fn do_read(
         &mut self,
         qname: &str,
         q: &nom_sql::SelectStatement,
@@ -617,7 +612,7 @@ impl NoriaConnector {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         trace!("select::access view");
-        let getter = self.inner.ensure_getter(&qname);
+        let getter = self.inner.ensure_getter(&qname).await;
         let getter_schema = getter.schema().expect("No schema for view");
         let mut key_types = key_column_indices
             .iter()
@@ -740,7 +735,7 @@ impl NoriaConnector {
             timestamp: None,
         };
 
-        let data = block_on_buffer(getter.raw_lookup(vq))?;
+        let data = getter.raw_lookup(vq).await?;
         trace!("select::complete");
         let schema = schema.to_vec();
         Ok((
@@ -753,13 +748,13 @@ impl NoriaConnector {
         ))
     }
 
-    fn do_update(
+    async fn do_update(
         &mut self,
-        q: Cow<UpdateStatement>,
-        params: Option<ParamParser>,
+        q: Cow<'_, UpdateStatement>,
+        params: Option<ParamParser<'_>>,
     ) -> std::result::Result<(u64, u64), Error> {
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name);
+        let mutator = self.inner.ensure_mutator(&q.table.name).await;
 
         let q = q.into_owned();
         let (key, updates) = {
@@ -774,18 +769,18 @@ impl NoriaConnector {
         };
 
         trace!("update::update");
-        block_on_buffer(mutator.update(key, updates))?;
+        mutator.update(key, updates).await?;
         trace!("update::complete");
         Ok((1, 0))
     }
 
-    pub(crate) fn handle_select(
+    pub(crate) async fn handle_select(
         &mut self,
         q: nom_sql::SelectStatement,
         use_params: Vec<Literal>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         trace!("query::select::access view");
-        let qname = self.get_or_create_view(&q, false)?;
+        let qname = self.get_or_create_view(&q, false).await?;
 
         let keys: Vec<_> = use_params
             .into_iter()
@@ -797,6 +792,7 @@ impl NoriaConnector {
         let getter_schema = self
             .inner
             .ensure_getter(&qname)
+            .await
             .schema()
             .expect(&format!("no schema for view '{}'", qname));
 
@@ -825,9 +821,10 @@ impl NoriaConnector {
 
         trace!(%qname, "query::select::do");
         self.do_read(&qname, &q, keys, &schema, &key_column_indices)
+            .await
     }
 
-    pub(crate) fn prepare_select(
+    pub(crate) async fn prepare_select(
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
@@ -851,13 +848,14 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self.get_or_create_view(&q, true)?;
+        let qname = self.get_or_create_view(&q, true).await?;
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
         let getter_schema = self
             .inner
             .ensure_getter(&qname)
+            .await
             .schema()
             .expect(&format!("no schema for view '{}'", qname));
 
@@ -903,10 +901,10 @@ impl NoriaConnector {
         Ok((statement_id, params, schema))
     }
 
-    pub(crate) fn execute_prepared_select(
+    pub(crate) async fn execute_prepared_select(
         &mut self,
         q_id: u32,
-        params: ParamParser,
+        params: ParamParser<'_>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
@@ -968,7 +966,9 @@ impl NoriaConnector {
                     }
                 };
 
-                return self.do_read(name, q, keys, schema, key_column_indices);
+                return self
+                    .do_read(name, q, keys, schema, key_column_indices)
+                    .await;
             }
             _ => {
                 unreachable!()
@@ -976,7 +976,7 @@ impl NoriaConnector {
         };
     }
 
-    pub(crate) fn handle_create_view(
+    pub(crate) async fn handle_create_view(
         &mut self,
         q: nom_sql::CreateViewStatement,
     ) -> std::result::Result<(), Error> {
@@ -985,7 +985,7 @@ impl NoriaConnector {
 
         info!(%q.definition, %q.name, "view::create");
 
-        block_on!(
+        noria_await!(
             self.inner,
             self.inner
                 .noria
