@@ -1,9 +1,7 @@
 import sendRes from '../../../libs/send-res-with-module-map'
-import session from '../../../libs/session'
 import db from '../../../libs/db'
 
 export default async (req, res) => {
-  session(req, res)
 
   if (req.method === 'GET') {
     console.time('Get note from Noria')
@@ -22,22 +20,15 @@ export default async (req, res) => {
   }
 
   if (req.method === 'POST') {
-    const login = req.session.login
-
-    if (!login) {
-      return res.status(403).send('Unauthorized')
-    }
-
     console.time('Create note in Noria')
 
     const { insertId } = await db.execute(
-      `INSERT INTO notes (title, body, updated_at, created_by)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO notes (title, body, updated_at)
+       VALUES (?, ?, ?)`,
       [
         (req.body.title || '').slice(0, 255),
         (req.body.body || '').slice(0, 2048),
         db.formatDate(new Date()),
-        login,
       ]
     )
 

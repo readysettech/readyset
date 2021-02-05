@@ -4,15 +4,14 @@ import { format } from 'date-fns'
 
 import NotePreview from './NotePreview'
 import NoteEditor from './NoteEditor.client'
-import AuthButton from './AuthButton.server'
+import EditButton from './EditButton.client'
 
 let endpoint = process.env.ENDPOINT
 if (!endpoint.startsWith('http')) {
   endpoint = `https://${endpoint}`
 }
 
-export default function Note({ selectedId, isEditing, login }) {
-  console.log('SELECTED ID:', selectedId)
+export default function Note({ selectedId, isEditing }) {
   const note =
     selectedId != null
       ? fetch(`${endpoint}/api/notes/${selectedId}`).json()
@@ -71,13 +70,7 @@ export default function Note({ selectedId, isEditing, login }) {
             <small className="note-updated-at" role="status">
               Last updated on {format(updatedAt, "d MMM yyyy 'at' h:mm bb")}
             </small>
-            {login === created_by ? (
-              <AuthButton login={login} noteId={id}>
-                Edit
-              </AuthButton>
-            ) : (
-              <div style={{ height: 30 }} />
-            )}
+            <EditButton noteId={id}>Edit</EditButton>
           </div>
         </div>
         <NotePreview body={body} />

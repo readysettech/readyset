@@ -4,12 +4,12 @@ import SearchField from './SearchField.client'
 
 import Note from './Note.server'
 import NoteList from './NoteList.server'
-import AuthButton from './AuthButton.server'
+import EditButton from './EditButton.client'
 
 import NoteSkeleton from './NoteSkeleton'
 import NoteListSkeleton from './NoteListSkeleton'
 
-export default function App({ selectedId, isEditing, searchText, login }) {
+export default function App({ selectedId, isEditing, searchText }) {
   return (
     <div className="container">
       <div className="banner">
@@ -36,9 +36,7 @@ export default function App({ selectedId, isEditing, searchText, login }) {
           </section>
           <section className="sidebar-menu" role="menubar">
             <SearchField />
-            <AuthButton login={login} noteId={null}>
-              Add
-            </AuthButton>
+            <EditButton noteId={null}>Add</EditButton>
           </section>
           <nav>
             <Suspense fallback={<NoteListSkeleton />}>
@@ -48,7 +46,7 @@ export default function App({ selectedId, isEditing, searchText, login }) {
         </section>
         <section className="col note-viewer">
           <Suspense fallback={<NoteSkeleton isEditing={isEditing} />}>
-            <Note login={login} selectedId={selectedId} isEditing={isEditing} />
+            <Note selectedId={selectedId} isEditing={isEditing} />
           </Suspense>
         </section>
       </div>

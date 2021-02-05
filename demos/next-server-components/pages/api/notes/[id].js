@@ -1,22 +1,18 @@
 import sendRes from '../../../libs/send-res-with-module-map'
-import session from '../../../libs/session'
 import db from '../../../libs/db'
 
 export default async (req, res) => {
-  session(req, res)
   const id = +req.query.id
-  const login = req.session.login
 
   console.time('Get note from Noria')
-  const result =
-    await db.execute(
-      `SELECT
+  const result = await db.execute(
+    `SELECT
          id, title, updated_at, body, created_by
        FROM notes
        WHERE id = ?`,
-      [id]
-    );
-  const note = result[0];
+    [id]
+  )
+  const note = result[0]
   console.timeEnd('Get note from Noria')
 
   if (req.method === 'GET') {
@@ -24,10 +20,6 @@ export default async (req, res) => {
   }
 
   if (req.method === 'DELETE') {
-    if (!login || login !== note.created_by) {
-      return res.status(403).send('Unauthorized')
-    }
-
     console.time('Delete note in Noria')
     await db.execute('DELETE FROM notes WHERE id = ?', [id])
     console.timeEnd('Delete note in Noria')
@@ -36,10 +28,6 @@ export default async (req, res) => {
   }
 
   if (req.method === 'PUT') {
-    if (!login || login !== note.created_by) {
-      return res.status(403).send('Unauthorized')
-    }
-
     console.time('Update note in Noria')
     await db.execute(
       `UPDATE notes SET
