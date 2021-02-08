@@ -25,16 +25,17 @@ pub struct Miss<K>(pub Vec<(Bound<K>, Bound<K>)>);
 ///
 /// Since the map remains immutable while this lives, the methods on this type all give you
 /// unguarded references to types contained in the map.
-pub struct MapReadRef<'rh, K, V, M = (), S = RandomState>
+pub struct MapReadRef<'rh, K, V, M = (), T = (), S = RandomState>
 where
     K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
+    T: Clone,
 {
-    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, S>>,
+    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S>>,
 }
 
-impl<'rh, K, V, M, S> fmt::Debug for MapReadRef<'rh, K, V, M, S>
+impl<'rh, K, V, M, T, S> fmt::Debug for MapReadRef<'rh, K, V, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
@@ -42,6 +43,7 @@ where
     K: fmt::Debug,
     M: fmt::Debug,
     V: fmt::Debug,
+    T: fmt::Debug + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MapReadRef")
@@ -50,11 +52,12 @@ where
     }
 }
 
-impl<'rh, K, V, M, S> MapReadRef<'rh, K, V, M, S>
+impl<'rh, K, V, M, T, S> MapReadRef<'rh, K, V, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
+    T: Clone,
 {
     /// Iterate over all key + valuesets in the map.
     ///
@@ -196,12 +199,13 @@ where
     }
 }
 
-impl<'rh, K, Q, V, M, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, S>
+impl<'rh, K, Q, V, M, T, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, T, S>
 where
     K: Ord + Clone + Borrow<Q>,
     V: Eq + Hash,
     Q: Ord + ?Sized,
     S: BuildHasher,
+    T: Clone,
 {
     type Output = Values<V, S>;
     fn index(&self, key: &Q) -> &Self::Output {
@@ -209,11 +213,12 @@ where
     }
 }
 
-impl<'rg, 'rh, K, V, M, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, S>
+impl<'rg, 'rh, K, V, M, T, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
+    T: Clone,
 {
     type Item = (&'rg K, &'rg Values<V, S>);
     type IntoIter = ReadGuardIter<'rg, K, V, S>;

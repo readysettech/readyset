@@ -4,11 +4,20 @@ use super::{key_to_double, key_to_single, Key};
 use crate::prelude::*;
 use ahash::RandomState;
 use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use noria::consistency::Timestamp;
 
 pub(super) enum Handle {
-    Single(evbtree::handles::WriteHandle<DataType, Vec<DataType>, i64, RandomState>),
-    Double(evbtree::handles::WriteHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
-    Many(evbtree::handles::WriteHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
+    Single(evbtree::handles::WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Double(
+        evbtree::handles::WriteHandle<
+            (DataType, DataType),
+            Vec<DataType>,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
+    ),
+    Many(evbtree::handles::WriteHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>),
 }
 
 impl Handle {

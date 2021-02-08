@@ -95,7 +95,7 @@ where
 
 fn do_ops<K, V, S>(
     ops: &[Op<K, V>],
-    evbtree: &mut WriteHandle<K, V, (), S>,
+    evbtree: &mut WriteHandle<K, V, (), (), S>,
     write_ref: &mut BTreeMap<K, Vec<V>>,
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
@@ -137,7 +137,7 @@ fn do_ops<K, V, S>(
     }
 }
 
-fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), S>, b: &BTreeMap<K, Vec<V>>) -> bool
+fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), (), S>, b: &BTreeMap<K, Vec<V>>) -> bool
 where
     K: Clone + Ord + Debug,
     V: Hash + Eq + Debug + Ord + Copy,

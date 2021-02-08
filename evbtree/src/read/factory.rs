@@ -10,18 +10,20 @@ use std::hash::BuildHasher;
 /// additional external locking to synchronize access to the non-`Sync` [`ReadHandle`] type. Note
 /// that this _internally_ takes a lock whenever you call [`ReadHandleFactory::handle`], so
 /// you should not expect producing new handles rapidly to scale well.
-pub struct ReadHandleFactory<K, V, M, S = RandomState>
+pub struct ReadHandleFactory<K, V, M, T, S = RandomState>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
-    pub(super) factory: left_right::ReadHandleFactory<Inner<K, V, M, S>>,
+    pub(super) factory: left_right::ReadHandleFactory<Inner<K, V, M, T, S>>,
 }
 
-impl<K, V, M, S> fmt::Debug for ReadHandleFactory<K, V, M, S>
+impl<K, V, M, T, S> fmt::Debug for ReadHandleFactory<K, V, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadHandleFactory")
@@ -30,10 +32,11 @@ where
     }
 }
 
-impl<K, V, M, S> Clone for ReadHandleFactory<K, V, M, S>
+impl<K, V, M, T, S> Clone for ReadHandleFactory<K, V, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -42,14 +45,15 @@ where
     }
 }
 
-impl<K, V, M, S> ReadHandleFactory<K, V, M, S>
+impl<K, V, M, T, S> ReadHandleFactory<K, V, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
     /// Produce a new [`ReadHandle`] to the same left-right data structure as this factory was
     /// originally produced from.
-    pub fn handle(&self) -> ReadHandle<K, V, M, S> {
+    pub fn handle(&self) -> ReadHandle<K, V, M, T, S> {
         ReadHandle {
             handle: self.factory.handle(),
         }

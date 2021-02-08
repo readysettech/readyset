@@ -246,82 +246,100 @@ mod aliasing;
 ///
 /// In particular, the options dictate the hashing function, meta type, and initial capacity of the
 /// map.
-pub struct Options<M, S>
+pub struct Options<M, T, S>
 where
     S: BuildHasher,
 {
     meta: M,
+    timestamp: T,
     hasher: S,
     capacity: Option<usize>,
 }
 
-impl<M, S> fmt::Debug for Options<M, S>
+impl<M, T, S> fmt::Debug for Options<M, T, S>
 where
     S: BuildHasher,
     M: fmt::Debug,
+    T: fmt::Debug + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Options")
             .field("meta", &self.meta)
+            .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
             .finish()
     }
 }
 
-impl Default for Options<(), RandomState> {
+impl Default for Options<(), (), RandomState> {
     fn default() -> Self {
         Options {
             meta: (),
+            timestamp: (),
             hasher: RandomState::default(),
             capacity: None,
         }
     }
 }
 
-impl<M, S> Options<M, S>
+impl<M, T, S> Options<M, T, S>
 where
     S: BuildHasher,
 {
     /// Set the initial meta value for the map.
-    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, S> {
+    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, T, S> {
         Options {
             meta,
+            timestamp: self.timestamp,
             hasher: self.hasher,
             capacity: self.capacity,
         }
     }
 
     /// Set the hasher used for the map.
-    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, S2>
+    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2>
     where
         S2: BuildHasher,
     {
         Options {
             meta: self.meta,
+            timestamp: self.timestamp,
             hasher: hash_builder,
             capacity: self.capacity,
         }
     }
 
     /// Set the initial capacity for the map.
-    pub fn with_capacity(self, capacity: usize) -> Options<M, S> {
+    pub fn with_capacity(self, capacity: usize) -> Options<M, T, S> {
         Options {
             meta: self.meta,
+            timestamp: self.timestamp,
             hasher: self.hasher,
             capacity: Some(capacity),
         }
     }
 
+    /// Sets the initial timestamp of the map.
+    pub fn with_timestamp<T2>(self, timestamp: T2) -> Options<M, T2, S> {
+        Options {
+            meta: self.meta,
+            timestamp,
+            hasher: self.hasher,
+            capacity: self.capacity,
+        }
+    }
+
     /// Create the map, and construct the read and write handles used to access it.
     #[allow(clippy::type_complexity)]
-    pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, S>, ReadHandle<K, V, M, S>)
+    pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
     where
         K: Ord + Clone,
         S: BuildHasher + Clone,
         V: Eq + Hash,
         M: 'static + Clone,
+        T: Clone,
     {
-        let inner = Inner::with_hasher(self.meta, self.hasher);
+        let inner = Inner::with_hasher(self.meta, self.timestamp, self.hasher);
 
         let (mut w, r) = left_right::new_from_empty(inner);
         w.append(write::Operation::MarkReady);
@@ -335,8 +353,8 @@ where
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
 pub fn new<K, V>() -> (
-    WriteHandle<K, V, (), RandomState>,
-    ReadHandle<K, V, (), RandomState>,
+    WriteHandle<K, V, (), (), RandomState>,
+    ReadHandle<K, V, (), (), RandomState>,
 )
 where
     K: Ord + Clone,
@@ -345,40 +363,48 @@ where
     Options::default().construct()
 }
 
-/// Create an empty eventually consistent map with meta information.
+/// Create an empty eventually consistent map with meta and timestamp information.
 ///
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
-pub fn with_meta<K, V, M>(
+pub fn with_meta_and_timestamp<K, V, M, T>(
     meta: M,
+    timestamp: T,
 ) -> (
-    WriteHandle<K, V, M, RandomState>,
-    ReadHandle<K, V, M, RandomState>,
+    WriteHandle<K, V, M, T, RandomState>,
+    ReadHandle<K, V, M, T, RandomState>,
 )
 where
     K: Ord + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
+    T: Clone,
 {
-    Options::default().with_meta(meta).construct()
+    Options::default()
+        .with_meta(meta)
+        .with_timestamp(timestamp)
+        .construct()
 }
 
 /// Create an empty eventually consistent map with meta information and custom hasher.
 ///
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
-pub fn with_hasher<K, V, M, S>(
+pub fn with_hasher<K, V, M, T, S>(
+    timestamp: T,
     meta: M,
     hasher: S,
-) -> (WriteHandle<K, V, M, S>, ReadHandle<K, V, M, S>)
+) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
 where
     K: Ord + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
+    T: Clone,
     S: BuildHasher + Clone,
 {
     Options::default()
         .with_hasher(hasher)
+        .with_timestamp(timestamp)
         .with_meta(meta)
         .construct()
 }
