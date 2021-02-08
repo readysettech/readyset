@@ -548,7 +548,7 @@ fn replace_post_refresh() {
 
 #[test]
 fn with_meta() {
-    let (mut w, r) = evbtree::with_meta::<usize, usize, _>(42);
+    let (mut w, r) = evbtree::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
     assert_eq!(
         r.meta_get(&1).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
         None
@@ -903,4 +903,20 @@ fn contains_range_works() {
         assert!(m.contains_range(3..4));
         assert!(!m.contains_range(6..));
     }
+}
+
+#[test]
+fn timestamp_changes_on_publish() {
+    let (mut w, r) = evbtree::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+    // Map is unitialized before first publish, therefore the timestamp should not
+    // return a value.
+    assert_eq!(r.get_timestamp(), None,);
+    w.publish();
+    // Set timestamp after publish, it should not be visible until the next
+    // publish.
+    w.set_timestamp(4);
+    assert_eq!(r.get_timestamp(), Some(12));
+    // Publish that includes the timestamp of 4, it will now be visible.
+    w.publish();
+    assert_eq!(r.get_timestamp(), Some(4));
 }

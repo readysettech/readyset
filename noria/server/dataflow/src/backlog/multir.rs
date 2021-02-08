@@ -5,6 +5,7 @@ use evbtree::{
     refs::{Miss, Values},
 };
 use launchpad::intervals::BoundFunctor;
+use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use std::convert::{TryFrom, TryInto};
 use std::mem;
@@ -13,9 +14,17 @@ use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, RandomState>),
-    Double(evbtree::handles::ReadHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>),
-    Many(evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, RandomState>),
+    Single(evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Double(
+        evbtree::handles::ReadHandle<
+            (DataType, DataType),
+            Vec<DataType>,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
+    ),
+    Many(evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>),
 }
 
 pub(super) unsafe fn slice_to_2_tuple<T>(slice: &[T]) -> (T, T) {
@@ -326,22 +335,24 @@ mod tests {
     use proptest::prelude::*;
 
     fn make_single() -> (
-        WriteHandle<DataType, Vec<DataType>, i64, RandomState>,
+        WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = evbtree::Options::default()
             .with_meta(-1)
+            .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
             .construct();
         (w, Handle::Single(r))
     }
 
     fn make_double() -> (
-        WriteHandle<(DataType, DataType), Vec<DataType>, i64, RandomState>,
+        WriteHandle<(DataType, DataType), Vec<DataType>, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = evbtree::Options::default()
             .with_meta(-1)
+            .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
             .construct();
         (w, Handle::Double(r))

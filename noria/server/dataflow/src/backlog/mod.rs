@@ -4,6 +4,7 @@ use ahash::RandomState;
 use common::SizeOf;
 use evbtree::refs::Values;
 use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use rand::prelude::*;
 use std::borrow::Cow;
@@ -64,6 +65,7 @@ fn new_inner(
             use evbtree;
             let (mut w, r) = evbtree::Options::default()
                 .with_meta(-1)
+                .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
                 .construct();
             // If we're fully materialized, we never miss, so we can insert a single interval to

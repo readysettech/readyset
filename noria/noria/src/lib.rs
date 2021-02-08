@@ -204,6 +204,7 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use tokio_tower::multiplex;
 
+pub mod consistency;
 mod controller;
 mod data;
 mod data_serde;

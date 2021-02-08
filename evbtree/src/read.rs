@@ -18,19 +18,21 @@ pub use factory::ReadHandleFactory;
 /// Note that any changes made to the map will not be made visible until the writer calls
 /// [`publish`](crate::WriteHandle::publish). In other words, all operations performed on a
 /// `ReadHandle` will *only* see writes to the map that preceeded the last call to `publish`.
-pub struct ReadHandle<K, V, M = (), S = RandomState>
+pub struct ReadHandle<K, V, M = (), T = (), S = RandomState>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
-    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, S>>,
+    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, T, S>>,
 }
 
-impl<K, V, M, S> fmt::Debug for ReadHandle<K, V, M, S>
+impl<K, V, M, T, S> fmt::Debug for ReadHandle<K, V, M, T, S>
 where
     K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     M: fmt::Debug,
+    T: Clone + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadHandle")
@@ -39,10 +41,11 @@ where
     }
 }
 
-impl<K, V, M, S> Clone for ReadHandle<K, V, M, S>
+impl<K, V, M, T, S> Clone for ReadHandle<K, V, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -51,22 +54,24 @@ where
     }
 }
 
-impl<K, V, M, S> ReadHandle<K, V, M, S>
+impl<K, V, M, T, S> ReadHandle<K, V, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
+    T: Clone,
 {
-    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, S>>) -> Self {
+    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, T, S>>) -> Self {
         Self { handle }
     }
 }
 
-impl<K, V, M, S> ReadHandle<K, V, M, S>
+impl<K, V, M, T, S> ReadHandle<K, V, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
     S: BuildHasher,
     M: Clone,
+    T: Clone,
 {
     /// Take out a guarded live reference to the read side of the map.
     ///
@@ -77,7 +82,7 @@ where
     /// If no publish has happened, or the map has been destroyed, this function returns `None`.
     ///
     /// See [`MapReadRef`].
-    pub fn enter(&self) -> Option<MapReadRef<'_, K, V, M, S>> {
+    pub fn enter(&self) -> Option<MapReadRef<'_, K, V, M, T, S>> {
         let guard = self.handle.enter()?;
         if !guard.ready {
             return None;
@@ -229,6 +234,22 @@ where
             .flatten()
             .map(|(k, v)| f(k, v))
             .collect()
+    }
+
+    /// Returns the timestamp associated with the last write.
+    ///
+    /// Note, as this function does not return a read guard, the map
+    /// may be mutated after reading the timestamp.
+    ///
+    /// If a guarded reference cannot be acquired to read the timestamp,
+    /// None is returned.
+    pub fn get_timestamp(&self) -> Option<T> {
+        let inner = self.handle.enter()?;
+        if !inner.ready {
+            return None;
+        }
+        let t = inner.timestamp.clone();
+        Some(t)
     }
 }
 
