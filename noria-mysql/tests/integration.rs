@@ -10,7 +10,6 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{NaiveDate, NaiveDateTime};
-use maplit::hashmap;
 use msql_srv::MysqlIntermediary;
 use mysql::prelude::*;
 use nom_sql::SelectStatement;
@@ -136,18 +135,14 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
         let backend = BackendBuilder::new()
             .writer(rt.block_on(writer))
             .reader(rt.block_on(reader))
-            .users(hashmap! {"root".to_owned() => "password".to_owned()})
+            .require_authentication(false)
             .build();
 
         MysqlIntermediary::run_on_tcp(backend, s).unwrap();
         drop(rt);
     });
 
-    mysql::OptsBuilder::default()
-        .tcp_port(addr.port())
-        .user(Some("root"))
-        .pass(Some("password"))
-        .into()
+    mysql::OptsBuilder::default().tcp_port(addr.port()).into()
 }
 
 #[test]

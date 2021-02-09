@@ -37,6 +37,7 @@ pub struct BackendBuilder {
     slowlog: bool,
     permissive: bool,
     users: HashMap<String, String>,
+    require_authentication: bool,
 }
 
 impl Default for BackendBuilder {
@@ -49,6 +50,7 @@ impl Default for BackendBuilder {
             slowlog: false,
             permissive: false,
             users: Default::default(),
+            require_authentication: true,
         }
     }
 }
@@ -73,6 +75,7 @@ impl BackendBuilder {
             slowlog: self.slowlog,
             permissive: self.permissive,
             users: self.users,
+            require_authentication: self.require_authentication,
         }
     }
 
@@ -110,6 +113,11 @@ impl BackendBuilder {
         self.users = users;
         self
     }
+
+    pub fn require_authentication(mut self, require_authentication: bool) -> Self {
+        self.require_authentication = require_authentication;
+        self
+    }
 }
 
 pub struct Backend {
@@ -127,6 +135,7 @@ pub struct Backend {
     permissive: bool,
     /// Map from username to password for all users allowed to connect to the db
     users: HashMap<String, String>,
+    require_authentication: bool,
 }
 
 pub struct SelectSchema {
@@ -680,5 +689,9 @@ impl<W: io::Write> MysqlShim<W> for Backend {
             .and_then(|un| self.users.get(&un))
             .cloned()
             .map(String::into_bytes)
+    }
+
+    fn require_authentication(&self) -> bool {
+        self.require_authentication
     }
 }
