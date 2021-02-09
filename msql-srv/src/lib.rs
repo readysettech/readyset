@@ -199,6 +199,11 @@ pub trait MysqlShim<W: Write> {
     ///
     /// If the user doesn't exist, return [`None`].
     fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>>;
+
+    /// Return false if password checking should be skipped entirely
+    fn require_authentication(&self) -> bool {
+        true
+    }
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -306,11 +311,13 @@ impl<B: MysqlShim<W>, R: Read, W: Write> MysqlIntermediary<B, R, W> {
 
         self.writer.set_seq(seq + 1);
 
-        let auth_success = self
-            .shim
-            .password_for_username(handshake.username)
-            .map(|password| hash_password(&password, &auth_data) == handshake.password)
-            .unwrap_or(false);
+        let auth_success = !self.shim.require_authentication()
+            || self
+                .shim
+                .password_for_username(handshake.username)
+                .map_or(false, |password| {
+                    hash_password(&password, &auth_data) == handshake.password
+                });
 
         if auth_success {
             writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty())?;

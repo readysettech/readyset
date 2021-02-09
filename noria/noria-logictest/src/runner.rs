@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
-use maplit::hashmap;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use slog::o;
@@ -321,17 +320,13 @@ impl TestScript {
             let backend = BackendBuilder::new()
                 .writer(rt.block_on(writer))
                 .reader(rt.block_on(reader))
-                .users(hashmap! {"root".to_owned() => "password".to_owned()})
+                .require_authentication(false)
                 .build();
 
             MysqlIntermediary::run_on_tcp(backend, s).unwrap();
             drop(rt);
         });
 
-        mysql::OptsBuilder::default()
-            .tcp_port(addr.port())
-            .user(Some("root"))
-            .pass(Some("password"))
-            .into()
+        mysql::OptsBuilder::default().tcp_port(addr.port()).into()
     }
 }

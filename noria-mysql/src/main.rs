@@ -109,12 +109,18 @@ fn main() {
                 .help("Disable query sanitization. Improves latency."),
         )
         .arg(
+            Arg::with_name("no-require-authentication")
+                .long("no-require-authentication")
+                .takes_value(false)
+                .help("Don't require authentication for any client connections")
+        )
+        .arg(
             Arg::with_name("username")
                 .long("username")
                 .short("u")
                 .takes_value(true)
                 .default_value("root")
-                .help("Allow database connections authenticated as this user")
+                .help("Allow database connections authenticated as this user. Ignored if --no-require-authentication is passed")
         )
         .arg(
             Arg::with_name("password")
@@ -123,7 +129,7 @@ fn main() {
                 .takes_value(true)
                 .required(true)
                 .empty_values(false)
-                .help("Password to authenticate database connections with")
+                .help("Password to authenticate database connections with. Ignored if --no-require-authentication is passed")
         )
         .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .arg(
@@ -146,6 +152,7 @@ fn main() {
     let permissive = matches.is_present("permissive");
     let static_responses = !matches.is_present("no-static-responses");
     let mysql_url = matches.value_of("mysql-url").map(|s| s.to_owned());
+    let require_authentication = !matches.is_present("no-require-authentication");
 
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         matches.value_of("username").unwrap().to_owned() =>
@@ -280,6 +287,7 @@ fn main() {
                     .slowlog(slowlog)
                     .permissive(permissive)
                     .users(users.clone())
+                    .require_authentication(require_authentication)
                     .build();
 
                 let rs = s.try_clone().unwrap();
