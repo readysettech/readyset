@@ -147,7 +147,7 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, String> {
         match name {
             None => self.nodes_for_query(query, is_leaf, mig),
-            Some(n) => self.nodes_for_named_query(query, n, is_leaf, mig),
+            Some(n) => self.nodes_for_named_query(query, n, false, is_leaf, mig),
         }
     }
 
@@ -187,6 +187,7 @@ impl SqlIncorporator {
     fn consider_query_graph(
         &mut self,
         query_name: &str,
+        is_name_required: bool,
         universe: UniverseId,
         st: &SelectStatement,
         is_leaf: bool,
@@ -218,6 +219,7 @@ impl SqlIncorporator {
                 if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() == qg.parameters()
                     && existing_qg.exact_hash() == qg.exact_hash()
+                    && (!is_name_required || mir_query.name == query_name)
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
@@ -514,6 +516,7 @@ impl SqlIncorporator {
     fn add_compound_query(
         &mut self,
         query_name: &str,
+        is_name_required: bool,
         query: &CompoundSelectStatement,
         is_leaf: bool,
         mut mig: &mut Migration,
@@ -524,7 +527,13 @@ impl SqlIncorporator {
             .enumerate()
             .map(|(i, sq)| {
                 Ok(self
-                    .add_select_query(&format!("{}_csq_{}", query_name, i), &sq.1, false, mig)?
+                    .add_select_query(
+                        &format!("{}_csq_{}", query_name, i),
+                        is_name_required,
+                        &sq.1,
+                        false,
+                        mig,
+                    )?
                     .1
                     .unwrap())
             })
@@ -551,11 +560,13 @@ impl SqlIncorporator {
     fn add_select_query(
         &mut self,
         query_name: &str,
+        is_name_required: bool,
         sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
-        let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq, is_leaf)?;
+        let (qg, reuse) =
+            self.consider_query_graph(&query_name, is_name_required, mig.universe(), sq, is_leaf)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(name, mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
@@ -839,7 +850,7 @@ impl SqlIncorporator {
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
-        self.nodes_for_named_query(q, name, is_leaf, mig)
+        self.nodes_for_named_query(q, name, false, is_leaf, mig)
     }
 
     /// Runs some standard rewrite passes on the query.
@@ -862,22 +873,32 @@ impl SqlIncorporator {
                 field_with_table_name, query_from_condition_base, Subquery,
             };
             use nom_sql::{JoinRightSide, Table};
+            let default_name = format!("q_{}", self.num_queries);
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
                     let qfp = self
-                        .add_parsed_query(sq, None, false, mig)
+                        .nodes_for_named_query(sq, default_name, false, false, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(ref ns, ref alias) => {
+                            // Ensure the specified name is actually used for the subquery. This is
+                            // necessary to ensure that existing column references can refer to the
+                            // subquery correctly and to ensure that distinct subqueries are
+                            // treated as separate views in the query graph even if they are "exact
+                            // matches" in the sense of QueryGraphReuse::ExactMatch.
+                            let name = alias.clone().unwrap_or(default_name);
+                            let is_name_required = true;
+
                             let qfp = self
-                                .add_parsed_query(
+                                .nodes_for_named_query(
                                     SqlQuery::Select((**ns).clone()),
-                                    alias.clone(),
+                                    name,
+                                    is_name_required,
                                     false,
                                     mig,
                                 )
@@ -936,6 +957,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
+        is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
@@ -949,12 +971,19 @@ impl SqlIncorporator {
                     return self.nodes_for_named_query(
                         SqlQuery::CompoundSelect(csq),
                         name,
+                        is_name_required,
                         is_leaf,
                         mig,
                     );
                 }
                 SelectSpecification::Simple(sq) => {
-                    return self.nodes_for_named_query(SqlQuery::Select(sq), name, is_leaf, mig);
+                    return self.nodes_for_named_query(
+                        SqlQuery::Select(sq),
+                        name,
+                        is_name_required,
+                        is_leaf,
+                        mig,
+                    );
                 }
             }
         };
@@ -969,10 +998,13 @@ impl SqlIncorporator {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
-                self.add_compound_query(&query_name, &csq, is_leaf, mig)
+                self.add_compound_query(&query_name, is_name_required, &csq, is_leaf, mig)
                     .unwrap()
             }
-            SqlQuery::Select(sq) => self.add_select_query(&query_name, &sq, is_leaf, mig)?.0,
+            SqlQuery::Select(sq) => {
+                self.add_select_query(&query_name, is_name_required, &sq, is_leaf, mig)?
+                    .0
+            }
             ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig),
             q => panic!("unhandled query type in recipe: {:?}", q),
         };
@@ -3108,6 +3140,56 @@ mod tests {
                 )
                 .is_ok());
 
+            let q = "SELECT nested_users.name, articles.title \
+                     FROM articles \
+                     JOIN (SELECT * FROM users) AS nested_users \
+                     ON (nested_users.id = articles.author);";
+            let q = inc.add_query(q, None, mig);
+            assert!(q.is_ok());
+            let qid = query_id_hash(
+                &["articles", "nested_users"],
+                &[
+                    &Column::from("articles.author"),
+                    &Column::from("nested_users.id"),
+                ],
+                &[
+                    &Column::from("nested_users.name"),
+                    &Column::from("articles.title"),
+                ],
+            );
+            // join node
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            // leaf node
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
+        })
+        .await;
+    }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn it_incorporates_join_with_reused_nested_query() {
+        let mut g =
+            integration::start_simple("it_incorporates_join_with_reused_nested_query").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            assert!(inc
+                .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)
+                .is_ok());
+            assert!(inc
+                .add_query(
+                    "CREATE TABLE articles (id int, author int, title varchar(255));",
+                    None,
+                    mig
+                )
+                .is_ok());
+
+            // Add a simple query on users, which will be duplicated in the subquery below.
+            assert!(inc.add_query("SELECT * FROM users;", None, mig).is_ok());
+
+            // Ensure that the JOIN with nested_users still works as expected, even though an
+            // an identical query already exists with a different name.
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \
                      JOIN (SELECT * FROM users) AS nested_users \

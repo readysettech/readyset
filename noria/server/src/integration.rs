@@ -812,6 +812,50 @@ async fn it_works_with_double_query_through() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn it_works_with_duplicate_subquery() {
+    let mut g = start_simple_unsharded("it_works_with_double_query_through").await;
+    let sql = "
+        # base tables
+        CREATE TABLE A (aid int, other int, PRIMARY KEY(aid));
+        CREATE TABLE B (bid int, PRIMARY KEY(bid));
+
+        # read queries
+        QUERY ReadJoin: SELECT J.aid, J.other \
+            FROM B \
+            LEFT JOIN (SELECT A.aid, A.other FROM A \
+                WHERE A.other = 5) AS J \
+            ON (J.aid = B.bid) \
+            WHERE J.aid = ?;
+
+        # Another query, with a subquery identical to the one above but named differently.
+        QUERY ReadJoin2: SELECT J2.aid, J2.other \
+            FROM B \
+            LEFT JOIN (SELECT A.aid, A.other FROM A \
+                WHERE A.other = 5) AS J2 \
+            ON (J2.aid = B.bid) \
+            WHERE J2.aid = ?;
+    ";
+
+    g.install_recipe(sql).await.unwrap();
+    let mut a = g.table("A").await.unwrap();
+    let mut b = g.table("B").await.unwrap();
+    let mut getter = g.view("ReadJoin2").await.unwrap();
+
+    a.insert(vec![1i64.into(), 5.into()]).await.unwrap();
+    a.insert(vec![2i64.into(), 10.into()]).await.unwrap();
+    b.insert(vec![1i64.into()]).await.unwrap();
+
+    sleep().await;
+
+    let rs = getter.lookup(&[1i64.into()], true).await.unwrap();
+    assert_eq!(rs.len(), 1);
+    assert_eq!(rs[0], vec![1i64.into(), 5.into()]);
+
+    let empty = getter.lookup(&[2i64.into()], true).await.unwrap();
+    assert_eq!(empty.len(), 0);
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn it_works_with_reads_before_writes() {
     let mut g = start_simple("it_works_with_reads_before_writes").await;
     let sql = "
