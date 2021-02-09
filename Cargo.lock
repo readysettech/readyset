@@ -2596,6 +2596,7 @@ dependencies = [
  "arccstr",
  "chrono",
  "clap 2.33.3",
+ "derive_more",
  "futures-executor",
  "futures-util",
  "itertools 0.9.0",

@@ -18,8 +18,9 @@ mod rewrite;
 mod schema;
 mod utils;
 
-use crate::backend::mysql_connector::MySqlConnector;
-use crate::backend::noria_connector::NoriaConnector;
+use crate::backend::{
+    mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder,
+};
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
@@ -34,7 +35,6 @@ use std::thread;
 use tracing::Level;
 
 use crate::backend::Writer;
-use backend::Backend;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -249,9 +249,7 @@ fn main() {
                 let reader = futures_executor::block_on(reader_reciever).unwrap();
                 let _g = connection.enter();
 
-                // there is a lot of duplication between these two arms. It isn't ideal. however, the
-                // alternative was implementing Future for the writer on the backend.
-                let b: Backend = if let Some(url) = mysql_url {
+                let writer: Writer = if let Some(url) = mysql_url {
                     let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
                     let connector = MySqlConnector::new(url);
                     ex.spawn(async move {
@@ -260,17 +258,7 @@ fn main() {
                             .unwrap_or_else(|_| panic!("Could not send writer"));
                     });
 
-                    let writer = futures_executor::block_on(writer_reciever).unwrap();
-
-                    Backend::new(
-                        sanitize,
-                        static_responses,
-                        Writer::MySqlConnector(writer),
-                        reader,
-                        slowlog,
-                        permissive,
-                        users.clone(),
-                    )
+                    futures_executor::block_on(writer_reciever).unwrap().into()
                 } else {
                     let (writer_sender, writer_reciever) = tokio::sync::oneshot::channel();
                     let connector =
@@ -281,22 +269,22 @@ fn main() {
                             .unwrap_or_else(|_| panic!("Could not send writer"));
                     });
 
-                    let writer = futures_executor::block_on(writer_reciever).unwrap();
-
-                    Backend::new(
-                        sanitize,
-                        static_responses,
-                        Writer::NoriaConnector(writer),
-                        reader,
-                        slowlog,
-                        permissive,
-                        users.clone(),
-                    )
+                    futures_executor::block_on(writer_reciever).unwrap().into()
                 };
+
+                let backend = BackendBuilder::new()
+                    .sanitize(sanitize)
+                    .static_responses(static_responses)
+                    .writer(writer)
+                    .reader(reader)
+                    .slowlog(slowlog)
+                    .permissive(permissive)
+                    .users(users.clone())
+                    .build();
 
                 let rs = s.try_clone().unwrap();
                 if let Err(backend::error::Error::IOError(e)) =
-                    MysqlIntermediary::run_on(b, BufReader::new(rs), BufWriter::new(s))
+                    MysqlIntermediary::run_on(backend, BufReader::new(rs), BufWriter::new(s))
                 {
                     match e.kind() {
                         io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}

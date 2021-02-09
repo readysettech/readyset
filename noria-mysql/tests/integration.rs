@@ -18,8 +18,7 @@ use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use noria_mysql::backend::noria_connector::NoriaConnector;
-use noria_mysql::backend::Backend;
-use noria_mysql::backend::Writer;
+use noria_mysql::backend::BackendBuilder;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -126,27 +125,21 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
 
-        let reader = NoriaConnector::new(
+        let writer = NoriaConnector::new(
             rt.handle().clone(),
             ch.clone(),
             auto_increments.clone(),
             query_cache.clone(),
         );
+        let reader = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
 
-        let writer = NoriaConnector::new(rt.handle().clone(), ch, auto_increments, query_cache);
-        let writer = rt.block_on(writer);
+        let backend = BackendBuilder::new()
+            .writer(rt.block_on(writer))
+            .reader(rt.block_on(reader))
+            .users(hashmap! {"root".to_owned() => "password".to_owned()})
+            .build();
 
-        let reader = rt.block_on(reader);
-        let b = Backend::new(
-            true,
-            true,
-            Writer::NoriaConnector(writer),
-            reader,
-            false,
-            false,
-            hashmap! {"root".to_owned() => "password".to_owned()},
-        );
-        MysqlIntermediary::run_on_tcp(b, s).unwrap();
+        MysqlIntermediary::run_on_tcp(backend, s).unwrap();
         drop(rt);
     });
 
