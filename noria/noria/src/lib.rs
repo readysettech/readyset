@@ -311,7 +311,7 @@ pub use crate::table::Table;
 pub use crate::view::View;
 
 #[doc(hidden)]
-pub use crate::table::Input;
+pub use crate::table::{PacketData, PacketPayload};
 
 #[doc(hidden)]
 pub use crate::view::{

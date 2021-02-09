@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain;
 use crate::prelude::*;
-use noria::internal::LocalOrNot;
 use noria::{self, KeyComparison};
+use noria::{internal::LocalOrNot, PacketData};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -83,7 +83,7 @@ pub enum Packet {
     // Data messages
     //
     Input {
-        inner: LocalOrNot<Input>,
+        inner: LocalOrNot<PacketData>,
         src: Option<SourceChannelIdentifier>,
         senders: Vec<SourceChannelIdentifier>,
     },
@@ -231,10 +231,8 @@ pub enum Packet {
 impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match *self {
-            Packet::Input { ref inner, .. } => {
-                // inputs come "from" the base table too
-                unsafe { inner.deref() }.dst
-            }
+            // inputs come "from" the base table too
+            Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
             Packet::Message { ref link, .. } => link.src,
             Packet::ReplayPiece { ref link, .. } => link.src,
             _ => unreachable!(),

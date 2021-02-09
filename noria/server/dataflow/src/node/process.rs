@@ -1,8 +1,9 @@
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
+use core::convert::TryInto;
 use launchpad::hash::hash;
-use noria::KeyComparison;
+use noria::{KeyComparison, PacketData};
 use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
@@ -73,7 +74,10 @@ impl Node {
                     Some(Packet::Input {
                         inner, mut senders, ..
                     }) => {
-                        let Input { dst, data } = unsafe { inner.take() };
+                        let PacketData { dst, data } = unsafe { inner.take() };
+                        let data = data
+                            .try_into()
+                            .expect("Payload of Input packet was not of Input type");
                         let mut rs = b.process(addr, data, &*state);
 
                         // When a replay originates at a base node, we replay the data *through* that

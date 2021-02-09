@@ -17,10 +17,13 @@ use futures_util::{
     sink::Sink,
     stream::{futures_unordered::FuturesUnordered, Stream},
 };
-use noria::channel::{DualTcpStream, CONNECTION_FROM_BASE};
 use noria::internal::DomainIndex;
 use noria::internal::LocalOrNot;
-use noria::{Input, Tagged};
+use noria::{
+    channel::{DualTcpStream, CONNECTION_FROM_BASE},
+    PacketPayload,
+};
+use noria::{PacketData, Tagged};
 use pin_project::pin_project;
 use slog;
 use std::collections::{HashMap, VecDeque};
@@ -80,7 +83,7 @@ pub(super) struct Replica {
         DualTcpStream<
             BufStream<tokio::net::TcpStream>,
             Box<Packet>,
-            Tagged<LocalOrNot<Input>>,
+            Tagged<LocalOrNot<PacketData>>,
             AsyncDestination,
         >,
     >,
@@ -391,12 +394,19 @@ impl Replica {
             let tcp = if is_base {
                 DualTcpStream::upgrade(
                     tokio::io::BufStream::new(stream),
-                    move |Tagged { v: input, tag }| {
-                        Box::new(Packet::Input {
-                            inner: input,
-                            src: Some(SourceChannelIdentifier { token, tag, epoch }),
-                            senders: Vec::new(),
-                        })
+                    move |Tagged { v, tag }| {
+                        let input: LocalOrNot<PacketData> = v;
+                        // Peek at its type.
+                        match unsafe { input.deref() }.data {
+                            PacketPayload::Input(_) => Box::new(Packet::Input {
+                                inner: input,
+                                src: Some(SourceChannelIdentifier { token, tag, epoch }),
+                                senders: Vec::new(),
+                            }),
+                            PacketPayload::Timestamp(_) => {
+                                unreachable!("We are not propagating timestamps yet")
+                            }
+                        }
                     },
                 )
             } else {
