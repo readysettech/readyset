@@ -3543,6 +3543,7 @@ async fn post_read_ilike() {
                 operator: ViewQueryOperator::ILike,
                 value: "%a%".to_string(),
             }),
+            timestamp: None,
         })
         .await
         .unwrap();

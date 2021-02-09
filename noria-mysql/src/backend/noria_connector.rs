@@ -735,6 +735,9 @@ impl NoriaConnector {
             order_by,
             limit,
             filter,
+            // TODO(andrew): Add a timestamp to views when RYW consistency
+            // is specified.
+            timestamp: None,
         };
 
         let data = block_on_buffer(getter.raw_lookup(vq))?;

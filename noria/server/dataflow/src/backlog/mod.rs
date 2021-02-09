@@ -456,6 +456,10 @@ impl SingleReadHandle {
     pub fn keys(&self) -> Vec<Vec<DataType>> {
         self.handle.keys()
     }
+
+    pub fn timestamp(&self) -> Option<Timestamp> {
+        self.handle.timestamp()
+    }
 }
 
 #[cfg(test)]
