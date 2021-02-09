@@ -1,5 +1,6 @@
 use noria::DataType;
 
+use derive_more::From;
 use msql_srv::{self, *};
 use nom_sql::{self, SqlQuery};
 
@@ -21,9 +22,94 @@ use crate::backend::error::Error::{IOError, ParseError};
 use mysql_connector::MySqlConnector;
 use noria_connector::NoriaConnector;
 
+#[derive(From)]
 pub enum Writer {
     MySqlConnector(MySqlConnector),
     NoriaConnector(NoriaConnector),
+}
+
+/// Builder for a [`Backend`]
+pub struct BackendBuilder {
+    sanitize: bool,
+    static_responses: bool,
+    writer: Option<Writer>,
+    reader: Option<NoriaConnector>,
+    slowlog: bool,
+    permissive: bool,
+    users: HashMap<String, String>,
+}
+
+impl Default for BackendBuilder {
+    fn default() -> Self {
+        BackendBuilder {
+            sanitize: true,
+            static_responses: true,
+            writer: None,
+            reader: None,
+            slowlog: false,
+            permissive: false,
+            users: Default::default(),
+        }
+    }
+}
+
+impl BackendBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn build(self) -> Backend {
+        let parsed_query_cache = HashMap::new();
+        let prepared_queries = HashMap::new();
+        let prepared_count = 0;
+        Backend {
+            sanitize: self.sanitize,
+            parsed_query_cache,
+            prepared_queries,
+            prepared_count,
+            static_responses: self.static_responses,
+            writer: self.writer.expect("BackendBuilder must be passed a writer"),
+            reader: self.reader.expect("BackendBuilder must be passed a reader"),
+            slowlog: self.slowlog,
+            permissive: self.permissive,
+            users: self.users,
+        }
+    }
+
+    pub fn sanitize(mut self, sanitize: bool) -> Self {
+        self.sanitize = sanitize;
+        self
+    }
+
+    pub fn static_responses(mut self, static_responses: bool) -> Self {
+        self.static_responses = static_responses;
+        self
+    }
+
+    pub fn writer<W: Into<Writer>>(mut self, writer: W) -> Self {
+        self.writer = Some(writer.into());
+        self
+    }
+
+    pub fn reader(mut self, reader: NoriaConnector) -> Self {
+        self.reader = Some(reader);
+        self
+    }
+
+    pub fn slowlog(mut self, slowlog: bool) -> Self {
+        self.slowlog = slowlog;
+        self
+    }
+
+    pub fn permissive(mut self, permissive: bool) -> Self {
+        self.permissive = permissive;
+        self
+    }
+
+    pub fn users(mut self, users: HashMap<String, String>) -> Self {
+        self.users = users;
+        self
+    }
 }
 
 pub struct Backend {
@@ -48,33 +134,8 @@ pub struct SelectSchema {
     schema: Vec<Column>,
     columns: Vec<String>,
 }
-impl Backend {
-    pub fn new(
-        sanitize: bool,
-        static_responses: bool,
-        writer: Writer,
-        reader: NoriaConnector,
-        slowlog: bool,
-        permissive: bool,
-        users: HashMap<String, String>,
-    ) -> Self {
-        let parsed_query_cache = HashMap::new();
-        let prepared_queries = HashMap::new();
-        let prepared_count = 0;
-        Backend {
-            sanitize,
-            parsed_query_cache,
-            prepared_queries,
-            prepared_count,
-            static_responses,
-            reader,
-            writer,
-            slowlog,
-            permissive,
-            users,
-        }
-    }
 
+impl Backend {
     fn handle_failure<W: io::Write>(
         &mut self,
         q: &str,

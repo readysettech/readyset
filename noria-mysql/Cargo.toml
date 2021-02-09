@@ -27,6 +27,7 @@ tracing-timing = { version = "0.4.0", features = ["layer"] }
 vec1 = "1.6.0"
 itertools = "0.9"
 maplit = "1.0.2"
+derive_more = "0.99.11"
 
 [dev-dependencies]
 zookeeper = "0.5.4"
