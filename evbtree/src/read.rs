@@ -243,7 +243,7 @@ where
     ///
     /// If a guarded reference cannot be acquired to read the timestamp,
     /// None is returned.
-    pub fn get_timestamp(&self) -> Option<T> {
+    pub fn timestamp(&self) -> Option<T> {
         let inner = self.handle.enter()?;
         if !inner.ready {
             return None;

@@ -9,6 +9,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
+use noria::consistency::Timestamp;
 use noria::util::like::LikePattern;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
@@ -210,6 +211,7 @@ fn handle_normal_read_query(
         order_by,
         limit,
         filter,
+        timestamp,
     } = query;
     let immediate = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
@@ -219,6 +221,7 @@ fn handle_normal_read_query(
         });
 
         let mut ret = Vec::with_capacity(key_comparisons.len());
+        let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 
         // first do non-blocking reads for all keys to see if we can return immediately
         let mut ready = true;
@@ -230,11 +233,21 @@ fn handle_normal_read_query(
                 continue;
             }
 
+            // If a lookup misses on consistency miss, we still want to trigger a partial
+            // replay. Otherwise, if the key exists in the map, we need to wait for the map
+            // to be sufficiently up to date before returning the key. We still do the lookup
+            // on consistency miss to know if we must trigger a partial replay.
             use dataflow::LookupError::*;
             match do_lookup(reader, &key_comparison, order_by, limit, &filter) {
                 Ok(rs) => {
-                    // immediate hit!
-                    ret.push(rs);
+                    if consistency_miss {
+                        // The key is pending on an upstream update before it
+                        // can be returned.
+                        pending.push(i as usize);
+                    } else {
+                        // immediate hit!
+                        ret.push(rs);
+                    }
                 }
                 Err(NotReady) => {
                     // map not yet ready
@@ -299,6 +312,7 @@ fn handle_normal_read_query(
                         order_by,
                         limit,
                         filter,
+                        timestamp,
                     },
                     tx,
                 ));
@@ -502,6 +516,20 @@ fn do_lookup(
     }
 }
 
+fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timestamp>) -> bool {
+    if timestamp.is_none() {
+        return true;
+    }
+
+    let dataflow_timestamp = reader.timestamp();
+    if dataflow_timestamp.is_none() {
+        return false;
+    }
+
+    // The data in the evbtree is newer than the requested timestamp.
+    dataflow_timestamp <= *timestamp
+}
+
 #[pin_project]
 struct BlockingRead {
     tag: u32,
@@ -521,6 +549,7 @@ struct BlockingRead {
     next_trigger: time::Instant,
     first: time::Instant,
     warned: bool,
+    timestamp: Option<Timestamp>,
 }
 
 impl std::fmt::Debug for BlockingRead {
@@ -534,6 +563,7 @@ impl std::fmt::Debug for BlockingRead {
             .field("trigger_timeout", &self.trigger_timeout)
             .field("next_trigger", &self.next_trigger)
             .field("first", &self.first)
+            .field("timestamp", &self.timestamp)
             .finish()
     }
 }
@@ -553,31 +583,34 @@ impl BlockingRead {
             let read = &mut self.read;
             let next_trigger = self.next_trigger;
 
-            // here's the trick we're going to play:
-            // we're going to re-try the lookups starting with the _last_ key.
-            // if it hits, we move on to the second-to-last, and so on.
-            // the moment we miss again, we yield immediately, rather than continue.
-            // this avoids shuffling around self.pending and self.keys, and probably doesn't
-            // really cost us anything -- we couldn't return ready anyway!
+            // If the map is sufficiently up to date to serve the query, we start looking up
+            // keys, otherwise we continue to wait.
+            if has_sufficient_timestamp(reader, &self.timestamp) {
+                // here's the trick we're going to play:
+                // we're going to re-try the lookups starting with the _last_ key.
+                // if it hits, we move on to the second-to-last, and so on.
+                // the moment we miss again, we yield immediately, rather than continue.
+                // this avoids shuffling around self.pending and self.keys, and probably doesn't
+                // really cost us anything -- we couldn't return ready anyway!
+                while let Some(read_i) = self.pending.pop() {
+                    let key = self.keys.pop().expect("pending.len() == keys.len()");
 
-            while let Some(read_i) = self.pending.pop() {
-                let key = self.keys.pop().expect("pending.len() == keys.len()");
-
-                match do_lookup(reader, &key, self.order_by, self.limit, &self.filter) {
-                    Ok(rs) => {
-                        read[read_i] = rs;
-                    }
-                    Err(e) => {
-                        if e.is_miss() {
-                            // we still missed! restore key + pending
-                            self.pending.push(read_i);
-                            self.keys.push(key);
-                            break;
-                        } else {
-                            // map has been deleted, so server is shutting down
-                            self.pending.clear();
-                            self.keys.clear();
-                            return Err(());
+                    match do_lookup(reader, &key, self.order_by, self.limit, &self.filter) {
+                        Ok(rs) => {
+                            read[read_i] = rs;
+                        }
+                        Err(e) => {
+                            if e.is_miss() {
+                                // we still missed! restore key + pending
+                                self.pending.push(read_i);
+                                self.keys.push(key);
+                                break;
+                            } else {
+                                // map has been deleted, so server is shutting down
+                                self.pending.clear();
+                                self.keys.clear();
+                                return Err(());
+                            }
                         }
                     }
                 }

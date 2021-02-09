@@ -149,6 +149,14 @@ impl LookupError {
 pub type LookupResult<T> = Result<(T, i64), LookupError>;
 
 impl Handle {
+    pub(super) fn timestamp(&self) -> Option<Timestamp> {
+        match *self {
+            Handle::Single(ref h) => h.timestamp(),
+            Handle::Double(ref h) => h.timestamp(),
+            Handle::Many(ref h) => h.timestamp(),
+        }
+    }
+
     pub(super) fn len(&self) -> usize {
         match *self {
             Handle::Single(ref h) => h.len(),

@@ -1,3 +1,4 @@
+use crate::consistency::Timestamp;
 use crate::data::*;
 use crate::errors::wrap_boxed_error;
 use crate::util::like::CaseSensitivityMode;
@@ -540,6 +541,12 @@ pub struct ViewQuery {
     pub limit: Option<usize>,
     /// Filter to apply to values after they're returned from the underlying reader
     pub filter: Option<ViewQueryFilter>,
+    /// Timestamp to compare against for reads, if a timestamp is passed into the
+    /// view query, a read will only return once the timestamp is less than
+    /// the timestamp associated with the data.
+    // TODO(justin): Verify reads block on timestamps once timestamps have a definition
+    // with Ord.
+    pub timestamp: Option<Timestamp>,
 }
 
 impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
@@ -550,6 +557,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
             order_by: None,
             limit: None,
             filter: None,
+            timestamp: None,
         }
     }
 }
@@ -645,6 +653,7 @@ impl Service<ViewQuery> for View {
                             order_by: query.order_by,
                             limit: query.limit,
                             filter: query.filter.clone(),
+                            timestamp: query.timestamp.clone(),
                         },
                     });
 
