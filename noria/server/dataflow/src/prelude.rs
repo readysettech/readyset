@@ -16,7 +16,7 @@ pub(crate) type Edge = ();
 
 // dataflow types
 pub(crate) use crate::payload::{ReplayPathSegment, SourceChannelIdentifier};
-pub(crate) use noria::Input;
+pub(crate) use noria::PacketPayload;
 
 // domain local state
 pub(crate) use crate::state::{

@@ -1,10 +1,14 @@
 use crate::channel::CONNECTION_FROM_BASE;
+use crate::consistency;
 use crate::data::*;
 use crate::errors::wrap_boxed_error;
 use crate::internal::*;
 use crate::LocalOrNot;
 use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use derive_more::TryInto;
+
+use core::convert::TryInto;
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::TryStreamExt,
@@ -30,7 +34,7 @@ use vec_map::VecMap;
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
     Tagged<()>,
-    Tagged<LocalOrNot<Input>>,
+    Tagged<LocalOrNot<PacketData>>,
     AsyncDestination,
 >;
 
@@ -208,8 +212,11 @@ struct Endpoint(SocketAddr);
 
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
-    tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<LocalOrNot<Input>>>,
-    Tagged<LocalOrNot<Input>>,
+    tokio_tower::Error<
+        multiplex::MultiplexTransport<Transport, Tagger>,
+        Tagged<LocalOrNot<PacketData>>,
+    >,
+    Tagged<LocalOrNot<PacketData>>,
 >;
 
 impl Service<()> for Endpoint {
@@ -270,8 +277,8 @@ type Discover = impl tower_discover::Discover<Key = usize, Service = InnerServic
 type Discover = crate::doc_mock::Discover<InnerService>;
 
 pub(crate) type TableRpc = Buffer<
-    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<Input>>>>,
-    Tagged<LocalOrNot<Input>>,
+    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>,
+    Tagged<LocalOrNot<PacketData>>,
 >;
 
 /// A failed [`Table`] operation.
@@ -288,27 +295,41 @@ pub enum TableError {
     /// The underlying connection to Noria produced an error.
     #[error("{0}")]
     TransportError(#[source] anyhow::Error),
+
+    /// The table operation was passed an incorrect packet data type.
+    #[error("wrong packet data type")]
+    WrongPacketDataType(),
 }
 
-impl From<Box<dyn std::error::Error + Send + Sync>> for TableError {
+impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for TableError {
     fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
         TableError::TransportError(wrap_boxed_error(e))
     }
 }
 
-#[doc(hidden)]
+/// Wrapper of packet payloads with their destination node.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Input {
+pub struct PacketData {
+    /// The domain identifier of the destination node.
     pub dst: LocalNodeIndex,
-    pub data: Vec<TableOperation>,
+    /// The data associated with the packet.
+    pub data: PacketPayload,
 }
 
-impl fmt::Debug for Input {
+/// Wrapper around types that can be propagated to base tables
+/// as packets.
+#[derive(Clone, Serialize, Deserialize, TryInto)]
+#[try_into(owned, ref, ref_mut)]
+pub enum PacketPayload {
+    /// An input update to a base table.
+    Input(Vec<TableOperation>),
+    /// A new timestamp to update the base table.
+    Timestamp(consistency::Timestamp),
+}
+
+impl fmt::Debug for PacketData {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("Input")
-            .field("dst", &self.dst)
-            .field("data", &self.data)
-            .finish()
+        fmt.debug_struct("Input").field("dst", &self.dst).finish()
     }
 }
 
@@ -431,7 +452,7 @@ impl Table {
     #[allow(clippy::cognitive_complexity)]
     fn input(
         &mut self,
-        mut i: Input,
+        mut i: PacketData,
     ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
@@ -445,7 +466,10 @@ impl Table {
         // NOTE: this is really just a try block
         let immediate_err = || {
             let ncols = self.columns.len() + self.dropped.len();
-            for op in &i.data {
+            let ops: &Vec<TableOperation> = (&i.data)
+                .try_into()
+                .map_err(|_| TableError::WrongPacketDataType())?;
+            for op in ops {
                 match op {
                     TableOperation::Insert(ref row) => {
                         if row.len() != ncols {
@@ -495,9 +519,9 @@ impl Table {
 
         if self.shards.len() == 1 {
             let request = Tagged::from(if self.dst_is_local {
-                unsafe { LocalOrNot::for_local_transfer(i) }
+                unsafe { LocalOrNot::for_local_transfer(i.clone()) }
             } else {
-                LocalOrNot::new(i)
+                LocalOrNot::new(i.clone())
             });
 
             let _guard = span.as_ref().map(tracing::Span::enter);
@@ -518,7 +542,8 @@ impl Table {
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("shard request");
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
-            for r in i.data.drain(..) {
+            let ops: &mut Vec<TableOperation> = (&mut i.data).try_into().unwrap();
+            for r in &mut ops.drain(..) {
                 let shard = {
                     let key = match r {
                         TableOperation::Insert(ref r) => &r[key_col],
@@ -534,18 +559,15 @@ impl Table {
             let wait_for = FuturesUnordered::new();
             for (s, rs) in shard_writes.drain(..).enumerate() {
                 if !rs.is_empty() {
+                    let new_i = PacketData {
+                        dst: i.dst,
+                        data: PacketPayload::Input(rs),
+                    };
+
                     let p = if self.dst_is_local {
-                        unsafe {
-                            LocalOrNot::for_local_transfer(Input {
-                                dst: i.dst,
-                                data: rs,
-                            })
-                        }
+                        unsafe { LocalOrNot::for_local_transfer(new_i) }
                     } else {
-                        LocalOrNot::new(Input {
-                            dst: i.dst,
-                            data: rs,
-                        })
+                        LocalOrNot::new(new_i)
                     };
                     let request = Tagged::from(p);
 
@@ -579,7 +601,7 @@ impl Table {
 
 impl Service<Vec<TableOperation>> for Table {
     type Error = TableError;
-    type Response = <TableRpc as Service<Tagged<LocalOrNot<Input>>>>::Response;
+    type Response = <TableRpc as Service<Tagged<LocalOrNot<PacketData>>>>::Response;
 
     #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
@@ -712,14 +734,14 @@ impl Table {
         }
     }
 
-    fn prep_records(&self, mut ops: Vec<TableOperation>) -> Input {
+    fn prep_records(&self, mut ops: Vec<TableOperation>) -> PacketData {
         for r in &mut ops {
             self.inject_dropped_cols(r);
         }
 
-        Input {
+        PacketData {
             dst: self.node,
-            data: ops,
+            data: PacketPayload::Input(ops),
         }
     }
 

@@ -1,5 +1,6 @@
 use crate::prelude::*;
-use noria::internal::LocalOrNot;
+use core::convert::TryInto;
+use noria::{internal::LocalOrNot, PacketData, TableOperation};
 use std::time;
 
 pub struct GroupCommitQueueSet {
@@ -100,10 +101,14 @@ impl GroupCommitQueueSet {
                     src,
                     senders,
                 } => {
-                    let Input { dst, data } = unsafe { inner.take() };
-
+                    // SAFETY: inner is local to this node and can be unwrapped.
+                    let p = unsafe { inner.take() };
+                    let data: Vec<TableOperation> = p
+                        .data
+                        .try_into()
+                        .expect("Input packet data was not of Input type.");
                     assert_eq!(senders.len(), 0);
-                    assert_eq!(merged_dst, dst);
+                    assert_eq!(merged_dst, p.dst);
                     acc.extend(data);
 
                     if let Some(src) = src {
@@ -116,9 +121,9 @@ impl GroupCommitQueueSet {
         });
 
         Some(Box::new(Packet::Input {
-            inner: LocalOrNot::new(Input {
+            inner: LocalOrNot::new(PacketData {
                 dst: merged_dst,
-                data: merged_data,
+                data: PacketPayload::Input(merged_data),
             }),
             src: None,
             senders: all_senders,
