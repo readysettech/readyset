@@ -3520,6 +3520,126 @@ async fn join_reused_name_results() {
 }
 
 #[tokio::test(threaded_scheduler)]
+async fn self_join_basic() {
+    let mut g = start_simple("self_join_basic").await;
+    g.install_recipe(
+        "CREATE TABLE votes (story int, user int);
+         VIEW like_minded: SELECT v1.user, v2.user AS agreer \
+             FROM votes v1 \
+             JOIN votes v2 ON (v1.story = v2.story);
+         QUERY follow_on: SELECT user, agreer FROM like_minded;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("votes").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+
+    // Check like_minded
+
+    let mut query = g.view("like_minded").await.unwrap();
+    assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
+
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("agreer").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![
+        (1, 1),
+        (1, 1),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 1),
+        (2, 2),
+        (3, 1),
+        (3, 3),
+    ];
+    assert_eq!(results, expected);
+
+    // Check follow_on
+
+    let mut query = g.view("follow_on").await.unwrap();
+    assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
+
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("agreer").unwrap()))
+        .sorted()
+        .collect();
+    assert_eq!(results, expected);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn self_join_param() {
+    let mut g = start_simple("self_join_param").await;
+    g.install_recipe(
+        "CREATE TABLE users (id int, friend int);
+         QUERY fof: SELECT u1.id AS user, u2.friend AS fof \
+             FROM users u1 \
+             JOIN users u2 ON (u1.friend = u2.id) WHERE u1.id = ?;
+         VIEW fof2: SELECT u1.id AS user, u2.friend AS fof \
+             FROM users u1 \
+             JOIN users u2 ON (u1.friend = u2.id);
+	     QUERY follow_on: SELECT * FROM fof2 WHERE user = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("users").await.unwrap();
+    votes.insert(vec![1i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![1i32.into(), 3i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 5i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![5i32.into(), 6i32.into()]).await.unwrap();
+    votes.insert(vec![6i32.into(), 2i32.into()]).await.unwrap();
+
+    // Check fof
+
+    let mut query = g.view("fof").await.unwrap();
+    assert_eq!(query.columns(), vec!["user", "fof"]);
+
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[1.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("fof").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![(1, 1), (1, 5)];
+    assert_eq!(results, expected);
+
+    // Check follow_on
+
+    let mut query = g.view("follow_on").await.unwrap();
+
+    // Disabled because a "bogokey" column is present as well.
+    // assert_eq!(query.columns(), vec!["user", "fof"]);
+
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[1.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("fof").unwrap()))
+        .sorted()
+        .collect();
+    assert_eq!(results, expected);
+}
+
+#[tokio::test(threaded_scheduler)]
 async fn non_sql_materialized_range_query() {
     let mut g = {
         let mut builder = Builder::default();

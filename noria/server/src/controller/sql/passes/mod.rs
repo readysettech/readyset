@@ -1,4 +1,4 @@
-mod alias_removal;
+pub(crate) mod alias_removal;
 mod count_star_rewrite;
 mod implied_tables;
 mod key_def_coalescing;
