@@ -19,8 +19,9 @@ use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
 use nom_sql::{parser as sql_parser, ArithmeticItem};
-use nom_sql::{ArithmeticBase, BinaryOperator, CreateTableStatement, SqlQuery};
-use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, SelectStatement};
+use nom_sql::{ArithmeticBase, BinaryOperator, CreateTableStatement};
+use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
+use nom_sql::{SelectStatement, SqlQuery, Table};
 use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
@@ -854,9 +855,15 @@ impl SqlIncorporator {
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(&mut self, q: SqlQuery, mig: &mut Migration) -> Result<SqlQuery, String> {
+    fn rewrite_query(
+        &mut self,
+        q: SqlQuery,
+        query_name: &str,
+        mig: &mut Migration,
+    ) -> Result<SqlQuery, String> {
         // TODO: make this not take &mut self
 
+        use passes::alias_removal::TableAliasRewrite;
         use passes::*;
         use query_utils::ReferredTables;
 
@@ -872,7 +879,7 @@ impl SqlIncorporator {
             use self::passes::subqueries::{
                 field_with_table_name, query_from_condition_base, Subquery,
             };
-            use nom_sql::{JoinRightSide, Table};
+            use nom_sql::JoinRightSide;
             let default_name = format!("q_{}", self.num_queries);
             match sq {
                 Subquery::InComparison(cond_base) => {
@@ -915,6 +922,29 @@ impl SqlIncorporator {
             }
         }
 
+        // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
+        // replaced with a view rather than the table itself in order to prevent ambiguity. (This
+        // may occur when a single table is referenced using more than one alias).
+        let table_alias_rewrites = fq.rewrite_table_aliases(query_name, mig.context());
+        for r in table_alias_rewrites {
+            if let TableAliasRewrite::ToView {
+                to_view, for_table, ..
+            } = r
+            {
+                let query = SqlQuery::Select(SelectStatement {
+                    tables: vec![Table {
+                        name: for_table,
+                        ..Default::default()
+                    }],
+                    fields: vec![FieldDefinitionExpression::All],
+                    ..Default::default()
+                });
+                let is_name_required = true;
+                self.nodes_for_named_query(query, to_view, is_name_required, false, mig)
+                    .expect("failed to add named view for table");
+            }
+        }
+
         // Check that all tables mentioned in the query exist.
         // This must happen before the rewrite passes are applied because some of them rely on
         // having the table schema available in `self.view_schemas`.
@@ -943,7 +973,6 @@ impl SqlIncorporator {
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         Ok(fq
-            .expand_table_aliases(mig.context())
             .rewrite_between()
             .remove_negation()
             .strip_post_filters()
@@ -988,7 +1017,7 @@ impl SqlIncorporator {
             }
         };
 
-        let q = self.rewrite_query(q, mig)?;
+        let q = self.rewrite_query(q, &query_name, mig)?;
 
         // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
@@ -2978,10 +3007,19 @@ mod tests {
                      JOIN (SELECT * FROM friends) AS f2 ON (f1.friend = f2.id)
                      WHERE f1.id = ?;";
 
-            let q = inc.add_query(q, None, mig);
-            assert!(q.is_ok());
+            let res = inc.add_query(q, None, mig);
+            assert!(res.is_ok());
+            let qfp = res.unwrap();
+
+            // Check join node
+            let join = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            assert_eq!(join.fields(), &["id", "friend", "friend"]);
+            assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:1 ⋈ 2:0");
+
+            // Check leaf projection node
             let leaf_view = get_node(&inc, mig, "q_1");
             assert_eq!(leaf_view.fields(), &["id", "fof"]);
+            assert_eq!(leaf_view.description(true), "π[0, 2]");
         })
         .await;
     }
