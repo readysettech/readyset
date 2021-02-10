@@ -9,6 +9,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::Union;
 use dataflow::{DurabilityMode, PersistenceParameters};
+use itertools::Itertools;
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
 use noria::{DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator};
@@ -3310,6 +3311,214 @@ async fn correct_nested_view_schema() {
     assert_eq!(q.schema(), Some(&expected_schema[..]));
 }
 
+// FIXME: The test is disabled because join column projection does not work correctly.
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn join_column_projection() {
+    let mut g = start_simple("join_column_projection").await;
+
+    // NOTE u_id causes panic in stories_authors_explicit; stories_authors_tables_star also paics
+    g.install_recipe(
+        "CREATE TABLE stories (s_id int, author_id int, s_name text, content text);
+         CREATE TABLE users (u_id int, u_name text, email text);
+         VIEW stories_authors_explicit: SELECT s_id, author_id, s_name, content, u_id, u_name, email
+             FROM stories
+             JOIN users ON (stories.author_id = users.u_id);
+         VIEW stories_authors_tables_star: SELECT stories.*, users.*
+             FROM stories
+             JOIN users ON (stories.author_id = users.u_id);
+         VIEW stories_authors_star: SELECT *
+             FROM stories
+             JOIN users ON (stories.author_id = users.u_id);",
+    )
+    .await
+    .unwrap();
+
+    let query = g.view("stories_authors_explicit").await.unwrap();
+    assert_eq!(
+        query.columns(),
+        vec![
+            "s_id",
+            "author_id",
+            "s_name",
+            "content",
+            "u_id",
+            "u_name",
+            "email",
+            "bogokey"
+        ]
+    );
+
+    let query = g.view("stories_authors_tables_star").await.unwrap();
+    assert_eq!(
+        query.columns(),
+        vec![
+            "s_id",
+            "author_id",
+            "s_name",
+            "content",
+            "u_id",
+            "u_name",
+            "email",
+            "bogokey"
+        ]
+    );
+
+    let query = g.view("stories_authors_star").await.unwrap();
+    assert_eq!(
+        query.columns(),
+        vec![
+            "s_id",
+            "author_id",
+            "s_name",
+            "content",
+            "u_id",
+            "u_name",
+            "email",
+            "bogokey"
+        ]
+    );
+}
+
+// FIXME: The test is disabled because the rows returned when a parameter is provided are not the
+// correct filtered subset of the rows returned when a parameter is not provided.
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn join_param_results() {
+    let mut g = start_simple("join_param_results").await;
+    g.install_recipe(
+        "CREATE TABLE votes (story int, user int);
+         CREATE TABLE recs (story int, other int);
+         VIEW all_user_recs: SELECT votes.user as u, recs.other as s
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story);
+         VIEW user_recs: SELECT votes.user as u, recs.other as s
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("votes").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut votes = g.table("recs").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+
+    // Check 'all_user_recs' results.
+    let mut query = g.view("all_user_recs").await.unwrap();
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("u").unwrap(), r.get("s").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![
+        (1, 1),
+        (1, 1),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 1),
+        (2, 2),
+        (3, 1),
+        (3, 3),
+    ];
+    assert_eq!(results, expected);
+
+    // Check 'user_recs' results.
+    let mut query = g.view("user_recs").await.unwrap();
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[1.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("u").unwrap(), r.get("s").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
+    assert_eq!(results, expected);
+}
+
+// FIXME: The test is disabled because aliasing the result columns with names reused from other
+// columns causes incorrect results to be returned. (See above 'join_param_results' test for
+// correct behavior in the no-param case, when column names are not reused.)
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn join_reused_name_results() {
+    let mut g = start_simple("join_reused_name_results").await;
+    g.install_recipe(
+        "CREATE TABLE votes (story int, user int);
+         CREATE TABLE recs (story int, other int);
+         VIEW all_user_recs: SELECT votes.user as user, recs.other as story
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story);
+         VIEW user_recs: SELECT votes.user as user, recs.other as story
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("votes").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut votes = g.table("recs").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+
+    // Check 'all_user_recs' results.
+    let mut query = g.view("all_user_recs").await.unwrap();
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("story").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![
+        (1, 1),
+        (1, 1),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 1),
+        (2, 2),
+        (3, 1),
+        (3, 3),
+    ];
+    assert_eq!(results, expected);
+
+    // Check 'user_recs' results.
+    let mut query = g.view("user_recs").await.unwrap();
+    let results: Vec<(i32, i32)> = query
+        .lookup(&[1.into()], true)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| (r.get("user").unwrap(), r.get("story").unwrap()))
+        .sorted()
+        .collect();
+    let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
+    assert_eq!(results, expected);
+}
+
 #[tokio::test(threaded_scheduler)]
 async fn non_sql_materialized_range_query() {
     let mut g = {
@@ -3494,6 +3703,29 @@ async fn query_reuse_aliases() {
     assert!(g.view("q2").await.is_ok());
     assert!(g.view("q3").await.is_ok());
     assert!(g.view("q4").await.is_ok());
+}
+
+// FIXME: The test is disabled due to panic when querying an aliased view.
+#[ignore]
+#[tokio::test(threaded_scheduler)]
+async fn view_reuse_aliases() {
+    let mut g = start_simple_logging("view_reuse_aliases").await;
+
+    // NOTE q1 causes panic
+    g.install_recipe(
+        "CREATE TABLE t1 (a INT, b INT);
+         VIEW v1: SELECT * FROM t1 WHERE a != 1;
+         VIEW v2: SELECT * FROM t1 WHERE a != 1;
+         QUERY q1: SELECT * FROM v1;
+         QUERY q2: SELECT * FROM v2;",
+    )
+    .await
+    .unwrap();
+
+    assert!(g.view("v1").await.is_ok());
+    assert!(g.view("v2").await.is_ok());
+    assert!(g.view("q1").await.is_ok());
+    assert!(g.view("q2").await.is_ok());
 }
 
 #[tokio::test(threaded_scheduler)]
