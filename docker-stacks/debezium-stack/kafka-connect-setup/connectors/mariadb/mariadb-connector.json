@@ -1,0 +1,20 @@
+{
+  "name": "mariadb-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "mariadb",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "debezium",
+    "database.server.id": "184054",
+    "database.server.name": "dbserver1",
+    "database.include.list": "test",
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "dbhistory.test",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "decimal.handling.mode": "double",
+    "time.precision.mode": "connect"
+  }
+}
