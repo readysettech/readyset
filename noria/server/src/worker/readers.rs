@@ -516,6 +516,9 @@ fn do_lookup(
     }
 }
 
+/// Verifies that the timestamp in the reader node associated with the read handle, `reader`,
+/// has a greater timestamp than `timestamp`. A greater reader timestamp indicates the writes
+/// in the node include all of the writes associated with `timestamp`.
 fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timestamp>) -> bool {
     if timestamp.is_none() {
         return true;
@@ -527,7 +530,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
     }
 
     // The data in the evbtree is newer than the requested timestamp.
-    dataflow_timestamp <= *timestamp
+    dataflow_timestamp >= *timestamp
 }
 
 #[pin_project]
