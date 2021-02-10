@@ -38,7 +38,6 @@ pub struct DataChange {
     pub schema: Schema,
     pub payload: DataChangePayload,
 }
-
 #[derive(Debug, Deserialize)]
 pub struct Schema {
     pub name: String,
@@ -80,7 +79,11 @@ pub struct UpdatePayload {
 
 #[derive(Debug, Deserialize)]
 pub struct Source {
-    pub table: String,
+    // We need to set the source as optional since
+    // MariaDB database sends dummy events to the [database.server.name] topic.
+    // These events contain null fields, and having a non-Optional table field
+    // breaks the parsing.
+    pub table: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

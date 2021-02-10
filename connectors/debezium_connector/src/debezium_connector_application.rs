@@ -72,29 +72,32 @@ impl DebeziumConnector {
                     DataChangePayload::Create(p) => {
                         // We know that the payload consist of before, after and source fields
                         // and that too in that specific order.
-                        let after_field_schema = &e.schema.fields[1];
-                        let create_vector = p.get_create_vector(after_field_schema)?;
-                        let table_name = &p.source.table;
-                        let mut table_mutator = noria_authority.table(table_name).await?;
-                        table_mutator.insert(create_vector).await?
+                        if let Some(table_name) = &p.source.table {
+                            let after_field_schema = &e.schema.fields[1];
+                            let create_vector = p.get_create_vector(after_field_schema)?;
+                            let mut table_mutator = noria_authority.table(table_name).await?;
+                            table_mutator.insert(create_vector).await?
+                        }
                     }
                     DataChangePayload::Update(p) => {
-                        let pk_datatype = key_message.get_pk_datatype()?;
-                        // We know that the payload consist of before, after and source fields
-                        // and that too in that specific order.
-                        let after_field_schema = &e.schema.fields[1];
-                        let update_vector = p.get_update_vector(after_field_schema)?;
-                        let table_name = &p.source.table;
-                        let mut table_mutator = noria_authority.table(table_name).await?;
-                        table_mutator
-                            .update(vec![pk_datatype], update_vector)
-                            .await?
+                        if let Some(table_name) = &p.source.table {
+                            let pk_datatype = key_message.get_pk_datatype()?;
+                            // We know that the payload consist of before, after and source fields
+                            // and that too in that specific order.
+                            let after_field_schema = &e.schema.fields[1];
+                            let update_vector = p.get_update_vector(after_field_schema)?;
+                            let mut table_mutator = noria_authority.table(table_name).await?;
+                            table_mutator
+                                .update(vec![pk_datatype], update_vector)
+                                .await?
+                        }
                     }
                     DataChangePayload::Delete { source: src } => {
-                        let pk_datatype = key_message.get_pk_datatype()?;
-                        let table_name = &src.table;
-                        let mut table_mutator = noria_authority.table(table_name).await?;
-                        table_mutator.delete(vec![pk_datatype]).await?
+                        if let Some(table_name) = &src.table {
+                            let pk_datatype = key_message.get_pk_datatype()?;
+                            let mut table_mutator = noria_authority.table(table_name).await?;
+                            table_mutator.delete(vec![pk_datatype]).await?
+                        }
                     }
                 }
             }
