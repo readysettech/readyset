@@ -1,4 +1,5 @@
-use noria::internal::*;
+#![allow(missing_docs)]
+use crate::internal::*;
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 
@@ -26,17 +27,17 @@ impl<T: Clone> Clone for Map<T> {
     }
 }
 
-pub enum Entry<'a, V: 'a> {
+pub enum Entry<'a, V> {
     Vacant(VacantEntry<'a, V>),
     Occupied(OccupiedEntry<'a, V>),
 }
 
-pub struct VacantEntry<'a, V: 'a> {
+pub struct VacantEntry<'a, V> {
     map: &'a mut Map<V>,
     index: LocalNodeIndex,
 }
 
-pub struct OccupiedEntry<'a, V: 'a> {
+pub struct OccupiedEntry<'a, V> {
     map: &'a mut Map<V>,
     index: LocalNodeIndex,
 }
@@ -170,7 +171,7 @@ impl<T> Map<T> {
         self.n == 0
     }
 
-    pub fn entry(&mut self, key: LocalNodeIndex) -> Entry<T> {
+    pub fn entry(&mut self, key: LocalNodeIndex) -> Entry<'_, T> {
         if self.contains_key(key) {
             Entry::Occupied(OccupiedEntry {
                 map: self,
@@ -190,7 +191,7 @@ impl<T> fmt::Debug for Map<T>
 where
     T: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
     }
 }

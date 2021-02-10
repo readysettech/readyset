@@ -3,13 +3,12 @@
 extern crate serde_derive;
 
 mod local;
-mod map;
 mod records;
 
 pub use self::local::*;
-pub use self::map::*;
 pub use self::records::*;
 pub use noria::DataType;
+pub use noria::Map;
 
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
