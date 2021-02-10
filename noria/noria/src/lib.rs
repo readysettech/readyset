@@ -210,6 +210,7 @@ mod data;
 mod data_serde;
 #[doc(hidden)]
 pub mod errors;
+mod map;
 mod table;
 pub mod util;
 mod view;
@@ -305,6 +306,7 @@ pub use crate::data::{
     DataType, Modification, Operation, TableOperation, ValueCoerceError, DATE_FORMAT,
     TIMESTAMP_FORMAT,
 };
+pub use crate::map::Map;
 pub use crate::table::Table;
 pub use crate::view::View;
 
