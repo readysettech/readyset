@@ -4344,9 +4344,12 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 name = "unbounded-interval-tree"
 version = "0.2.3"
 dependencies = [
+ "itertools 0.10.0",
  "launchpad",
+ "pretty_assertions 0.6.1",
  "proptest",
  "rand 0.7.3",
+ "test-strategy",
 ]
 
 [[package]]
