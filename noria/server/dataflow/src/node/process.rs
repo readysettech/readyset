@@ -280,7 +280,7 @@ impl Node {
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
-                        reroute_miss(nodes, miss);
+                        self.reroute_miss(nodes, miss);
                     }
                 }
 
@@ -338,42 +338,58 @@ impl Node {
             NodeType::Egress(None) | NodeType::Source => unreachable!(),
         }
     }
-}
 
-// When we miss in can_query_through, that miss is *really* in the can_query_through node's
-// ancestor. We need to ensure that a replay is done to there, not the query_through node itself,
-// by translating the Miss into the right parent.
-fn reroute_miss(nodes: &DomainNodes, miss: &mut Miss) {
-    let node = nodes[miss.on].borrow();
-    if node.is_internal() && node.can_query_through() {
-        let mut new_parent: Option<IndexPair> = None;
-        for col in miss.lookup_idx.iter_mut() {
-            let parents = node.resolve(*col).unwrap();
-            assert_eq!(parents.len(), 1, "query_through with more than one parent");
+    // When we miss in can_query_through, that miss is *really* in the can_query_through node's
+    // ancestor. We need to ensure that a replay is done to there, not the query_through node
+    // itself, by translating the Miss into the right parent.
+    fn reroute_miss(&self, nodes: &DomainNodes, miss: &mut Miss) {
+        let node = nodes[miss.on].borrow();
+        if node.is_internal() && node.can_query_through() {
+            let mut new_parent: Option<IndexPair> = None;
+            for col in miss.lookup_idx.iter_mut() {
+                let parents = node.resolve(*col).unwrap();
+                assert_eq!(parents.len(), 1, "query_through with more than one parent");
 
-            let (parent_global, parent_col) = parents[0];
-            if let Some(p) = new_parent {
-                assert_eq!(
-                    p.as_global(),
-                    parent_global,
-                    "query_through from different parents"
-                );
-            } else {
-                let parent_node = nodes
-                    .values()
-                    .find(|n| n.borrow().global_addr() == parent_global)
-                    .unwrap();
-                let mut pair: IndexPair = parent_global.into();
-                pair.set_local(parent_node.borrow().local_addr());
-                new_parent = Some(pair);
+                let (parent_global, parent_col) = parents[0];
+                if let Some(p) = new_parent {
+                    assert_eq!(
+                        p.as_global(),
+                        parent_global,
+                        "query_through from different parents"
+                    );
+                } else {
+                    let parent_node = nodes
+                        .iter()
+                        .filter_map(|(i, n)| {
+                            match n.try_borrow() {
+                                Ok(n) => Some(n),
+                                Err(_) => {
+                                    // 'self' can be skipped. It cannot be its own ancestor and
+                                    // is expected to already be mutably borrowed.
+                                    assert_eq!(i, self.local_addr(), "unexpected borrow failure");
+                                    assert_ne!(
+                                        self.global_addr(),
+                                        parent_global,
+                                        "rerouting back to self requested"
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                        .find(|n| n.global_addr() == parent_global)
+                        .unwrap();
+                    let mut pair: IndexPair = parent_global.into();
+                    pair.set_local(parent_node.local_addr());
+                    new_parent = Some(pair);
+                }
+
+                *col = parent_col;
             }
 
-            *col = parent_col;
+            miss.on = *new_parent.unwrap();
+            // Recurse in case the parent we landed at also is a query_through node:
+            self.reroute_miss(nodes, miss);
         }
-
-        miss.on = *new_parent.unwrap();
-        // Recurse in case the parent we landed at also is a query_through node:
-        reroute_miss(nodes, miss);
     }
 }
 
