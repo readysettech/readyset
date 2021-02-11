@@ -1,9 +1,11 @@
 #![allow(missing_docs)]
+use proptest::arbitrary::Arbitrary;
+
 use crate::internal::*;
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 pub struct Map<T> {
     n: usize,
     things: Vec<Option<T>>,
@@ -24,6 +26,30 @@ impl<T: Clone> Clone for Map<T> {
             n: self.n,
             things: self.things.clone(),
         }
+    }
+}
+
+impl<T> Arbitrary for Map<T>
+where
+    T: Arbitrary,
+    <T as Arbitrary>::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Map<T>>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        any::<Vec<T>>()
+            .prop_map(|ts| {
+                let mut map = Map::new();
+                // Keep local node indices contiguous.
+                for (i, t) in ts.into_iter().enumerate() {
+                    map.insert(unsafe { LocalNodeIndex::make(i as u32) }, t);
+                }
+                map
+            })
+            .boxed()
     }
 }
 
@@ -157,6 +183,10 @@ impl<T> Map<T> {
             t.as_mut()
                 .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
+    }
+
+    pub fn keys<'a>(&'a self) -> Box<dyn Iterator<Item = LocalNodeIndex> + 'a> {
+        Box::new((0..self.n).map(|i| (unsafe { LocalNodeIndex::make(i as u32) })))
     }
 
     pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a T> + 'a> {
