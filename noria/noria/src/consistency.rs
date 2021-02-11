@@ -1,30 +1,81 @@
 //! Primitives and structs related to maintaining different consistency
 //! models within the Noria dataflow graph.
 use crate::map::Map;
+use proptest::arbitrary::Arbitrary;
 
 /// The timestamp maps a each base table to a monotonically increasing
 /// identifier, the transaction id of the last transaction executed on the
 /// table. Timestamps may call `satisfies` to verify if another timestamp
 /// is sufficiently up to date to satisfy read-your-write guarentees.
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Timestamp {
     map: Map<u64>,
 }
+impl Arbitrary for Timestamp {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Timestamp>;
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<Map<u64>>().prop_map(|map| Self { map }).boxed()
+    }
+}
 
 // TODO(justin): Remove #[allow(dead_code)] when the impl functions are being used.
-// TODO(justin/andrew): Implementation of these functions.
 #[allow(dead_code)]
 impl Timestamp {
     /// Combine a set of timestamps, returning a timestamp with the minimum
     /// base table timestamp across all timestamps in `t`.
-    pub fn min(_t: &[&Timestamp]) -> Timestamp {
-        todo!("Implementation");
+    pub fn min(timestamps: &[&Timestamp]) -> Timestamp {
+        // Iterate over each timestamps maps. Keep the minimum value seen in
+        // the returned map.
+        let mut ret = Timestamp::default();
+        for t in timestamps {
+            for (table, value) in t.map.iter() {
+                if let Some(current_value) = ret.map.get_mut(table) {
+                    // Set current_value to the minimum across all the maps.
+                    if &*current_value > value {
+                        *current_value = *value;
+                    }
+                } else {
+                    ret.map.insert(table, *value);
+                }
+            }
+        }
+
+        ret
     }
 
     /// Join two timestamps, returning the maximum timestamp value across all
-    /// timestamps in `t1` and `t2`.
-    pub fn join(_t1: &Timestamp, _t2: &Timestamp) -> Timestamp {
-        todo!("Implementation");
+    /// timestamps in `t1` and `t2`. A join of a timestamp with an empty timestamp
+    /// Timestamp::default(), returns the unchanged timestamp.
+    pub fn join(t1: &Timestamp, t2: &Timestamp) -> Timestamp {
+        // Iterate over the set of keys, for each key take the maximum timestamp
+        // value of t1[key], t2[key]. This iterates over both t1 and t2's keys.
+        let mut ret = Timestamp::default();
+        for key in t1.map.keys().chain(t2.map.keys()) {
+            ret.map.entry(key).or_insert_with(|| {
+                let v1 = t1.map.get(key);
+                let v2 = t2.map.get(key);
+                match v1 {
+                    None => match v2 {
+                        None => unreachable!("One of the maps must have the key"),
+                        Some(v2) => *v2,
+                    },
+                    Some(v1) => match v2 {
+                        None => *v1,
+                        Some(v2) => {
+                            if v1 > v2 {
+                                *v1
+                            } else {
+                                *v2
+                            }
+                        }
+                    },
+                }
+            });
+        }
+
+        ret
     }
 
     /// A timestamp `self` satisfies read-your-write consistency for `t2` if:
@@ -47,6 +98,7 @@ impl Timestamp {
 mod tests {
     use super::*;
     use crate::internal::LocalNodeIndex;
+    use test_strategy::proptest;
 
     fn create_timestamp(t: Vec<(LocalNodeIndex, u64)>) -> Timestamp {
         Timestamp {
@@ -102,5 +154,81 @@ mod tests {
 
         let t2 = create_timestamp(vec![(b2, 2)]);
         assert!(!t2.satisfies(&t1));
+    }
+
+    #[proptest]
+    fn min_with_empty(t: Timestamp) {
+        assert_eq!(&t, &Timestamp::min(&[&t, &Timestamp::default()]));
+    }
+
+    #[proptest]
+    fn min_associative(t1: Timestamp, t2: Timestamp, t3: Timestamp) {
+        assert_eq!(
+            &Timestamp::min(&[&Timestamp::min(&[&t1, &t2]), &t3]),
+            &Timestamp::min(&[&t1, &Timestamp::min(&[&t2, &t3])])
+        );
+    }
+
+    #[proptest]
+    fn min_commutative(t1: Timestamp, t2: Timestamp) {
+        assert_eq!(&Timestamp::min(&[&t1, &t2]), &Timestamp::min(&[&t2, &t1]));
+    }
+
+    #[proptest]
+    fn min_idempotent(t: Timestamp) {
+        assert_eq!(&t, &Timestamp::min(&[&t, &t]));
+    }
+
+    #[test]
+    fn min_multiple_vectors() {
+        // SAFETY: The local node indices are safe as they are 0-indexed
+        // and contiguous.
+        let b1 = unsafe { LocalNodeIndex::make(0) };
+        let b2 = unsafe { LocalNodeIndex::make(1) };
+
+        let t1 = create_timestamp(vec![(b1, 1), (b2, 2)]);
+        let t2 = create_timestamp(vec![(b1, 2), (b2, 1)]);
+
+        let min = Timestamp::min(&[&t1, &t2]);
+        let expected = create_timestamp(vec![(b1, 1), (b2, 1)]);
+        assert_eq!(&min, &expected);
+    }
+
+    #[proptest]
+    fn join_with_empty(t: Timestamp) {
+        assert_eq!(&t, &Timestamp::join(&t, &Timestamp::default()));
+    }
+
+    #[proptest]
+    fn join_associative(t1: Timestamp, t2: Timestamp, t3: Timestamp) {
+        assert_eq!(
+            &Timestamp::join(&Timestamp::join(&t1, &t2), &t3),
+            &Timestamp::join(&t1, &Timestamp::join(&t2, &t3))
+        );
+    }
+
+    #[proptest]
+    fn join_commutative(t1: Timestamp, t2: Timestamp) {
+        assert_eq!(&Timestamp::join(&t1, &t2), &Timestamp::join(&t2, &t1));
+    }
+
+    #[proptest]
+    fn join_idempotent(t: Timestamp) {
+        assert_eq!(&t, &Timestamp::join(&t, &t));
+    }
+
+    #[test]
+    fn join_calculates_max() {
+        // SAFETY: The local node indices are safe as they are 0-indexed
+        // and contiguous.
+        let b1 = unsafe { LocalNodeIndex::make(0) };
+        let b2 = unsafe { LocalNodeIndex::make(1) };
+
+        let t1 = create_timestamp(vec![(b1, 2), (b2, 1)]);
+        let t2 = create_timestamp(vec![(b1, 1), (b2, 2)]);
+
+        let join = Timestamp::join(&t1, &t2);
+        let expected = create_timestamp(vec![(b1, 2), (b2, 2)]);
+        assert_eq!(&join, &expected);
     }
 }
