@@ -2,11 +2,11 @@ pub use self::multir::{LookupError, LookupResult};
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
-use evbtree::refs::Values;
 use launchpad::intervals::{BoundAsRef, BoundFunctor};
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use rand::prelude::*;
+use reader_map::refs::Values;
 use std::borrow::Cow;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -62,8 +62,8 @@ fn new_inner(
 
     macro_rules! make {
         ($variant:tt) => {{
-            use evbtree;
-            let (mut w, r) = evbtree::Options::default()
+            use reader_map;
+            let (mut w, r) = reader_map::Options::default()
                 .with_meta(-1)
                 .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
@@ -71,7 +71,7 @@ fn new_inner(
             // If we're fully materialized, we never miss, so we can insert a single interval to
             // cover the full range of keys
             // PERF: this is likely not the most efficient way to do this - at some point we likely
-            // want to pass whether we're fully materialized down into the evbtree and skip
+            // want to pass whether we're fully materialized down into the reader_map and skip
             // inserting into the interval tree entirely (maybe make it an option?) if so
             if trigger.is_none() {
                 w.insert_range(vec![], ..);
@@ -150,7 +150,7 @@ pub(crate) struct WriteHandleEntry<'a> {
 impl<'a> WriteHandleEntry<'a> {
     pub(crate) fn try_find_and<F, T>(self, mut then: F) -> LookupResult<T>
     where
-        F: FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>) -> T,
+        F: FnMut(&reader_map::refs::Values<Vec<DataType>, RandomState>) -> T,
     {
         self.handle.handle.read().meta_get_and(&self.key, &mut then)
     }
@@ -289,7 +289,7 @@ impl WriteHandle {
     }
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
-    /// bytes that will be freed once the underlying `evbtree` applies the operation.
+    /// bytes that will be freed once the underlying `reader_map` applies the operation.
     pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, mut n: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {

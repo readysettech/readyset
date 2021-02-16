@@ -990,19 +990,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "evbtree"
-version = "0.1.0"
-dependencies = [
- "hashbag",
- "left-right",
- "quickcheck",
- "quickcheck_macros",
- "rand 0.7.3",
- "smallvec",
- "unbounded-interval-tree",
-]
-
-[[package]]
 name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2428,7 +2415,6 @@ dependencies = [
  "ahash 0.3.8",
  "bincode",
  "derive_more",
- "evbtree",
  "futures-util",
  "hashbag",
  "indexmap",
@@ -2444,6 +2430,7 @@ dependencies = [
  "pretty_assertions 0.6.1",
  "proptest",
  "rand 0.7.3",
+ "reader_map",
  "regex",
  "rocksdb",
  "serde",
@@ -3211,6 +3198,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
 dependencies = [
  "rand_core 0.3.1",
+]
+
+[[package]]
+name = "reader_map"
+version = "0.1.0"
+dependencies = [
+ "hashbag",
+ "left-right",
+ "quickcheck",
+ "quickcheck_macros",
+ "rand 0.7.3",
+ "smallvec",
+ "unbounded-interval-tree",
 ]
 
 [[package]]

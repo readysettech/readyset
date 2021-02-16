@@ -22,7 +22,7 @@ use std::ops::{Bound, RangeBounds};
 /// ```
 /// let x = ('x', 42);
 ///
-/// let (mut w, r) = evbtree::new();
+/// let (mut w, r) = reader_map::new();
 ///
 /// // the map is uninitialized, so all lookups should return None
 /// assert_eq!(r.get(&x.0).map(|rs| rs.len()), None);

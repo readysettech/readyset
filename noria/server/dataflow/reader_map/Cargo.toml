@@ -1,5 +1,5 @@
 [package]
-name = "evbtree"
+name = "reader_map"
 version = "0.1.0"
 authors = ["Readyset"]
 edition = "2018"
@@ -9,7 +9,7 @@ smallvec = "1.0.0"
 hashbag = "0.1.2"
 rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.9.1"
-unbounded-interval-tree = { version = "0.2.3", path = "../unbounded-interval-tree" }
+unbounded-interval-tree = { version = "0.2.3", path = "../../../../unbounded-interval-tree" }
 
 [dev-dependencies]
 quickcheck = "0.9"

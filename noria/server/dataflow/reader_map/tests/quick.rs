@@ -1,9 +1,9 @@
 #![cfg(not(miri))]
 #![feature(btree_drain_filter)]
 
-extern crate evbtree;
+extern crate reader_map;
 
-use evbtree::handles::{ReadHandle, WriteHandle};
+use reader_map::handles::{ReadHandle, WriteHandle};
 
 extern crate quickcheck;
 #[macro_use(quickcheck)]
@@ -29,7 +29,7 @@ where
 
 #[quickcheck]
 fn contains(insert: Vec<u32>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
     }
@@ -40,7 +40,7 @@ fn contains(insert: Vec<u32>) -> bool {
 
 #[quickcheck]
 fn contains_not(insert: Vec<u8>, not: Vec<u8>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
     }
@@ -52,7 +52,7 @@ fn contains_not(insert: Vec<u8>, not: Vec<u8>) -> bool {
 
 #[quickcheck]
 fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     for &key in &insert {
         w.insert(key, ());
     }
@@ -95,7 +95,7 @@ where
 
 fn do_ops<K, V, S>(
     ops: &[Op<K, V>],
-    evbtree: &mut WriteHandle<K, V, (), (), S>,
+    reader_map: &mut WriteHandle<K, V, (), (), S>,
     write_ref: &mut BTreeMap<K, Vec<V>>,
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
@@ -106,18 +106,18 @@ fn do_ops<K, V, S>(
     for op in ops {
         match *op {
             Add(ref k, ref v) => {
-                evbtree.insert(k.clone(), v.clone());
+                reader_map.insert(k.clone(), v.clone());
                 write_ref
                     .entry(k.clone())
                     .or_insert_with(Vec::new)
                     .push(v.clone());
             }
             Remove(ref k) => {
-                evbtree.remove_entry(k.clone());
+                reader_map.remove_entry(k.clone());
                 write_ref.remove(k);
             }
             RemoveValue(ref k, ref v) => {
-                evbtree.remove_value(k.clone(), v.clone());
+                reader_map.remove_value(k.clone(), v.clone());
                 write_ref.get_mut(k).and_then(|values| {
                     values
                         .iter_mut()
@@ -126,11 +126,11 @@ fn do_ops<K, V, S>(
                 });
             }
             RemoveRange(ref range) => {
-                evbtree.remove_range(range.clone());
+                reader_map.remove_range(range.clone());
                 write_ref.drain_filter(|k, _| range.contains(k));
             }
             Refresh => {
-                evbtree.publish();
+                reader_map.publish();
                 *read_ref = write_ref.clone();
             }
         }
@@ -221,7 +221,7 @@ impl Arbitrary for Alphabet {
 
 #[quickcheck]
 fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
@@ -233,7 +233,7 @@ fn operations_i8(ops: Large<Vec<Op<i8, i8>>>) -> bool {
 
 #[quickcheck]
 fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
@@ -245,13 +245,13 @@ fn operations_string(ops: Vec<Op<Alphabet, i8>>) -> bool {
 
 #[quickcheck]
 fn keys_values(ops: Large<Vec<Op<i8, i8>>>) -> bool {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     let mut write_ref = BTreeMap::new();
     let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
 
     if let Some(read_guard) = r.enter() {
-        let (mut w_visit, r_visit) = evbtree::new();
+        let (mut w_visit, r_visit) = reader_map::new();
         for (k, v_set) in read_guard.keys().zip(read_guard.values()) {
             assert!(read_guard[k].iter().all(|v| v_set.contains(v)));
             assert!(v_set.iter().all(|v| read_guard[k].contains(v)));

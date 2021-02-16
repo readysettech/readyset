@@ -7,9 +7,9 @@ use launchpad::intervals::{BoundAsRef, BoundFunctor};
 use noria::consistency::Timestamp;
 
 pub(super) enum Handle {
-    Single(evbtree::handles::WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Single(reader_map::handles::WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
     Double(
-        evbtree::handles::WriteHandle<
+        reader_map::handles::WriteHandle<
             (DataType, DataType),
             Vec<DataType>,
             i64,
@@ -17,7 +17,9 @@ pub(super) enum Handle {
             RandomState,
         >,
     ),
-    Many(evbtree::handles::WriteHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>),
+    Many(
+        reader_map::handles::WriteHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>,
+    ),
 }
 
 impl Handle {
@@ -98,7 +100,7 @@ impl Handle {
         &mut self,
         rng: &mut impl rand::Rng,
         n: usize,
-        mut f: impl FnMut(&evbtree::refs::Values<Vec<DataType>, RandomState>),
+        mut f: impl FnMut(&reader_map::refs::Values<Vec<DataType>, RandomState>),
     ) {
         match *self {
             Handle::Single(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
@@ -137,7 +139,7 @@ impl Handle {
                             h.insert(r[key[0]].clone(), r);
                         }
                         Record::Negative(r) => {
-                            // TODO: evbtree will remove the empty vec for a key if we remove the
+                            // TODO: reader_map will remove the empty vec for a key if we remove the
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.

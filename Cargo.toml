@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "evbtree",
     "msql-srv",
     "nom-sql",
     "noria-mysql",

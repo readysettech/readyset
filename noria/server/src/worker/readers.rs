@@ -529,7 +529,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
         return false;
     }
 
-    // The data in the evbtree is newer than the requested timestamp.
+    // The data in the map is newer than the requested timestamp.
     dataflow_timestamp >= *timestamp
 }
 

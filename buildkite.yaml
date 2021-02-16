@@ -37,7 +37,7 @@ steps:
   - label: ':clippy: Check clippy'
     commands:
     - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
-    - "( echo '--- :rust: Checking evbtree'; cargo clippy -p evbtree -- -D warnings)"
+    - "( echo '--- :rust: Checking reader_map'; cargo clippy -p reader_map -- -D warnings)"
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     depends_on:
     - build-image
@@ -171,46 +171,6 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build evbtree'
-    key: build-evbtree
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p evbtree
-    depends_on:
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test evbtree'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p evbtree
-    depends_on:
-    - build-image
-    - build-evbtree
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
   - label: ':rust: Build unbounded-interval-tree'
     key: build-unbounded-interval-tree
     commands:
@@ -261,7 +221,6 @@ steps:
     depends_on:
     - build-image
     - build-nom-sql
-    - build-evbtree
     - build-unbounded-interval-tree
     - build-launchpad
     plugins:
