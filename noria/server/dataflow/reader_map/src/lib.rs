@@ -206,6 +206,7 @@ use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::write::WriteHandle;
 use left_right::aliasing::Aliased;
+use noria::internal::IndexType;
 use std::collections::hash_map::RandomState;
 
 use std::fmt;
@@ -253,6 +254,7 @@ where
     meta: M,
     timestamp: T,
     hasher: S,
+    index_type: IndexType,
     capacity: Option<usize>,
 }
 
@@ -277,6 +279,7 @@ impl Default for Options<(), (), RandomState> {
             meta: (),
             timestamp: (),
             hasher: RandomState::default(),
+            index_type: IndexType::BTreeMap,
             capacity: None,
         }
     }
@@ -291,6 +294,7 @@ where
         Options {
             meta,
             timestamp: self.timestamp,
+            index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
         }
@@ -304,6 +308,7 @@ where
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
+            index_type: self.index_type,
             hasher: hash_builder,
             capacity: self.capacity,
         }
@@ -314,6 +319,7 @@ where
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
+            index_type: self.index_type,
             hasher: self.hasher,
             capacity: Some(capacity),
         }
@@ -324,6 +330,7 @@ where
         Options {
             meta: self.meta,
             timestamp,
+            index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
         }
@@ -333,13 +340,18 @@ where
     #[allow(clippy::type_complexity)]
     pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
     where
-        K: Ord + Clone,
+        K: Ord + Clone + Hash,
         S: BuildHasher + Clone,
         V: Eq + Hash,
         M: 'static + Clone,
         T: Clone,
     {
-        let inner = Inner::with_hasher(self.meta, self.timestamp, self.hasher);
+        let inner = Inner::with_index_type_and_hasher(
+            self.index_type,
+            self.meta,
+            self.timestamp,
+            self.hasher,
+        );
 
         let (mut w, r) = left_right::new_from_empty(inner);
         w.append(write::Operation::MarkReady);
@@ -357,7 +369,7 @@ pub fn new<K, V>() -> (
     ReadHandle<K, V, (), (), RandomState>,
 )
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
 {
     Options::default().construct()
@@ -375,7 +387,7 @@ pub fn with_meta_and_timestamp<K, V, M, T>(
     ReadHandle<K, V, M, T, RandomState>,
 )
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
     M: 'static + Clone,
     T: Clone,
@@ -396,7 +408,7 @@ pub fn with_hasher<K, V, M, T, S>(
     hasher: S,
 ) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
     M: 'static + Clone,
     T: Clone,

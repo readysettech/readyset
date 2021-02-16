@@ -3,8 +3,10 @@
 
 mod addressing;
 mod external;
+mod index;
 mod proto;
 
 pub use self::addressing::{DomainIndex, LocalNodeIndex};
 pub use self::external::MaterializationStatus;
+pub use self::index::IndexType;
 pub use self::proto::LocalOrNot;

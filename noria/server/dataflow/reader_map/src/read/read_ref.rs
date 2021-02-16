@@ -1,22 +1,17 @@
+use crate::inner::Miss;
 use crate::values::ValuesInner;
 use crate::{inner::Inner, values::Values, Aliased};
 use left_right::ReadGuard;
 use std::borrow::Borrow;
+use std::collections::btree_map;
 use std::collections::hash_map::RandomState;
-use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;
-
-/// Represents a miss when looking up a range.
-///
-/// Values in the vec are ranges of keys within the requested bound that are not present
-#[derive(Debug, PartialEq, Eq)]
-pub struct Miss<K>(pub Vec<(Bound<K>, Bound<K>)>);
 
 /// A live reference into the read half of an evmap.
 ///
@@ -54,7 +49,7 @@ where
 
 impl<'rh, K, V, M, T, S> MapReadRef<'rh, K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
     S: BuildHasher,
     T: Clone,
@@ -73,18 +68,15 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying map is not a [`BTreeMap`](noria::internal::IndexType::BTreeMap).
     pub fn range<R>(&self, range: R) -> Result<RangeIter<'_, K, V, S>, Miss<K>>
     where
         R: RangeBounds<K> + Clone,
     {
-        let diff = self.guard.tree.get_interval_difference(range.clone());
-        if diff.is_empty() {
-            Ok(RangeIter {
-                iter: self.guard.data.range(range),
-            })
-        } else {
-            Err(Miss(diff))
-        }
+        self.guard.data.range(range).map(|iter| RangeIter { iter })
     }
 
     /// Iterate over all keys in the map.
@@ -133,7 +125,7 @@ where
     pub fn get<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a Values<V, S>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         self.guard.data.get(key).map(AsRef::as_ref)
     }
@@ -153,7 +145,7 @@ where
     pub fn get_one<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         self.guard
             .data
@@ -168,7 +160,7 @@ where
     pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         self.guard.data.contains_key(key)
     }
@@ -181,7 +173,7 @@ where
     where
         K: Borrow<Q>,
         Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Ord,
+        Q: Ord + Hash,
         W: Hash + Eq,
     {
         self.guard
@@ -195,15 +187,15 @@ where
     where
         R: RangeBounds<K> + Clone,
     {
-        self.guard.tree.contains_interval(range)
+        self.guard.data.contains_range(range)
     }
 }
 
 impl<'rh, K, Q, V, M, T, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, T, S>
 where
-    K: Ord + Clone + Borrow<Q>,
+    K: Ord + Clone + Borrow<Q> + Hash,
     V: Eq + Hash,
-    Q: Ord + ?Sized,
+    Q: Ord + ?Sized + Hash,
     S: BuildHasher,
     T: Clone,
 {
@@ -215,7 +207,7 @@ where
 
 impl<'rg, 'rh, K, V, M, T, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
     S: BuildHasher,
     T: Clone,
@@ -234,7 +226,7 @@ where
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
+    iter: crate::inner::Iter<'rg, K, V, S>,
 }
 
 impl<'rg, K, V, S> fmt::Debug for ReadGuardIter<'rg, K, V, S>
@@ -268,7 +260,7 @@ where
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
+    iter: crate::inner::Iter<'rg, K, V, S>,
 }
 
 impl<'rg, K, V, S> fmt::Debug for KeysIter<'rg, K, V, S>
@@ -340,7 +332,7 @@ where
     V: Eq + Hash,
     S: BuildHasher,
 {
-    iter: <&'rg BTreeMap<K, ValuesInner<V, S, crate::aliasing::NoDrop>> as IntoIterator>::IntoIter,
+    iter: crate::inner::Iter<'rg, K, V, S>,
 }
 
 impl<'rg, K, V, S> fmt::Debug for ValuesIter<'rg, K, V, S>

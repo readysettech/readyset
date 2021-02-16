@@ -37,7 +37,6 @@ steps:
   - label: ':clippy: Check clippy'
     commands:
     - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
-    - "( echo '--- :rust: Checking reader_map'; cargo clippy -p reader_map -- -D warnings)"
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     depends_on:
     - build-image

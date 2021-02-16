@@ -3206,7 +3206,9 @@ name = "reader_map"
 version = "0.1.0"
 dependencies = [
  "hashbag",
+ "itertools 0.10.0",
  "left-right",
+ "noria",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.7.3",

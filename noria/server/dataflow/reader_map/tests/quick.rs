@@ -99,7 +99,7 @@ fn do_ops<K, V, S>(
     write_ref: &mut BTreeMap<K, Vec<V>>,
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Clone + Eq + Hash,
     S: BuildHasher + Clone,
 {
@@ -139,7 +139,7 @@ fn do_ops<K, V, S>(
 
 fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), (), S>, b: &BTreeMap<K, Vec<V>>) -> bool
 where
-    K: Clone + Ord + Debug,
+    K: Clone + Ord + Debug + Hash,
     V: Hash + Eq + Debug + Ord + Copy,
     S: BuildHasher,
 {
@@ -191,7 +191,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 struct Alphabet(String);
 
 impl Deref for Alphabet {
