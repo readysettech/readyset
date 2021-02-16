@@ -1,5 +1,6 @@
 use crate::{inner::Inner, values::Values, Aliased};
 use left_right::ReadGuard;
+use noria::internal::IndexType;
 
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
@@ -8,7 +9,8 @@ use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 
 mod read_ref;
-pub use read_ref::{MapReadRef, Miss, ReadGuardIter};
+pub use crate::inner::Miss;
+pub use read_ref::{MapReadRef, ReadGuardIter};
 
 mod factory;
 pub use factory::ReadHandleFactory;
@@ -67,7 +69,7 @@ where
 
 impl<K, V, M, T, S> ReadHandle<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     V: Eq + Hash,
     S: BuildHasher,
     M: Clone,
@@ -109,7 +111,7 @@ where
     fn get_raw<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<'_, Values<V, S>>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         let inner = self.handle.enter()?;
         if !inner.ready {
@@ -133,7 +135,7 @@ where
     pub fn get<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, Values<V, S>>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         // call `borrow` here to monomorphize `get_raw` fewer times
         self.get_raw(key.borrow())
@@ -157,7 +159,7 @@ where
     pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, V>>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone,
+        Q: Ord + Clone + Hash,
     {
         ReadGuard::try_map(self.get_raw(key.borrow())?, |x| x.get_one())
     }
@@ -178,7 +180,7 @@ where
     pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Option<(Option<ReadGuard<'_, Values<V, S>>>, M)>
     where
         K: Borrow<Q>,
-        Q: Ord + Clone,
+        Q: Ord + Clone + Hash,
     {
         let inner = self.handle.enter()?;
         if !inner.ready {
@@ -201,7 +203,7 @@ where
     pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + Hash,
     {
         self.enter().map_or(false, |x| x.contains_key(key))
     }
@@ -214,7 +216,7 @@ where
     where
         K: Borrow<Q>,
         Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Ord,
+        Q: Ord + Hash,
         W: Hash + Eq,
         V: Hash + Eq,
     {
@@ -250,6 +252,11 @@ where
         }
         let t = inner.timestamp.clone();
         Some(t)
+    }
+
+    /// Returns the index type of the underlying map, or None if no writes have been performed yet
+    pub fn index_type(&self) -> Option<IndexType> {
+        Some(self.handle.enter()?.data.index_type())
     }
 }
 

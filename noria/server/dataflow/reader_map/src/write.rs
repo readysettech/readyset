@@ -1,10 +1,9 @@
-use crate::inner::Inner;
+use crate::inner::{Entry, Inner};
 use crate::read::ReadHandle;
 use crate::values::ValuesInner;
 use left_right::{aliasing::Aliased, Absorb};
 
 use rand::prelude::IteratorRandom;
-use std::collections::btree_map::Entry;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
@@ -45,7 +44,7 @@ use std::ops::{Bound, RangeBounds};
 /// ```
 pub struct WriteHandle<K, V, M = (), T = (), S = RandomState>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -62,7 +61,7 @@ where
 
 impl<K, V, M, T, S> fmt::Debug for WriteHandle<K, V, M, T, S>
 where
-    K: Ord + Clone + fmt::Debug,
+    K: Ord + Clone + Hash + fmt::Debug,
     S: BuildHasher + Clone,
     V: Eq + Hash + fmt::Debug,
     M: 'static + Clone + fmt::Debug,
@@ -78,7 +77,7 @@ where
 
 impl<K, V, M, T, S> WriteHandle<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -374,7 +373,7 @@ where
 
 impl<K, V, M, T, S> Absorb<Operation<K, V, M, T>> for Inner<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -427,7 +426,7 @@ where
                         .push(unsafe { value.alias() }, hasher);
                 }
 
-                self.tree.insert(range.clone());
+                self.data.add_range(range.clone());
             }
             Operation::RemoveEntry(ref key) => {
                 self.data.remove(key);
@@ -441,8 +440,7 @@ where
                 }
             }
             Operation::RemoveRange(ref range) => {
-                self.tree.remove(range);
-                self.data.drain_filter(move |k, _| range.contains(k));
+                self.data.remove_range(range);
             }
             Operation::Retain(ref key, ref mut predicate) => {
                 if let Some(e) = self.data.get_mut(key) {
@@ -550,14 +548,13 @@ where
                         .push(unsafe { value.change_drop() }, hasher);
                 }
 
-                inner.tree.insert(range);
+                inner.data.add_range(range);
             }
             Operation::RemoveEntry(key) => {
                 inner.data.remove(&key);
             }
             Operation::RemoveRange(range) => {
-                self.tree.remove(&range);
-                self.data.drain_filter(move |k, _| range.contains(k));
+                inner.data.remove_range(&range);
             }
             Operation::Purge => {
                 inner.data.clear();
@@ -631,7 +628,7 @@ where
                     // so we are about to turn the alias back into NoDrop.
                     (k.clone(), unsafe { ValuesInner::alias(vs, &other.hasher) })
                 }));
-                inner.tree = other.tree.clone();
+                inner.data.clone_intervals_from(&other.data);
             }
         }
     }
@@ -657,7 +654,7 @@ where
 
 impl<K, V, M, T, S> Extend<(K, V)> for WriteHandle<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
@@ -674,7 +671,7 @@ where
 use std::ops::Deref;
 impl<K, V, M, T, S> Deref for WriteHandle<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Eq + Hash,
     M: 'static + Clone,
