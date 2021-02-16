@@ -19,7 +19,7 @@ jemallocator = "0.3"
 
 [dependencies]
 bincode = "1.0.0"
-evbtree = { version = "0.1.0", path = "../../../evbtree" }
+reader_map = { version = "0.1.0", path = "reader_map" }
 hashbag = "0.1.2"
 ahash = "0.3"
 futures-util = "0.3.0"

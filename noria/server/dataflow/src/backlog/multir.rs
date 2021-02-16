@@ -1,12 +1,12 @@
 use ahash::RandomState;
 use common::DataType;
-use evbtree::{
-    self,
-    refs::{Miss, Values},
-};
 use launchpad::intervals::BoundFunctor;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
+use reader_map::{
+    self,
+    refs::{Miss, Values},
+};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::ops::{Bound, RangeBounds};
@@ -14,9 +14,9 @@ use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(evbtree::handles::ReadHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Single(reader_map::handles::ReadHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
     Double(
-        evbtree::handles::ReadHandle<
+        reader_map::handles::ReadHandle<
             (DataType, DataType),
             Vec<DataType>,
             i64,
@@ -24,7 +24,9 @@ pub(super) enum Handle {
             RandomState,
         >,
     ),
-    Many(evbtree::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>),
+    Many(
+        reader_map::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>,
+    ),
 }
 
 pub(super) unsafe fn slice_to_2_tuple<T>(slice: &[T]) -> (T, T) {
@@ -339,14 +341,14 @@ impl Handle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use evbtree::handles::WriteHandle;
     use proptest::prelude::*;
+    use reader_map::handles::WriteHandle;
 
     fn make_single() -> (
         WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>,
         Handle,
     ) {
-        let (w, r) = evbtree::Options::default()
+        let (w, r) = reader_map::Options::default()
             .with_meta(-1)
             .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
@@ -358,7 +360,7 @@ mod tests {
         WriteHandle<(DataType, DataType), Vec<DataType>, i64, Timestamp, RandomState>,
         Handle,
     ) {
-        let (w, r) = evbtree::Options::default()
+        let (w, r) = reader_map::Options::default()
             .with_meta(-1)
             .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())

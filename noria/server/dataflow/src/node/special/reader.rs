@@ -95,7 +95,7 @@ impl Reader {
     }
 
     /// Evict a randomly selected key, returning the number of bytes evicted.
-    /// Note that due to how `evbtree` applies the evictions asynchronously, we can only evict a
+    /// Note that due to how `reader_map` applies the evictions asynchronously, we can only evict a
     /// single key at a time here.
     pub(crate) fn evict_random_keys(&mut self, n: usize) -> u64 {
         let mut bytes_freed = 0;

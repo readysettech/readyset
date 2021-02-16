@@ -36,7 +36,7 @@
 //! // new will use the default HashMap hasher, and a meta of ()
 //! // note that we get separate read and write handles
 //! // the read handle can be cloned to have more readers
-//! let (mut book_reviews_w, book_reviews_r) = evbtree::new();
+//! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // review some books.
 //! book_reviews_w.insert("Adventures of Huckleberry Finn",    "My favorite book.");
@@ -95,7 +95,7 @@
 //!
 //! ```
 //! use std::thread;
-//! let (mut book_reviews_w, book_reviews_r) = evbtree::new();
+//! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // start some readers
 //! let readers: Vec<_> = (0..4).map(|_| {
@@ -140,10 +140,10 @@
 //! ```
 //! use std::thread;
 //! use std::sync::{Arc, Mutex};
-//! let (mut book_reviews_w, book_reviews_r) = evbtree::new();
+//! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // start some writers.
-//! // since evbtree does not support concurrent writes, we need
+//! // since reader_map does not support concurrent writes, we need
 //! // to protect the write handle by a mutex.
 //! let w = Arc::new(Mutex::new(book_reviews_w));
 //! let writers: Vec<_> = (0..4).map(|i| {
@@ -180,11 +180,11 @@
 //! # Value storage
 //!
 //! The values for each key in the map are stored in [`refs::Values`]. Conceptually, each `Values`
-//! is a _bag_ or _multiset_; it can store multiple copies of the same value. `evbtree` applies some
+//! is a _bag_ or _multiset_; it can store multiple copies of the same value. `reader_map` applies some
 //! cleverness in an attempt to reduce unnecessary allocations and keep the cost of operations on
 //! even large value-bags small. For small bags, `Values` uses the `smallvec` crate. This avoids
 //! allocation entirely for single-element bags, and uses a `Vec` if the bag is relatively small.
-//! For large bags, `Values` uses the `hashbag` crate, which enables `evbtree` to efficiently look up
+//! For large bags, `Values` uses the `hashbag` crate, which enables `reader_map` to efficiently look up
 //! and remove specific elements in the value bag. For bags larger than one element, but smaller
 //! than the threshold for moving to `hashbag`, we use `smallvec` to avoid unnecessary hashing.
 //! Operations such as `Fit` and `Replace` will automatically switch back to the inline storage if
@@ -216,7 +216,7 @@ mod read;
 mod values;
 mod write;
 
-/// Handles to the read and write halves of an `evbtree`.
+/// Handles to the read and write halves of an `reader_map`.
 pub mod handles {
     pub use crate::write::WriteHandle;
 
@@ -226,7 +226,7 @@ pub mod handles {
     pub use crate::read::ReadHandleFactory;
 }
 
-/// Helper types that give access to values inside the read half of an `evbtree`.
+/// Helper types that give access to values inside the read half of an `reader_map`.
 pub mod refs {
     // Same here, ::{..} won't work.
     pub use super::values::Values;

@@ -254,9 +254,9 @@
 //!
 //! Since we asked `Migration` to "maintain" the output of `awvc`, `awvc` has a single child node
 //! which is a `Reader`. `Reader` keeps materialized state that can be accessed by applications by
-//! issuing reads on a `noria::View`. This materialized state uses
-//! [`evbtree`](https://github.com/readysettech/readyset/tree/master/evbtree), which is optimized
-//! for concurrent reads and writes.
+//! issuing reads on a `noria::View`. This materialized state uses a
+//! [`reader_map`](https://github.com/readysettech/readyset/tree/master/noria/server/dataflow/reader_map),
+//! which is optimized for concurrent reads and writes.
 //! Since `awvc` produced no updates this time around, no changes are made to the `Reader`. When
 //! control returns to the domain, it observes that `awvc` has no further descendants, and does not
 //! propagate the (empty) update any further.

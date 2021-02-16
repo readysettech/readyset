@@ -1,4 +1,4 @@
-extern crate evbtree;
+extern crate reader_map;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -13,7 +13,7 @@ macro_rules! assert_match {
 fn it_works() {
     let x = ('x', 42);
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     // the map is uninitialized, so all lookups should return None
     assert_match!(r.get(&x.0), None);
@@ -73,7 +73,7 @@ fn it_works() {
 fn mapref() {
     let x = ('x', 42);
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     // get a read ref to the map
     // scope to ensure it gets dropped and doesn't stall refresh
@@ -157,7 +157,7 @@ fn mapref() {
 #[cfg_attr(miri, ignore)]
 // https://github.com/rust-lang/miri/issues/658
 fn paniced_reader_doesnt_block_writer() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.publish();
 
@@ -175,7 +175,7 @@ fn paniced_reader_doesnt_block_writer() {
 fn read_after_drop() {
     let x = ('x', 42);
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(x.0, x);
     w.publish();
     assert_eq!(r.get(&x.0).map(|rs| rs.len()), Some(1));
@@ -193,7 +193,7 @@ fn read_after_drop() {
 fn clone_types() {
     let x = b"xyz";
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(&*x, x);
     w.publish();
 
@@ -225,7 +225,7 @@ fn busybusybusy_inner(slow: bool) {
     if !slow {
         n *= 100;
     }
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.publish();
 
     let rs: Vec<_> = (0..threads)
@@ -274,7 +274,7 @@ fn busybusybusy_heap() {
 
     let threads = 2;
     let n = 1000;
-    let (mut w, r) = evbtree::new::<_, Vec<_>>();
+    let (mut w, r) = reader_map::new::<_, Vec<_>>();
     w.publish();
 
     let rs: Vec<_> = (0..threads)
@@ -313,7 +313,7 @@ fn busybusybusy_heap() {
 
 #[test]
 fn minimal_query() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.publish();
     w.insert(1, "b");
@@ -324,7 +324,7 @@ fn minimal_query() {
 
 #[test]
 fn clear_vs_empty() {
-    let (mut w, r) = evbtree::new::<_, ()>();
+    let (mut w, r) = reader_map::new::<_, ()>();
     w.publish();
     assert_eq!(r.get(&1).map(|rs| rs.len()), None);
     w.clear(1);
@@ -344,7 +344,7 @@ fn clear_vs_empty() {
 
 #[test]
 fn non_copy_values() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a".to_string());
     assert_eq!(r.get(&1).map(|rs| rs.len()), None);
 
@@ -360,7 +360,7 @@ fn non_copy_values() {
 
 #[test]
 fn non_minimal_query() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.publish();
@@ -373,7 +373,7 @@ fn non_minimal_query() {
 
 #[test]
 fn absorb_negative_immediate() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.remove_value(1, "a");
@@ -385,7 +385,7 @@ fn absorb_negative_immediate() {
 
 #[test]
 fn absorb_negative_later() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.publish();
@@ -398,7 +398,7 @@ fn absorb_negative_later() {
 
 #[test]
 fn absorb_multi() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.extend(vec![(1, "a"), (1, "b")]);
     w.publish();
 
@@ -417,7 +417,7 @@ fn absorb_multi() {
 
 #[test]
 fn empty() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -431,7 +431,7 @@ fn empty() {
 
 #[test]
 fn empty_random() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -459,7 +459,7 @@ fn empty_random() {
 
 #[test]
 fn empty_random_multiple() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -477,7 +477,7 @@ fn empty_random_multiple() {
 
 #[test]
 fn empty_post_refresh() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -492,7 +492,7 @@ fn empty_post_refresh() {
 
 #[test]
 fn clear() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -517,7 +517,7 @@ fn clear() {
 
 #[test]
 fn replace() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -532,7 +532,7 @@ fn replace() {
 
 #[test]
 fn replace_post_refresh() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -548,7 +548,7 @@ fn replace_post_refresh() {
 
 #[test]
 fn with_meta() {
-    let (mut w, r) = evbtree::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+    let (mut w, r) = reader_map::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
     assert_eq!(
         r.meta_get(&1).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
         None
@@ -572,7 +572,7 @@ fn with_meta() {
 
 #[test]
 fn map_into() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -594,7 +594,7 @@ fn map_into() {
 
 #[test]
 fn keys() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -609,7 +609,7 @@ fn keys() {
 
 #[test]
 fn values() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -635,7 +635,7 @@ fn values() {
 #[cfg_attr(miri, ignore)]
 fn clone_churn() {
     use std::thread;
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     thread::spawn(move || loop {
         let r = r.clone();
@@ -654,7 +654,7 @@ fn clone_churn() {
 #[cfg_attr(miri, ignore)]
 fn bigbag() {
     use std::thread;
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.publish();
 
     let ndistinct = 32;
@@ -705,7 +705,7 @@ fn bigbag() {
 
 #[test]
 fn foreach() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.insert(1, "b");
     w.insert(2, "c");
@@ -734,7 +734,7 @@ fn retain() {
     // do same operations on a plain vector
     // to verify retain implementation
     let mut v = Vec::new();
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     for i in 0..50 {
         w.insert(0, i);
@@ -760,7 +760,7 @@ fn retain() {
 fn get_one() {
     let x = ('x', 42);
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     w.insert(x.0, x);
     w.insert(x.0, x);
@@ -776,7 +776,7 @@ fn get_one() {
 fn insert_remove_value() {
     let x = 'x';
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     w.insert(x, x);
 
@@ -796,7 +796,7 @@ fn insert_remove_value() {
 fn insert_remove_entry() {
     let x = 'x';
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
 
     w.insert(x, x);
 
@@ -811,7 +811,7 @@ fn insert_remove_entry() {
 fn range_works() {
     use std::ops::Bound::{Included, Unbounded};
 
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert_range(vec![(3, 9), (3, 30), (4, 10)], (Included(2), Unbounded));
     w.publish();
 
@@ -843,7 +843,7 @@ fn insert_range_pre_publish() {
     // directly, then add an op that copies the changes over to the other side on the eventual
     // publish. This tests that that works properly for the interval tree by checking reads with
     // both an even and an odd number of publishes
-    let (mut w, r) = evbtree::new::<i32, i32>();
+    let (mut w, r) = reader_map::new::<i32, i32>();
     w.insert_range(vec![], ..);
     w.publish();
 
@@ -869,7 +869,7 @@ fn insert_range_pre_publish() {
 
 #[test]
 fn remove_range_works() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..=6);
     w.insert(5, 7);
     w.insert(9, 20);
@@ -894,7 +894,7 @@ fn remove_range_works() {
 
 #[test]
 fn contains_range_works() {
-    let (mut w, r) = evbtree::new();
+    let (mut w, r) = reader_map::new();
     w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..6);
     w.publish();
 
@@ -907,7 +907,7 @@ fn contains_range_works() {
 
 #[test]
 fn timestamp_changes_on_publish() {
-    let (mut w, r) = evbtree::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+    let (mut w, r) = reader_map::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
     // Map is unitialized before first publish, therefore the timestamp should not
     // return a value.
     assert_eq!(r.timestamp(), None,);

@@ -132,8 +132,8 @@ impl KeyedState {
     /// Remove all rows for a randomly chosen key seeded by `seed`, returning that key along with
     /// the number of bytes freed. Returns `None` if map is empty.
     pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(u64, Vec<DataType>)> {
-        // TODO(grfn): This way of evicting (which also happens in evbtree) is pretty icky - we have
-        // to iterate the sequence of keys, *and* we have to clone out the keys themselves! we
+        // TODO(grfn): This way of evicting (which also happens in reader_map) is pretty icky - we
+        // have to iterate the sequence of keys, *and* we have to clone out the keys themselves! we
         // should find a better way to do that.
         // https://app.clubhouse.io/readysettech/story/154
         let (rs, key) = match *self {
