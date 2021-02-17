@@ -879,11 +879,11 @@ impl Domain {
                                     self.state.insert(node, Box::new(MemoryState::default()));
                                 }
                                 let state = self.state.get_mut(node).unwrap();
-                                for (key, tags) in index {
+                                for (index, tags) in index {
                                     info!(self.log, "told to prepare partial state";
-                                           "key" => ?key,
+                                           "index" => ?index,
                                            "tags" => ?tags);
-                                    state.add_key(&key[..], Some(tags));
+                                    state.add_key(&index, Some(tags));
                                 }
                             }
                             InitialState::IndexedLocal(index) => {
@@ -894,7 +894,7 @@ impl Domain {
                                 for idx in index {
                                     info!(self.log, "told to prepare full state";
                                            "key" => ?idx);
-                                    state.add_key(&idx[..], None);
+                                    state.add_key(&idx, None);
                                 }
                             }
                             InitialState::PartialGlobal {
@@ -1338,8 +1338,8 @@ impl Domain {
                                     _ => Box::new(MemoryState::default()),
                                 }
                             };
-                            for idx in index {
-                                s.add_key(&idx[..], None);
+                            for idx in &index {
+                                s.add_key(idx, None);
                             }
                             assert!(self.state.insert(node, s).is_none());
                         } else {

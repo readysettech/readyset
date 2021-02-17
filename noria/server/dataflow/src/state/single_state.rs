@@ -1,5 +1,5 @@
 use super::mk_key::MakeKey;
-use super::RangeLookupResult;
+use super::{partial_map, RangeLookupResult};
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
@@ -17,13 +17,13 @@ pub(super) struct SingleState {
 }
 
 impl SingleState {
-    pub(super) fn new(columns: &[usize], partial: bool) -> Self {
-        let mut state: KeyedState = columns.into();
+    pub(super) fn new(index: &Index, partial: bool) -> Self {
+        let mut state = KeyedState::from(index);
         if !partial {
             state.insert_range((Bound::Unbounded, Bound::Unbounded))
         }
         Self {
-            key: Vec::from(columns),
+            key: index.columns.clone(),
             state,
             partial,
             rows: 0,
@@ -34,8 +34,8 @@ impl SingleState {
     /// not inserted).
     pub(super) fn insert_row(&mut self, r: Row) -> bool {
         macro_rules! insert_row_match_impl {
-            ($self:ident, $r:ident, $map:ident) => {{
-                use super::partial_map::Entry;
+            ($self:ident, $r:ident, $map:ident, $entry:path) => {{
+                use $entry as Entry;
                 let key = MakeKey::from_row(&$self.key, &*$r);
                 match $map.entry(key) {
                     Entry::Occupied(mut rs) => {
@@ -50,7 +50,7 @@ impl SingleState {
         }
 
         match self.state {
-            KeyedState::Single(ref mut map) => {
+            KeyedState::SingleBTree(ref mut map) => {
                 // treat this specially to avoid the extra Vec
                 debug_assert_eq!(self.key.len(), 1);
                 // i *wish* we could use the entry API here, but it would mean an extra clone
@@ -65,11 +65,51 @@ impl SingleState {
                 }
                 map.insert(r[self.key[0]].clone(), std::iter::once(r).collect());
             }
-            KeyedState::Double(ref mut map) => insert_row_match_impl!(self, r, map),
-            KeyedState::Tri(ref mut map) => insert_row_match_impl!(self, r, map),
-            KeyedState::Quad(ref mut map) => insert_row_match_impl!(self, r, map),
-            KeyedState::Quin(ref mut map) => insert_row_match_impl!(self, r, map),
-            KeyedState::Sex(ref mut map) => insert_row_match_impl!(self, r, map),
+            KeyedState::DoubleBTree(ref mut map) => {
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::TriBTree(ref mut map) => {
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::QuadBTree(ref mut map) => {
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::QuinBTree(ref mut map) => {
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::SexBTree(ref mut map) => {
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::DoubleHash(ref mut map) => {
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
+            }
+            KeyedState::SingleHash(ref mut map) => {
+                // treat this specially to avoid the extra Vec
+                debug_assert_eq!(self.key.len(), 1);
+                // i *wish* we could use the entry API here, but it would mean an extra clone
+                // in the common case of an entry already existing for the given key...
+                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
+                    self.rows += 1;
+                    rs.insert(r);
+                    return true;
+                } else if self.partial {
+                    // trying to insert a record into partial materialization hole!
+                    return false;
+                }
+                map.insert(r[self.key[0]].clone(), std::iter::once(r).collect());
+            }
+            KeyedState::TriHash(ref mut map) => {
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
+            }
+            KeyedState::QuadHash(ref mut map) => {
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
+            }
+            KeyedState::QuinHash(ref mut map) => {
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
+            }
+            KeyedState::SexHash(ref mut map) => {
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
+            }
         }
 
         self.rows += 1;
@@ -105,8 +145,11 @@ impl SingleState {
         };
 
         macro_rules! remove_row_match_impl {
-            ($self:ident, $r:ident, $map:ident) => {{
-                let key = MakeKey::from_row(&$self.key, $r);
+            ($self:ident, $r:ident, $map:ident) => {
+                remove_row_match_impl!($self, $r, $map, _)
+            };
+            ($self:ident, $r:ident, $map:ident, $hint:ty) => {{
+                let key = <$hint as MakeKey<_>>::from_row(&$self.key, $r);
                 if let Some(ref mut rs) = $map.get_mut(&key) {
                     return do_remove(&mut $self.rows, rs);
                 }
@@ -114,25 +157,45 @@ impl SingleState {
         }
 
         match self.state {
-            KeyedState::Single(ref mut map) => {
+            KeyedState::SingleBTree(ref mut map) => {
                 if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
                     return do_remove(&mut self.rows, rs);
                 }
             }
-            KeyedState::Double(ref mut map) => {
+            KeyedState::DoubleBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
             }
-            KeyedState::Tri(ref mut map) => {
+            KeyedState::TriBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
             }
-            KeyedState::Quad(ref mut map) => {
+            KeyedState::QuadBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
             }
-            KeyedState::Quin(ref mut map) => {
+            KeyedState::QuinBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
             }
-            KeyedState::Sex(ref mut map) => {
+            KeyedState::SexBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
+            }
+            KeyedState::SingleHash(ref mut map) => {
+                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
+                    return do_remove(&mut self.rows, rs);
+                }
+            }
+            KeyedState::DoubleHash(ref mut map) => {
+                remove_row_match_impl!(self, r, map, (DataType, _))
+            }
+            KeyedState::TriHash(ref mut map) => {
+                remove_row_match_impl!(self, r, map, (DataType, _, _))
+            }
+            KeyedState::QuadHash(ref mut map) => {
+                remove_row_match_impl!(self, r, map, (DataType, _, _, _))
+            }
+            KeyedState::QuinHash(ref mut map) => {
+                remove_row_match_impl!(self, r, map, (DataType, _, _, _, _))
+            }
+            KeyedState::SexHash(ref mut map) => {
+                remove_row_match_impl!(self, r, map, (DataType, _, _, _, _, _))
             }
         }
         None
@@ -141,11 +204,13 @@ impl SingleState {
     fn mark_point_filled(&mut self, key: Vec1<DataType>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
-            KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
-            KeyedState::Double(ref mut map) => {
+            KeyedState::SingleBTree(ref mut map) => {
+                map.insert(key.next().unwrap(), Rows::default())
+            }
+            KeyedState::DoubleBTree(ref mut map) => {
                 map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
             }
-            KeyedState::Tri(ref mut map) => map.insert(
+            KeyedState::TriBTree(ref mut map) => map.insert(
                 (
                     key.next().unwrap(),
                     key.next().unwrap(),
@@ -153,7 +218,7 @@ impl SingleState {
                 ),
                 Rows::default(),
             ),
-            KeyedState::Quad(ref mut map) => map.insert(
+            KeyedState::QuadBTree(ref mut map) => map.insert(
                 (
                     key.next().unwrap(),
                     key.next().unwrap(),
@@ -162,7 +227,7 @@ impl SingleState {
                 ),
                 Rows::default(),
             ),
-            KeyedState::Quin(ref mut map) => map.insert(
+            KeyedState::QuinBTree(ref mut map) => map.insert(
                 (
                     key.next().unwrap(),
                     key.next().unwrap(),
@@ -172,7 +237,49 @@ impl SingleState {
                 ),
                 Rows::default(),
             ),
-            KeyedState::Sex(ref mut map) => map.insert(
+            KeyedState::SexBTree(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Rows::default(),
+            ),
+            KeyedState::SingleHash(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
+            KeyedState::DoubleHash(ref mut map) => {
+                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
+            }
+            KeyedState::TriHash(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Rows::default(),
+            ),
+            KeyedState::QuadHash(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Rows::default(),
+            ),
+            KeyedState::QuinHash(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Rows::default(),
+            ),
+            KeyedState::SexHash(ref mut map) => map.insert(
                 (
                     key.next().unwrap(),
                     key.next().unwrap(),
@@ -201,24 +308,52 @@ impl SingleState {
     pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
-                KeyedState::Single(ref mut m) => {
+                KeyedState::SingleBTree(ref mut m) => {
                     Box::new(m.remove(&(key[0])).into_iter().flatten())
                 }
-                KeyedState::Double(ref mut m) => {
+                KeyedState::DoubleBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
-                KeyedState::Tri(ref mut m) => {
+                KeyedState::TriBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
-                KeyedState::Quad(ref mut m) => {
+                KeyedState::QuadBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
-                KeyedState::Quin(ref mut m) => {
+                KeyedState::QuinBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
-                KeyedState::Sex(ref mut m) => {
+                KeyedState::SexBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
+                KeyedState::SingleHash(ref mut m) => {
+                    Box::new(m.remove(&(key[0])).into_iter().flatten())
+                }
+                KeyedState::DoubleHash(ref mut m) => Box::new(
+                    m.remove::<(DataType, _)>(&MakeKey::from_key(key))
+                        .into_iter()
+                        .flatten(),
+                ),
+                KeyedState::TriHash(ref mut m) => Box::new(
+                    m.remove::<(DataType, _, _)>(&MakeKey::from_key(key))
+                        .into_iter()
+                        .flatten(),
+                ),
+                KeyedState::QuadHash(ref mut m) => Box::new(
+                    m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
+                        .into_iter()
+                        .flatten(),
+                ),
+                KeyedState::QuinHash(ref mut m) => Box::new(
+                    m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                        .into_iter()
+                        .flatten(),
+                ),
+                KeyedState::SexHash(ref mut m) => Box::new(
+                    m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                        .into_iter()
+                        .flatten(),
+                ),
             },
             KeyComparison::Range(range) => {
                 macro_rules! remove_range {
@@ -231,14 +366,19 @@ impl SingleState {
                 }
 
                 match self.state {
-                    KeyedState::Single(ref mut m) => remove_range!(m, range, DataType),
-                    KeyedState::Double(ref mut m) => remove_range!(m, range, (DataType, _)),
-                    KeyedState::Tri(ref mut m) => remove_range!(m, range, (DataType, _, _)),
-                    KeyedState::Quad(ref mut m) => remove_range!(m, range, (DataType, _, _, _)),
-                    KeyedState::Quin(ref mut m) => remove_range!(m, range, (DataType, _, _, _, _)),
-                    KeyedState::Sex(ref mut m) => {
+                    KeyedState::SingleBTree(ref mut m) => remove_range!(m, range, DataType),
+                    KeyedState::DoubleBTree(ref mut m) => remove_range!(m, range, (DataType, _)),
+                    KeyedState::TriBTree(ref mut m) => remove_range!(m, range, (DataType, _, _)),
+                    KeyedState::QuadBTree(ref mut m) => {
+                        remove_range!(m, range, (DataType, _, _, _))
+                    }
+                    KeyedState::QuinBTree(ref mut m) => {
+                        remove_range!(m, range, (DataType, _, _, _, _))
+                    }
+                    KeyedState::SexBTree(ref mut m) => {
                         remove_range!(m, range, (DataType, _, _, _, _, _))
                     }
+                    _ => panic!("mark_hole with a range key called on a HashMap SingleState"),
                 }
             }
         };
@@ -252,12 +392,18 @@ impl SingleState {
     pub(super) fn clear(&mut self) {
         self.rows = 0;
         match self.state {
-            KeyedState::Single(ref mut map) => map.clear(),
-            KeyedState::Double(ref mut map) => map.clear(),
-            KeyedState::Tri(ref mut map) => map.clear(),
-            KeyedState::Quad(ref mut map) => map.clear(),
-            KeyedState::Quin(ref mut map) => map.clear(),
-            KeyedState::Sex(ref mut map) => map.clear(),
+            KeyedState::SingleBTree(ref mut map) => map.clear(),
+            KeyedState::DoubleBTree(ref mut map) => map.clear(),
+            KeyedState::TriBTree(ref mut map) => map.clear(),
+            KeyedState::QuadBTree(ref mut map) => map.clear(),
+            KeyedState::QuinBTree(ref mut map) => map.clear(),
+            KeyedState::SexBTree(ref mut map) => map.clear(),
+            KeyedState::SingleHash(ref mut map) => map.clear(),
+            KeyedState::DoubleHash(ref mut map) => map.clear(),
+            KeyedState::TriHash(ref mut map) => map.clear(),
+            KeyedState::QuadHash(ref mut map) => map.clear(),
+            KeyedState::QuinHash(ref mut map) => map.clear(),
+            KeyedState::SexHash(ref mut map) => map.clear(),
         };
     }
 
@@ -293,14 +439,21 @@ impl SingleState {
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
         match self.state {
-            KeyedState::Single(ref map) => Box::new(map.values()),
-            KeyedState::Double(ref map) => Box::new(map.values()),
-            KeyedState::Tri(ref map) => Box::new(map.values()),
-            KeyedState::Quad(ref map) => Box::new(map.values()),
-            KeyedState::Quin(ref map) => Box::new(map.values()),
-            KeyedState::Sex(ref map) => Box::new(map.values()),
+            KeyedState::SingleBTree(ref map) => Box::new(map.values()),
+            KeyedState::DoubleBTree(ref map) => Box::new(map.values()),
+            KeyedState::TriBTree(ref map) => Box::new(map.values()),
+            KeyedState::QuadBTree(ref map) => Box::new(map.values()),
+            KeyedState::QuinBTree(ref map) => Box::new(map.values()),
+            KeyedState::SexBTree(ref map) => Box::new(map.values()),
+            KeyedState::SingleHash(ref map) => Box::new(map.values()),
+            KeyedState::DoubleHash(ref map) => Box::new(map.values()),
+            KeyedState::TriHash(ref map) => Box::new(map.values()),
+            KeyedState::QuadHash(ref map) => Box::new(map.values()),
+            KeyedState::QuinHash(ref map) => Box::new(map.values()),
+            KeyedState::SexHash(ref map) => Box::new(map.values()),
         }
     }
+
     pub(super) fn key(&self) -> &[usize] {
         &self.key
     }
@@ -343,14 +496,14 @@ mod tests {
 
     #[test]
     fn mark_filled_point() {
-        let mut state = SingleState::new(&[0], true);
+        let mut state = SingleState::new(&Index::new(IndexType::BTreeMap, vec![0]), true);
         state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
         assert!(state.lookup(&KeyType::from(&[0.into()])).is_some())
     }
 
     #[test]
     fn mark_filled_range() {
-        let mut state = SingleState::new(&[0], true);
+        let mut state = SingleState::new(&Index::new(IndexType::BTreeMap, vec![0]), true);
         state.mark_filled(KeyComparison::Range((
             Bound::Included(vec1![0.into()]),
             Bound::Excluded(vec1![5.into()]),
@@ -367,7 +520,7 @@ mod tests {
 
         #[test]
         fn equal() {
-            let mut state = SingleState::new(&[0], true);
+            let mut state = SingleState::new(&Index::new(IndexType::BTreeMap, vec![0]), true);
             let key = KeyComparison::Equal(vec1![0.into()]);
             state.mark_filled(key.clone());
             state.insert_row(vec![0.into(), 1.into()].into());
@@ -377,7 +530,7 @@ mod tests {
 
         #[test]
         fn range() {
-            let mut state = SingleState::new(&[0], true);
+            let mut state = SingleState::new(&Index::new(IndexType::BTreeMap, vec![0]), true);
             let key =
                 KeyComparison::from_range(&(vec1![DataType::from(0)]..vec1![DataType::from(10)]));
             state.mark_filled(key.clone());

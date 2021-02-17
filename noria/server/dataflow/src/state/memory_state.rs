@@ -34,8 +34,8 @@ impl SizeOf for MemoryState {
 }
 
 impl State for MemoryState {
-    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
-        let (i, exists) = if let Some(i) = self.state_for(columns) {
+    fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
+        let (i, exists) = if let Some(i) = self.state_for(&index.columns) {
             // already keyed by this key; just adding tags
             (i, true)
         } else {
@@ -53,8 +53,7 @@ impl State for MemoryState {
             return;
         }
 
-        self.state
-            .push(SingleState::new(columns, partial.is_some()));
+        self.state.push(SingleState::new(index, partial.is_some()));
 
         if !self.state.is_empty() && partial.is_none() {
             // we need to *construct* the index!
@@ -262,7 +261,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(&[0], None);
+        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.process_records(&mut Vec::from(&records[..3]).into(), None);
         state.process_records(&mut records[3].clone().into(), None);
 
@@ -287,9 +286,9 @@ mod tests {
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
         let row: Vec<DataType> = vec![10.into(), "Cat".into()];
-        state.add_key(&[0], None);
+        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(&[1], None);
+        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
@@ -313,7 +312,7 @@ mod tests {
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
                 let tag = Tag::new(1);
-                state.add_key(&[0], Some(vec![tag]));
+                state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
                 state.mark_filled(
                     KeyComparison::from_range(
                         &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
@@ -348,7 +347,7 @@ mod tests {
 
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
-                state.add_key(&[0], None);
+                state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
                 state.process_records(
                     &mut (0..10)
                         .map(|n| Record::from(vec![n.into()]))

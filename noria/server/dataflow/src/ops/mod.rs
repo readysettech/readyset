@@ -300,7 +300,7 @@ pub mod test {
             let idx = self.graph[global].suggest_indexes(global);
             for (tbl, col) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
-                    s.add_key(&col[..], None);
+                    s.add_key(&Index::new(IndexType::BTreeMap, col), None);
                 }
             }
             // and get rid of states we don't need
@@ -376,7 +376,7 @@ pub mod test {
             let mut state = MemoryState::default();
             for (tbl, col) in idx {
                 if tbl == base.as_global() {
-                    state.add_key(&col[..], None);
+                    state.add_key(&Index::new(IndexType::BTreeMap, col), None);
                 }
             }
 

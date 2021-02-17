@@ -1,4 +1,3 @@
-use petgraph;
 use serde::{Deserialize, Serialize};
 
 use crate::domain;
@@ -42,8 +41,8 @@ pub enum TriggerEndpoint {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum InitialState {
-    PartialLocal(Vec<(Vec<usize>, Vec<Tag>)>),
-    IndexedLocal(HashSet<Vec<usize>>),
+    PartialLocal(Vec<(Index, Vec<Tag>)>),
+    IndexedLocal(HashSet<Index>),
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
@@ -211,7 +210,7 @@ pub enum Packet {
     Ready {
         node: LocalNodeIndex,
         purge: bool,
-        index: HashSet<Vec<usize>>,
+        index: HashSet<Index>,
     },
 
     /// Notification from Blender for domain to terminate

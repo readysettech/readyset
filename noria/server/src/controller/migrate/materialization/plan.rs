@@ -540,11 +540,24 @@ impl<'a> Plan<'a> {
                     let indices = self
                         .tags
                         .drain()
-                        .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
+                        .map(|(k, paths)| {
+                            (
+                                // TODO(grfn): Pick index type based on which kinds of query we'd
+                                // like to support (ch266)
+                                Index::new(IndexType::BTreeMap, k),
+                                paths.into_iter().map(|(tag, _)| tag).collect(),
+                            )
+                        })
                         .collect();
                     InitialState::PartialLocal(indices)
                 } else {
-                    let indices = self.tags.drain().map(|(k, _)| k).collect();
+                    let indices = self
+                        .tags
+                        .drain()
+                        // TODO(grfn): Pick index type based on which kinds of query we'd like to
+                        // support (ch266)
+                        .map(|(k, _)| Index::new(IndexType::BTreeMap, k))
+                        .collect();
                     InitialState::IndexedLocal(indices)
                 }
             });
