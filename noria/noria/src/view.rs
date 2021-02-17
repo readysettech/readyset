@@ -549,6 +549,22 @@ pub struct ViewQuery {
     pub timestamp: Option<Timestamp>,
 }
 
+// TODO(andrew): consolidate From impls once RYW fully adopted
+impl From<(Vec<KeyComparison>, bool, Option<Timestamp>)> for ViewQuery {
+    fn from(
+        (key_comparisons, block, ticket): (Vec<KeyComparison>, bool, Option<Timestamp>),
+    ) -> Self {
+        Self {
+            key_comparisons,
+            block,
+            order_by: None,
+            limit: None,
+            filter: None,
+            timestamp: ticket,
+        }
+    }
+}
+
 impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
     fn from((key_comparisons, block): (Vec<KeyComparison>, bool)) -> Self {
         Self {
@@ -759,6 +775,10 @@ impl View {
         Ok(vec)
     }
 
+    // TODO(andrew): consolidate RYW and normal reads into cohesive API once API design is settled.
+    // RYW functionality currently added as duplicate methods so as not to disrupt current
+    // reader usage until RYW is fully adopted
+
     /// Issue a raw `ViewQuery` against this view, and return the results.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
@@ -767,6 +787,13 @@ impl View {
     pub async fn raw_lookup(&mut self, query: ViewQuery) -> Result<Vec<Results>, ViewError> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
         self.call(query).await
+    }
+
+    /// Retrieve the query results for the given parameter value.
+    ///
+    /// The method will block if the results are not yet available only when `block` is `true`.
+    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
+        self.lookup_ryw(key, block, None).await
     }
 
     /// Retrieve the query results for the given parameter values.
@@ -779,31 +806,8 @@ impl View {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
     ) -> Result<Vec<Results>, ViewError> {
-        self.raw_lookup((key_comparisons, block).into()).await
+        self.raw_lookup((key_comparisons, block, None).into()).await
     }
-
-    /// Retrieve the query results for the given parameter value.
-    ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
-        // TODO: Optimized version of this function?
-        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
-        let rs = self
-            .multi_lookup(vec![KeyComparison::Equal(key)], block)
-            .await?;
-        Ok(rs.into_iter().next().unwrap())
-    }
-
-    /// Retrieve the query results for the given range of parameter values
-    ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    // pub async fn range(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
-    //     // TODO: Optimized version of this function?
-    //     let rs = self
-    //         .multi_lookup(vec![KeyComparison::Equal(Vec::from(key))], block)
-    //         .await?;
-    //     Ok(rs.into_iter().next().unwrap())
-    // }
 
     /// Retrieve the first query result for the given parameter value.
     ///
@@ -814,9 +818,61 @@ impl View {
         block: bool,
     ) -> Result<Option<Row>, ViewError> {
         // TODO: Optimized version of this function?
+        self.lookup_first_ryw(key, block, None).await
+    }
+
+    /// Retrieve the query results for the given parameter value.
+    ///
+    /// The method will block if the results are not yet available or do not have a timestamp
+    /// satisfying the `ticket ` requirement only when `block` is `true`.
+    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
+    /// missing state will be backfilled (asynchronously if `block` is `false`).
+    pub async fn lookup_ryw(
+        &mut self,
+        key: &[DataType],
+        block: bool,
+        ticket: Option<Timestamp>,
+    ) -> Result<Results, ViewError> {
+        // TODO: Optimized version of this function?
         let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
         let rs = self
-            .multi_lookup(vec![KeyComparison::Equal(key)], block)
+            .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
+            .await?;
+        Ok(rs.into_iter().next().unwrap())
+    }
+
+    /// Retrieve the query results for the given parameter values
+    ///
+    /// The method will block if the results are not yet available or do not have a timestamp
+    /// satisfying the `ticket ` requirement only when `block` is `true`.
+    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
+    /// missing state will be backfilled (asynchronously if `block` is `false`).
+    pub async fn multi_lookup_ryw(
+        &mut self,
+        key_comparisons: Vec<KeyComparison>,
+        block: bool,
+        ticket: Option<Timestamp>,
+    ) -> Result<Vec<Results>, ViewError> {
+        self.raw_lookup((key_comparisons, block, ticket).into())
+            .await
+    }
+
+    /// Retrieve the first query result for the given parameter value.
+    ///
+    /// The method will block if the results are not yet available or do not have a timestamp
+    /// satisfying the `ticket ` requirement only when `block` is `true`.
+    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
+    /// missing state will be backfilled (asynchronously if `block` is `false`).
+    pub async fn lookup_first_ryw(
+        &mut self,
+        key: &[DataType],
+        block: bool,
+        ticket: Option<Timestamp>,
+    ) -> Result<Option<Row>, ViewError> {
+        // TODO: Optimized version of this function?
+        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
+        let rs = self
+            .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
         Ok(rs.into_iter().next().unwrap().into_iter().next())
     }
