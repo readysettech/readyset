@@ -24,8 +24,9 @@ pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
 
 pub(crate) trait State: SizeOf + Send {
-    /// Add an index keyed by the given columns and replayed to by the given partial tags.
-    fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>);
+    /// Add an index of the given type, keyed by the given columns and replayed to by the given
+    /// partial tags.
+    fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>);
 
     /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
     /// infromation and is thus "not useful".

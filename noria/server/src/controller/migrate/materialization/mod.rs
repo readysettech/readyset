@@ -12,7 +12,6 @@ use crate::controller::{
 };
 use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::prelude::*;
-use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -817,7 +816,14 @@ impl Materializations {
                     .send_to_healthy(
                         Box::new(Packet::PrepareState {
                             node: n.local_addr(),
-                            state: InitialState::IndexedLocal(index_on),
+                            state: InitialState::IndexedLocal(
+                                index_on
+                                    .into_iter()
+                                    // TODO(grfn): Pick index type based on which kinds of query
+                                    // we'd like to support (ch266)
+                                    .map(|cols| Index::new(IndexType::BTreeMap, cols))
+                                    .collect(),
+                            ),
                         }),
                         workers,
                     )
@@ -853,7 +859,12 @@ impl Materializations {
                     Box::new(Packet::Ready {
                         node: n.local_addr(),
                         purge: n.purge,
-                        index: index_on,
+                        index: index_on
+                            .into_iter()
+                            // TODO(grfn): Pick index type based on which kinds of query
+                            // we'd like to support (ch266)
+                            .map(|cols| Index::new(IndexType::BTreeMap, cols))
+                            .collect(),
                     }),
                     workers,
                 )

@@ -519,8 +519,8 @@ mod tests {
 
         let mut states = StateMap::default();
         let row: Record = vec![1.into(), 2.into(), 3.into()].into();
-        state.add_key(&[0], None);
-        state.add_key(&[1], None);
+        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
         state.process_records(&mut row.into(), None);
         states.insert(local, state);
 
