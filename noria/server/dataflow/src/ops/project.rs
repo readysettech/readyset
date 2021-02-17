@@ -253,7 +253,7 @@ impl Ingredient for Project {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         HashMap::new()
     }
 

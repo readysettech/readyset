@@ -1,3 +1,4 @@
+use maplit::hashmap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -540,13 +541,11 @@ impl Ingredient for Join {
         }
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        vec![
-            (self.left.as_global(), vec![self.on.0]),
-            (self.right.as_global(), vec![self.on.1]),
-        ]
-        .into_iter()
-        .collect()
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Index> {
+        hashmap! {
+            self.left.as_global() => Index::hash_map(vec![self.on.0]),
+            self.right.as_global() => Index::hash_map(vec![self.on.1]),
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -741,15 +740,12 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        use std::collections::HashMap;
         let me = 2.into();
         let (g, l, r) = setup();
-        let hm: HashMap<_, _> = vec![
-            (l.as_global(), vec![0]), /* join column for left */
-            (r.as_global(), vec![0]), /* join column for right */
-        ]
-        .into_iter()
-        .collect();
+        let hm = hashmap! {
+            l.as_global() => Index::hash_map(vec![0]), // join column for left
+            r.as_global() => Index::hash_map(vec![0]), // join column for right
+        };
         assert_eq!(g.node().suggest_indexes(me), hm);
     }
 

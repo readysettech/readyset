@@ -1,3 +1,4 @@
+use maplit::hashmap;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use vec1::vec1;
@@ -124,9 +125,11 @@ impl Ingredient for Latest {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
         // index all key columns
-        Some((this, vec![self.key])).into_iter().collect()
+        hashmap! {
+            this => Index::hash_map(vec![self.key])
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -269,7 +272,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], vec![1]);
+        assert_eq!(idx[&me], Index::hash_map(vec![1]));
     }
 
     #[test]

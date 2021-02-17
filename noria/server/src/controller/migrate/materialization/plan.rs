@@ -14,7 +14,7 @@ pub(super) struct Plan<'a> {
     workers: &'a HashMap<WorkerIdentifier, Worker>,
     partial: bool,
 
-    tags: HashMap<Vec<usize>, Vec<(Tag, DomainIndex)>>,
+    tags: HashMap<Index, Vec<(Tag, DomainIndex)>>,
     paths: HashMap<Tag, Vec<NodeIndex>>,
     pending: Vec<PendingReplay>,
 }
@@ -106,7 +106,7 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn add(&mut self, index_on: Vec<usize>, replies: &mut DomainReplies) {
+    pub(super) fn add(&mut self, index_on: Index, replies: &mut DomainReplies) {
         if !self.partial && !self.paths.is_empty() {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
@@ -115,7 +115,7 @@ impl<'a> Plan<'a> {
             return;
         }
 
-        let paths = self.paths(&index_on[..]);
+        let paths = self.paths(&index_on.columns[..]);
 
         // all right, story time!
         //
@@ -540,24 +540,11 @@ impl<'a> Plan<'a> {
                     let indices = self
                         .tags
                         .drain()
-                        .map(|(k, paths)| {
-                            (
-                                // TODO(grfn): Pick index type based on which kinds of query we'd
-                                // like to support (ch266)
-                                Index::new(IndexType::BTreeMap, k),
-                                paths.into_iter().map(|(tag, _)| tag).collect(),
-                            )
-                        })
+                        .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
                         .collect();
                     InitialState::PartialLocal(indices)
                 } else {
-                    let indices = self
-                        .tags
-                        .drain()
-                        // TODO(grfn): Pick index type based on which kinds of query we'd like to
-                        // support (ch266)
-                        .map(|(k, _)| Index::new(IndexType::BTreeMap, k))
-                        .collect();
+                    let indices = self.tags.drain().map(|(k, _)| k).collect();
                     InitialState::IndexedLocal(indices)
                 }
             });

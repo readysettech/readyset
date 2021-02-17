@@ -65,7 +65,7 @@ impl Ingredient for ParamFilter {
         vec![self.src.as_global()]
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         HashMap::new()
     }
 

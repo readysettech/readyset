@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use maplit::hashmap;
 use noria::{Modification, Operation, TableOperation};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -270,11 +271,11 @@ impl Base {
         results.into()
     }
 
-    pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        if self.primary_key.is_some() {
-            Some((n, self.primary_key.as_ref().unwrap().clone()))
-                .into_iter()
-                .collect()
+    pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Index> {
+        if let Some(ref pk) = self.primary_key {
+            hashmap! {
+                n => Index::hash_map(pk.clone())
+            }
         } else {
             HashMap::new()
         }
@@ -335,8 +336,8 @@ mod tests {
         graph.node_weight_mut(global).unwrap().on_commit(&remap);
         graph.node_weight_mut(global).unwrap().add_to(0.into());
 
-        for (_, col) in graph[global].suggest_indexes(global) {
-            state.add_key(&Index::new(IndexType::BTreeMap, col), None);
+        for (_, index) in graph[global].suggest_indexes(global) {
+            state.add_key(&index, None);
         }
 
         let mut states = StateMap::new();

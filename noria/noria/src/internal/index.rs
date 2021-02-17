@@ -30,8 +30,30 @@ impl Index {
         }
     }
 
+    /// Construct a new [`HashMap`](IndexType::HashMap) index with the given column indices
+    pub fn hash_map(columns: Vec<usize>) -> Self {
+        Self::new(IndexType::HashMap, columns)
+    }
+
+    /// Construct a new [`BTreeMap`](IndexType::HashMap) index with the given column indices
+    pub fn btree_map(columns: Vec<usize>) -> Self {
+        Self::new(IndexType::BTreeMap, columns)
+    }
+
     /// Returns the length of this index's key
-    pub fn key_length(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.columns.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+}
+
+impl std::ops::Index<usize> for Index {
+    type Output = usize;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.columns[index]
     }
 }
