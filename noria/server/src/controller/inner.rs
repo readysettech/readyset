@@ -797,7 +797,7 @@ impl ControllerInner {
         }
     }
 
-    /// Obtain a TableBuild that can be used to construct a Table to perform writes and deletes
+    /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
     fn table_builder(&self, base: &str) -> Option<TableBuilder> {
         let ni = match self.recipe.node_addr_for(base) {
@@ -811,6 +811,7 @@ impl ControllerInner {
         let mut key = self.ingredients[ni]
             .suggest_indexes(ni)
             .remove(&ni)
+            .map(|index| index.columns)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {

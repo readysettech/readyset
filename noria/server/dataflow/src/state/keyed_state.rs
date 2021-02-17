@@ -314,7 +314,7 @@ impl KeyedState {
 impl From<&Index> for KeyedState {
     fn from(index: &Index) -> Self {
         use IndexType::*;
-        match (index.key_length(), &index.index_type) {
+        match (index.len(), &index.index_type) {
             (1, BTreeMap) => KeyedState::SingleBTree(Default::default()),
             (2, BTreeMap) => KeyedState::DoubleBTree(Default::default()),
             (3, BTreeMap) => KeyedState::TriBTree(Default::default()),

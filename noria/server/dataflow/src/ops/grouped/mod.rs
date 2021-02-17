@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
+use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
@@ -299,9 +300,11 @@ where
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
         // index by our primary key
-        Some((this, self.out_key.clone())).into_iter().collect()
+        hashmap! {
+            this => Index::hash_map(self.out_key.clone())
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

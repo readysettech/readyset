@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use maplit::hashmap;
+
 use crate::prelude::*;
 
 /// This will get distinct records from a set of records compared over a given set of columns
@@ -156,8 +158,10 @@ impl Ingredient for Distinct {
         true
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        vec![(this, self.group_by.clone())].into_iter().collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
+        hashmap! {
+            this => Index::hash_map(self.group_by.clone())
+        }
     }
 }
 

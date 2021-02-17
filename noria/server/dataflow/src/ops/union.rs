@@ -782,7 +782,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         // index nothing (?)
         HashMap::new()
     }

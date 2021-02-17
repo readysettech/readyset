@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use maplit::hashmap;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use vec1::vec1;
@@ -178,13 +179,11 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        vec![
-            (self.signal.as_global(), vec![0]),
-            (self.src.as_global(), vec![self.signal_key]),
-        ]
-        .into_iter()
-        .collect()
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+        hashmap! {
+            self.signal.as_global() => Index::hash_map(vec![0]),
+            self.src.as_global() => Index::hash_map(vec![self.signal_key]),
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

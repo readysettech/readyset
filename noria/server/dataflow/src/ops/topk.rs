@@ -1,4 +1,5 @@
 use launchpad::hash::hash;
+use maplit::hashmap;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -6,7 +7,7 @@ use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::ops::Index;
+use std::ops;
 
 use crate::prelude::*;
 
@@ -101,7 +102,7 @@ impl TopK {
     /// Project the columns we are grouping by out of the given record
     fn project_group<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DataType>
     where
-        R: Index<usize, Output = DataType> + ?Sized,
+        R: ops::Index<usize, Output = DataType> + ?Sized,
     {
         self.group_by
             .iter()
@@ -113,7 +114,7 @@ impl TopK {
     /// `self.extra_records`
     fn group_hash<'rec, R>(&self, rec: &'rec R) -> GroupHash
     where
-        R: Index<usize, Output = DataType> + ?Sized,
+        R: ops::Index<usize, Output = DataType> + ?Sized,
     {
         let mut hasher = DefaultHasher::new();
         self.project_group(rec).hash(&mut hasher);
@@ -355,8 +356,10 @@ impl Ingredient for TopK {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        vec![(this, self.group_by.clone())].into_iter().collect()
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
+        hashmap! {
+            this => Index::hash_map(self.group_by.clone())
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -564,7 +567,7 @@ mod tests {
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 1);
-        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
+        assert_eq!(*idx.iter().next().unwrap().1, Index::hash_map(vec![1]));
     }
 
     #[test]

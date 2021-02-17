@@ -158,7 +158,7 @@ where
     ///
     /// Note that a vector of length > 1 for any one node means that that node should be given a
     /// *compound* key, *not* that multiple columns should be independently indexed.
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>>;
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.

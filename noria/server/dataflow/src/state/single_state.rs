@@ -19,7 +19,7 @@ pub(super) struct SingleState {
 impl SingleState {
     pub(super) fn new(index: &Index, partial: bool) -> Self {
         let mut state = KeyedState::from(index);
-        if !partial {
+        if !partial && index.index_type == IndexType::BTreeMap {
             state.insert_range((Bound::Unbounded, Bound::Unbounded))
         }
         Self {

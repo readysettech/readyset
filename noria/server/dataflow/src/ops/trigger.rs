@@ -1,3 +1,5 @@
+use maplit::hashmap;
+
 use crate::prelude::*;
 use std::collections::HashMap;
 
@@ -125,9 +127,11 @@ impl Ingredient for Trigger {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
         // index all key columns
-        Some((this, vec![self.key])).into_iter().collect()
+        hashmap! {
+            this => Index::hash_map(vec![self.key])
+        }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {

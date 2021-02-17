@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod plan;
 
-type Indices = HashSet<Vec<usize>>;
+type Indices = HashSet<Index>;
 
 /// Strategy for determining which (partial) materializations should be placed beyond the
 /// materialization frontier.
@@ -133,27 +133,28 @@ impl Materializations {
         //
 
         // Holds all lookup obligations. Keyed by the node that should be materialized.
-        let mut lookup_obligations = HashMap::new();
+        let mut lookup_obligations: HashMap<NodeIndex, Indices> = HashMap::new();
 
         // Holds all replay obligations. Keyed by the node whose *parent* should be materialized.
-        let mut replay_obligations = HashMap::new();
+        let mut replay_obligations: HashMap<NodeIndex, Indices> = HashMap::new();
 
         // Find indices we need to add.
         for &ni in new {
             let n = &graph[ni];
 
             let mut indices = if n.is_reader() {
-                let key = n.with_reader(|r| r.key()).unwrap();
-                if key.is_none() {
+                if let Some(key) = n.with_reader(|r| r.key()).unwrap() {
+                    // for a reader that will get lookups, we'd like to have an index above us
+                    // somewhere on our key so that we can make the reader partial
+                    let mut i = HashMap::new();
+                    // TODO(grfn): once the reader knows its own index type, ask it what that is
+                    // here
+                    i.insert(ni, (Index::btree_map(key.to_vec()), false));
+                    i
+                } else {
                     // only streaming, no indexing needed
                     continue;
                 }
-
-                // for a reader that will get lookups, we'd like to have an index above us
-                // somewhere on our key so that we can make the reader partial
-                let mut i = HashMap::new();
-                i.insert(ni, (Vec::from(key.unwrap()), false));
-                i
             } else {
                 n.suggest_indexes(ni)
                     .into_iter()
@@ -164,7 +165,7 @@ impl Materializations {
             if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, (vec![0], true));
+                indices.insert(ni, (Index::btree_map(vec![0]), true));
             }
 
             for (ni, (cols, lookup)) in indices {
@@ -188,41 +189,41 @@ impl Materializations {
         }
 
         // map all the indices to the corresponding columns in the parent
-        fn map_indices(
-            n: &Node,
-            parent: NodeIndex,
-            indices: &HashSet<Vec<usize>>,
-        ) -> Result<HashSet<Vec<usize>>, String> {
+        fn map_indices(n: &Node, parent: NodeIndex, indices: &Indices) -> Result<Indices, String> {
             indices
                 .iter()
                 .map(|index| {
-                    index
-                        .iter()
-                        .map(|&col| {
-                            if !n.is_internal() {
-                                if n.is_base() {
-                                    unreachable!();
+                    Ok(Index::new(
+                        index.index_type,
+                        index
+                            .columns
+                            .iter()
+                            .map(|&col| {
+                                if !n.is_internal() {
+                                    if n.is_base() {
+                                        unreachable!();
+                                    }
+                                    return Ok(col);
                                 }
-                                return Ok(col);
-                            }
 
-                            let really = n.parent_columns(col);
-                            let really = really
-                                .into_iter()
-                                .find(|&(anc, _)| anc == parent)
-                                .and_then(|(_, col)| col);
+                                let really = n.parent_columns(col);
+                                let really = really
+                                    .into_iter()
+                                    .find(|&(anc, _)| anc == parent)
+                                    .and_then(|(_, col)| col);
 
-                            really.ok_or_else(|| {
-                                format!(
-                                    "could not resolve obligation past operator;\
+                                really.ok_or_else(|| {
+                                    format!(
+                                        "could not resolve obligation past operator;\
                                      node => {}, ancestor => {}, column => {}",
-                                    n.global_addr().index(),
-                                    parent.index(),
-                                    col
-                                )
+                                        n.global_addr().index(),
+                                        parent.index(),
+                                        col
+                                    )
+                                })
                             })
-                        })
-                        .collect()
+                            .collect::<Result<Vec<usize>, String>>()?,
+                    ))
                 })
                 .collect()
         }
@@ -383,7 +384,8 @@ impl Materializations {
                     break;
                 }
 
-                let paths = keys::provenance_of(graph, ni, &index[..], plan::Plan::on_join(graph));
+                let paths =
+                    keys::provenance_of(graph, ni, &index.columns[..], plan::Plan::on_join(graph));
 
                 for path in paths {
                     for (pni, cols) in path.into_iter().skip(1) {
@@ -393,7 +395,10 @@ impl Materializations {
                             able = false;
                             break 'attempt;
                         }
-                        let index: Vec<_> = cols.into_iter().map(Option::unwrap).collect();
+                        let index = Index::new(
+                            index.index_type,
+                            cols.into_iter().map(Option::unwrap).collect(),
+                        );
                         if let Some(m) = self.have.get(&pni) {
                             if !m.contains(&index) {
                                 // we'd need to add an index to this view,
@@ -563,8 +568,12 @@ impl Materializations {
                 }
 
                 for index in added {
-                    let paths =
-                        keys::provenance_of(graph, ni, &index[..], plan::Plan::on_join(graph));
+                    let paths = keys::provenance_of(
+                        graph,
+                        ni,
+                        &index.columns[..],
+                        plan::Plan::on_join(graph),
+                    );
 
                     for path in paths {
                         for (pni, columns) in path {
@@ -578,12 +587,13 @@ impl Materializations {
                                     // the child having state present for that key.
 
                                     // do we share a column?
-                                    if index.iter().all(|&c| !columns.contains(&Some(c))) {
+                                    if index.columns.iter().all(|&c| !columns.contains(&Some(c))) {
                                         continue;
                                     }
 
                                     // is there a column we *don't* share?
                                     let unshared = index
+                                        .columns
                                         .iter()
                                         .cloned()
                                         .find(|&c| !columns.contains(&Some(c)))
@@ -591,7 +601,7 @@ impl Materializations {
                                             columns
                                                 .iter()
                                                 .map(|c| c.unwrap())
-                                                .find(|c| !index.contains(&c))
+                                                .find(|c| !index.columns.contains(&c))
                                         });
                                     if let Some(not_shared) = unshared {
                                         println!("{}", graphviz(graph, true, &self));
@@ -816,14 +826,7 @@ impl Materializations {
                     .send_to_healthy(
                         Box::new(Packet::PrepareState {
                             node: n.local_addr(),
-                            state: InitialState::IndexedLocal(
-                                index_on
-                                    .into_iter()
-                                    // TODO(grfn): Pick index type based on which kinds of query
-                                    // we'd like to support (ch266)
-                                    .map(|cols| Index::new(IndexType::BTreeMap, cols))
-                                    .collect(),
-                            ),
+                            state: InitialState::IndexedLocal(index_on),
                         }),
                         workers,
                     )
@@ -859,12 +862,7 @@ impl Materializations {
                     Box::new(Packet::Ready {
                         node: n.local_addr(),
                         purge: n.purge,
-                        index: index_on
-                            .into_iter()
-                            // TODO(grfn): Pick index type based on which kinds of query
-                            // we'd like to support (ch266)
-                            .map(|cols| Index::new(IndexType::BTreeMap, cols))
-                            .collect(),
+                        index: index_on,
                     }),
                     workers,
                 )
@@ -888,7 +886,7 @@ impl Materializations {
     fn ready_one(
         &mut self,
         ni: NodeIndex,
-        index_on: &mut HashSet<Vec<usize>>,
+        index_on: &mut Indices,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -946,7 +944,7 @@ impl Materializations {
     fn setup(
         &mut self,
         ni: NodeIndex,
-        index_on: &mut HashSet<Vec<usize>>,
+        index_on: &mut Indices,
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -958,8 +956,10 @@ impl Materializations {
             graph[ni]
                 .with_reader(|r| {
                     assert!(r.is_materialized());
-                    if let Some(rh) = r.key() {
-                        index_on.insert(Vec::from(rh));
+                    if let Some(rk) = r.key() {
+                        // TODO(grfn): once the reader knows its own index type, ask it what that is
+                        // here
+                        index_on.insert(Index::btree_map(rk.to_vec()));
                     }
                 })
                 .unwrap();
