@@ -2,6 +2,7 @@
 members = [
     "msql-srv",
     "nom-sql",
+    "noria-client",
     "noria-mysql",
     "noria/noria",
     "noria/server",

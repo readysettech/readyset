@@ -7,26 +7,17 @@
 extern crate clap;
 extern crate anyhow;
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate tracing;
 
-mod backend;
-mod convert;
-mod referred_tables;
-mod rewrite;
-mod schema;
-mod utils;
-
-use crate::backend::{
-    mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder,
-};
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
+use noria_client::backend::{
+    mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder,
+};
 use std::collections::HashMap;
 use std::io::{self};
 use std::sync::atomic::AtomicUsize;
@@ -34,7 +25,7 @@ use std::sync::{Arc, RwLock};
 
 use tracing::Level;
 
-use crate::backend::Writer;
+use noria_client::backend::Writer;
 
 // Just give me a damn terminal logger
 // Duplicated from distributary, as the API subcrate doesn't export it.
@@ -249,7 +240,7 @@ fn main() {
                 .require_authentication(require_authentication)
                 .build();
 
-            if let Err(backend::error::Error::IOError(e)) =
+            if let Err(noria_client::backend::error::Error::IOError(e)) =
                 MysqlIntermediary::run_on_tcp(b, s).await
             {
                 match e.kind() {
