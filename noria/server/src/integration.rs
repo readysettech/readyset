@@ -10,6 +10,7 @@ use crate::controller::sql::{mir, SqlIncorporator};
 use crate::get_col;
 use crate::integration_utils::*;
 use crate::{Builder, ReadySetError, ReuseConfigType};
+use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -55,7 +56,7 @@ async fn it_completes() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -122,7 +123,7 @@ async fn test_timestamp_propagation_simple() {
             emits.insert(a, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, c)
         })
         .await;
@@ -186,7 +187,7 @@ async fn test_timestamp_propagation_multitable() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -267,7 +268,7 @@ async fn sharded_shuffle() {
             &["id", "non_id"],
             Base::new(vec![]).with_key(vec![0]),
         );
-        mig.maintain_anonymous(a, &[1]);
+        mig.maintain_anonymous(a, &Index::hash_map(vec![1]));
     })
     .await;
 
@@ -335,7 +336,12 @@ async fn broad_recursing_upquery() {
             Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
         );
         // reader, sharded by the lookup column, which is the third column on x
-        mig.maintain("reader".to_string(), join, &[2], Default::default());
+        mig.maintain(
+            "reader".to_string(),
+            join,
+            &Index::hash_map(vec![2]),
+            Default::default(),
+        );
     })
     .await;
 
@@ -377,7 +383,7 @@ async fn base_mutation() {
     let mut g = start_simple("base_mutation").await;
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-        mig.maintain_anonymous(a, &[0]);
+        mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
     })
     .await;
 
@@ -464,11 +470,11 @@ async fn shared_interdomain_ancestor() {
 
             let u = Union::new(emits.clone(), union::DuplicateMode::UnionAll).unwrap();
             let b = mig.add_ingredient("b", &["a", "b"], u);
-            mig.maintain_anonymous(b, &[0]);
+            mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
 
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -518,7 +524,7 @@ async fn it_works_w_mat() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -593,7 +599,7 @@ async fn it_works_w_partial_mat() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             c
         })
         .await;
@@ -631,7 +637,7 @@ async fn it_works_w_partial_mat_below_empty() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -678,7 +684,7 @@ async fn it_works_deletion() {
             emits.insert(b, vec![1, 2]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["x", "y"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -1296,7 +1302,7 @@ async fn mutator_churn() {
                     .unwrap(),
             );
 
-            mig.maintain_anonymous(vc, &[0]);
+            mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
             (vote, vc)
         })
         .await;
@@ -1719,7 +1725,7 @@ async fn votes() {
             emits.insert(article2, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let article = mig.add_ingredient("article", &["id", "title"], u);
-            mig.maintain_anonymous(article, &[0]);
+            mig.maintain_anonymous(article, &Index::hash_map(vec![0]));
 
             // add vote base table
             let vote = mig.add_base("vote", &["user", "id"], Base::default());
@@ -1732,12 +1738,12 @@ async fn votes() {
                     .over(vote, 0, &[1])
                     .unwrap(),
             );
-            mig.maintain_anonymous(vc, &[0]);
+            mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
 
             // add final join using first field from article and first from vc
             let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
             let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-            mig.maintain_anonymous(end, &[0]);
+            mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
 
             (article1, article2, vote, article, vc, end)
         })
@@ -1825,7 +1831,7 @@ async fn empty_migration() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;
@@ -1868,7 +1874,7 @@ async fn simple_migration() {
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::default());
-            mig.maintain_anonymous(a, &[0]);
+            mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
             a
         })
         .await;
@@ -1892,7 +1898,7 @@ async fn simple_migration() {
     let _ = g
         .migrate(|mig| {
             let b = mig.add_base("b", &["a", "b"], Base::default());
-            mig.maintain_anonymous(b, &[0]);
+            mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
             b
         })
         .await;
@@ -1922,7 +1928,7 @@ async fn add_columns() {
     let a = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-            mig.maintain_anonymous(a, &[0]);
+            mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
             a
         })
         .await;
@@ -1997,7 +2003,7 @@ async fn migrate_added_columns() {
         .migrate(move |mig| {
             mig.add_column(a, "c", 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
-            mig.maintain_anonymous(b, &[1]);
+            mig.maintain_anonymous(b, &Index::hash_map(vec![1]));
             b
         })
         .await;
@@ -2044,7 +2050,7 @@ async fn migrate_drop_columns() {
                 &["a", "b"],
                 Base::new(vec!["a".try_into().unwrap(), "b".try_into().unwrap()]),
             );
-            mig.maintain_anonymous(a, &[0]);
+            mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
             a
         })
         .await;
@@ -2066,7 +2072,7 @@ async fn migrate_drop_columns() {
     // drop a column
     g.migrate(move |mig| {
         mig.drop_column(a, 1).unwrap();
-        mig.maintain_anonymous(a, &[0]);
+        mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
     })
     .await;
 
@@ -2141,7 +2147,7 @@ async fn key_on_added() {
         .migrate(move |mig| {
             mig.add_column(a, "c", 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
-            mig.maintain_anonymous(b, &[0]);
+            mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
             b
         })
         .await;
@@ -2183,7 +2189,7 @@ async fn replay_during_replay() {
             let u = mig.add_ingredient("u", &["u", "a"], j);
             let j = Join::new(a, u, JoinType::Left, vec![B(0, 1), R(0)]);
             let end = mig.add_ingredient("end", &["a", "u"], j);
-            mig.maintain_anonymous(end, &[0]);
+            mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
             (u, end)
         })
         .await;
@@ -2234,7 +2240,7 @@ async fn replay_during_replay() {
     // we now know that u has key a=1 in its index
     // now we add a secondary index on u.u
     g.migrate(move |mig| {
-        mig.maintain_anonymous(u, &[0]);
+        mig.maintain_anonymous(u, &Index::hash_map(vec![0]));
     })
     .await;
 
@@ -2315,7 +2321,7 @@ async fn cascading_replays_with_sharding() {
                 .over(j, 0, &[2])
                 .unwrap();
             let end = mig.add_ingredient("end", &["u", "c"], a);
-            mig.maintain_anonymous(end, &[0]);
+            mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
             (j, end)
         })
         .await;
@@ -2426,7 +2432,7 @@ async fn full_aggregation_with_bogokey() {
                     .over(bogo, 0, &[1])
                     .unwrap(),
             );
-            mig.maintain_anonymous(agg, &[0]);
+            mig.maintain_anonymous(agg, &Index::hash_map(vec![0]));
             agg
         })
         .await;
@@ -2533,7 +2539,7 @@ async fn materialization_frontier() {
         let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
-        let ri = mig.maintain_anonymous(end, &[0]);
+        let ri = mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
         mig.mark_shallow(ri);
         (article, vote, vc, end)
     })
@@ -2641,7 +2647,7 @@ async fn crossing_migration() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             c
         })
         .await;
@@ -2678,7 +2684,7 @@ async fn independent_domain_migration() {
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::default());
-            mig.maintain_anonymous(a, &[0]);
+            mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
             a
         })
         .await;
@@ -2702,7 +2708,7 @@ async fn independent_domain_migration() {
     let _ = g
         .migrate(|mig| {
             let b = mig.add_base("b", &["a", "b"], Base::default());
-            mig.maintain_anonymous(b, &[0]);
+            mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
             b
         })
         .await;
@@ -2744,7 +2750,7 @@ async fn domain_amend_migration() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             c
         })
         .await;
@@ -2842,7 +2848,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
             let end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
-            mig.maintain_anonymous(end, &[0]);
+            mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
             (article, vote, vc, end)
         })
         .await;
@@ -2901,7 +2907,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 vec![B(0, 0), L(1), R(1), R(2)],
             );
             let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
-            mig.maintain_anonymous(newend, &[0]);
+            mig.maintain_anonymous(newend, &Index::hash_map(vec![0]));
             (rating, newend)
         })
         .await;
@@ -2972,7 +2978,7 @@ async fn live_writes() {
                     .unwrap(),
             );
 
-            mig.maintain_anonymous(vc, &[0]);
+            mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
             (vote, vc)
         })
         .await;
@@ -3004,7 +3010,7 @@ async fn live_writes() {
                 &["id", "votes"],
                 Aggregation::Sum.over(vc, 1, &[0]).unwrap(),
             );
-            mig.maintain_anonymous(vc2, &[0]);
+            mig.maintain_anonymous(vc2, &Index::hash_map(vec![0]));
             vc2
         })
         .await;
@@ -3074,7 +3080,7 @@ async fn state_replay_migration_query() {
             let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
             // we want to observe what comes out of the join
-            mig.maintain_anonymous(j, &[0]);
+            mig.maintain_anonymous(j, &Index::hash_map(vec![0]));
             j
         })
         .await;
@@ -3308,7 +3314,7 @@ async fn node_removal() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0])
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]))
         })
         .await;
 
@@ -4219,7 +4225,7 @@ async fn non_sql_materialized_range_query() {
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
-        mig.maintain_anonymous(a, &[0]);
+        mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
     })
     .await;
 
@@ -4259,7 +4265,7 @@ async fn non_sql_range_upquery() {
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
-        mig.maintain_anonymous(a, &[0]);
+        mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
     })
     .await;
 
@@ -4306,7 +4312,12 @@ async fn range_upquery_after_point_queries() {
             Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
         );
 
-        mig.maintain("reader".to_string(), join, &[0], Default::default());
+        mig.maintain(
+            "reader".to_string(),
+            join,
+            &Index::btree_map(vec![0]),
+            Default::default(),
+        );
     })
     .await;
 
@@ -4463,7 +4474,7 @@ async fn post_read_ilike() {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
         mig.maintain_anonymous_with_post_lookup(
             a,
-            &[0],
+            &Index::hash_map(vec![0]),
             PostLookup {
                 order_by: Some(vec![(1, OrderType::OrderAscending)]),
                 ..Default::default()

@@ -547,35 +547,47 @@ impl Migration {
         &self.ingredients
     }
 
-    fn ensure_reader_for(&mut self, n: NodeIndex, name: Option<String>, post_lookup: PostLookup) {
+    /// Ensure that a reader node exists as a child of `n`, optionally with the given name and set
+    /// of post-lookup operations, returning the index of that reader.
+    fn ensure_reader_for(
+        &mut self,
+        n: NodeIndex,
+        name: Option<String>,
+        post_lookup: PostLookup,
+    ) -> NodeIndex {
         use std::collections::hash_map::Entry;
-        if let Entry::Vacant(e) = self.readers.entry(n) {
-            // make a reader
-            let r = node::special::Reader::new(n, post_lookup);
-            let mut r = if let Some(name) = name {
-                self.ingredients[n].named_mirror(r, name)
-            } else {
-                self.ingredients[n].mirror(r)
-            };
-            if r.name().starts_with("SHALLOW_") {
-                r.purge = true;
+        match self.readers.entry(n) {
+            Entry::Occupied(ni) => *ni.into_mut(),
+            Entry::Vacant(e) => {
+                // make a reader
+                let r = node::special::Reader::new(n, post_lookup);
+                let mut r = if let Some(name) = name {
+                    self.ingredients[n].named_mirror(r, name)
+                } else {
+                    self.ingredients[n].mirror(r)
+                };
+                if r.name().starts_with("SHALLOW_") {
+                    r.purge = true;
+                }
+                let r = self.ingredients.add_node(r);
+                self.ingredients.add_edge(n, r, ());
+                self.added.insert(r);
+                *e.insert(r)
             }
-            let r = self.ingredients.add_node(r);
-            self.ingredients.add_edge(n, r, ());
-            self.added.insert(r);
-            e.insert(r);
         }
     }
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `Leader::get_getter`.
-    pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
-        self.ensure_reader_for(n, None, Default::default());
-        let ri = self.readers[&n];
+    pub fn maintain_anonymous(&mut self, n: NodeIndex, index: &Index) -> NodeIndex {
+        let ri = self.ensure_reader_for(n, None, Default::default());
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
+        self.ingredients[ri]
+            .as_mut_reader()
+            .unwrap()
+            .set_index(index);
 
         ri
     }
@@ -587,14 +599,16 @@ impl Migration {
     pub fn maintain_anonymous_with_post_lookup(
         &mut self,
         n: NodeIndex,
-        key: &[usize],
+        index: &Index,
         post_lookup: PostLookup,
     ) -> NodeIndex {
-        self.ensure_reader_for(n, None, post_lookup);
-        let ri = self.readers[&n];
+        let ri = self.ensure_reader_for(n, None, post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
+        self.ingredients[ri]
+            .as_mut_reader()
+            .unwrap()
+            .set_index(index);
 
         ri
     }
@@ -602,13 +616,14 @@ impl Migration {
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `Leader::get_getter`.
-    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize], post_lookup: PostLookup) {
-        self.ensure_reader_for(n, Some(name), post_lookup);
-
-        let ri = self.readers[&n];
+    pub fn maintain(&mut self, name: String, n: NodeIndex, index: &Index, post_lookup: PostLookup) {
+        let ri = self.ensure_reader_for(n, Some(name), post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
+        self.ingredients[ri]
+            .as_mut_reader()
+            .unwrap()
+            .set_index(index);
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.

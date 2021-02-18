@@ -205,7 +205,7 @@ pub struct Reader {
     writer: Option<backlog::WriteHandle>,
 
     for_node: NodeIndex,
-    state: Option<Vec<usize>>,
+    index: Option<Index>,
 
     /// Operations to perform on the result set after the rows are returned from the lookup
     post_lookup: PostLookup,
@@ -216,9 +216,9 @@ impl Clone for Reader {
         debug_assert!(self.writer.is_none());
         Reader {
             writer: None,
-            state: self.state.clone(),
             for_node: self.for_node,
             post_lookup: self.post_lookup.clone(),
+            index: self.index.clone(),
         }
     }
 }
@@ -227,9 +227,9 @@ impl Reader {
     pub fn new(for_node: NodeIndex, post_lookup: PostLookup) -> Self {
         Reader {
             writer: None,
-            state: None,
             for_node,
             post_lookup,
+            index: None,
         }
     }
 
@@ -250,14 +250,14 @@ impl Reader {
     pub(in crate::node) fn take(&mut self) -> Self {
         Self {
             writer: self.writer.take(),
-            state: self.state.clone(),
             for_node: self.for_node,
             post_lookup: self.post_lookup.clone(),
+            index: self.index.clone(),
         }
     }
 
     pub fn is_materialized(&self) -> bool {
-        self.state.is_some()
+        self.index.is_some()
     }
 
     pub(crate) fn is_partial(&self) -> bool {
@@ -272,15 +272,23 @@ impl Reader {
         self.writer = Some(wh);
     }
 
-    pub fn key(&self) -> Option<&[usize]> {
-        self.state.as_ref().map(|s| &s[..])
+    pub fn index(&self) -> Option<&Index> {
+        self.index.as_ref()
     }
 
-    pub fn set_key(&mut self, key: &[usize]) {
-        if let Some(ref skey) = self.state {
-            debug_assert_eq!(&skey[..], key);
+    pub fn key(&self) -> Option<&[usize]> {
+        self.index.as_ref().map(|s| &s.columns[..])
+    }
+
+    pub fn index_type(&self) -> Option<IndexType> {
+        self.index.as_ref().map(|index| index.index_type)
+    }
+
+    pub fn set_index(&mut self, index: &Index) {
+        if let Some(ref m_index) = self.index {
+            debug_assert_eq!(m_index, index);
         } else {
-            self.state = Some(Vec::from(key));
+            self.index = Some(index.clone());
         }
     }
 

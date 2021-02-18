@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
+use common::IndexType;
 use petgraph::graph::NodeIndex;
 
 use ::mir::query::{MirQuery, QueryFlowParts};
@@ -42,8 +43,8 @@ mod reuse;
 enum QueryGraphReuse<'a> {
     ExactMatch(&'a str, MirNodeRef),
     ExtendExisting(Vec<u64>),
-    /// (node, columns to re-project if necessary, parameters)
-    ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>),
+    /// (node, columns to re-project if necessary, parameters, index_type)
+    ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>, IndexType),
     None,
 }
 
@@ -309,11 +310,23 @@ impl SqlIncorporator {
                             "Query has an exact match modulo parameters, so making a new reader",
                         );
 
-                        let params: Vec<_> = qg
+                        let mut index_type = None;
+                        let params = qg
                             .parameters()
                             .into_iter()
-                            .map(|(col, _)| Column::from(col))
-                            .collect();
+                            .map(|(col, op)| -> ReadySetResult<_> {
+                                match IndexType::for_operator(*op) {
+                                    Some(it) if index_type.is_none() => index_type = Some(it),
+                                    Some(it) if index_type == Some(it) => {}
+                                    Some(_) => {
+                                        unsupported!("Conflicting binary operators in query")
+                                    }
+                                    None => unsupported!("Unsupported binary operator `{}`", op),
+                                }
+
+                                Ok(Column::from(col))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
 
                         let parent = mir_query
                             .leaf
@@ -329,7 +342,12 @@ impl SqlIncorporator {
                         if params.iter().all(|p| parent.borrow().columns().contains(p)) {
                             return Ok((
                                 qg,
-                                QueryGraphReuse::ReaderOntoExisting(parent, None, params),
+                                QueryGraphReuse::ReaderOntoExisting(
+                                    parent,
+                                    None,
+                                    params,
+                                    index_type.unwrap_or(IndexType::HashMap),
+                                ),
                             ));
                         }
 
@@ -389,6 +407,7 @@ impl SqlIncorporator {
                                     ancestor,
                                     project_columns,
                                     params,
+                                    index_type.unwrap_or(IndexType::HashMap),
                                 ),
                             ));
                         }
@@ -424,6 +443,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         params: &[Column],
+        index_type: IndexType,
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
         mut mig: &mut Migration,
@@ -434,6 +454,7 @@ impl SqlIncorporator {
             final_query_node,
             query_name,
             params,
+            index_type,
             project_columns,
         );
 
@@ -551,9 +572,16 @@ impl SqlIncorporator {
                     .map_err(on_err)?;
                 (qfp, None)
             }
-            QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
+            QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params, index_type) => {
                 let qfp = self
-                    .add_leaf_to_existing_query(query_name, &params, mn, project_columns, mig)
+                    .add_leaf_to_existing_query(
+                        query_name,
+                        &params,
+                        index_type,
+                        mn,
+                        project_columns,
+                        mig,
+                    )
                     .map_err(on_err)?;
                 (qfp, None)
             }

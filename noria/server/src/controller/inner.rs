@@ -562,12 +562,11 @@ impl Leader {
                             node::special::Reader::new(node_index, post_lookup),
                             child.name().to_string(),
                         );
-                        // We also take the associated keys of the original reader node.
-                        let keys_opt = child.as_reader().and_then(|r| r.key());
-                        if let Some(keys) = keys_opt {
-                            // And set the keys to the replicated reader.
+                        // We also take the index of the original reader node.
+                        if let Some(index) = child.as_reader().and_then(|r| r.index()) {
+                            // And set the index on the replicated reader.
                             #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
-                            reader_node.as_mut_reader().unwrap().set_key(keys);
+                            reader_node.as_mut_reader().unwrap().set_index(index);
                         }
                         // We add the replicated reader to the graph.
                         let reader_index = self.ingredients.add_node(reader_node);

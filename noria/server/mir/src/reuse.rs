@@ -201,6 +201,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, ColumnSpecification, SqlType};
+    use noria::internal::IndexType;
 
     use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;
@@ -255,7 +256,7 @@ mod tests {
             "d",
             0,
             vec![Column::from("aa"), Column::from("ba")],
-            MirNodeInner::leaf(c.clone(), vec![Column::from("ba")]),
+            MirNodeInner::leaf(c.clone(), vec![Column::from("ba")], IndexType::HashMap),
             vec![],
             vec![],
         );

@@ -1,3 +1,4 @@
+use common::IndexType;
 use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
 use mir::node::node_inner::MirNodeInner;
@@ -170,6 +171,7 @@ impl SqlToMirConverter {
         prior_leaf: MirNodeRef,
         name: &str,
         params: &[Column],
+        index_type: IndexType,
         project_columns: Option<Vec<Column>>,
     ) -> MirQuery {
         // hang off the previous logical leaf node
@@ -219,7 +221,7 @@ impl SqlToMirConverter {
                     c
                 })
                 .collect(),
-            MirNodeInner::leaf(n.clone(), Vec::from(params)),
+            MirNodeInner::leaf(n.clone(), Vec::from(params), index_type),
             vec![n],
             vec![],
         );
@@ -296,7 +298,12 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 sanitized_columns,
-                MirNodeInner::leaf(final_node.clone(), vec![]),
+                MirNodeInner::leaf(
+                    final_node.clone(),
+                    vec![],
+                    // TODO: is this right?
+                    IndexType::HashMap,
+                ),
                 vec![final_node],
                 vec![],
             )
@@ -1756,7 +1763,7 @@ impl SqlToMirConverter {
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
-            let key_columns = match qg.parameters()[..] {
+            let index = match qg.parameters()[..] {
                 _ if !has_leaf => {
                     // If no leaf node is to be attached, the key_columns are unnecessary.
                     None
@@ -1768,7 +1775,7 @@ impl SqlToMirConverter {
                     if !projected_columns.contains(&Column::new(None, "bogokey")) {
                         projected_literals.push(("bogokey".into(), DataType::from(0i32)));
                     }
-                    Some(vec![Column::new(None, "bogokey")])
+                    Some((vec![Column::new(None, "bogokey")], IndexType::HashMap))
                 }
 
                 #[cfg(feature = "param_filter")]
@@ -1788,27 +1795,31 @@ impl SqlToMirConverter {
                     nodes_added.push(final_node.clone());
                     projected_columns.push(filter_key_column.clone());
                     new_node_count += 1;
-                    Some(vec![filter_key_column])
+                    Some((vec![filter_key_column], IndexType::HashMap))
                 }
 
                 _ => {
-                    // If parameters have equality operators only, ensure their columns are
-                    // projected and collect them into the lookup key.
+                    let mut index_type = None;
                     for (pc, op) in qg.parameters() {
-                        if *op != BinaryOperator::Equal {
-                            unsupported!("Unsupported binary operator `{}`; only direct equality is supported", op);
+                        match IndexType::for_operator(*op) {
+                            Some(it) if index_type.is_none() => index_type = Some(it),
+                            Some(it) if index_type == Some(it) => {}
+                            Some(_) => unsupported!("Conflicting binary operators in query"),
+                            None => unsupported!("Unsupported binary operator `{}`", op),
                         }
+
                         let pc = Column::from(pc);
                         if !projected_columns.contains(&pc) {
                             projected_columns.push(pc);
                         }
                     }
-                    Some(
+                    Some((
                         qg.parameters()
                             .into_iter()
                             .map(|(col, _)| Column::from(col))
                             .collect(),
-                    )
+                        index_type.expect("Checked qg.parameters() isn't empty above"),
+                    ))
                 }
             };
 
@@ -1845,7 +1856,7 @@ impl SqlToMirConverter {
 
             nodes_added.push(leaf_project_node.clone());
 
-            if let Some(key_columns) = key_columns {
+            if let Some((keys, index_type)) = index {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
                 let columns = leaf_project_node
@@ -1865,7 +1876,8 @@ impl SqlToMirConverter {
                     columns,
                     MirNodeInner::Leaf {
                         node: leaf_project_node.clone(),
-                        keys: key_columns,
+                        keys,
+                        index_type,
                         order_by: st.order.as_ref().map(|order| {
                             order
                                 .columns

@@ -1,3 +1,6 @@
+use std::cmp::Ordering;
+
+use nom_sql::BinaryOperator;
 use serde::{Deserialize, Serialize};
 
 /// Types of (key-value) data structures we can use as indices in Noria.
@@ -11,6 +14,37 @@ pub enum IndexType {
     HashMap,
     /// An index backed by a [`BTreeMap`](std::collections::BTreeMap)
     BTreeMap,
+}
+
+/// An index type it₁ is > it₂ iff it₁ can support all lookup operations it₂ can support.
+impl Ord for IndexType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        use IndexType::*;
+
+        match (self, other) {
+            (HashMap, HashMap) | (BTreeMap, BTreeMap) => Ordering::Equal,
+            (BTreeMap, HashMap) => Ordering::Greater,
+            (HashMap, BTreeMap) => Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for IndexType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl IndexType {
+    /// Return the [`IndexType`] that is best able to satisfy lookups via the given operator, if any
+    pub fn for_operator(operator: BinaryOperator) -> Option<Self> {
+        use BinaryOperator::*;
+        match operator {
+            Equal | Is => Some(Self::HashMap),
+            Greater | GreaterOrEqual | Less | LessOrEqual => Some(Self::BTreeMap),
+            _ => None,
+        }
+    }
 }
 
 /// A description of an index used on a relation
