@@ -255,6 +255,46 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
+  - label: ':rust: Build noria-client'
+    key: build-noria-client
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria-client
+    depends_on:
+    - build-noria
+    - build-nom-sql
+    - build-image
+    - build-launchpad
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Test noria-client'
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cargo test -v -p noria-client
+    depends_on:
+    - build-image
+    - build-noria-client
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readyset-sccache
+          config: noria-client/build/docker-compose.yaml
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+  
   - label: ':rust: Build noria-mysql'
     key: build-noria-mysql
     commands:
