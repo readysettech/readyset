@@ -12,6 +12,7 @@ use crate::integration_utils::*;
 use crate::Builder;
 use crate::DataType;
 use assert_approx_eq::assert_approx_eq;
+use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -50,7 +51,7 @@ async fn it_works_basic() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
+            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })
         .await;

@@ -1,6 +1,6 @@
 use crate::node::BaseNodeAdaptation;
 use crate::{Column, MirNodeRef};
-use common::DataType;
+use common::{DataType, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
@@ -94,6 +94,7 @@ pub enum MirNodeInner {
     Leaf {
         node: MirNodeRef,
         keys: Vec<Column>,
+        index_type: IndexType,
 
         /// Optional set of columns and direction to order the results of lookups to this leaf
         order_by: Option<Vec<(Column, OrderType)>>,
@@ -113,12 +114,13 @@ pub enum MirNodeInner {
 }
 
 impl MirNodeInner {
-    /// Construct a new [`MirNodeInner::Leaf`] for the given node and with the given keys, without
-    /// any post-lookup operations
-    pub fn leaf(node: MirNodeRef, keys: Vec<Column>) -> Self {
+    /// Construct a new [`MirNodeInner::Leaf`] for the given node and with the given keys and index
+    /// type, without any post-lookup operations
+    pub fn leaf(node: MirNodeRef, keys: Vec<Column>, index_type: IndexType) -> Self {
         Self::Leaf {
             node,
             keys,
+            index_type,
             order_by: None,
             limit: None,
             returned_cols: None,

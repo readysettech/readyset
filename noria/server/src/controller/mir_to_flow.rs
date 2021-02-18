@@ -12,6 +12,7 @@ use nom_sql::{
     BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
     OrderType, UnaryOperator,
 };
+use noria::internal::{Index, IndexType};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -236,6 +237,7 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::Leaf {
                     ref keys,
+                    index_type,
                     ref order_by,
                     limit,
                     ref returned_cols,
@@ -252,7 +254,7 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                         returned_cols,
                         default_row.clone(),
                     )?;
-                    materialize_leaf_node(&parent, name, keys, mig, post_lookup)?;
+                    materialize_leaf_node(&parent, name, keys, index_type, post_lookup, mig)?;
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
@@ -1165,8 +1167,9 @@ fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
     key_cols: &[Column],
-    mig: &mut Migration,
+    index_type: IndexType,
     post_lookup: PostLookup,
+    mig: &mut Migration,
 ) -> ReadySetResult<()> {
     let na = parent.borrow().flow_node_addr()?;
 
@@ -1182,10 +1185,10 @@ fn materialize_leaf_node(
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c))
             .collect::<ReadySetResult<Vec<_>>>()?;
-        mig.maintain(name, na, &key_cols[..], post_lookup);
+        mig.maintain(name, na, &Index::new(index_type, key_cols), post_lookup);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, &[0], post_lookup);
+        mig.maintain(name, na, &Index::new(index_type, vec![0]), post_lookup);
     }
     Ok(())
 }
