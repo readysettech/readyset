@@ -19,8 +19,8 @@ use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_mysql::backend::noria_connector::NoriaConnector;
-use noria_mysql::backend::BackendBuilder;
+use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::BackendBuilder;
 use noria_server::Builder;
 
 use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};

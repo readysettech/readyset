@@ -16,8 +16,8 @@ use nom_sql::SelectStatement;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
-use noria_mysql::backend::noria_connector::NoriaConnector;
-use noria_mysql::backend::BackendBuilder;
+use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::BackendBuilder;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {

@@ -17,7 +17,7 @@ use crate::utils;
 pub mod mysql_connector;
 pub mod noria_connector;
 
-pub(crate) mod error;
+pub mod error;
 
 use crate::backend::error::Error;
 use crate::backend::error::Error::{IOError, ParseError};
