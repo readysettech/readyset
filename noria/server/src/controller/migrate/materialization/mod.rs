@@ -149,7 +149,7 @@ impl Materializations {
                     let mut i = HashMap::new();
                     // TODO(grfn): once the reader knows its own index type, ask it what that is
                     // here
-                    i.insert(ni, (Index::btree_map(key.to_vec()), false));
+                    i.insert(ni, (Index::hash_map(key.to_vec()), false));
                     i
                 } else {
                     // only streaming, no indexing needed
@@ -165,7 +165,7 @@ impl Materializations {
             if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, (Index::btree_map(vec![0]), true));
+                indices.insert(ni, (Index::hash_map(vec![0]), true));
             }
 
             for (ni, (cols, lookup)) in indices {
@@ -959,7 +959,7 @@ impl Materializations {
                     if let Some(rk) = r.key() {
                         // TODO(grfn): once the reader knows its own index type, ask it what that is
                         // here
-                        index_on.insert(Index::btree_map(rk.to_vec()));
+                        index_on.insert(Index::hash_map(rk.to_vec()));
                     }
                 })
                 .unwrap();
