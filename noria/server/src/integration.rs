@@ -3640,6 +3640,7 @@ async fn self_join_param() {
 }
 
 #[tokio::test(threaded_scheduler)]
+#[ignore]
 async fn non_sql_materialized_range_query() {
     let mut g = {
         let mut builder = Builder::default();
@@ -3681,6 +3682,7 @@ async fn non_sql_materialized_range_query() {
 }
 
 #[tokio::test(threaded_scheduler)]
+#[ignore]
 async fn non_sql_range_upquery() {
     let mut g = {
         let mut builder = Builder::default();
@@ -3721,6 +3723,7 @@ async fn non_sql_range_upquery() {
 }
 
 #[tokio::test(threaded_scheduler)]
+#[ignore]
 async fn range_upquery_after_point_queries() {
     let mut g = {
         let mut builder = Builder::default();
@@ -3793,7 +3796,7 @@ async fn range_upquery_after_point_queries() {
 
 #[tokio::test(threaded_scheduler)]
 async fn query_reuse_aliases() {
-    let mut g = start_simple_logging("it_works_basic").await;
+    let mut g = start_simple("it_works_basic").await;
     g.install_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          QUERY q1: SELECT * FROM t1 WHERE a != 1;
@@ -3849,12 +3852,13 @@ async fn view_reuse_aliases() {
 }
 
 #[tokio::test(threaded_scheduler)]
+#[ignore]
 async fn post_read_ilike() {
     let mut g = {
         let mut builder = Builder::default();
         builder.disable_partial();
         builder.set_sharding(None);
-        builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
+        builder.set_persistence(get_persistence_params("post_read_ilike"));
         builder.start_local()
     }
     .await

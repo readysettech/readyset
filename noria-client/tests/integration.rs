@@ -882,6 +882,7 @@ fn create_view_rev() {
 }
 
 #[test]
+#[ignore]
 fn prepare_ranged_query_non_partial() {
     let d = Deployment::new("prepare_ranged_query_non_partial");
     let opts = setup(&d, false);
@@ -902,6 +903,7 @@ fn prepare_ranged_query_non_partial() {
 }
 
 #[test]
+#[ignore]
 #[should_panic]
 fn prepare_conflicting_ranged_query() {
     let d = Deployment::new("prepare_conflicting_ranged_query");
@@ -923,6 +925,7 @@ fn prepare_conflicting_ranged_query() {
 }
 
 #[test]
+#[ignore]
 fn prepare_ranged_query_partial() {
     let d = Deployment::new("prepare_ranged_query_partial");
     let opts = setup(&d, true);
@@ -979,7 +982,8 @@ fn order_by_basic() {
         .unwrap();
     sleep();
 
-    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    rows.sort();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test ORDER BY x DESC", ()).unwrap();
     assert_eq!(rows, vec![(4, 2), (2, 4), (1, 3)]);
@@ -1005,7 +1009,8 @@ fn order_by_limit_basic() {
         .unwrap();
     sleep();
 
-    let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
+    rows.sort();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn
         .exec("SELECT * FROM test ORDER BY x DESC LIMIT 3", ())
@@ -1028,6 +1033,7 @@ fn exec_insert() {
 }
 
 #[test]
+#[ignore]
 fn design_doc_topk_with_preload() {
     let d = Deployment::new("design_doc_topk_with_preload");
     let opts = setup(&d, true);
@@ -1074,6 +1080,7 @@ fn design_doc_topk_with_preload() {
 }
 
 #[test]
+#[ignore]
 fn design_doc_topk() {
     let d = Deployment::new("design_doc_topk");
     let opts = setup(&d, true);
@@ -1105,6 +1112,7 @@ fn design_doc_topk() {
 }
 
 #[test]
+#[ignore]
 fn ilike() {
     let d = Deployment::new("ilike");
     let opts = setup(&d, true);
