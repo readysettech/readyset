@@ -14,7 +14,9 @@ use tokio::stream::StreamExt;
 
 mod debezium_message_parser;
 mod kafka_message_consumer_wrapper;
-use debezium_message_parser::{DataChange, DataChangePayload, EventKey, EventValue, SchemaChange};
+use debezium_message_parser::{
+    DataChange, DataChangePayload, EventKey, EventValue, SchemaChange, Transaction,
+};
 
 /// Kafka topics the debezium connector reads from.
 enum Topic {
@@ -22,6 +24,8 @@ enum Topic {
     SchemaChange,
     /// Data changes associated with each row-level INSERT, UPDATE, or DELETE.
     DataChange,
+    /// Transaction metadata for any transaction written to the databases.
+    Transaction,
 }
 
 pub struct DebeziumConnector {
@@ -57,7 +61,11 @@ impl DebeziumConnector {
 
         // we also listen to the schema change topic, which is just named <dbserver>
         topic_names.push(server_name.clone());
-        topics.insert(server_name, Topic::SchemaChange);
+        topics.insert(server_name.clone(), Topic::SchemaChange);
+
+        let transaction_topic = server_name + ".transaction";
+        topic_names.push(transaction_topic.clone());
+        topics.insert(transaction_topic, Topic::Transaction);
 
         let consumer = kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper::new(
             bootstrap_servers,
@@ -124,6 +132,18 @@ impl DebeziumConnector {
         Ok(())
     }
 
+    /// Processes a BEGIN or END transaction message.
+    /// When a transaction end message is received, we will increment the
+    /// timestamps associated with each changed base table. This new timestamp
+    /// will be propagated on the data flow graph.
+    async fn handle_transaction_message(
+        _noria_authority: &mut Handle<ZookeeperAuthority>,
+        _message: Transaction,
+    ) -> Result<()> {
+        // TODO(justin): Interface with timestamp service and timestamp propagation.
+        Ok(())
+    }
+
     pub async fn start(&mut self) -> Result<()> {
         let mut message_stream = self.kafka_consumer.kafka_consumer.start();
 
@@ -166,6 +186,19 @@ impl DebeziumConnector {
                             value_message.try_into().unwrap(),
                         )
                         .await?;
+                    }
+                    Topic::Transaction => {
+                        if owned_message.payload().is_some() {
+                            let transaction =
+                                std::str::from_utf8(owned_message.payload().unwrap())?;
+                            let transaction: Transaction = serde_json::from_str(transaction)?;
+
+                            DebeziumConnector::handle_transaction_message(
+                                &mut noria_authority,
+                                transaction,
+                            )
+                            .await?;
+                        }
                     }
                 }
 

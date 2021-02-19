@@ -38,6 +38,27 @@ pub struct DataChange {
     pub schema: Schema,
     pub payload: DataChangePayload,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct Transaction {
+    pub schema: Schema,
+    pub payload: TransactionPayload,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub struct TransactionPayload {
+    pub status: String,
+    pub id: String,
+    pub event_count: Option<u32>,
+    pub data_collections: Option<Vec<DataCollection>>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub struct DataCollection {
+    pub data_collection: String,
+    pub event_count: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Schema {
     pub name: String,
@@ -437,6 +458,68 @@ mod tests {
                 payload: DataChangePayload::Delete { source: _ },
             })
         ));
+    }
+
+    #[test]
+    fn parse_transaction_begin_event() {
+        let json = r#"{
+            "status": "BEGIN",
+            "id": "0e4d5dcd-a33b-11ea-80f1-02010a22a99e:10",
+            "event_count": null,
+            "data_collections": null
+          }"#;
+        let parsed: TransactionPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            parsed,
+            TransactionPayload {
+                status: "BEGIN".to_string(),
+                id: "0e4d5dcd-a33b-11ea-80f1-02010a22a99e:10".to_string(),
+                event_count: None,
+                data_collections: None
+            }
+        );
+    }
+
+    #[test]
+    fn parsed_transaction_end_event() {
+        let json = r#"{
+            "status": "END",
+            "id": "0e4d5dcd-a33b-11ea-80f1-02010a22a99e:10",
+            "event_count": 2,
+            "data_collections": [
+                {
+                "data_collection": "s1.a",
+                "event_count": 1
+                },
+                {
+                "data_collection": "s2.a",
+                "event_count": 1
+                }
+            ]
+            }"#;
+        let parsed: TransactionPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.status, "END");
+        assert_eq!(parsed.id, "0e4d5dcd-a33b-11ea-80f1-02010a22a99e:10");
+        assert_eq!(parsed.event_count.unwrap(), 2);
+
+        assert_eq!(
+            parsed,
+            TransactionPayload {
+                status: "END".to_string(),
+                id: "0e4d5dcd-a33b-11ea-80f1-02010a22a99e:10".to_string(),
+                event_count: Some(2),
+                data_collections: Some(vec![
+                    DataCollection {
+                        data_collection: "s1.a".to_string(),
+                        event_count: 1,
+                    },
+                    DataCollection {
+                        data_collection: "s2.a".to_string(),
+                        event_count: 1,
+                    }
+                ]),
+            }
+        );
     }
 
     // Using the following link for type information
