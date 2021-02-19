@@ -1,4 +1,7 @@
 extern crate serde_json;
+#[macro_use]
+extern crate derive_more;
+
 use clap::{App, Arg};
 use std::net::IpAddr;
 use std::str::FromStr;

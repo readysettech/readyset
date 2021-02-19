@@ -20,7 +20,7 @@ pub struct KeyPayload {
     pub fields: HashMap<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TryInto)]
 #[serde(untagged)]
 pub enum EventValue {
     SchemaChange(SchemaChange),
