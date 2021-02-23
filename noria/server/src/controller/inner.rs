@@ -5,6 +5,8 @@ use crate::controller::schema;
 use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::metrics::MetricsDump;
+use crate::NoriaMetricsRecorder;
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
@@ -194,6 +196,7 @@ impl ControllerInner {
         body: hyper::body::Bytes,
         authority: &Arc<A>,
     ) -> Result<Result<String, String>, StatusCode> {
+        metrics::increment_counter!("server.external_requests");
         use serde_json as json;
 
         match (&method, path.as_ref()) {
@@ -207,6 +210,12 @@ impl ControllerInner {
             }
             (&Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
+            }
+            (&Method::GET, "/metrics_dump") => {
+                let recorder = NoriaMetricsRecorder::get();
+                let (counters, gauges) = recorder.with_metrics(|c, g| (c.clone(), g.clone()));
+                let md = MetricsDump::from_metrics(counters, gauges);
+                return Ok(Ok(json::to_string(&md).unwrap()));
             }
             (&Method::POST, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));

@@ -35,6 +35,8 @@ futures-executor = "0.3.0" # for block_on
 pin-project = "0.4.0"
 hyper = { version = "0.13.0", features = [ "stream" ] }
 itertools = "0.10.0"
+metrics = "0.14"
+crossbeam = "0.8"
 nom = "5"
 nom-sql = { version = "0.0.11", path = "../../nom-sql" }
 petgraph = { version = "0.5", features = ["serde-1"] }
