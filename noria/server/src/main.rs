@@ -1,5 +1,5 @@
 use clap::value_t_or_exit;
-use noria_server::{Builder, ReuseConfigType, ZookeeperAuthority};
+use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,6 +101,13 @@ fn main() {
                 .help("Shard the graph this many ways (0 = disable sharding)."),
         )
         .arg(
+            Arg::with_name("metrics-queue-len")
+                .long("metrics-queue-len")
+                .takes_value(true)
+                .default_value("1024")
+                .help("Metrics queue length (number of metrics updates before a flush is needed).")
+        )
+        .arg(
             Arg::with_name("verbose")
                 .short("v")
                 .long("verbose")
@@ -116,6 +123,7 @@ fn main() {
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let memory = value_t_or_exit!(matches, "memory", usize);
     let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
+    let metrics_queue_len = value_t_or_exit!(matches, "metrics-queue-len", usize);
     let quorum = value_t_or_exit!(matches, "quorum", usize);
     let persistence_threads = value_t_or_exit!(matches, "persistence-threads", i32);
     let flush_ns = value_t_or_exit!(matches, "flush-timeout", u32);
@@ -125,6 +133,11 @@ fn main() {
     };
     let verbose = matches.is_present("verbose");
     let deployment_name = matches.value_of("deployment").unwrap();
+
+    // SAFETY: we haven't initialized threads that might call the recorder yet
+    unsafe {
+        NoriaMetricsRecorder::install(metrics_queue_len).unwrap();
+    }
 
     let mut authority =
         ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment_name)).unwrap();

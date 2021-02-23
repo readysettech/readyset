@@ -367,6 +367,7 @@ mod worker;
 
 #[cfg(test)]
 mod integration;
+mod metrics;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]
@@ -379,6 +380,7 @@ pub enum ReuseConfigType {
 
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;
+pub use crate::metrics::NoriaMetricsRecorder;
 pub use controller::migrate::materialization::FrontierStrategy;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::LocalAuthority;
