@@ -50,7 +50,9 @@ for sha in $(git rev-list origin/master.."${BUILDKITE_COMMIT}"); do
   fi
 
   if ! contains_body "${sha}"; then
-    echo >&2 "Missing body: '$CURRENT_SUBJECT' (${sha})"
+    echo >&2 "Commit (${sha}) is missing a body"
+    echo >&2 "All commit messages should have a body describing the purpose of the change, etc."
+    echo >&2 "To format a commit message with a body, add a blank line after the subject of your commit, then write a longer description of the commit wrapped to 80 characters"
     exit 1
   fi
 
