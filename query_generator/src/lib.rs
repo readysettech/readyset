@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use noria::DataType;
+use noria::{DataType, KeyComparison};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -281,6 +281,7 @@ impl GeneratorState {
 pub struct QueryState<'a> {
     gen: &'a mut GeneratorState,
     tables: HashSet<TableName>,
+    parameters: Vec<(TableName, ColumnName)>,
     alias_counter: u32,
 }
 
@@ -289,6 +290,7 @@ impl<'a> QueryState<'a> {
         Self {
             gen,
             tables: HashSet::new(),
+            parameters: Vec::new(),
             alias_counter: 0,
         }
     }
@@ -321,6 +323,22 @@ impl<'a> QueryState<'a> {
             .map(|table_name| {
                 let rows = self.gen.generate_data_for_table(table_name, rows_per_table);
                 (table_name, rows)
+            })
+            .collect()
+    }
+
+    /// Record a new (positional) parameter for the query, comparing against the given column of the
+    /// given table
+    pub fn add_parameter(&mut self, table_name: TableName, column_name: ColumnName) {
+        self.parameters.push((table_name, column_name))
+    }
+
+    /// Returns a lookup key for the parameters in the query that will return results
+    pub fn key(&self) -> KeyComparison {
+        self.parameters
+            .iter()
+            .map(|(table_name, column_name)| {
+                value_of_type(&self.gen.tables[table_name].columns[column_name])
             })
             .collect()
     }
@@ -539,17 +557,22 @@ impl QueryOperation {
                 ));
             }
             QueryOperation::SingleParameter => {
-                let col = state.some_table_mut().some_column_name();
+                let table = state.some_table_mut();
+                let col = table.some_column_name();
                 and_where(
                     query,
                     ConditionExpression::ComparisonOp(ConditionTree {
                         operator: BinaryOperator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(col.into()))),
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                            col.clone().into(),
+                        ))),
                         right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
                             Literal::Placeholder(ItemPlaceholder::QuestionMark),
                         ))),
                     }),
-                )
+                );
+                let table_name = table.name.clone();
+                state.add_parameter(table_name, col);
             }
             QueryOperation::MultipleParameters => {
                 QueryOperation::SingleParameter.add_to_query(state, query);

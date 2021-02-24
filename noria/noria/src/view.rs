@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::iter::FromIterator;
 use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
@@ -257,6 +258,14 @@ impl From<Vec1<DataType>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]
     fn from(key: Vec1<DataType>) -> Self {
         KeyComparison::Equal(key)
+    }
+}
+
+impl FromIterator<DataType> for KeyComparison {
+    /// Collects into a [`KeyComparison::Equal`], panicking if the iterator yields no values
+    fn from_iter<T: IntoIterator<Item = DataType>>(iter: T) -> Self {
+        Self::try_from(iter.into_iter().collect::<Vec<_>>())
+            .expect("Tried to build a KeyComparison from an iterator that yielded no values")
     }
 }
 
