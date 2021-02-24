@@ -1,0 +1,17 @@
+[package]
+name = "query_generator"
+version = "0.1.0"
+authors = ["Griffin Smith <root@gws.fyi>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.38"
+clap = "3.0.0-beta.2"
+derive_more = "0.99.11"
+itertools = "0.10.0"
+lazy_static = "1.4.0"
+nom-sql = { version = "0.0.11", path = "../nom-sql" }
+serde = { version = "1.0.123", features = ["derive"] }
+strum = "0.20.0"
+strum_macros = "0.20.1"
+toml = "0.5.8"

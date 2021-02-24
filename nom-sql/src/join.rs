@@ -39,7 +39,7 @@ impl fmt::Display for JoinRightSide {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinOperator {
     Join,
     LeftJoin,

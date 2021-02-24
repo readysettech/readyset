@@ -42,7 +42,7 @@ impl Display for FunctionExpression {
             FunctionExpression::Max(ref col) => write!(f, "max({})", col),
             FunctionExpression::Min(ref col) => write!(f, "min({})", col),
             FunctionExpression::GroupConcat(ref col, ref s) => {
-                write!(f, "group_concat({}, {})", col, s)
+                write!(f, "group_concat({}, '{}')", col, s)
             }
             FunctionExpression::Generic(ref name, ref args) => write!(f, "{}({})", name, args),
         }
