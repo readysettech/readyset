@@ -91,6 +91,25 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
+  - label: ':rust: Build query-generator'
+    key: build-query-generator
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build -v -p query_generator
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
   - label: ':rust: Build launchpad'
     key: build-launchpad
     commands:
@@ -294,7 +313,7 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
-  
+
   - label: ':rust: Build noria-mysql'
     key: build-noria-mysql
     commands:
