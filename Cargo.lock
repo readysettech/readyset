@@ -3146,11 +3146,13 @@ name = "query_generator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap 3.0.0-beta.2",
  "derive_more",
  "itertools 0.10.0",
  "lazy_static",
  "nom-sql",
+ "noria",
  "serde",
  "strum",
  "strum_macros",

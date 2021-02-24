@@ -1,8 +1,10 @@
 #![feature(or_insert_with_key)]
 
+use chrono::NaiveDate;
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use noria::DataType;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -17,6 +19,45 @@ use nom_sql::{
     FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
     Literal, LiteralExpression, SelectStatement, SqlType, Table,
 };
+
+/// Generate a constant value with the given [`SqlType`]
+///
+/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+///
+/// - [`SqlType::Date`]
+/// - [`SqlType::Enum`]
+/// - [`SqlType::Bool`]
+fn value_of_type(typ: &SqlType) -> DataType {
+    match typ {
+        SqlType::Char(_)
+        | SqlType::Varchar(_)
+        | SqlType::Blob
+        | SqlType::Longblob
+        | SqlType::Mediumblob
+        | SqlType::Tinyblob
+        | SqlType::Tinytext
+        | SqlType::Mediumtext
+        | SqlType::Longtext
+        | SqlType::Text
+        | SqlType::Binary(_)
+        | SqlType::Varbinary(_) => "a".into(),
+        SqlType::Int(_) => 1i32.into(),
+        SqlType::Bigint(_) => 1i64.into(),
+        SqlType::UnsignedInt(_) => 1u32.into(),
+        SqlType::UnsignedBigint(_) => 1u64.into(),
+        SqlType::Tinyint(_) => 1i8.into(),
+        SqlType::UnsignedTinyint(_) => 1u8.into(),
+        SqlType::Smallint(_) => 1i16.into(),
+        SqlType::UnsignedSmallint(_) => 1u16.into(),
+        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => 1.5.into(),
+        SqlType::DateTime(_) | SqlType::Timestamp => {
+            NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
+        }
+        SqlType::Date => unimplemented!(),
+        SqlType::Enum(_) => unimplemented!(),
+        SqlType::Bool => unimplemented!(),
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
@@ -52,6 +93,11 @@ pub struct TableSpec {
     pub name: TableName,
     pub columns: HashMap<ColumnName, SqlType>,
     column_name_counter: u32,
+
+    /// Values per column that should be present in that column at least some of the time.
+    ///
+    /// This is used to ensure that queries that filter on constant values get at least some results
+    expected_values: HashMap<ColumnName, HashSet<DataType>>,
 }
 
 impl From<TableSpec> for CreateTableStatement {
@@ -79,6 +125,7 @@ impl TableSpec {
             name,
             columns: Default::default(),
             column_name_counter: 0,
+            expected_values: Default::default(),
         }
     }
 
@@ -99,6 +146,47 @@ impl TableSpec {
             .next()
             .cloned()
             .unwrap_or_else(|| self.fresh_column())
+    }
+
+    /// Record that the column given by `column_name` should contain `value` at least some of the
+    /// time.
+    ///
+    /// This can be used, for example, to ensure that queries that filter comparing against a
+    /// constant value return at least some results
+    pub fn expect_value(&mut self, column_name: ColumnName, value: DataType) {
+        assert!(self.columns.contains_key(&column_name));
+        self.expected_values
+            .entry(column_name)
+            .or_default()
+            .insert(value);
+    }
+
+    /// Generate `num_rows` rows of data for this table
+    pub fn generate_data(&self, num_rows: usize) -> Vec<HashMap<&ColumnName, DataType>> {
+        (0..num_rows)
+            .map(|n| {
+                self.columns
+                    .iter()
+                    .map(|(col_name, col_type)| {
+                        (
+                            col_name,
+                            // if we have expected values, yield them half the time
+                            if n % 2 == 0 {
+                                self.expected_values
+                                    .get(col_name)
+                                    .map(|vals| {
+                                        // yield an even distribution of the expected values
+                                        vals.iter().nth((n / 2) % vals.len()).unwrap().clone()
+                                    })
+                                    .unwrap_or_else(|| value_of_type(col_type))
+                            } else {
+                                value_of_type(col_type)
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
     }
 }
 
@@ -175,6 +263,19 @@ impl GeneratorState {
     pub fn ddl(&self) -> impl Iterator<Item = CreateTableStatement> + '_ {
         self.tables.iter().map(|(_, tbl)| tbl.clone().into())
     }
+
+    /// Generate `num_rows` rows of data for the table given by `table_name`
+    ///
+    /// # Panics
+    ///
+    /// Panics if `table_name` is not a known table
+    pub fn generate_data_for_table(
+        &self,
+        table_name: &TableName,
+        num_rows: usize,
+    ) -> Vec<HashMap<&ColumnName, DataType>> {
+        self.tables[table_name].generate_data(num_rows)
+    }
 }
 
 pub struct QueryState<'a> {
@@ -207,6 +308,21 @@ impl<'a> QueryState<'a> {
         let table = self.gen.fresh_table_mut();
         self.tables.insert(table.name.clone());
         table
+    }
+
+    /// Generate `rows_per_table` rows of data for all the tables referenced in the query for this
+    /// QueryState
+    pub fn generate_data(
+        &self,
+        rows_per_table: usize,
+    ) -> HashMap<&TableName, Vec<HashMap<&ColumnName, DataType>>> {
+        self.tables
+            .iter()
+            .map(|table_name| {
+                let rows = self.gen.generate_data_for_table(table_name, rows_per_table);
+                (table_name, rows)
+            })
+            .collect()
     }
 }
 
@@ -353,11 +469,10 @@ impl QueryOperation {
                 let tbl = state.some_table_mut();
                 let col = tbl.fresh_column_with_type(SqlType::Int(1));
                 let right = Box::new(match filter.rhs {
-                    FilterRHS::Constant => ConditionExpression::Base(ConditionBase::Literal(
-                        // TODO(grfn): Tell the generatorstate about all the values we want to exist
-                        // per column
-                        Literal::Integer(1),
-                    )),
+                    FilterRHS::Constant => {
+                        tbl.expect_value(col.clone(), 1i32.into());
+                        ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(1)))
+                    }
                     FilterRHS::Column => {
                         let col = tbl.fresh_column();
                         ConditionExpression::Base(ConditionBase::Field(col.into()))
