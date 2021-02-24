@@ -1558,6 +1558,14 @@ impl Domain {
                     Packet::Spin => {
                         // spinning as instructed
                     }
+                    Packet::Timestamp { src, .. } => {
+                        // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
+                        // ack should be moved to the base table node's handling of the packet.
+                        // As the packet is not propagated or mutated before reaching the
+                        // domain, we still have a source channel identifier that we can use
+                        // to ack the packet.
+                        executor.ack(src.unwrap());
+                    }
                     _ => unreachable!(),
                 }
             }

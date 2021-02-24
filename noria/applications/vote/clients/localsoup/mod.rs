@@ -1,7 +1,7 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use anyhow::Context as AnyhowContext;
 use clap::{self, value_t_or_exit};
-use noria::{self, TableOperation};
+use noria::{self, TableOperation, TableRequest};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -158,7 +158,11 @@ impl Service<WriteRequest> for LocalNoria {
             .map(|article_id| vec![(article_id as i32).into(), 0.into()].into())
             .collect();
 
-        let fut = self.w.as_mut().unwrap().call(data);
+        let fut = self
+            .w
+            .as_mut()
+            .unwrap()
+            .call(TableRequest::TableOperations(data));
         async move {
             fut.await?;
             Ok(())

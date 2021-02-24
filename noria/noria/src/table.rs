@@ -518,12 +518,7 @@ impl Table {
         }
 
         if self.shards.len() == 1 {
-            let request = Tagged::from(if self.dst_is_local {
-                unsafe { LocalOrNot::for_local_transfer(i.clone()) }
-            } else {
-                LocalOrNot::new(i.clone())
-            });
-
+            let request = Tagged::from(unsafe { LocalOrNot::new_for_dst(i, self.dst_is_local) });
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
             future::Either::Right(future::Either::Left(
@@ -564,11 +559,7 @@ impl Table {
                         data: PacketPayload::Input(rs),
                     };
 
-                    let p = if self.dst_is_local {
-                        unsafe { LocalOrNot::for_local_transfer(new_i) }
-                    } else {
-                        LocalOrNot::new(new_i)
-                    };
+                    let p = unsafe { LocalOrNot::new_for_dst(new_i, self.dst_is_local) };
                     let request = Tagged::from(p);
 
                     // make a span per shard
@@ -597,9 +588,51 @@ impl Table {
             ))
         }
     }
+
+    /// Sends the timestamp `PacketData` to each base table shard associated with
+    /// `self`.
+    fn timestamp(
+        &mut self,
+        t: PacketData,
+    ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
+        if self.shards.len() == 1 {
+            let request = Tagged::from(unsafe { LocalOrNot::new_for_dst(t, self.dst_is_local) });
+            future::Either::Left(self.shards[0].call(request).map_err(TableError::from))
+        } else {
+            if self.key.is_empty() {
+                unreachable!("sharded base without a key?");
+            }
+            if self.key.len() != 1 {
+                // base sharded by complex key
+                unimplemented!();
+            }
+
+            // We create a request to each base table shard with the new timestamp.
+            let wait_for = FuturesUnordered::new();
+            for s in &mut self.shards {
+                let p = unsafe { LocalOrNot::new_for_dst(t.clone(), self.dst_is_local) };
+                let request = Tagged::from(p);
+                wait_for.push(s.call(request));
+            }
+            future::Either::Right(
+                wait_for
+                    .try_for_each(|_| async { Ok(()) })
+                    .map_err(TableError::from)
+                    .map_ok(Tagged::from),
+            )
+        }
+    }
 }
 
-impl Service<Vec<TableOperation>> for Table {
+/// A request to the table service.
+pub enum TableRequest {
+    /// A set of operations to apply on the table.
+    TableOperations(Vec<TableOperation>),
+    /// A timestamp to propagate along the data flow from the base table.
+    Timestamp(consistency::Timestamp),
+}
+
+impl Service<TableRequest> for Table {
     type Error = TableError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<PacketData>>>>::Response;
 
@@ -615,9 +648,20 @@ impl Service<Vec<TableOperation>> for Table {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, ops: Vec<TableOperation>) -> Self::Future {
-        let i = self.prep_records(ops);
-        self.input(i)
+    fn call(&mut self, req: TableRequest) -> Self::Future {
+        match req {
+            TableRequest::TableOperations(ops) => {
+                let i = self.prep_records(ops);
+                future::Either::Left(self.input(i))
+            }
+            TableRequest::Timestamp(t) => {
+                let p = PacketData {
+                    dst: self.node,
+                    data: PacketPayload::Timestamp(t),
+                };
+                future::Either::Right(self.timestamp(p))
+            }
+        }
     }
 }
 
@@ -762,8 +806,10 @@ impl Table {
     where
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(vec![TableOperation::Insert(u.into())])
-            .await
+        self.quick_n_dirty(TableRequest::TableOperations(vec![TableOperation::Insert(
+            u.into(),
+        )]))
+        .await
     }
 
     /// Insert multiple rows of data into this base table.
@@ -772,11 +818,11 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(
+        self.quick_n_dirty(TableRequest::TableOperations(
             rows.into_iter()
                 .map(|row| TableOperation::Insert(row.into()))
-                .collect(),
-        )
+                .collect::<Vec<_>>(),
+        ))
         .await
     }
 
@@ -786,8 +832,10 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
     {
-        self.quick_n_dirty(i.into_iter().map(Into::into).collect::<Vec<_>>())
-            .await
+        self.quick_n_dirty(TableRequest::TableOperations(
+            i.into_iter().map(Into::into).collect::<Vec<_>>(),
+        ))
+        .await
     }
 
     /// Delete the row with the given key from this base table.
@@ -795,8 +843,10 @@ impl Table {
     where
         I: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(vec![TableOperation::Delete { key: key.into() }])
-            .await
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::Delete { key: key.into() },
+        ]))
+        .await
     }
 
     /// Update the row with the given key in this base table.
@@ -820,8 +870,10 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(vec![TableOperation::Update { key, set }])
-            .await
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::Update { key, set },
+        ]))
+        .await
     }
 
     /// Perform a insert-or-update on this base table.
@@ -849,10 +901,17 @@ impl Table {
             set[coli] = m;
         }
 
-        self.quick_n_dirty(vec![TableOperation::InsertOrUpdate {
-            row: insert,
-            update: set,
-        }])
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::InsertOrUpdate {
+                row: insert,
+                update: set,
+            },
+        ]))
         .await
+    }
+
+    /// Updates the timestamp of the base table in the data flow graph.
+    pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> Result<(), TableError> {
+        self.quick_n_dirty(TableRequest::Timestamp(t)).await
     }
 }

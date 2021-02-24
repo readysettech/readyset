@@ -1,7 +1,8 @@
 extern crate serde_json;
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 use noria::consensus::ZookeeperAuthority;
+use noria::consistency::Timestamp;
 use noria::Builder;
 use noria::Handle;
 use rdkafka::consumer::{CommitMode, Consumer};
@@ -137,10 +138,46 @@ impl DebeziumConnector {
     /// timestamps associated with each changed base table. This new timestamp
     /// will be propagated on the data flow graph.
     async fn handle_transaction_message(
-        _noria_authority: &mut Handle<ZookeeperAuthority>,
-        _message: Transaction,
+        noria_authority: &mut Handle<ZookeeperAuthority>,
+        message: Transaction,
     ) -> Result<()> {
-        // TODO(justin): Interface with timestamp service and timestamp propagation.
+        let payload = &message.payload;
+        // We currently do not process payload begin messages or transactions
+        // that have not modified anys
+        if payload.status == "BEGIN" || payload.data_collections.is_none() {
+            return Ok(());
+        }
+
+        // TODO(justin): Create an error type for debezium connector errors and
+        // refactor error handling.
+        let collections = payload
+            .data_collections
+            .as_ref()
+            .ok_or(Error::msg("Transaction metadata had no data collections"))?;
+        let tables = collections.iter().map(|c| {
+            let mut tokens = c.data_collection.split(".");
+
+            // Postgres and MySql have different data collection naming schemes.
+            // Postgres names tables as: schema.table, while MySql uses: table.
+            // Split the data collection name by the '.' character. If it is postgres,
+            // there will be two tokens and we return the second.
+            // TODO(justin): Wrap parsing different data collection naming schemes.
+            let first = tokens.next();
+            let second = tokens.next();
+
+            match second {
+                Some(t) => Ok(t),
+                None => first.ok_or(Error::msg(
+                    "Data collection did not include a valid table name",
+                )),
+            }
+        });
+
+        for table in tables {
+            // Propagate any collection naming errors
+            let mut table_mutator = noria_authority.table(table?).await?;
+            table_mutator.update_timestamp(Timestamp::default()).await?;
+        }
         Ok(())
     }
 

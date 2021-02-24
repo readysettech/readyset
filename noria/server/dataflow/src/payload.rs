@@ -225,6 +225,13 @@ pub enum Packet {
 
     /// Ask domain to log its state size
     UpdateStateSize,
+
+    /// Propagate updated timestamps for the set of base tables.
+    Timestamp {
+        link: Option<Link>,
+        src: Option<SourceChannelIdentifier>,
+        timestamp: LocalOrNot<PacketData>,
+    },
 }
 
 impl Packet {

@@ -12,7 +12,10 @@ use dataflow::{DurabilityMode, PersistenceParameters};
 use itertools::Itertools;
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
-use noria::{DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator};
+use noria::{
+    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, ViewQuery,
+    ViewQueryFilter, ViewQueryOperator,
+};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -210,6 +213,60 @@ async fn it_completes() {
 
     // wait for exit
     done.await;
+}
+
+// This test propagates a timestamp and verifies that we can request data
+// without a timestamp. At this time, propagation only reaches the base table
+// and does not reach the reader nodes.
+// TODO(justin): Update this test when timestamp propagation reaches the base
+// table nodes.
+#[tokio::test(threaded_scheduler)]
+async fn test_timestamp_propagation() {
+    let mut g = start_simple("test_timestamp_propagation").await;
+
+    // Create a base table "a" with columns "a", and "b".
+    let _ = g
+        .migrate(|mig| {
+            // Adds a base table with fields "a", "b".
+            let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+
+            let mut emits = HashMap::new();
+            emits.insert(a, vec![0, 1]);
+            let u = Union::new(emits);
+            let c = mig.add_ingredient("c", &["a"], u);
+            mig.maintain_anonymous(c, &[0]);
+            (a, c)
+        })
+        .await;
+
+    let mut cq = g.view("c").await.unwrap();
+    let mut muta = g.table("a").await.unwrap();
+
+    // Insert <1, 2> into table "a".
+    let id: DataType = 1.into();
+    let value: DataType = 2.into();
+    muta.insert(vec![id.clone(), value.clone()]).await.unwrap();
+
+    // Create and pass the timestamp to the base table node.
+    let mut t = Timestamp::default();
+    // SAFETY: LocalNodeIndex must be contiguous and 0 indices.
+    t.map.insert(unsafe { LocalNodeIndex::make(0) }, 4);
+    muta.update_timestamp(t.clone()).await.unwrap();
+
+    // If a timestamp is not specified, timestamp propagation has no impact.
+    let res = cq
+        .raw_lookup(ViewQuery {
+            key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
+            block: true,
+            order_by: None,
+            limit: None,
+            filter: None,
+            timestamp: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(res[0], vec![vec![id.clone(), value.clone()]]);
 }
 
 #[tokio::test(threaded_scheduler)]

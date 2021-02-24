@@ -308,7 +308,7 @@ pub use crate::data::{
     TIMESTAMP_FORMAT,
 };
 pub use crate::map::Map;
-pub use crate::table::Table;
+pub use crate::table::{Table, TableRequest};
 pub use crate::view::View;
 
 #[doc(hidden)]

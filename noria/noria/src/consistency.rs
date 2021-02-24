@@ -9,7 +9,8 @@ use proptest::arbitrary::Arbitrary;
 /// is sufficiently up to date to satisfy read-your-write guarentees.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Timestamp {
-    map: Map<u64>,
+    /// A map from  a base table's LocalNodeIndex to timestamp.
+    pub map: Map<u64>,
 }
 impl Arbitrary for Timestamp {
     type Parameters = ();
