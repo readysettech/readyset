@@ -2,6 +2,7 @@ use crate::data::DataType;
 use chrono::NaiveDateTime;
 use serde::ser::SerializeTupleVariant;
 use std::convert::TryFrom;
+use std::fmt;
 
 impl serde::ser::Serialize for DataType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -50,110 +51,103 @@ impl<'de> serde::Deserialize<'de> for DataType {
     where
         D: serde::Deserializer<'de>,
     {
-        #[allow(non_camel_case_types)]
-        enum __Field {
-            __field0,
-            __field1,
-            __field2,
-            __field3,
-            __field4,
+        enum Field {
+            Field0,
+            Field1,
+            Field2,
+            Field3,
+            Field4,
         }
-        struct __FieldVisitor;
-        impl<'de> serde::de::Visitor<'de> for __FieldVisitor {
-            type Value = __Field;
-            fn expecting(
-                &self,
-                __formatter: &mut serde::export::Formatter<'_>,
-            ) -> serde::export::fmt::Result {
-                serde::export::Formatter::write_str(__formatter, "variant identifier")
+        struct FieldVisitor;
+        impl<'de> serde::de::Visitor<'de> for FieldVisitor {
+            type Value = Field;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("variant identifier")
             }
-            fn visit_u64<__E>(self, __value: u64) -> serde::export::Result<Self::Value, __E>
+            fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
             where
-                __E: serde::de::Error,
+                E: serde::de::Error,
             {
-                match __value {
-                    0u64 => serde::export::Ok(__Field::__field0),
-                    1u64 => serde::export::Ok(__Field::__field1),
-                    2u64 => serde::export::Ok(__Field::__field2),
-                    3u64 => serde::export::Ok(__Field::__field3),
-                    4u64 => serde::export::Ok(__Field::__field4),
-                    _ => serde::export::Err(serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Unsigned(__value),
+                match val {
+                    0u64 => Ok(Field::Field0),
+                    1u64 => Ok(Field::Field1),
+                    2u64 => Ok(Field::Field2),
+                    3u64 => Ok(Field::Field3),
+                    4u64 => Ok(Field::Field4),
+                    _ => Err(serde::de::Error::invalid_value(
+                        serde::de::Unexpected::Unsigned(val),
                         &"variant index 0 <= i < 5",
                     )),
                 }
             }
-            fn visit_str<__E>(self, __value: &str) -> serde::export::Result<Self::Value, __E>
+            fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
             where
-                __E: serde::de::Error,
+                E: serde::de::Error,
             {
-                match __value {
-                    "None" => serde::export::Ok(__Field::__field0),
-                    "Int" => serde::export::Ok(__Field::__field1),
-                    "Real" => serde::export::Ok(__Field::__field2),
-                    "Text" => serde::export::Ok(__Field::__field3),
-                    "Timestamp" => serde::export::Ok(__Field::__field4),
-                    _ => serde::export::Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
+                match val {
+                    "None" => Ok(Field::Field0),
+                    "Int" => Ok(Field::Field1),
+                    "Real" => Ok(Field::Field2),
+                    "Text" => Ok(Field::Field3),
+                    "Timestamp" => Ok(Field::Field4),
+                    _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
-            fn visit_bytes<__E>(self, __value: &[u8]) -> serde::export::Result<Self::Value, __E>
+            fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
             where
-                __E: serde::de::Error,
+                E: serde::de::Error,
             {
-                match __value {
-                    b"None" => serde::export::Ok(__Field::__field0),
-                    b"Int" => serde::export::Ok(__Field::__field1),
-                    b"Real" => serde::export::Ok(__Field::__field2),
-                    b"Text" => serde::export::Ok(__Field::__field3),
-                    b"Timestamp" => serde::export::Ok(__Field::__field4),
-                    _ => {
-                        let __value = &serde::export::from_utf8_lossy(__value);
-                        serde::export::Err(serde::de::Error::unknown_variant(__value, VARIANTS))
-                    }
+                match val {
+                    b"None" => Ok(Field::Field0),
+                    b"Int" => Ok(Field::Field1),
+                    b"Real" => Ok(Field::Field2),
+                    b"Text" => Ok(Field::Field3),
+                    b"Timestamp" => Ok(Field::Field4),
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &String::from_utf8_lossy(val),
+                        VARIANTS,
+                    )),
                 }
             }
         }
-        impl<'de> serde::Deserialize<'de> for __Field {
+        impl<'de> serde::Deserialize<'de> for Field {
             #[inline]
-            fn deserialize<__D>(__deserializer: __D) -> serde::export::Result<Self, __D::Error>
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
-                __D: serde::Deserializer<'de>,
+                D: serde::Deserializer<'de>,
             {
-                serde::Deserializer::deserialize_identifier(__deserializer, __FieldVisitor)
+                serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
             }
         }
 
-        struct __Visitor;
-        impl<'de> serde::de::Visitor<'de> for __Visitor {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = DataType;
-            fn expecting(
-                &self,
-                __formatter: &mut serde::export::Formatter<'_>,
-            ) -> serde::export::fmt::Result {
-                serde::export::Formatter::write_str(__formatter, "enum DataType")
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("enum DataType")
             }
 
-            fn visit_enum<__A>(self, __data: __A) -> serde::export::Result<Self::Value, __A::Error>
+            fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
             where
-                __A: serde::de::EnumAccess<'de>,
+                A: serde::de::EnumAccess<'de>,
             {
-                match match serde::de::EnumAccess::variant(__data) {
-                    serde::export::Ok(__val) => __val,
-                    serde::export::Err(__err) => {
-                        return serde::export::Err(__err);
+                match match serde::de::EnumAccess::variant(data) {
+                    Ok(val) => val,
+                    Err(err) => {
+                        return Err(err);
                     }
                 } {
-                    (__Field::__field0, __variant) => {
-                        match serde::de::VariantAccess::unit_variant(__variant) {
-                            serde::export::Ok(__val) => __val,
-                            serde::export::Err(__err) => {
-                                return serde::export::Err(__err);
+                    (Field::Field0, variant) => {
+                        match serde::de::VariantAccess::unit_variant(variant) {
+                            Ok(val) => val,
+                            Err(err) => {
+                                return Err(err);
                             }
                         };
-                        serde::export::Ok(DataType::None)
+                        Ok(DataType::None)
                     }
-                    (__Field::__field1, __variant) => {
-                        serde::de::VariantAccess::newtype_variant::<i128>(__variant).and_then(|x| {
+                    (Field::Field1, variant) => {
+                        serde::de::VariantAccess::newtype_variant::<i128>(variant).and_then(|x| {
                             DataType::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
                                     serde::de::Unexpected::Other(format!("{}", x).as_str()),
@@ -162,88 +156,76 @@ impl<'de> serde::Deserialize<'de> for DataType {
                             })
                         })
                     }
-                    (__Field::__field2, __variant) => {
-                        struct __Visitor;
-                        impl<'de> serde::de::Visitor<'de> for __Visitor {
+                    (Field::Field2, variant) => {
+                        struct Visitor;
+                        impl<'de> serde::de::Visitor<'de> for Visitor {
                             type Value = DataType;
-                            fn expecting(
-                                &self,
-                                __formatter: &mut serde::export::Formatter<'_>,
-                            ) -> serde::export::fmt::Result {
-                                serde::export::Formatter::write_str(
-                                    __formatter,
-                                    "tuple variant DataType::Real",
-                                )
+                            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                                fmt::Formatter::write_str(formatter, "tuple variant DataType::Real")
                             }
                             #[inline]
-                            fn visit_seq<__A>(
-                                self,
-                                mut __seq: __A,
-                            ) -> serde::export::Result<Self::Value, __A::Error>
+                            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
                             where
-                                __A: serde::de::SeqAccess<'de>,
+                                A: serde::de::SeqAccess<'de>,
                             {
-                                let __field0 = match match serde::de::SeqAccess::next_element::<i64>(
-                                    &mut __seq,
-                                ) {
-                                    serde::export::Ok(__val) => __val,
-                                    serde::export::Err(__err) => {
-                                        return serde::export::Err(__err);
-                                    }
-                                } {
-                                    serde::export::Some(__value) => __value,
-                                    serde::export::None => {
-                                        return serde::export::Err(
-                                            serde::de::Error::invalid_length(
+                                let field0 =
+                                    match match serde::de::SeqAccess::next_element::<i64>(&mut seq)
+                                    {
+                                        Ok(val) => val,
+                                        Err(err) => {
+                                            return Err(err);
+                                        }
+                                    } {
+                                        Some(val) => val,
+                                        None => {
+                                            return Err(serde::de::Error::invalid_length(
                                                 0usize,
                                                 &"tuple variant DataType::Real with 2 elements",
-                                            ),
-                                        );
-                                    }
-                                };
-                                let __field1 = match match serde::de::SeqAccess::next_element::<i32>(
-                                    &mut __seq,
-                                ) {
-                                    serde::export::Ok(__val) => __val,
-                                    serde::export::Err(__err) => {
-                                        return serde::export::Err(__err);
-                                    }
-                                } {
-                                    serde::export::Some(__value) => __value,
-                                    serde::export::None => {
-                                        return serde::export::Err(
-                                            serde::de::Error::invalid_length(
+                                            ));
+                                        }
+                                    };
+                                let field1 =
+                                    match match serde::de::SeqAccess::next_element::<i32>(&mut seq)
+                                    {
+                                        Ok(val) => val,
+                                        Err(err) => {
+                                            return Err(err);
+                                        }
+                                    } {
+                                        Some(val) => val,
+                                        None => {
+                                            return Err(serde::de::Error::invalid_length(
                                                 1usize,
                                                 &"tuple variant DataType::Real with 2 elements",
-                                            ),
-                                        );
-                                    }
-                                };
-                                serde::export::Ok(DataType::Real(__field0, __field1))
+                                            ));
+                                        }
+                                    };
+                                Ok(DataType::Real(field0, field1))
                             }
                         }
-                        serde::de::VariantAccess::tuple_variant(__variant, 2usize, __Visitor)
+                        serde::de::VariantAccess::tuple_variant(variant, 2usize, Visitor)
                     }
-                    (__Field::__field3, __variant) => serde::de::VariantAccess::newtype_variant::<
-                        &'_ [u8],
-                    >(__variant)
-                    .and_then(|x| {
-                        DataType::try_from(x).map_err(|_| {
-                            serde::de::Error::invalid_value(
-                                serde::de::Unexpected::Bytes(x),
-                                &"valid utf-8 or short TinyText",
-                            )
-                        })
-                    }),
-                    (__Field::__field4, __variant) => serde::export::Result::map(
-                        serde::de::VariantAccess::newtype_variant::<NaiveDateTime>(__variant),
+                    (Field::Field3, variant) => {
+                        serde::de::VariantAccess::newtype_variant::<&'_ [u8]>(variant).and_then(
+                            |x| {
+                                DataType::try_from(x).map_err(|_| {
+                                    serde::de::Error::invalid_value(
+                                        serde::de::Unexpected::Bytes(x),
+                                        &"valid utf-8 or short TinyText",
+                                    )
+                                })
+                            },
+                        )
+                    }
+                    (Field::Field4, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<NaiveDateTime>(variant),
                         DataType::Timestamp,
                     ),
                 }
             }
         }
 
-        const VARIANTS: &'static [&'static str] = &[
+        const VARIANTS: &[&str] = &[
             "None",
             "Int",
             "UnsignedInt",
@@ -253,6 +235,6 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "Text",
             "Timestamp",
         ];
-        deserializer.deserialize_enum("DataType", VARIANTS, __Visitor)
+        deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }
 }
