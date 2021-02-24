@@ -2,7 +2,7 @@ use crate::clients::localsoup::graph::RECIPE;
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use anyhow::Context as AnyhowContext;
 use clap;
-use noria::{self, ControllerHandle, TableOperation, ZookeeperAuthority};
+use noria::{self, ControllerHandle, TableOperation, TableRequest, ZookeeperAuthority};
 use std::future::Future;
 use std::task::{Context, Poll};
 use tower_service::Service;
@@ -89,7 +89,7 @@ impl Service<WriteRequest> for Conn {
     type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Service::<Vec<TableOperation>>::poll_ready(self.w.as_mut().unwrap(), cx)
+        Service::<TableRequest>::poll_ready(self.w.as_mut().unwrap(), cx)
             .map_err(anyhow::Error::from)
     }
 
@@ -100,7 +100,11 @@ impl Service<WriteRequest> for Conn {
             .map(|article_id| vec![(article_id as i32).into(), 0.into()].into())
             .collect();
 
-        let fut = self.w.as_mut().unwrap().call(data);
+        let fut = self
+            .w
+            .as_mut()
+            .unwrap()
+            .call(TableRequest::TableOperations(data));
         async move {
             fut.await?;
             Ok(())

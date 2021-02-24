@@ -403,9 +403,12 @@ impl Replica {
                                 src: Some(SourceChannelIdentifier { token, tag, epoch }),
                                 senders: Vec::new(),
                             }),
-                            PacketPayload::Timestamp(_) => {
-                                unreachable!("We are not propagating timestamps yet")
-                            }
+                            PacketPayload::Timestamp(_) => Box::new(Packet::Timestamp {
+                                // The link values propagated to the base table are not used.
+                                link: None,
+                                src: Some(SourceChannelIdentifier { token, tag, epoch }),
+                                timestamp: input,
+                            }),
                         }
                     },
                 )
@@ -603,12 +606,16 @@ impl Future for Replica {
                     let retry = &mut $retry;
                     if let ProcessResult::StopPolling = {
                         let packet = retry.take().unwrap();
-                        if let Packet::Input {
-                            src: Some(SourceChannelIdentifier { token, epoch, .. }),
-                            ..
-                        } = *packet
-                        {
-                            $outbox.saw_input(token, epoch);
+                        match *packet {
+                            Packet::Input {
+                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
+                                ..
+                            } => $outbox.saw_input(token, epoch),
+                            Packet::Timestamp {
+                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
+                                ..
+                            } => $outbox.saw_input(token, epoch),
+                            _ => {}
                         }
                         $pp(packet)
                     } {

@@ -101,6 +101,23 @@ impl<T> LocalOrNot<T> {
         }
     }
 
+    /// Creates a new LocalOrNot object based on the destinations
+    /// locality. Unsafe when `dst_is_local` is true.
+    ///
+    /// # Safety
+    ///
+    /// When `dst_is_local` the internal object is boxed
+    /// and may have ownership transfered, the LocalOrNot object
+    /// still provides `take` and `deref` calls to an object that
+    /// may not still be contained in the Box.
+    pub unsafe fn new_for_dst(t: T, dst_is_local: bool) -> Self {
+        if dst_is_local {
+            LocalOrNot::for_local_transfer(t)
+        } else {
+            LocalOrNot::new(t)
+        }
+    }
+
     #[doc(hidden)]
     pub unsafe fn for_local_transfer(t: T) -> Self {
         LocalOrNot(LocalOrNotInner::Local(LocalBypass::make(Box::new(t))))
