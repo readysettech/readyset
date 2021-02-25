@@ -241,6 +241,16 @@ impl Packet {
             Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
             Packet::Message { ref link, .. } => link.src,
             Packet::ReplayPiece { ref link, .. } => link.src,
+            // If link is not specified, then we are at a base table node. Use the packet data
+            // to get the src (which is the base table node).
+            Packet::Timestamp {
+                ref link,
+                ref timestamp,
+                ..
+            } => match link {
+                Some(l) => l.src,
+                None => unsafe { timestamp.deref() }.dst,
+            },
             _ => unreachable!(),
         }
     }
@@ -250,6 +260,16 @@ impl Packet {
             Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
             Packet::Message { ref link, .. } => link.dst,
             Packet::ReplayPiece { ref link, .. } => link.dst,
+            // If link is not specified, then we are at a base table node. Use the packet data
+            // to get the dst (which is the base table node).
+            Packet::Timestamp {
+                ref link,
+                ref timestamp,
+                ..
+            } => match link {
+                Some(l) => l.dst,
+                None => unsafe { timestamp.deref() }.dst,
+            },
             _ => unreachable!(),
         }
     }
@@ -259,6 +279,7 @@ impl Packet {
             Packet::Message { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
             Packet::EvictKeys { ref mut link, .. } => link,
+            Packet::Timestamp { ref mut link, .. } => link.as_mut().unwrap(),
             _ => unreachable!(),
         }
     }
@@ -326,6 +347,15 @@ impl Packet {
                 tag,
                 data: data.clone(),
                 context: context.clone(),
+            },
+            Packet::Timestamp {
+                ref timestamp,
+                link,
+                src,
+            } => Packet::Timestamp {
+                link,
+                src,
+                timestamp: timestamp.clone(),
             },
             _ => unreachable!(),
         }

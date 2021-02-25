@@ -3,7 +3,7 @@ use crate::payload;
 use crate::prelude::*;
 use core::convert::TryInto;
 use launchpad::hash::hash;
-use noria::{KeyComparison, PacketData};
+use noria::{consistency::Timestamp, KeyComparison, PacketData};
 use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
@@ -393,6 +393,101 @@ impl Node {
             miss.on = *new_parent.unwrap();
             // Recurse in case the parent we landed at also is a query_through node:
             self.reroute_miss(nodes, miss);
+        }
+    }
+
+    pub(crate) fn process_timestamp(
+        &mut self,
+        m: Box<Packet>,
+        executor: &mut dyn Executor,
+    ) -> Option<Box<Packet>> {
+        let src_node = m.src();
+        match *m {
+            Packet::Timestamp {
+                link,
+                src,
+                timestamp,
+            } => {
+                let PacketData { dst, data } = unsafe { timestamp.take() };
+
+                let timestamp: Timestamp =
+                    data.try_into().expect("Packet data not of timestamp type");
+
+                // Set the incoming timestamp in the current nodes map of
+                // upstream timestamps.
+                self.timestamps
+                    .entry(src_node)
+                    .and_modify(|e| {
+                        *e = Timestamp::join(e, &timestamp);
+                    })
+                    .or_insert(timestamp.clone());
+
+                // Calculate the minimum timestamp over all timestamps for each parent
+                // of the node. If the node does not have a timestamp for any parent,
+                // then the minimum timestamp is returned.
+                let mut parent_timestamps: Vec<&Timestamp> = Vec::with_capacity(self.parents.len());
+                let mut parent_without_timestamp = false;
+                for parent in self.parents() {
+                    match self.timestamps.get(parent) {
+                        Some(t) => {
+                            parent_timestamps.push(&t);
+                        }
+                        None => {
+                            parent_without_timestamp = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If a node has no parents it is a base table node, we pass the
+                // timestamp in the packet along.
+                let timestamp = if self.parents().is_empty() {
+                    self.timestamps.get(&src_node).unwrap().clone()
+                } else if parent_without_timestamp {
+                    // The empty timestamp is a placeholder for the minimum timestamp.
+                    Timestamp::default()
+                } else {
+                    Timestamp::min(&parent_timestamps[..])
+                };
+
+                if let NodeType::Reader(ref mut r) = self.inner {
+                    r.process_timestamp(timestamp);
+                    return None;
+                }
+
+                // Create a link if one does not already exist. This only happens
+                // at the base table. The domain is responsible for setting the
+                // new dst for the link.
+                let link = Some(link.unwrap_or_else(|| Link::new(src_node, src_node)));
+
+                // We leave the link untouched, the domain will be responsible
+                // for updating it.
+                let p = Box::new(Packet::Timestamp {
+                    link,
+                    src: None,
+                    timestamp: LocalOrNot::new(PacketData {
+                        dst,
+                        data: PacketPayload::Timestamp(timestamp),
+                    }),
+                });
+
+                // Some node types require additional packet handling after aggregating
+                // all parent node timestamps.
+                match self.inner {
+                    NodeType::Egress(Some(ref mut e)) => {
+                        // TODO(justin): Should this use on_shard like process.
+                        let p = &mut Some(p);
+                        e.process(p, 0, executor);
+                        None
+                    }
+                    NodeType::Base(_) => {
+                        executor.ack(src.unwrap());
+                        Some(p)
+                    }
+                    _ => Some(p),
+                }
+            }
+            _ => unreachable!("process_timestamp passed non timestamp packet."),
         }
     }
 }

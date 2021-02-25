@@ -215,14 +215,25 @@ async fn it_completes() {
     done.await;
 }
 
-// This test propagates a timestamp and verifies that we can request data
-// without a timestamp. At this time, propagation only reaches the base table
-// and does not reach the reader nodes.
-// TODO(justin): Update this test when timestamp propagation reaches the base
-// table nodes.
+fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
+    let mut t = Timestamp::default();
+    // SAFETY: For performance, LocalNodeIndex must be contiguous and 0 indexed.
+    for p in pairs {
+        t.map.insert(unsafe { LocalNodeIndex::make(p.0) }, p.1);
+    }
+
+    t
+}
+
+// Tests that a write to a single base table accompanied by a timestamp
+// update propagates to the reader nodes. Tests that a read with a timestamp
+// that can be satisfied by the reader node succeeds and that a timestamp
+// that cannot be satisfied does not. If the reader node had not received
+// a timestamp, the read would not be satisfied, unless there is a bug with
+// timestamp satisfiability.
 #[tokio::test(threaded_scheduler)]
-async fn test_timestamp_propagation() {
-    let mut g = start_simple("test_timestamp_propagation").await;
+async fn test_timestamp_propagation_simple() {
+    let mut g = start_simple("test_timestamp_propagation_simple").await;
 
     // Create a base table "a" with columns "a", and "b".
     let _ = g
@@ -248,12 +259,12 @@ async fn test_timestamp_propagation() {
     muta.insert(vec![id.clone(), value.clone()]).await.unwrap();
 
     // Create and pass the timestamp to the base table node.
-    let mut t = Timestamp::default();
-    // SAFETY: LocalNodeIndex must be contiguous and 0 indices.
-    t.map.insert(unsafe { LocalNodeIndex::make(0) }, 4);
+    let t = timestamp(vec![(0, 1)]);
     muta.update_timestamp(t.clone()).await.unwrap();
 
-    // If a timestamp is not specified, timestamp propagation has no impact.
+    // Successful read with a timestamp that the reader node timestamp
+    // satisfies. We begin with a blocking read as the data is not
+    // materialized at the reader.
     let res = cq
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
@@ -261,12 +272,116 @@ async fn test_timestamp_propagation() {
             order_by: None,
             limit: None,
             filter: None,
-            timestamp: None,
+            timestamp: Some(t.clone()),
         })
         .await
         .unwrap();
 
     assert_eq!(res[0], vec![vec![id.clone(), value.clone()]]);
+
+    // Perform a read with a timestamp the reader cannot satisfy.
+    let res = cq
+        .raw_lookup(ViewQuery {
+            key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
+            block: false,
+            order_by: None,
+            limit: None,
+            filter: None,
+            // The timestamp at the reader node { 0: 4 }, does not
+            // satisfy this timestamp.
+            timestamp: Some(timestamp(vec![(1, 4)])),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(res[0], Vec::new());
+}
+
+// Simulate writes from two clients.
+#[tokio::test(threaded_scheduler)]
+async fn test_timestamp_propagation_multitable() {
+    let mut g = start_simple("test_timestamp_propagation_multitable").await;
+
+    // Create two base tables "a" and "b" with columns "a", and "b".
+    let _ = g
+        .migrate(|mig| {
+            let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+            let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+
+            let mut emits = HashMap::new();
+            emits.insert(a, vec![0, 1]);
+            emits.insert(b, vec![0, 1]);
+            let u = Union::new(emits);
+            let c = mig.add_ingredient("c", &["a", "b"], u);
+            mig.maintain_anonymous(c, &[0]);
+            (a, b, c)
+        })
+        .await;
+
+    let mut cq = g.view("c").await.unwrap();
+    let mut muta = g.table("a").await.unwrap();
+    let mut mutb = g.table("b").await.unwrap();
+
+    // Insert some data into table a.
+    muta.insert(vec![DataType::Int(1), DataType::Int(2)])
+        .await
+        .unwrap();
+
+    // Update timestamps to simulate two clients performing writes
+    // to two base tables at the same time.
+    //
+    // Client 1's update timestamp calls.
+    muta.update_timestamp(timestamp(vec![(0, 6)]))
+        .await
+        .unwrap();
+    mutb.update_timestamp(timestamp(vec![(1, 5)]))
+        .await
+        .unwrap();
+
+    // Client 2's update timestamp calls.
+    muta.update_timestamp(timestamp(vec![(0, 5)]))
+        .await
+        .unwrap();
+    mutb.update_timestamp(timestamp(vec![(1, 6)]))
+        .await
+        .unwrap();
+
+    // Successful read with a timestamp that the reader node timestamp
+    // satisfies. We begin with a blocking read as the data is not
+    // materialized at the reader. In order for the timestamp to satisfy
+    // the timestamp { 0: 6, 1: 6 }, each dataflow node will have to had
+    // calculated the max over the timestamp entries they had seen for
+    // each table.
+    let res = cq
+        .raw_lookup(ViewQuery {
+            key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            block: true,
+            order_by: None,
+            limit: None,
+            filter: None,
+            timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(res[0], vec![vec![DataType::Int(1), DataType::Int(2)]]);
+
+    // Perform a non-blocking read with a timestamp that the reader should not
+    // be able to satisfy. A non-blocking read of a satisfiable timestamp would
+    // suceed here due to the previous read materializing the data.
+    let res = cq
+        .raw_lookup(ViewQuery {
+            key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            block: false,
+            order_by: None,
+            limit: None,
+            filter: None,
+            timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(res[0], Vec::new());
 }
 
 #[tokio::test(threaded_scheduler)]
@@ -3649,7 +3764,7 @@ async fn self_join_param() {
          VIEW fof2: SELECT u1.id AS user, u2.friend AS fof \
              FROM users u1 \
              JOIN users u2 ON (u1.friend = u2.id);
-	     QUERY follow_on: SELECT * FROM fof2 WHERE user = ?;",
+             QUERY follow_on: SELECT * FROM fof2 WHERE user = ?;",
     )
     .await
     .unwrap();

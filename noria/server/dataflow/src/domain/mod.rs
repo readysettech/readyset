@@ -40,7 +40,6 @@ pub enum ProcessResult {
     Processed,
     StopPolling,
 }
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub concurrent_replays: usize,
@@ -784,6 +783,38 @@ impl Domain {
         }
     }
 
+    fn handle_timestamp(&mut self, m: Box<Packet>, executor: &mut dyn Executor) {
+        let me = m.dst();
+
+        let m = {
+            let mut n = self.nodes[me].borrow_mut();
+            n.process_timestamp(m, executor)
+        };
+
+        let nchildren = self.nodes[me].borrow().children().len();
+        for i in 0..nchildren {
+            let mut p = Box::new(m.as_ref().unwrap().clone_data());
+
+            let childi = self.nodes[me].borrow().children()[i];
+            let child_is_merger = {
+                // XXX: shouldn't NLL make this unnecessary?
+                let c = self.nodes[childi].borrow();
+                c.is_shard_merger()
+            };
+
+            // The packet `m` must have a link by this point as `link_mut` calls
+            // unwrap on the option.
+            if child_is_merger {
+                // we need to preserve the egress src (which includes shard identifier)
+            } else {
+                p.link_mut().src = me;
+            }
+            p.link_mut().dst = childi;
+
+            self.handle(p, executor, true);
+        }
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn handle(&mut self, m: Box<Packet>, executor: &mut dyn Executor, top: bool) {
         if self.wait_time.is_running() {
@@ -825,6 +856,9 @@ impl Domain {
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(m, executor);
+            }
+            Packet::Timestamp { .. } => {
+                self.handle_timestamp(m, executor);
             }
             consumed => {
                 match consumed {
@@ -1557,14 +1591,6 @@ impl Domain {
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
                     Packet::Spin => {
                         // spinning as instructed
-                    }
-                    Packet::Timestamp { src, .. } => {
-                        // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
-                        // ack should be moved to the base table node's handling of the packet.
-                        // As the packet is not propagated or mutated before reaching the
-                        // domain, we still have a source channel identifier that we can use
-                        // to ack the packet.
-                        executor.ack(src.unwrap());
                     }
                     _ => unreachable!(),
                 }
