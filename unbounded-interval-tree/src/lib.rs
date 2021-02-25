@@ -1323,6 +1323,7 @@ mod tests {
             })
             .prop_filter("Empty range", |(start, end)| {
                 cmp_start_end(start.as_ref(), end.as_ref()) == Less
+                    && !matches!((start, end), (Included(x), Excluded(y)) if x == y)
             })
     }
 
