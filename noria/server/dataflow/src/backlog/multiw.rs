@@ -185,6 +185,14 @@ impl Handle {
         memory_delta
     }
 
+    pub fn set_timestamp(&mut self, t: Timestamp) {
+        match *self {
+            Handle::Single(ref mut h) => h.set_timestamp(t),
+            Handle::Double(ref mut h) => h.set_timestamp(t),
+            Handle::Many(ref mut h) => h.set_timestamp(t),
+        }
+    }
+
     pub fn insert_range<R>(&mut self, range: R)
     where
         R: RangeBounds<Vec<DataType>>,

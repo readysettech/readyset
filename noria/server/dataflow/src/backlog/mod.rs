@@ -283,6 +283,9 @@ impl WriteHandle {
                 .unwrap();
         }
     }
+    pub(crate) fn set_timestamp(&mut self, t: Timestamp) {
+        self.handle.set_timestamp(t);
+    }
 
     pub(crate) fn is_partial(&self) -> bool {
         self.partial

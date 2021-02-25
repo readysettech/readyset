@@ -1,4 +1,4 @@
-use noria::KeyComparison;
+use noria::{consistency::Timestamp, KeyComparison};
 
 use crate::backlog;
 use crate::prelude::*;
@@ -175,6 +175,15 @@ impl Reader {
                 // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
+        }
+    }
+
+    pub(in crate::node) fn process_timestamp(&mut self, m: Timestamp) {
+        if let Some(ref mut handle) = self.writer {
+            handle.set_timestamp(m);
+
+            // Ensure the write is published.
+            handle.swap();
         }
     }
 }
