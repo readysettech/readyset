@@ -771,6 +771,7 @@ impl NoriaConnector {
         trace!("update::update");
         mutator.update(key, updates).await?;
         trace!("update::complete");
+        // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than hardcoded (1,0)
         Ok((1, 0))
     }
 

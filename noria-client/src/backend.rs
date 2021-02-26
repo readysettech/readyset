@@ -1,10 +1,12 @@
+use noria::results::Results;
 use noria::DataType;
 
 use derive_more::From;
 use msql_srv::{self, *};
-use nom_sql::{self, SqlQuery};
+use nom_sql::{self, Literal, SqlQuery};
 
 use async_trait::async_trait;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::io;
 use std::time;
@@ -20,7 +22,6 @@ pub mod noria_connector;
 pub mod error;
 
 use crate::backend::error::Error;
-use crate::backend::error::Error::{IOError, ParseError};
 use mysql_connector::MySqlConnector;
 use noria_connector::NoriaConnector;
 
@@ -199,13 +200,412 @@ pub struct Backend {
     require_authentication: bool,
 }
 
+#[derive(Debug)]
 pub struct SelectSchema {
     use_bogo: bool,
     schema: Vec<Column>,
     columns: Vec<String>,
 }
 
+/// The type returned when a query is prepared by `Backend`
+/// through the `prepare` function.
+/// Variants prefixed with `Noria` come from a `NoriaConnector` writer or reader.
+/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer
+#[derive(Debug)]
+pub enum PrepareResult {
+    NoriaPrepareSelect {
+        statement_id: u32,
+        params: Vec<msql_srv::Column>,
+        schema: Vec<Column>,
+    },
+    NoriaPrepareInsert {
+        statement_id: u32,
+        params: Vec<msql_srv::Column>,
+        schema: Vec<Column>,
+    },
+    NoriaPrepareUpdate {
+        statement_id: u64,
+        params: Vec<Column>,
+    },
+    MySqlPrepareWrite {
+        statement_id: u32,
+    },
+}
+
+/// The type returned when a query is carried out by `Backend`,
+/// through either the `query` or `execute` functions.
+/// Variants prefixed with `Noria` come from a `NoriaConnector` writer or reader.
+/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer
+#[derive(Debug)]
+pub enum QueryResult {
+    NoriaCreateTable,
+    NoriaCreateView,
+    NoriaInsert {
+        num_rows_inserted: u64,
+        first_inserted_id: u64,
+    },
+    NoriaSelect {
+        data: Vec<Results>,
+        select_schema: SelectSchema,
+    },
+    NoriaUpdate {
+        num_rows_updated: u64,
+        last_inserted_id: u64,
+    },
+    NoriaDelete {
+        num_rows_deleted: u64,
+    },
+    /// `last_inserted_id` is 0 if not applicable
+    MySqlWrite {
+        num_rows_affected: u64,
+        last_inserted_id: u64,
+    },
+}
+
 impl Backend {
+    /// Prepares `query` to be executed later using the reader/writer belonging
+    /// to the calling `Backend` struct and adds the prepared query
+    /// to the calling struct's map of prepared queries with a unique id.
+    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult, Error> {
+        //the updated count will serve as the id for the prepared statement
+        self.prepared_count += 1;
+
+        let span = span!(Level::DEBUG, "prepare", query);
+        let _g = span.enter();
+
+        let query = self.sanitize_query(query);
+        let (parsed_query, _) = self.parse_query(&query, false)?;
+
+        let res = match parsed_query {
+            nom_sql::SqlQuery::Select(_) => {
+                //todo : also prepare in writer if it is mysql
+                let (statement_id, params, schema) = self
+                    .reader
+                    .prepare_select(parsed_query.clone(), self.prepared_count)
+                    .await?;
+                Ok(PrepareResult::NoriaPrepareSelect {
+                    statement_id,
+                    params,
+                    schema,
+                })
+            }
+            nom_sql::SqlQuery::Insert(_) => {
+                match &mut self.writer {
+                    Writer::NoriaConnector(connector) => {
+                        let (statement_id, params, schema) = connector
+                            .prepare_insert(parsed_query.clone(), self.prepared_count)
+                            .await?;
+                        Ok(PrepareResult::NoriaPrepareInsert {
+                            statement_id,
+                            params,
+                            schema,
+                        })
+                    }
+                    Writer::MySqlConnector(connector) => {
+                        // todo : handle params correctly. dont just leave them blank.
+                        Ok(PrepareResult::MySqlPrepareWrite {
+                            statement_id: connector
+                                .on_prepare(&parsed_query.to_string(), self.prepared_count)
+                                .await?,
+                        })
+                    }
+                }
+            }
+            nom_sql::SqlQuery::Update(_) => {
+                match &mut self.writer {
+                    Writer::NoriaConnector(connector) => {
+                        let (statement_id, params) = connector
+                            .prepare_update(parsed_query.clone(), self.prepared_count)
+                            .await?;
+                        Ok(PrepareResult::NoriaPrepareUpdate {
+                            statement_id,
+                            params,
+                        })
+                    }
+                    Writer::MySqlConnector(connector) => {
+                        // todo : handle params correctly. dont just leave them blank.
+                        Ok(PrepareResult::MySqlPrepareWrite {
+                            statement_id: connector
+                                .on_prepare(&parsed_query.to_string(), self.prepared_count)
+                                .await?,
+                        })
+                    }
+                }
+            }
+            _ => {
+                error!("unsupported query");
+                Err(Error::UnsupportedError("Unsupported query".to_string()))
+            }
+        };
+
+        self.prepared_queries
+            .insert(self.prepared_count, parsed_query.to_owned());
+
+        res
+    }
+
+    /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
+    /// belonging to the calling `Backend` struct.
+    pub async fn execute(
+        &mut self,
+        id: u32,
+        params: ParamParser<'_>,
+    ) -> Result<QueryResult, Error> {
+        let span = span!(Level::TRACE, "execute", id);
+        let _g = span.enter();
+
+        let start = time::Instant::now();
+
+        let prep: SqlQuery = self
+            .prepared_queries
+            .get(&id)
+            .cloned()
+            .ok_or(Error::MissingPreparedStatement)?;
+
+        let res = match prep {
+            SqlQuery::Select(_) => {
+                let (data, select_schema) = self.reader.execute_prepared_select(id, params).await?;
+                Ok(QueryResult::NoriaSelect {
+                    data,
+                    select_schema,
+                })
+            }
+            SqlQuery::Insert(ref _q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    let (num_rows_inserted, first_inserted_id) =
+                        connector.execute_prepared_insert(id, params).await?;
+                    Ok(QueryResult::NoriaInsert {
+                        num_rows_inserted,
+                        first_inserted_id,
+                    })
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_execute(id, params).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            SqlQuery::Update(ref _q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    let (num_rows_updated, last_inserted_id) =
+                        connector.execute_prepared_update(id, params).await?;
+                    Ok(QueryResult::NoriaUpdate {
+                        num_rows_updated,
+                        last_inserted_id,
+                    })
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_execute(id, params).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            _ => unreachable!(),
+        };
+
+        if self.slowlog {
+            let took = start.elapsed();
+            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                let query: &dyn std::fmt::Display = match prep {
+                    SqlQuery::Select(ref q) => q,
+                    SqlQuery::Insert(ref q) => q,
+                    SqlQuery::Update(ref q) => q,
+                    _ => unreachable!(),
+                };
+                warn!(
+                    %query,
+                    time = ?took,
+                    "slow query",
+                );
+            }
+        }
+
+        return res;
+    }
+
+    /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
+        let span = span!(Level::TRACE, "query", query);
+        let _g = span.enter();
+        let start = time::Instant::now();
+
+        let query = self.sanitize_query(query);
+        let (parsed_query, use_params) = self.parse_query(&query, true)?;
+
+        let res = match parsed_query {
+            nom_sql::SqlQuery::CreateTable(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    connector.handle_create_table(q).await?;
+                    Ok(QueryResult::NoriaCreateTable)
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&q.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            nom_sql::SqlQuery::CreateView(q) => {
+                self.reader.handle_create_view(q).await?;
+                Ok(QueryResult::NoriaCreateView)
+            }
+            nom_sql::SqlQuery::Insert(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    let (num_rows_inserted, first_inserted_id) = connector.handle_insert(q).await?;
+                    Ok(QueryResult::NoriaInsert {
+                        num_rows_inserted,
+                        first_inserted_id,
+                    })
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&q.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            nom_sql::SqlQuery::Select(q) => {
+                let (data, select_schema) = self.reader.handle_select(q, use_params).await?;
+                Ok(QueryResult::NoriaSelect {
+                    data,
+                    select_schema,
+                })
+            }
+            nom_sql::SqlQuery::Update(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    let (num_rows_updated, last_inserted_id) = connector.handle_update(q).await?;
+                    Ok(QueryResult::NoriaUpdate {
+                        num_rows_updated,
+                        last_inserted_id,
+                    })
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&q.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            nom_sql::SqlQuery::Delete(q) => match &mut self.writer {
+                Writer::NoriaConnector(connector) => {
+                    let num_rows_deleted = connector.handle_delete(q).await?;
+                    Ok(QueryResult::NoriaDelete { num_rows_deleted })
+                }
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&q.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+            },
+            nom_sql::SqlQuery::DropTable(q) => match &mut self.writer {
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&q.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+                _ => {
+                    warn!("Ignoring drop table because using Noria writer not Mysql writer.");
+                    if self.permissive {
+                        warn!("Permissive flag enabled, so returning successful drop table despite failure.");
+                        Ok(QueryResult::MySqlWrite {
+                            num_rows_affected: 0,
+                            last_inserted_id: 0,
+                        })
+                    } else {
+                        unimplemented!()
+                    }
+                }
+            },
+            _ => match &mut self.writer {
+                Writer::MySqlConnector(connector) => {
+                    let (num_rows_affected, last_inserted_id) =
+                        connector.on_query(&parsed_query.to_string()).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+                _ => {
+                    error!("unsupported query");
+                    Err(Error::UnsupportedError("Unsupported query".to_string()))
+                }
+            },
+        };
+
+        if self.slowlog {
+            let took = start.elapsed();
+            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
+                warn!(
+                    %query,
+                    time = ?took,
+                    "slow query",
+                );
+            }
+        }
+
+        res
+    }
+
+    fn sanitize_query(&mut self, query: &str) -> String {
+        trace!("sanitize");
+        if self.sanitize {
+            let q = utils::sanitize_query(query);
+            trace!(%q, "sanitized");
+            q
+        } else {
+            query.to_owned()
+        }
+    }
+
+    fn parse_query(
+        &mut self,
+        query: &str,
+        collapse_where_ins: bool,
+    ) -> Result<(SqlQuery, Vec<Literal>), Error> {
+        match self.parsed_query_cache.entry(query.to_owned()) {
+            Entry::Occupied(entry) => Ok(entry.get().clone()),
+            Entry::Vacant(entry) => {
+                trace!("Parsing query");
+                match nom_sql::parse_query(query) {
+                    Ok(mut parsed_query) => {
+                        trace!("collapsing where-in clauses");
+                        let mut use_params = Vec::new();
+                        if collapse_where_ins {
+                            if let Some((_, p)) =
+                                rewrite::collapse_where_in(&mut parsed_query, true)
+                            {
+                                use_params = p;
+                            }
+                        }
+                        Ok(entry.insert((parsed_query, use_params)).clone())
+                    }
+                    Err(e) => {
+                        error!(%query, "query can't be parsed: \"{}\"", query);
+                        Err(Error::ParseError(e.to_string()))
+                    }
+                }
+            }
+        }
+    }
+
     async fn handle_failure<W: AsyncWrite + Unpin>(
         &mut self,
         q: &str,
@@ -242,98 +642,34 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
         query: &str,
         info: StatementMetaWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        //the updated count will serve as the id for the prepared statement
-        self.prepared_count += 1;
-
-        let span = span!(Level::DEBUG, "prepare", query);
-        let _g = span.enter();
-
-        trace!("sanitize");
-        let query = if self.sanitize {
-            utils::sanitize_query(query)
-        } else {
-            query.to_owned()
-        };
-
-        if !self.parsed_query_cache.contains_key(&query) {
-            //if we dont already have the parsed query, try to parse it
-            trace!("Parsing query");
-            match nom_sql::parse_query(&query) {
-                Ok(q) => {
-                    self.parsed_query_cache
-                        .insert(query.to_owned(), (q.clone(), vec![]));
-                }
-
-                Err(_e) => {
-                    // if nom-sql rejects the query, there is no chance Noria will like it
-                    let e_string = format!("query can't be parsed: \"{}\"", query);
-                    error!(%query, "query can't be parsed: \"{}\"", query);
-                    let error = ParseError(e_string);
-                    info.error(error.error_kind(), error.message().as_bytes())
-                        .await?;
-                    return Err(error);
-                }
-            }
-        }
-
-        let sql_q = match self.parsed_query_cache.get(&query) {
-            Some((q, _)) => q.clone(),
-            None => unreachable!(),
-        };
-
         trace!("delegate");
-        let res = match sql_q {
-            nom_sql::SqlQuery::Select(_) => {
-                //todo : also prepare in writer if it is mysql
-                let (id, params, schema) = self
-                    .reader
-                    .prepare_select(sql_q.clone(), self.prepared_count)
-                    .await?;
-                info.reply(id, params.as_slice(), schema.as_slice()).await
+        let res = match self.prepare(query).await {
+            Ok(PrepareResult::NoriaPrepareSelect {
+                statement_id,
+                params,
+                schema,
+            }) => {
+                info.reply(statement_id, params.as_slice(), schema.as_slice())
+                    .await
             }
-            nom_sql::SqlQuery::Insert(_) => {
-                match &mut self.writer {
-                    Writer::NoriaConnector(connector) => {
-                        match connector
-                            .prepare_insert(sql_q.clone(), self.prepared_count)
-                            .await
-                        {
-                            Ok((id, params, schema)) => {
-                                info.reply(id, params.as_slice(), schema.as_slice()).await
-                            }
-                            Err(e) => info.error(e.error_kind(), e.message().as_bytes()).await,
-                        }
-                    }
-                    Writer::MySqlConnector(connector) => {
-                        // todo : handle params correctly. dont just leave them blank.
-                        connector
-                            .on_prepare(&sql_q.to_string(), self.prepared_count)
-                            .await?;
-                        info.reply(self.prepared_count, &[], &[]).await
-                    }
-                }
+            Ok(PrepareResult::NoriaPrepareInsert {
+                statement_id,
+                params,
+                schema,
+            }) => {
+                info.reply(statement_id, params.as_slice(), schema.as_slice())
+                    .await
             }
-            nom_sql::SqlQuery::Update(_) => {
-                match &mut self.writer {
-                    Writer::NoriaConnector(connector) => {
-                        let (_, params) = connector
-                            .prepare_update(sql_q.clone(), self.prepared_count)
-                            .await?;
-                        info.reply(self.prepared_count, &params[..], &[]).await
-                    }
-                    Writer::MySqlConnector(connector) => {
-                        // todo : handle params correctly. dont just leave them blank.
-                        connector
-                            .on_prepare(&sql_q.to_string(), self.prepared_count)
-                            .await?;
-                        info.reply(self.prepared_count, &[], &[]).await
-                    }
-                }
-            }
-            _ => unimplemented!(),
+            Ok(PrepareResult::NoriaPrepareUpdate {
+                statement_id: _,
+                params,
+            }) => info.reply(self.prepared_count, &params[..], &[]).await,
+            Ok(PrepareResult::MySqlPrepareWrite { statement_id: _ }) => {
+                info.reply(self.prepared_count, &[], &[]).await
+            } // TODO : handle params correctly. dont just leave them blank.
+            Err(e) => info.error(e.error_kind(), e.message().as_bytes()).await,
         };
-        self.prepared_queries
-            .insert(self.prepared_count, sql_q.to_owned());
+
         Ok(res?)
     }
 
@@ -343,30 +679,11 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        let span = span!(Level::TRACE, "execute", id);
-        let _g = span.enter();
-
-        let start = time::Instant::now();
-
-        // TODO(malte): unfortunate clone here, but we can't call execute_select(&mut self) if we
-        // have self.prepared borrowed
-        let prep: SqlQuery = {
-            match self.prepared_queries.get(&id) {
-                Some(e) => e.clone(),
-                None => {
-                    let e = Error::MissingPreparedStatement;
-                    return results
-                        .error(e.error_kind(), "non-existent statement".as_bytes())
-                        .await
-                        .map_err(|e| IOError(e));
-                }
-            }
-        };
-
-        trace!("delegate");
-        let res = match prep {
-            SqlQuery::Select(_) => {
-                let (data, select_schema) = self.reader.execute_prepared_select(id, params).await?;
+        let res = match self.execute(id, params).await {
+            Ok(QueryResult::NoriaSelect {
+                data,
+                select_schema,
+            }) => {
                 let mut rw = results.start(&select_schema.schema).await.unwrap();
                 for resultsets in data {
                     for r in resultsets {
@@ -394,51 +711,37 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 }
                 rw.finish().await
             }
-            SqlQuery::Insert(ref _q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(
-                        connector.execute_prepared_insert(id, params).await,
-                        results,
+            Ok(QueryResult::NoriaInsert {
+                num_rows_inserted,
+                first_inserted_id,
+            }) => Backend::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            Ok(QueryResult::NoriaUpdate {
+                num_rows_updated,
+                last_inserted_id
+            }) => Backend::write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            Ok(QueryResult::MySqlWrite {
+                num_rows_affected,
+                last_inserted_id,
+            }) => {
+                Backend::write_query_results(
+                    Ok((num_rows_affected, last_inserted_id)),
+                    results,
+                )
+                .await
+            }
+            Err(Error::MissingPreparedStatement) => {
+                return results
+                    .error(
+                        Error::MissingPreparedStatement.error_kind(),
+                        "non-existent statement".as_bytes(),
                     )
                     .await
-                }
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_execute(id, params).await, results)
-                        .await
-                }
-            },
-            SqlQuery::Update(ref _q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(
-                        connector.execute_prepared_update(id, params).await,
-                        results,
-                    )
-                    .await
-                }
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_execute(id, params).await, results)
-                        .await
-                }
-            },
-            _ => unreachable!(),
+                    .map_err(|e| Error::IOError(e));
+            }
+            Err(e) => return Err(e),
+            _ => unreachable!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
         };
 
-        if self.slowlog {
-            let took = start.elapsed();
-            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                let query: &dyn std::fmt::Display = match prep {
-                    SqlQuery::Select(ref q) => q,
-                    SqlQuery::Insert(ref q) => q,
-                    SqlQuery::Update(ref q) => q,
-                    _ => unreachable!(),
-                };
-                warn!(
-                    %query,
-                    time = ?took,
-                    "slow query",
-                );
-            }
-        }
         Ok(res?)
     }
 
@@ -449,53 +752,6 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        let span = span!(Level::TRACE, "query", query);
-        let _g = span.enter();
-
-        let start = time::Instant::now();
-        trace!("sanitize");
-        let query = if self.sanitize {
-            let q = utils::sanitize_query(query);
-            trace!(%q, "sanitized");
-            q
-        } else {
-            query.to_owned()
-        };
-
-        let query_lc = query.to_lowercase();
-
-        if query_lc.starts_with("begin")
-            || query_lc.starts_with("start transaction")
-            || query_lc.starts_with("commit")
-        {
-            trace!("ignoring transaction bits");
-            return Ok(results.completed(0, 0).await?);
-        }
-
-        if query_lc.starts_with("show databases")
-            || query_lc.starts_with("rollback")
-            || query_lc.starts_with("alter table")
-            || query_lc.starts_with("create index")
-            || query_lc.starts_with("create unique index")
-            || query_lc.starts_with("create fulltext index")
-        {
-            warn!("unsupported query; returning empty results");
-            return Ok(results.completed(0, 0).await?);
-        }
-
-        if query_lc.starts_with("show tables") {
-            let cols = [Column {
-                table: String::from(""),
-                column: String::from("Tables"),
-                coltype: ColumnType::MYSQL_TYPE_STRING,
-                colflags: ColumnFlags::empty(),
-            }];
-            // TODO(malte): we could find out which tables exist via RPC to Soup and return them
-            let writer = results.start(&cols).await?;
-            trace!("mocking show tables");
-            return Ok(writer.finish().await?);
-        }
-
         if self.static_responses {
             for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
                 if pattern.is_match(&query) {
@@ -518,87 +774,38 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
             }
         }
 
-        if !self.parsed_query_cache.contains_key(&query) {
-            //if we dont already have the parsed query, try to parse it
-            trace!("Parsing query");
-            match nom_sql::parse_query(&query) {
-                Ok(mut q) => {
-                    trace!("checking endpoint availability");
-                    trace!("collapsing where-in clauses");
-                    let mut use_params = Vec::new();
-                    if let Some((_, p)) = rewrite::collapse_where_in(&mut q, true) {
-                        use_params = p;
-                    }
-                    self.parsed_query_cache
-                        .insert(query.to_owned(), (q.clone(), use_params.clone()));
-                }
-
-                Err(e) => {
-                    // if nom-sql rejects the query, there is no chance Noria will like it
-                    error!(%query, "query can't be parsed: \"{}\"", query);
-                    if self.permissive {
-                        warn!("permissive flag enabled, so returning success despite query parse failure");
-                        return Ok(results.completed(0, 0).await?);
-                    } else {
-                        return self
-                            .handle_failure(&query, results, e.to_string())
-                            .await
-                            .map_err(|e| IOError(e));
-                    }
-                }
+        let res = match self.query(query).await {
+            Ok(QueryResult::NoriaCreateTable) => results.completed(0, 0).await,
+            Ok(QueryResult::NoriaCreateView) => results.completed(0, 0).await,
+            Ok(QueryResult::NoriaInsert {
+                num_rows_inserted,
+                first_inserted_id,
+            }) => {
+                Backend::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results)
+                    .await
             }
-        }
-
-        let (q, use_params) = match self.parsed_query_cache.get(&query) {
-            Some((q, use_params)) => (q.clone(), use_params.clone()),
-            None => unreachable!(),
-        };
-
-        trace!("delegating");
-        let res = match q {
-            nom_sql::SqlQuery::CreateTable(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => match connector.handle_create_table(q).await {
-                    Ok(()) => results.completed(0, 0).await,
-                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
-                },
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
-                        .await
-                }
-            },
-            nom_sql::SqlQuery::CreateView(q) => match self.reader.handle_create_view(q).await {
-                Ok(()) => results.completed(0, 0).await,
-                Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
-            },
-            nom_sql::SqlQuery::Insert(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(connector.handle_insert(q).await, results).await
-                }
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
-                        .await
-                }
-            },
-            nom_sql::SqlQuery::Select(q) => {
-                let (d, select_result) = self.reader.handle_select(q, use_params).await?;
-                let mut rw = results.start(&select_result.schema).await?;
-                for resultsets in d {
+            Ok(QueryResult::NoriaSelect {
+                data,
+                select_schema,
+            }) => {
+                let mut rw = results.start(&select_schema.schema).await?;
+                for resultsets in data {
                     for r in resultsets {
                         let mut r: Vec<_> = r.into();
-                        if select_result.use_bogo {
+                        if select_schema.use_bogo {
                             // drop bogokey
                             r.pop();
                         }
 
-                        for c in &select_result.schema {
-                            let coli = select_result
+                        for c in &select_schema.schema {
+                            let coli = select_schema
                                 .columns
                                 .iter()
                                 .position(|f| f == &c.column)
                                 .unwrap_or_else(|| {
                                     panic!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, &select_result.columns
+                                        c.column, &select_schema.columns
                                     );
                                 });
                             write_column(&mut rw, &r[coli], &c).await;
@@ -608,70 +815,39 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 }
                 rw.finish().await
             }
-            nom_sql::SqlQuery::Set(_) => {
-                results
-                    .error(
-                        msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                        "unsupported set query".as_bytes(),
-                    )
+            Ok(QueryResult::NoriaUpdate {
+                num_rows_updated,
+                last_inserted_id,
+            }) => {
+                Backend::write_query_results(Ok((num_rows_updated, last_inserted_id)), results)
                     .await
             }
-            nom_sql::SqlQuery::Update(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
-                    Backend::write_query_results(connector.handle_update(q).await, results).await
-                }
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
+            Ok(QueryResult::NoriaDelete { num_rows_deleted }) => {
+                results.completed(num_rows_deleted, 0).await
+            }
+            Ok(QueryResult::MySqlWrite {
+                num_rows_affected,
+                last_inserted_id,
+            }) => {
+                Backend::write_query_results(Ok((num_rows_affected, last_inserted_id)), results)
+                    .await
+            }
+            Err(Error::ParseError(e)) => {
+                if self.permissive {
+                    warn!(
+                        "permissive flag enabled, so returning success despite query parse failure"
+                    );
+                    return Ok(results.completed(0, 0).await?);
+                } else {
+                    return self
+                        .handle_failure(&query, results, e.to_string())
                         .await
+                        .map_err(|e| Error::IOError(e));
                 }
-            },
-            nom_sql::SqlQuery::Delete(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => match connector.handle_delete(q).await {
-                    Ok(row_count) => results.completed(row_count, 0).await,
-                    Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
-                },
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
-                        .await
-                }
-            },
-            nom_sql::SqlQuery::DropTable(q) => match &mut self.writer {
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
-                        .await
-                }
-                _ => {
-                    warn!("ignoring drop table");
-                    unimplemented!()
-                }
-            },
-            _ => match &mut self.writer {
-                Writer::MySqlConnector(connector) => {
-                    Backend::write_query_results(connector.on_query(&q.to_string()).await, results)
-                        .await
-                }
-                _ => {
-                    error!("unsupported query");
-                    results
-                        .error(
-                            msql_srv::ErrorKind::ER_NOT_SUPPORTED_YET,
-                            "unsupported query".as_bytes(),
-                        )
-                        .await
-                }
-            },
+            }
+            Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
         };
 
-        if self.slowlog {
-            let took = start.elapsed();
-            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                warn!(
-                    %query,
-                    time = ?took,
-                    "slow query",
-                );
-            }
-        }
         Ok(res?)
     }
 

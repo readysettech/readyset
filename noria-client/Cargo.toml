@@ -31,6 +31,10 @@ slog = "2.4.0"
 zookeeper = "0.5.4"
 noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "0.2.0", features = ["full"] }
+maplit = "1.0.2"
 
 [lib]
 path = "src/lib.rs"
+
+[[example]]
+name = "basic_demo"

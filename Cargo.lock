@@ -2664,6 +2664,7 @@ dependencies = [
  "futures-util",
  "itertools 0.9.0",
  "lazy_static",
+ "maplit",
  "msql-srv",
  "mysql 20.1.0",
  "mysql_async",
