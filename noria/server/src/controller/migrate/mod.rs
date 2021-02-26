@@ -23,6 +23,7 @@
 use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
+use metrics::counter;
 use nom_sql::BinaryOperator;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -593,6 +594,10 @@ impl<'a> Migration<'a> {
             &mut mainline.replies,
         );
 
+        counter!(
+            "controller.migration_time_us",
+            start.elapsed().as_micros() as _
+        );
         warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
     }
 }

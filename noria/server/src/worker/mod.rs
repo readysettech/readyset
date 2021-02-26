@@ -4,6 +4,7 @@ use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
 use futures_util::{future::FutureExt, future::TryFutureExt, sink::SinkExt, stream::StreamExt};
+use metrics::{counter, gauge};
 use noria::channel;
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
@@ -405,6 +406,7 @@ async fn do_eviction(
 
     // 3. are we above the limit?
     let total: usize = sizes.iter().map(|&(_, s)| s).sum();
+    gauge!("eviction_worker.partial_memory_used_bytes", total as f64);
     match memory_limit {
         None => (),
         Some(limit) => {
@@ -453,6 +455,12 @@ async fn do_eviction(
                             limit,
                             target.0.index(),
                         );
+
+                    counter!(
+                        "eviction_worker.evictions_requested",
+                        1,
+                        "domain" => target.0.index().to_string(),
+                    );
 
                     let tx = domain_senders.entry(target).or_insert_with(|| {
                         tokio::task::block_in_place(|| {
