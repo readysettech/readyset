@@ -1,15 +1,16 @@
 #![feature(or_insert_with_key)]
 
+use anyhow::anyhow;
 use chrono::NaiveDate;
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use noria::{DataType, KeyComparison};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter;
+use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -19,6 +20,7 @@ use nom_sql::{
     FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
     Literal, LiteralExpression, SelectStatement, SqlType, Table,
 };
+use noria::DataType;
 
 /// Generate a constant value with the given [`SqlType`]
 ///
@@ -236,7 +238,7 @@ impl GeneratorState {
         QueryState::new(self)
     }
 
-    pub fn generate_query<'a, I>(&mut self, operations: I) -> SelectStatement
+    pub fn generate_query<'gen, 'a, I>(&'gen mut self, operations: I) -> Query<'gen>
     where
         I: IntoIterator<Item = &'a QueryOperation>,
     {
@@ -254,14 +256,15 @@ impl GeneratorState {
         if query.fields.is_empty() {
             query.fields.push(FieldDefinitionExpression::All);
         }
-        query
+
+        Query::new(state, query)
     }
 
     pub fn generate_queries(
         &mut self,
         max_depth: usize,
     ) -> impl Iterator<Item = SelectStatement> + '_ {
-        QueryOperation::permute(max_depth).map(move |ops| self.generate_query(ops))
+        QueryOperation::permute(max_depth).map(move |ops| self.generate_query(ops).statement)
     }
 
     pub fn into_ddl(self) -> impl Iterator<Item = CreateTableStatement> {
@@ -342,13 +345,47 @@ impl<'a> QueryState<'a> {
     }
 
     /// Returns a lookup key for the parameters in the query that will return results
-    pub fn key(&self) -> KeyComparison {
+    pub fn key(&self) -> Vec<DataType> {
         self.parameters
             .iter()
             .map(|(table_name, column_name)| {
                 value_of_type(&self.gen.tables[table_name].columns[column_name])
             })
             .collect()
+    }
+}
+
+pub struct Query<'gen> {
+    pub state: QueryState<'gen>,
+    pub statement: SelectStatement,
+}
+
+impl<'gen> Query<'gen> {
+    pub fn new(state: QueryState<'gen>, statement: SelectStatement) -> Self {
+        Self { state, statement }
+    }
+
+    /// Converts the DDL for this query into a Noria recipe
+    pub fn ddl_recipe(&self) -> String {
+        self.state
+            .tables
+            .iter()
+            .map(|table_name| {
+                let stmt = CreateTableStatement::from(self.state.gen.tables[table_name].clone());
+                format!("{};", stmt)
+            })
+            .join("\n")
+    }
+
+    /// Converts this query into a Noria recipe, including both the DDL and the query itself, using
+    /// the given name for the query
+    pub fn to_recipe(&self, query_name: &str) -> String {
+        format!(
+            "{}\nQUERY {}: {};",
+            self.ddl_recipe(),
+            query_name,
+            self.statement
+        )
     }
 }
 
@@ -583,6 +620,7 @@ impl QueryOperation {
                     }),
                 ));
             }
+
             QueryOperation::SingleParameter => {
                 let table = state.some_table_mut();
                 let col = table.some_column_name();
@@ -602,6 +640,7 @@ impl QueryOperation {
                 let table_name = table.name.clone();
                 state.add_parameter(table_name, col);
             }
+
             QueryOperation::MultipleParameters => {
                 QueryOperation::SingleParameter.add_to_query(state, query);
                 QueryOperation::SingleParameter.add_to_query(state, query);
@@ -614,6 +653,52 @@ impl QueryOperation {
     }
 }
 
+/// Representation of a subset of permutations of query operations
+#[repr(transparent)]
+pub struct Operations(pub Vec<Vec<QueryOperation>>);
+
+impl FromStr for Operations {
+    type Err = anyhow::Error;
+
+    /// Parse a specification for a subset of permutations of query operations from a human-supplied
+    /// string.
+    ///
+    /// The supported syntax is a comma-separated list of specifications for query operations, and
+    /// the result will be a list of all permutations of the corresponding query operations.
+    ///
+    /// The supported specifications are:
+    ///
+    /// | Specification                           | Meaning                           |
+    /// |-----------------------------------------|-----------------------------------|
+    /// | aggregates                              | All [`AggregateType`]s            |
+    /// | filters                                 | All constant-valued [`Filter`]s   |
+    /// | distinct                                | `SELECT DISTINCT`                 |
+    /// | joins                                   | Joins, with all [`JoinOperator`]s |
+    /// | single_parameter / single_param / param | A single query parameter          |
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use QueryOperation::*;
+
+        Ok(Self(
+            s.split(',')
+                .map(|s| -> anyhow::Result<Vec<_>> {
+                    match s {
+                        "aggregates" => Ok(AggregateType::iter().map(ColumnAggregate).collect()),
+                        "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
+                        "distinct" => Ok(vec![Distinct]),
+                        "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
+                        "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
+                        // TODO(grfn): add support for parsing the rest of the query operations
+                        s => Err(anyhow!("unknown query operation: {}", s)),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .multi_cartesian_product()
+                .collect(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,7 +708,18 @@ mod tests {
         I: IntoIterator<Item = &'a QueryOperation>,
     {
         let mut gen = GeneratorState::default();
-        gen.generate_query(ops)
+        gen.generate_query(ops).statement
+    }
+
+    #[test]
+    fn parse_operations() {
+        let src = "aggregates,joins";
+        let Operations(res) = Operations::from_str(src).unwrap();
+        assert_eq!(res.len(), 18);
+        assert!(res.contains(&vec![
+            QueryOperation::ColumnAggregate(AggregateType::Count),
+            QueryOperation::Join(JoinOperator::LeftJoin)
+        ]))
     }
 
     #[test]
