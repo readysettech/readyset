@@ -73,6 +73,12 @@ impl From<TableName> for Table {
     }
 }
 
+impl<'a> From<&'a TableName> for &'a str {
+    fn from(tn: &'a TableName) -> Self {
+        &tn.0
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
 pub struct ColumnName(String);
@@ -239,12 +245,14 @@ impl GeneratorState {
         for op in operations {
             op.add_to_query(&mut state, &mut query);
         }
-        for table in state.tables.into_iter() {
-            query.tables.push(Table {
-                name: table.into(),
-                alias: None,
-                schema: None,
-            })
+
+        if query.tables.is_empty() {
+            let table = state.tables.iter().next().unwrap();
+            query.tables.push(table.clone().into());
+        }
+
+        if query.fields.is_empty() {
+            query.fields.push(FieldDefinitionExpression::All);
         }
         query
     }
@@ -493,15 +501,19 @@ impl QueryOperation {
                     }
                     FilterRHS::Column => {
                         let col = tbl.fresh_column();
-                        ConditionExpression::Base(ConditionBase::Field(col.into()))
+                        ConditionExpression::Base(ConditionBase::Field(Column {
+                            table: Some(tbl.name.clone().into()),
+                            ..col.into()
+                        }))
                     }
                 });
 
                 let cond = ConditionExpression::ComparisonOp(ConditionTree {
                     operator: filter.operator,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                        col.clone().into(),
-                    ))),
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+                        table: Some(tbl.name.clone().into()),
+                        ..col.clone().into()
+                    }))),
                     right,
                 });
 
@@ -518,10 +530,16 @@ impl QueryOperation {
 
             QueryOperation::Join(operator) => {
                 let left_table = state.some_table_mut();
+                let left_table_name = left_table.name.clone();
                 let left_join_key = left_table.fresh_column_with_type(SqlType::Int(32));
                 let left_projected = left_table.fresh_column();
 
+                if query.tables.is_empty() {
+                    query.tables.push(left_table_name.clone().into());
+                }
+
                 let right_table = state.fresh_table_mut();
+                let right_table_name = right_table.name.clone();
                 let right_join_key = right_table.fresh_column_with_type(SqlType::Int(32));
                 let right_projected = right_table.fresh_column();
 
@@ -532,22 +550,31 @@ impl QueryOperation {
                         ConditionTree {
                             operator: BinaryOperator::Equal,
                             left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                                left_join_key.into(),
+                                Column {
+                                    table: Some(left_table_name.clone().into()),
+                                    ..left_join_key.into()
+                                },
                             ))),
                             right: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                                right_join_key.into(),
+                                Column {
+                                    table: Some(right_table_name.clone().into()),
+                                    ..right_join_key.into()
+                                },
                             ))),
                         },
                     )),
                 });
 
-                query
-                    .fields
-                    .push(FieldDefinitionExpression::Col(left_projected.into()));
-                query
-                    .fields
-                    .push(FieldDefinitionExpression::Col(right_projected.into()));
+                query.fields.push(FieldDefinitionExpression::Col(Column {
+                    table: Some(left_table_name.into()),
+                    ..left_projected.into()
+                }));
+                query.fields.push(FieldDefinitionExpression::Col(Column {
+                    table: Some(right_table_name.into()),
+                    ..right_projected.into()
+                }));
             }
+
             QueryOperation::ProjectLiteral => {
                 query.fields.push(FieldDefinitionExpression::Value(
                     FieldValueExpression::Literal(LiteralExpression {
@@ -563,9 +590,10 @@ impl QueryOperation {
                     query,
                     ConditionExpression::ComparisonOp(ConditionTree {
                         operator: BinaryOperator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                            col.clone().into(),
-                        ))),
+                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+                            table: Some(table.name.clone().into()),
+                            ..col.clone().into()
+                        }))),
                         right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
                             Literal::Placeholder(ItemPlaceholder::QuestionMark),
                         ))),
@@ -583,5 +611,56 @@ impl QueryOperation {
 
     pub fn permute(max_depth: usize) -> impl Iterator<Item = Vec<&'static QueryOperation>> {
         (1..=max_depth).flat_map(|depth| ALL_OPERATIONS.iter().combinations(depth))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn generate_query<'a, I>(ops: I) -> SelectStatement
+    where
+        I: IntoIterator<Item = &'a QueryOperation>,
+    {
+        let mut gen = GeneratorState::default();
+        gen.generate_query(ops)
+    }
+
+    #[test]
+    fn single_join() {
+        let query = generate_query(&[QueryOperation::Join(JoinOperator::LeftJoin)]);
+        eprintln!("query: {}", query);
+        assert_eq!(query.tables.len(), 1);
+        assert_eq!(query.join.len(), 1);
+        let join = query.join.first().unwrap();
+        match &join.constraint {
+            JoinConstraint::On(ConditionExpression::ComparisonOp(ConditionTree {
+                operator,
+                left,
+                right,
+            })) => {
+                assert_eq!(operator, &BinaryOperator::Equal);
+                match (left.as_ref(), right.as_ref()) {
+                    (
+                        ConditionExpression::Base(ConditionBase::Field(left_field)),
+                        ConditionExpression::Base(ConditionBase::Field(right_field)),
+                    ) => {
+                        assert_eq!(
+                            left_field.table.as_ref(),
+                            Some(&query.tables.first().unwrap().name)
+                        );
+                        assert_eq!(
+                            right_field.table.as_ref(),
+                            Some(match &join.right {
+                                JoinRightSide::Table(table) => &table.name,
+                                _ => unreachable!(),
+                            })
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            constraint => unreachable!("Unexpected constraint: {:?}", constraint),
+        }
     }
 }
