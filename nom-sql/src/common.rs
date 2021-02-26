@@ -1,5 +1,5 @@
 use nom::branch::alt;
-use nom::character::complete::{alphanumeric1, digit1, line_ending, multispace0, multispace1};
+use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
 use nom::combinator::{map, not, peek};
 use nom::{IResult, InputLength};
@@ -604,18 +604,18 @@ pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> 
     Ok((remaining_input, (args, distinct.is_some())))
 }
 
-fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    let ws_sep = preceded(multispace0, tag_no_case("separator"));
+fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    let ws_sep = delimited(multispace0, tag_no_case("separator"), multispace0);
     let (remaining_input, sep) = delimited(
         ws_sep,
-        delimited(tag("'"), opt(alphanumeric1), tag("'")),
+        opt(alt((raw_string_single_quoted, raw_string_double_quoted))),
         multispace0,
     )(i)?;
 
-    Ok((remaining_input, sep.unwrap_or(&[0u8; 0])))
+    Ok((remaining_input, sep.unwrap_or(vec![])))
 }
 
-fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<&[u8]>)> {
+fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<Vec<u8>>)> {
     pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
 }
 
@@ -645,11 +645,11 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
         map(
             preceded(tag_no_case("group_concat"), delim_group_concat_fx),
             |spec| {
-                let (ref col, ref sep) = spec;
-                let sep = match *sep {
+                let (ref col, sep) = spec;
+                let sep = match sep {
                     // default separator is a comma, see MySQL manual §5.7
                     None => String::from(","),
-                    Some(s) => String::from_utf8(s.to_vec()).unwrap(),
+                    Some(s) => String::from_utf8(s).unwrap(),
                 };
                 FunctionExpression::GroupConcat(FunctionArgument::Column(col.clone()), sep)
             },
@@ -1123,6 +1123,17 @@ mod tests {
                 Column::from("addr_id"),
             )))),
         };
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn group_concat() {
+        let qs = b"group_concat(x separator ', ')";
+        let expected = FunctionExpression::GroupConcat(
+            FunctionArgument::Column(Column::from("x")),
+            ", ".to_owned(),
+        );
+        let res = column_function(qs);
         assert_eq!(res.unwrap().1, expected);
     }
 
