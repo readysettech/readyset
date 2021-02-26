@@ -17,6 +17,7 @@ use crate::prelude::*;
 use crate::state::RangeLookupResult;
 use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
+use metrics::{counter, gauge};
 use noria::channel::{self, TcpSender};
 pub use noria::internal::DomainIndex as Index;
 use noria::KeyComparison;
@@ -345,6 +346,16 @@ impl Domain {
         use std::collections::hash_map::Entry;
         use std::ops::AddAssign;
 
+        counter!(
+            "domain.replay_misses",
+            1,
+            // HACK(eta): having to call `to_string()` here makes me sad,
+            // but seems to be a limitation of the `metrics` crate
+            "domain" => self.index.index().to_string(),
+            "shard" => self.shard.unwrap_or(0).to_string(),
+            "miss_in" => miss_in.id().to_string(),
+            "needed_for" => needed_for.to_string()
+        );
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
@@ -768,14 +779,35 @@ impl Domain {
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
+                let start = time::Instant::now();
+                let src = m.src().id();
+                let dst = m.dst().id();
                 self.total_forward_time.start();
                 self.dispatch(m, executor);
                 self.total_forward_time.stop();
+                counter!(
+                    "domain.forward_time_us",
+                    start.elapsed().as_micros() as _,
+                    // HACK(eta): having to call `to_string()` here makes me sad,
+                    // but seems to be a limitation of the `metrics` crate
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "from_node" => src.to_string(),
+                    "to_node" => dst.to_string(),
+                );
             }
-            Packet::ReplayPiece { .. } => {
+            Packet::ReplayPiece { tag, .. } => {
+                let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.handle_replay(m, executor);
                 self.total_replay_time.stop();
+                counter!(
+                    "domain.handle_replay_time_us",
+                    start.elapsed().as_micros() as _,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(m, executor);
@@ -801,6 +833,13 @@ impl Domain {
                         for &node in &nodes {
                             self.nodes[node].borrow_mut().remove();
                             self.state.remove(node);
+                            gauge!(
+                                "domain.node_state_size_bytes",
+                                0.0,
+                                "domain" => self.index.index().to_string(),
+                                "shard" => self.shard.unwrap_or(0).to_string(),
+                                "node" => node.id().to_string()
+                            );
                             trace!(self.log, "node removed"; "local" => node.id());
                         }
 
@@ -1106,6 +1145,7 @@ impl Domain {
                         cols,
                         node,
                     } => {
+                        let start = time::Instant::now();
                         self.total_replay_time.start();
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
@@ -1147,6 +1187,13 @@ impl Domain {
                             self.find_tags_and_replay(keys, &cols[..], node);
                         }
                         self.total_replay_time.stop();
+                        counter!(
+                            "domain.reader_replay_request_time_us",
+                            start.elapsed().as_micros() as _,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "node" => node.id().to_string()
+                        );
                     }
                     Packet::RequestPartialReplay {
                         tag,
@@ -1160,6 +1207,7 @@ impl Domain {
                            "tag" => tag,
                            "keys" => format!("{:?}", keys)
                         );
+                        let start = time::Instant::now();
                         self.total_replay_time.start();
                         for key in keys {
                             self.seed_replay(
@@ -1171,6 +1219,13 @@ impl Domain {
                             );
                         }
                         self.total_replay_time.stop();
+                        counter!(
+                            "domain.seed_replay_time_us",
+                            start.elapsed().as_micros() as _,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
@@ -1247,6 +1302,9 @@ impl Domain {
                                 .builder_for(&(self.index, self.shard.unwrap_or(0)))
                                 .unwrap();
 
+                            let domain_str = self.index.index().to_string();
+                            let shard_str = self.shard.unwrap_or(0).to_string();
+
                             thread::Builder::new()
                                 .name(format!(
                                     "replay{}.{}",
@@ -1298,17 +1356,41 @@ impl Domain {
                                        "node" => %link.dst,
                                        "μs" => start.elapsed().as_micros()
                                     );
+
+                                    counter!(
+                                        "domain.chunked_replay_time_us",
+                                        // HACK(eta): scary cast
+                                        start.elapsed().as_micros() as _,
+                                        "domain" => domain_str,
+                                        "shard" => shard_str,
+                                        "from_node" => link.dst.id().to_string()
+                                    );
                                 })
                                 .unwrap();
                         }
                         self.handle_replay(p, executor);
 
                         self.total_replay_time.stop();
+                        counter!(
+                            "domain.chunked_replay_start_time_us",
+                            start.elapsed().as_micros() as _,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
                     }
                     Packet::Finish(tag, ni) => {
+                        let start = time::Instant::now();
                         self.total_replay_time.start();
                         self.finish_replay(tag, ni, executor);
                         self.total_replay_time.stop();
+                        counter!(
+                            "domain.finish_replay_time_us",
+                            start.elapsed().as_micros() as _,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
                     }
                     Packet::Ready { node, purge, index } => {
                         assert_eq!(self.mode, DomainMode::Forwarding);
@@ -1507,7 +1589,16 @@ impl Domain {
                     self.buffered_replay_requests
                         .retain(|_, (_, ref keys, _)| !keys.is_empty());
                     for (tag, requesting_shard, keys, single_shard) in elapsed_replays.drain(..) {
+                        let start = time::Instant::now();
                         self.seed_all(tag, requesting_shard, keys, single_shard, executor);
+                        counter!(
+                            "domain.seed_all_time_us",
+                            start.elapsed().as_micros() as _,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "requesting_shard" => requesting_shard.to_string(),
+                            "tag" => tag.to_string()
+                        );
                     }
                     self.total_replay_time.stop();
                 }
@@ -3005,6 +3096,34 @@ impl Domain {
             })
             .sum();
 
+        let total_node_state: u64 = self
+            .state
+            .iter()
+            .map(|(ni, state)| {
+                let ret = state.deep_size_of();
+                gauge!(
+                    "domain.node_state_size_bytes",
+                    ret as f64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "node" => ni.id().to_string()
+                );
+                ret
+            })
+            .sum();
+
+        gauge!(
+            "domain.partial_state_size_bytes",
+            total as f64,
+            "domain" => self.index.index().to_string(),
+            "shard" => self.shard.unwrap_or(0).to_string(),
+        );
+        gauge!(
+            "domain.total_node_state_size_bytes",
+            total_node_state as f64,
+            "domain" => self.index.index().to_string(),
+            "shard" => self.shard.unwrap_or(0).to_string(),
+        );
         self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
     }

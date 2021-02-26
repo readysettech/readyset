@@ -2558,6 +2558,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
+ "metrics",
  "nom-sql",
  "noria",
  "noria-common",
