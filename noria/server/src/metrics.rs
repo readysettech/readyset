@@ -68,9 +68,9 @@ impl NoriaMetricsRecorder {
                 let mut inner = self.inner.lock().unwrap();
                 inner.collapse(&self.queue);
             }
-            self.queue
-                .push(op)
-                .expect_err("failed to push metrics op after a collapse");
+            if let Err(_) = self.queue.push(op) {
+                eprintln!("WARNING: failed to push metrics op after a collapse!");
+            }
         }
     }
 
