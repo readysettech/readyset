@@ -52,6 +52,7 @@
 //! [3]: QueryOperation::permute
 
 #![feature(or_insert_with_key)]
+#![feature(duration_zero)]
 
 use anyhow::anyhow;
 use chrono::NaiveDate;

@@ -65,6 +65,7 @@ test-strategy = "0.1.1"
 
 # Local dependencies
 launchpad = { path = "../../launchpad" }
+metrics = "0.14.2"
 
 [dev-dependencies]
 tokio = { version = "0.2.0", features = [ "rt-threaded", "macros" ] }

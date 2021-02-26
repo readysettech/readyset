@@ -1,8 +1,12 @@
+//! Support for recording and exporting in-memory metrics using the [`metrics`] crate
+
 use crossbeam::queue::ArrayQueue;
 use metrics::{GaugeValue, Key, Recorder, SetRecorderError, Unit};
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Mutex;
+
+pub use noria::metrics::MetricsDump;
 
 static mut METRICS_RECORDER: Option<NoriaMetricsRecorder> = None;
 
@@ -148,70 +152,5 @@ impl Recorder for NoriaMetricsRecorder {
 
     fn record_histogram(&self, _key: Key, _value: f64) {
         unimplemented!("histogram metrics are not supported yet")
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
-/// A dumped metric's kind.
-pub enum DumpedMetricKind {
-    Counter,
-    Gauge,
-}
-
-#[derive(Serialize, Clone, Debug)]
-/// A dumped metric's value.
-pub struct DumpedMetric {
-    /// Labels associated with this metric value.
-    pub labels: HashMap<String, String>,
-    /// The actual value.
-    pub value: f64,
-    /// The kind of this metric.
-    pub kind: DumpedMetricKind,
-}
-
-#[derive(Serialize, Clone, Debug)]
-/// A dump of metrics that implements `Serialize`.
-pub struct MetricsDump {
-    /// The actual metrics.
-    metrics: HashMap<String, Vec<DumpedMetric>>,
-}
-
-fn convert_key(k: Key) -> (String, HashMap<String, String>) {
-    let key_data = k.into_owned();
-    let (name_parts, labels) = key_data.into_parts();
-    let name = name_parts.to_string();
-    let labels = labels
-        .into_iter()
-        .map(|l| {
-            let (k, v) = l.into_parts();
-            (k.into_owned(), v.into_owned())
-        })
-        .collect();
-    (name, labels)
-}
-
-impl MetricsDump {
-    pub fn from_metrics(counters: HashMap<Key, u64>, gauges: HashMap<Key, f64>) -> Self {
-        let mut ret = HashMap::new();
-        for (key, val) in counters.into_iter() {
-            let (name, labels) = convert_key(key);
-            let ent = ret.entry(name).or_insert(vec![]);
-            ent.push(DumpedMetric {
-                labels,
-                // It's going to be serialized to JSON anyway, so who cares
-                value: val as f64,
-                kind: DumpedMetricKind::Counter,
-            });
-        }
-        for (key, val) in gauges.into_iter() {
-            let (name, labels) = convert_key(key);
-            let ent = ret.entry(name).or_insert(vec![]);
-            ent.push(DumpedMetric {
-                labels,
-                value: val,
-                kind: DumpedMetricKind::Gauge,
-            });
-        }
-        Self { metrics: ret }
     }
 }

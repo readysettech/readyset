@@ -211,6 +211,7 @@ mod data_serde;
 #[doc(hidden)]
 pub mod errors;
 mod map;
+pub mod metrics;
 mod table;
 pub mod util;
 mod view;

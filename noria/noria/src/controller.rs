@@ -1,6 +1,7 @@
 use crate::consensus::{self, Authority};
 use crate::debug::stats;
 use crate::errors::wrap_boxed_error;
+use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::ActivationResult;
@@ -435,5 +436,12 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ) -> impl Future<Output = Result<(), anyhow::Error>> {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
         self.rpc("remove_node", view, "failed to remove node")
+    }
+
+    /// Fetch a dump of metrics values from the running noria instance
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn metrics_dump(&mut self) -> impl Future<Output = Result<MetricsDump, anyhow::Error>> {
+        self.rpc("metrics_dump", (), "failed to dump metrics")
     }
 }
