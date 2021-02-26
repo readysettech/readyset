@@ -367,7 +367,7 @@ mod worker;
 
 #[cfg(test)]
 mod integration;
-mod metrics;
+pub mod metrics;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]

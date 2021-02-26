@@ -211,7 +211,7 @@ impl ControllerInner {
             (&Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
-            (&Method::GET, "/metrics_dump") => {
+            (&Method::POST, "/metrics_dump") => {
                 let recorder = NoriaMetricsRecorder::get();
                 let (counters, gauges) = recorder.with_metrics(|c, g| (c.clone(), g.clone()));
                 let md = MetricsDump::from_metrics(counters, gauges);
