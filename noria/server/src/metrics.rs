@@ -52,6 +52,11 @@ impl MetricsInner {
             }
         }
     }
+
+    fn clear(&mut self) {
+        self.counters.clear();
+        self.gauges.clear();
+    }
 }
 
 /// A simplistic metrics recorder for Noria, based on an operation queue and mutexed hashmaps.
@@ -76,6 +81,13 @@ impl NoriaMetricsRecorder {
                 eprintln!("WARNING: failed to push metrics op after a collapse!");
             }
         }
+    }
+
+    /// Clear all recorded metrics, and all pending enqueued metric operations.
+    pub fn clear(&self) {
+        self.inner.lock().unwrap().clear();
+        // drain the queue
+        while self.queue.pop().is_some() {}
     }
 
     /// Makes and installs a new `NoriaMetricsRecorder`, with the metrics queue capacity set to
