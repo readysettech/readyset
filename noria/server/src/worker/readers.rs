@@ -223,27 +223,36 @@ fn handle_normal_read_query(
         let mut ret = Vec::with_capacity(key_comparisons.len());
         let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 
-        // first do non-blocking reads for all keys to see if we can return immediately
+        // A miss is either a RYW consistency miss or a key that is not materialized.
+        // In the case of a RYW consistency miss, all keys will be added to `missed_keys`
+        let mut miss_keys = Vec::new();
+
+        // To keep track of the index within the output vector that each entry in `missed_keys`
+        // corresponds to. This is needed when only a subset of the keys are missing due to not
+        // being materialized.
+        let mut miss_indices = Vec::new();
+
+        // A key needs to be replayed only in the case of a materialization miss. `keys_to_replay`
+        // is separate from `miss_keys` because `miss_keys` also includes consistency misses.
+        let mut keys_to_replay = Vec::new();
+
         let mut ready = true;
-        let mut pending = Vec::new();
-        let mut misses = Vec::new();
-        for (i, key_comparison) in key_comparisons.drain(..).enumerate() {
+
+        // First do non-blocking reads for all keys to see if we can return immediately.
+        // We execute this loop even if there is RYW miss, since we still want to trigger a partial
+        // replay if the key has been evicted. However, if there is RYW miss, a successful lookup
+        // is actually still a miss since the row is not sufficiently up to date.
+        for (i, key) in key_comparisons.drain(..).enumerate() {
             if !ready {
                 ret.push(SerializedReadReplyBatch::empty());
                 continue;
             }
 
-            // If a lookup misses on consistency miss, we still want to trigger a partial
-            // replay. Otherwise, if the key exists in the map, we need to wait for the map
-            // to be sufficiently up to date before returning the key. We still do the lookup
-            // on consistency miss to know if we must trigger a partial replay.
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key_comparison, order_by, limit, &filter) {
+            match do_lookup(reader, &key, order_by, limit, &filter) {
                 Ok(rs) => {
                     if consistency_miss {
-                        // The key is pending on an upstream update before it
-                        // can be returned.
-                        pending.push(i as usize);
+                        ret.push(SerializedReadReplyBatch::empty());
                     } else {
                         // immediate hit!
                         ret.push(rs);
@@ -256,10 +265,26 @@ fn handle_normal_read_query(
                 }
                 Err(miss) => {
                     // need to trigger partial replay for this key
-                    pending.push(i as usize);
                     ret.push(SerializedReadReplyBatch::empty());
-                    misses.extend(miss.into_misses())
+
+                    for key in miss.into_misses().drain(..) {
+                        // We do not push a lookup miss to `missing_keys` and `missing_indices` here
+                        // If there is a `consistency_miss` the key will be pushed at the end of
+                        // the loop no matter if it is materialized or not.
+                        if !consistency_miss {
+                            miss_keys.push(key.clone());
+                            miss_indices.push(i as usize);
+                        }
+                        keys_to_replay.push(key);
+                    }
                 }
+            };
+
+            // Every key is a missed key if there is a `consistency_miss` since the reader is not
+            // sufficiently up to date.
+            if consistency_miss {
+                miss_keys.push(key);
+                miss_indices.push(i as usize);
             }
         }
 
@@ -270,24 +295,25 @@ fn handle_normal_read_query(
             });
         }
 
-        if misses.is_empty() {
-            // we hit on all the keys!
-            assert!(pending.is_empty());
+        // Hit on all the keys and were RYW consistent
+        if !consistency_miss && miss_keys.is_empty() {
             return Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Ok(ret)),
             });
         }
 
-        // trigger backfills for all the keys we missed on
-        reader.trigger(misses.iter());
+        // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
+        if !keys_to_replay.is_empty() {
+            reader.trigger(keys_to_replay.iter());
+        }
 
-        Err((misses, ret, pending))
+        Err((miss_keys, ret, miss_indices))
     });
 
     match immediate {
         Ok(reply) => Either::Left(future::ready(Ok(reply))),
-        Err((keys, ret, pending)) => {
+        Err((pending_keys, ret, pending_indices)) => {
             if !block {
                 Either::Left(future::ready(Ok(Tagged {
                     tag,
@@ -297,12 +323,13 @@ fn handle_normal_read_query(
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
                 let now = time::Instant::now();
+
                 let r = wait.send((
                     BlockingRead {
                         tag,
                         target,
-                        keys,
-                        pending,
+                        pending_keys,
+                        pending_indices,
                         read: ret,
                         truth: s.clone(),
                         trigger_timeout: trigger,
@@ -542,13 +569,11 @@ struct BlockingRead {
     limit: Option<usize>,
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
-    // keys we have yet to read
-    keys: Vec<KeyComparison>,
-    // index in self.read that each entyr in keys corresponds to
-    pending: Vec<usize>,
+    // keys we have yet to read and their corresponding indices in the reader
+    pending_keys: Vec<KeyComparison>,
+    pending_indices: Vec<usize>,
     truth: Readers,
     filter: Option<ViewQueryFilter>,
-
     trigger_timeout: time::Duration,
     next_trigger: time::Instant,
     first: time::Instant,
@@ -562,8 +587,8 @@ impl std::fmt::Debug for BlockingRead {
             .field("tag", &self.tag)
             .field("target", &self.target)
             .field("read", &self.read)
-            .field("keys", &self.keys)
-            .field("pending", &self.pending)
+            .field("pending_keys", &self.pending_keys)
+            .field("pending_indices", &self.pending_indices)
             .field("trigger_timeout", &self.trigger_timeout)
             .field("next_trigger", &self.next_trigger)
             .field("first", &self.first)
@@ -587,17 +612,22 @@ impl BlockingRead {
             let read = &mut self.read;
             let next_trigger = self.next_trigger;
 
+            let consistency_miss = !has_sufficient_timestamp(reader, &self.timestamp);
+
             // If the map is sufficiently up to date to serve the query, we start looking up
-            // keys, otherwise we continue to wait.
-            if has_sufficient_timestamp(reader, &self.timestamp) {
+            // keys.
+            if !consistency_miss {
                 // here's the trick we're going to play:
                 // we're going to re-try the lookups starting with the _last_ key.
                 // if it hits, we move on to the second-to-last, and so on.
                 // the moment we miss again, we yield immediately, rather than continue.
-                // this avoids shuffling around self.pending and self.keys, and probably doesn't
-                // really cost us anything -- we couldn't return ready anyway!
-                while let Some(read_i) = self.pending.pop() {
-                    let key = self.keys.pop().expect("pending.len() == keys.len()");
+                // this avoids shuffling around self.pending_indices and self.pending_keys, and
+                // probably doesn't really cost us anything -- we couldn't return ready anyway!
+                while let Some(read_i) = self.pending_indices.pop() {
+                    let key = self
+                        .pending_keys
+                        .pop()
+                        .expect("pending.len() == keys.len()");
 
                     match do_lookup(reader, &key, self.order_by, self.limit, &self.filter) {
                         Ok(rs) => {
@@ -606,44 +636,45 @@ impl BlockingRead {
                         Err(e) => {
                             if e.is_miss() {
                                 // we still missed! restore key + pending
-                                self.pending.push(read_i);
-                                self.keys.push(key);
+                                self.pending_indices.push(read_i);
+                                self.pending_keys.push(key);
                                 break;
                             } else {
                                 // map has been deleted, so server is shutting down
-                                self.pending.clear();
-                                self.keys.clear();
+                                self.pending_indices.clear();
+                                self.pending_keys.clear();
                                 return Err(());
                             }
                         }
                     }
                 }
-            }
-            debug_assert_eq!(self.pending.len(), self.keys.len());
 
-            if !self.keys.is_empty() && now > next_trigger {
-                // maybe the key got filled, then evicted, and we missed it?
-                if !reader.trigger(self.keys.iter()) {
-                    // server is shutting down and won't do the backfill
-                    return Err(());
+                if now > next_trigger && !self.pending_keys.is_empty() {
+                    // Retrigger all un-read keys. Its possible they could have been filled and then
+                    // evicted again without us reading it.
+                    if !reader.trigger(self.pending_keys.iter()) {
+                        // server is shutting down and won't do the backfill
+                        return Err(());
+                    }
+
+                    self.trigger_timeout *= 2;
+                    self.next_trigger = now + self.trigger_timeout;
                 }
-
-                self.trigger_timeout *= 2;
-                self.next_trigger = now + self.trigger_timeout;
             }
 
-            if !self.keys.is_empty() {
+            // log that we are still waiting
+            if !self.pending_keys.is_empty() {
                 let waited = now - self.first;
                 if waited > time::Duration::from_secs(7) && !self.warned {
                     eprintln!(
                         "warning: read has been stuck waiting on {} for {:?}",
-                        if self.keys.len() < 8 {
-                            format!("{:?}", self.keys)
+                        if self.pending_keys.len() < 8 {
+                            format!("{:?}", self.pending_keys)
                         } else {
                             format!(
                                 "{:?} (and {} more keys)",
-                                &self.keys[..8],
-                                self.keys.len() - 8
+                                &self.pending_keys[..8],
+                                self.pending_keys.len() - 8
                             )
                         },
                         waited
@@ -655,7 +686,7 @@ impl BlockingRead {
             Ok(())
         })?;
 
-        if self.keys.is_empty() {
+        if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
                 v: ReadReply::Normal(Ok(mem::take(&mut self.read))),
