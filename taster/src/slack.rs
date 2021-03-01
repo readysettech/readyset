@@ -1,9 +1,11 @@
-use slack_hook::{Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackLink, SlackText};
 use slack_hook::SlackTextContent::{Link, Text};
+use slack_hook::{
+    Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackLink, SlackText,
+};
 
-use Push;
 use config::Config;
 use taste::{BenchmarkResult, TastingResult};
+use Push;
 
 pub struct SlackNotifier {
     conn: Slack,
@@ -129,7 +131,8 @@ impl SlackNotifier {
                         continue;
                     }
 
-                    let mut nv = res.iter()
+                    let mut nv = res
+                        .iter()
                         .map(|(k, v)| {
                             let val = match *v {
                                 BenchmarkResult::Improvement(ref s, ref p) => (s, p),
@@ -145,9 +148,12 @@ impl SlackNotifier {
                             };
                             Field {
                                 title: k.clone(),
-                                value: SlackText::new(
-                                    format!("{} {} ({:+.2}%)", icon, val.0, val.1 * 100.0),
-                                ),
+                                value: SlackText::new(format!(
+                                    "{} {} ({:+.2}%)",
+                                    icon,
+                                    val.0,
+                                    val.1 * 100.0
+                                )),
                                 short: Some(true),
                             }
                         })

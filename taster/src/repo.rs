@@ -1,8 +1,10 @@
 use auth::with_authentication;
 
 use git2;
-use git2::{AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, RemoteCallbacks,
-           Repository, ResetType};
+use git2::{
+    AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, RemoteCallbacks, Repository,
+    ResetType,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -66,15 +68,17 @@ impl Workspace {
         }
         match self.repo.branches(Some(BranchType::Remote)) {
             Err(e) => panic!("Couldn't get remote branches: {}", e.message()),
-            Ok(br) => br.map(|b| {
-                let branch = b.unwrap().0;
-                (
-                    String::from(branch.name().as_ref().unwrap().unwrap()),
-                    self.repo
-                        .find_commit(branch.get().target().unwrap())
-                        .unwrap(),
-                )
-            }).collect(),
+            Ok(br) => br
+                .map(|b| {
+                    let branch = b.unwrap().0;
+                    (
+                        String::from(branch.name().as_ref().unwrap().unwrap()),
+                        self.repo
+                            .find_commit(branch.get().target().unwrap())
+                            .unwrap(),
+                    )
+                })
+                .collect(),
         }
     }
 

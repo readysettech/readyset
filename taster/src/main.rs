@@ -18,10 +18,10 @@ extern crate toml;
 mod auth;
 mod config;
 mod email;
+mod github;
 mod repo;
 mod slack;
 mod taste;
-mod github;
 
 use afterparty::{Delivery, Event, Hub};
 use hyper::Server;
@@ -412,8 +412,7 @@ pub fn main() {
                     match head_res {
                         Err(e) => println!(
                             "ERROR: failed to taste HEAD commit {}: {}",
-                            head_commit.id,
-                            e
+                            head_commit.id, e
                         ),
                         Ok((cfg, tr)) => {
                             notify(cfg.as_ref(), &tr, &push, &push.head_commit);
@@ -443,8 +442,7 @@ pub fn main() {
                                     match res {
                                         Err(e) => println!(
                                             "ERROR: failed to taste commit {}: {}",
-                                            c.id,
-                                            e
+                                            c.id, e
                                         ),
                                         Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push, &cur_c),
                                     }

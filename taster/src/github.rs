@@ -1,10 +1,10 @@
-use Push;
-use Commit;
 use config::Config;
-use taste::TastingResult;
-use github_rs::StatusCode;
 use github_rs::client::{Executor, Github};
+use github_rs::StatusCode;
 use serde_json;
+use taste::TastingResult;
+use Commit;
+use Push;
 
 pub struct GithubNotifier {
     api_token: String,
@@ -34,10 +34,7 @@ impl GithubNotifier {
         let repo_name = push.repo_name.clone().unwrap();
         println!(
             "Setting status of {}/{}#{} to {}",
-            owner_name,
-            repo_name,
-            commit.id,
-            payload.state
+            owner_name, repo_name, commit.id, payload.state
         );
 
         let client = Github::new(self.api_token.clone()).unwrap();
@@ -53,9 +50,7 @@ impl GithubNotifier {
         match result {
             Ok((_, StatusCode::CREATED, Some(_))) => Ok(()),
             Ok((_, status_code, Some(response))) => serde_json::from_value::<GithubError>(response)
-                .map_err(|err| {
-                    format!("Failed to parse error response ({}): {}", status_code, err)
-                })
+                .map_err(|err| format!("Failed to parse error response ({}): {}", status_code, err))
                 .and_then(|err| Err(err.message.into())),
             Ok((_, _, None)) => Err("Received error response from GitHub with no message".into()),
             Err(err) => Err(format!("Failed to execute GitHub request: {}", err)),
