@@ -112,6 +112,8 @@ impl<A> BoundAsRef<A> for Bound<A> {
 /// assert!(!covers(&(1..=10), &(8..11)));
 /// assert!(!covers(&(1..10), &(11..=12)));
 /// assert!(!covers(&(1..10), &(5..=12)));
+/// assert!(!covers(&(0..56), &(56..56)));
+/// assert!(!covers(&(56..57), &(56..56)));
 /// ```
 pub fn covers<Q, R, S>(outer: &R, inner: &S) -> bool
 where
@@ -119,6 +121,19 @@ where
     R: RangeBounds<Q>,
     S: RangeBounds<Q>,
 {
+    // empty inner ranges can give false positives for covers using the checks below - specifically
+    // if we have outer = x..y and inner = y..y, the end bound of outer is equal to the end bound of
+    // inner, even though outer does not cover inner. We check for specifically that case here
+    if is_empty(inner)
+        && (matches!((outer.end_bound(), inner.start_bound()), (Excluded(x), Included(y)) if x == y)
+            || matches!(
+                (outer.start_bound(), inner.end_bound()),
+                (Included(x), Excluded(y)) if x == y
+            ))
+    {
+        return false;
+    }
+
     match (outer.start_bound(), inner.start_bound()) {
         (Excluded(x), Included(y)) if x >= y => return false,
         (Excluded(x) | Included(x), Excluded(y) | Included(y)) if x > y => return false,
@@ -173,6 +188,29 @@ where
             _ => true,
         }
     )
+}
+
+/// Returns true if the given range is empty.
+///
+/// # Examples
+///
+/// ```rust
+/// use launchpad::intervals;
+/// use std::ops::Bound::*;
+///
+/// assert!(intervals::is_empty(&(1..1)));
+/// assert!(intervals::is_empty(&(Excluded(1), Included(1))));
+/// assert!(!intervals::is_empty(&(1..=1)));
+/// ```
+pub fn is_empty<Q, R>(r: &R) -> bool
+where
+    Q: Eq,
+    R: RangeBounds<Q>,
+{
+    matches!(
+        (r.start_bound(), r.end_bound()),
+        (Included(x), Excluded(y)) | (Excluded(x), Included(y))
+            if x == y)
 }
 
 /// Compare two bounds that are at the start of an interval
