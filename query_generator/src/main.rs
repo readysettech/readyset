@@ -1,5 +1,7 @@
 //! A command-line interface to query_generator
 
+#![feature(duration_zero)]
+
 use anyhow::bail;
 use clap::Clap;
 use itertools::Either;

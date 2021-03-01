@@ -13,13 +13,20 @@ criterion = "0.3.4"
 derive_more = "0.99.11"
 futures-util = "0.3.13"
 humantime = "2.1.0"
+humantime-serde = "1.0.1"
+indicatif = "0.15.0"
 itertools = "0.10.0"
 lazy_static = "1.4.0"
 nom-sql = { version = "0.0.11", path = "../nom-sql" }
 noria = { version = "0.7", path = "../noria/noria/" }
 noria-server = { version = "0.7", path = "../noria/server/" }
+prettytable-rs = "0.8.0"
+regex = "1.4.3"
 serde = { version = "1.0.123", features = ["derive"] }
+serde_json = "1.0.63"
+serde_with = "1.6.4"
+size_format = "1.0.2"
 strum = "0.20.0"
 strum_macros = "0.20.1"
+thiserror = "1.0.24"
 tokio = "0.2.0"
-toml = "0.5.8"
