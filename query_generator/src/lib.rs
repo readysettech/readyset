@@ -1,3 +1,56 @@
+//! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
+//!
+//! The intent of this library is to be used to automatically and *deterministically* generate an
+//! exhaustive set of SQL queries, to be used as seed data to run *comparative* benchmarks of
+//! various operators in Noria. Notably, this means a few things are explicitly *not* in scope for
+//! this library:
+//!
+//! - The queries we generate are intended primarily for benchmarking, not for correctness testing.
+//!   For example, we don't attempt to generate interesting seed data to exercise edge cases in
+//!   operators.
+//! - Everything this library does *must* be deterministic, so we can provide a consistent and
+//!   reproducible environment for running comparative benchmarks. This means no random generation
+//!   of permutations of query operators, and no random seed data.
+//!
+//! Alongside the library component of this crate is a command-line interface with a runtime for
+//! running benchmarks on generated queries against noria and collecting metrics - see the
+//! documentation for `main.rs` for more information.
+//!
+//! # Examples
+//!
+//! Generating a simple query, with a single query parameter and a single inner join:
+//!
+//! ```rust
+//! use query_generator::{GeneratorState, QueryOperation};
+//! use nom_sql::JoinOperator;
+//!
+//! let mut gen = GeneratorState::default();
+//! let query = gen.generate_query(&[
+//!   QueryOperation::SingleParameter,
+//!   QueryOperation::Join(JoinOperator::InnerJoin),
+//! ]);
+//! let query_str = format!("{}", query.statement);
+//! assert_eq!(query_str, "SELECT table_1.column_3, table_2.column_2 \
+//! FROM table_1 \
+//! INNER JOIN table_2 ON table_1.column_2 = table_2.column_1 \
+//! WHERE table_1.column_1 = ?");
+//! ```
+//!
+//! # Architecture
+//!
+//! - There's a [`QueryOperation`] enum which enumerates, in some sense, the individual "operations"
+//!   that can be performed as part of a SQL query
+//! - Each [`QueryOperation`] knows how to [add itself to a SQL query][0]
+//! - To support that, there's a [`GeneratorState`] struct, to which mutable references get passed
+//!   around, which knows how to summon up [new tables][1] and [columns][2] for use in queries
+//! - We can then [calculate all permutations of all the possible QueryOperations][3] (up to a
+//!   certain depth), and use those to generate queries.
+//!
+//! [0]: QueryOperation::add_to_query
+//! [1]: GeneratorState::fresh_table_mut
+//! [2]: TableSpec::fresh_column
+//! [3]: QueryOperation::permute
+
 #![feature(or_insert_with_key)]
 
 use anyhow::anyhow;
@@ -137,10 +190,12 @@ impl TableSpec {
         }
     }
 
+    /// Generate a new, unique column in this table (of an unspecified type) and return its name
     pub fn fresh_column(&mut self) -> ColumnName {
         self.fresh_column_with_type(SqlType::Int(32))
     }
 
+    /// Generate a new, unique column in this table with the specified type and return its name
     pub fn fresh_column_with_type(&mut self, col_type: SqlType) -> ColumnName {
         self.column_name_counter += 1;
         let column_name = ColumnName(format!("column_{}", self.column_name_counter));
@@ -148,6 +203,8 @@ impl TableSpec {
         column_name
     }
 
+    /// Returns the name of *some* column in this table, potentially generating a new column if
+    /// necessary
     pub fn some_column_name(&mut self) -> ColumnName {
         self.columns
             .keys()
@@ -206,6 +263,7 @@ pub struct GeneratorState {
 }
 
 impl GeneratorState {
+    /// Create a new, unique, empty table, and return a mutable reference to that table
     pub fn fresh_table_mut(&mut self) -> &mut TableSpec {
         self.table_name_counter += 1;
         let table_name = TableName(format!("table_{}", self.table_name_counter));
@@ -214,18 +272,22 @@ impl GeneratorState {
             .or_insert_with_key(|tn| TableSpec::new(tn.clone()))
     }
 
-    pub fn table_mut<'a, TN>(&'a mut self, name: &TN) -> &'a mut TableSpec
+    /// Returns a mutable reference to the table with the given name, if it exists
+    pub fn table_mut<'a, TN>(&'a mut self, name: &TN) -> Option<&'a mut TableSpec>
     where
         TableName: Borrow<TN>,
         TN: Eq + Hash,
     {
-        self.tables.get_mut(name).unwrap()
+        self.tables.get_mut(name)
     }
 
+    /// Returns an iterator over all the names of tables created for queries by this generator state
     pub fn table_names(&self) -> impl Iterator<Item = &TableName> {
         self.tables.keys()
     }
 
+    /// Return a mutable reference to *some* table in the schema - the implication being that the
+    /// caller doesn't care which table
     pub fn some_table_mut(&mut self) -> &mut TableSpec {
         if self.tables.is_empty() {
             self.fresh_table_mut()
@@ -238,6 +300,7 @@ impl GeneratorState {
         QueryState::new(self)
     }
 
+    /// Generate a new query using the given list of [`QueryOperation`]s
     pub fn generate_query<'gen, 'a, I>(&'gen mut self, operations: I) -> Query<'gen>
     where
         I: IntoIterator<Item = &'a QueryOperation>,
@@ -260,6 +323,8 @@ impl GeneratorState {
         Query::new(state, query)
     }
 
+    /// Generate a list of queries given by permutations of all query operations up to length
+    /// `max_depth`
     pub fn generate_queries(
         &mut self,
         max_depth: usize,
@@ -267,10 +332,12 @@ impl GeneratorState {
         QueryOperation::permute(max_depth).map(move |ops| self.generate_query(ops).statement)
     }
 
+    /// Return an iterator over `CreateTableStatement`s for all the tables in the schema
     pub fn into_ddl(self) -> impl Iterator<Item = CreateTableStatement> {
         self.tables.into_iter().map(|(_, tbl)| tbl.into())
     }
 
+    /// Return an iterator over clones of `CreateTableStatement`s for all the tables in the schema
     pub fn ddl(&self) -> impl Iterator<Item = CreateTableStatement> + '_ {
         self.tables.iter().map(|(_, tbl)| tbl.clone().into())
     }
@@ -306,17 +373,21 @@ impl<'a> QueryState<'a> {
         }
     }
 
+    /// Generate a new, unique column alias for the query
     pub fn fresh_alias(&mut self) -> String {
         self.alias_counter += 1;
         format!("alias_{}", self.alias_counter)
     }
 
+    /// Return a mutable reference to *some* table in the schema - the implication being that the
+    /// caller doesn't care which table
     pub fn some_table_mut(&mut self) -> &mut TableSpec {
         let table = self.gen.some_table_mut();
         self.tables.insert(table.name.clone());
         table
     }
 
+    /// Create a new, unique, empty table, and return a mutable reference to that table
     pub fn fresh_table_mut(&mut self) -> &mut TableSpec {
         let table = self.gen.fresh_table_mut();
         self.tables.insert(table.name.clone());
@@ -422,11 +493,28 @@ impl From<LogicalOp> for BinaryOperator {
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Filter {
-    operator: BinaryOperator,
-    rhs: FilterRHS,
-    extend_where_with: LogicalOp,
+    pub operator: BinaryOperator,
+    pub rhs: FilterRHS,
+    pub extend_where_with: LogicalOp,
 }
 
+/// Operations that can be performed as part of a SQL query
+///
+/// Members of this enum represent some sense of an individual operation that can be performed on an
+/// arbitrary SQL query. Each operation knows how to add itself to a given SQL query (via
+/// [`add_to_query`](QueryOperation::add_to_query)) with the aid of a mutable reference to a
+/// [`GeneratorState`].
+///
+/// Note that not every operation that Noria supports is currently included in this enum - planned
+/// for the future are:
+///
+/// - arithmetic projections
+/// - topk
+/// - union
+/// - order by
+/// - ilike
+///
+/// each of which should be relatively straightforward to add here.
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum QueryOperation {
     ColumnAggregate(AggregateType),
@@ -466,7 +554,9 @@ lazy_static! {
             })
             .collect()
     };
-    static ref ALL_OPERATIONS: Vec<QueryOperation> = {
+
+    /// A list of all possible [`QueryOperation`]s
+    pub static ref ALL_OPERATIONS: Vec<QueryOperation> = {
         AggregateType::iter()
             .map(QueryOperation::ColumnAggregate)
             .chain(ALL_FILTERS.iter().cloned().map(QueryOperation::Filter))
@@ -494,6 +584,8 @@ fn and_where(query: &mut SelectStatement, cond: ConditionExpression) {
 }
 
 impl QueryOperation {
+    /// Add this query operation to `query`, recording information about new tables and columns in
+    /// `state`.
     fn add_to_query<'state>(&self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
         match self {
             QueryOperation::ColumnAggregate(agg) => {
@@ -648,6 +740,7 @@ impl QueryOperation {
         }
     }
 
+    /// Returns an iterator over all permuations of length 1..`max_depth` [`QueryOperation`]s.
     pub fn permute(max_depth: usize) -> impl Iterator<Item = Vec<&'static QueryOperation>> {
         (1..=max_depth).flat_map(|depth| ALL_OPERATIONS.iter().combinations(depth))
     }
