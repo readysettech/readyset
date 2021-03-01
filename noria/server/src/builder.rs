@@ -99,6 +99,14 @@ impl Builder {
         unimplemented!();
     }
 
+    /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation
+    /// of that field for more information
+    ///
+    /// [0]: noria_dataflow::Config::aggressively_update_state_sizes.
+    pub fn set_aggressively_update_state_sizes(&mut self, value: bool) {
+        self.config.domain_config.aggressively_update_state_sizes = value;
+    }
+
     /// Start a server instance and return a handle to it.
     ///
     /// The second item of the returned tuple is a future that resolves when Noria is idle.
