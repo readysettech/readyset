@@ -11,13 +11,12 @@ mod taste;
 mod webhook;
 
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 use std::thread;
 
 use log::{error, info, warn};
-use rouille::{try_or_400, Response};
+use rouille::Response;
 use serde_json::json;
 
 use crate::config::Config;
@@ -42,6 +41,66 @@ pub struct Push {
     pub pusher: Option<String>,
     pub owner_name: Option<String>,
     pub repo_name: Option<String>,
+}
+
+pub struct Notifier {
+    email_notifier: Option<email::EmailNotifier>,
+    slack_notifier: Option<slack::SlackNotifier>,
+    github_notifier: Option<github::GithubNotifier>,
+}
+
+impl<'a> From<&'a clap::ArgMatches<'a>> for Notifier {
+    fn from(args: &'a clap::ArgMatches<'a>) -> Self {
+        let repo = args.value_of("github_repo").unwrap();
+
+        Self {
+            email_notifier: args
+                .value_of("email_addr")
+                .map(|addr| email::EmailNotifier::new(addr, repo)),
+
+            slack_notifier: args.value_of("slack_hook_url").map(|url| {
+                slack::SlackNotifier::new(
+                    url,
+                    args.value_of("slack_channel").unwrap(),
+                    repo,
+                    args.is_present("verbose_notifications"),
+                )
+            }),
+
+            github_notifier: args
+                .value_of("github_api_key")
+                .map(|key| github::GithubNotifier::new(key)),
+        }
+    }
+}
+
+impl Notifier {
+    fn notify(
+        &self,
+        cfg: Option<&Config>,
+        result: &taste::TastingResult,
+        push: &Push,
+        commit: Option<&Commit>,
+    ) -> Result<(), String> {
+        if let Some(en) = &self.email_notifier {
+            en.notify(cfg, result, push)?;
+        }
+        if let Some(sn) = &self.slack_notifier {
+            sn.notify(cfg, result, push)?;
+        }
+        if let (Some(gn), Some(commit)) = (&self.github_notifier, commit) {
+            gn.notify(cfg, result, push, commit)?;
+        }
+        Ok(())
+    }
+
+    fn notify_pending(&self, push: &Push, commit: &Commit) {
+        if let Some(gn) = &self.github_notifier {
+            if let Err(e) = gn.notify_pending(&push, &commit) {
+                error!("failed to deliver GitHub status notification: {:?}", e)
+            }
+        }
+    }
 }
 
 pub fn main() {
@@ -180,16 +239,11 @@ pub fn main() {
         .get_matches();
 
     let addr = args.value_of("listen_addr").unwrap();
-    let email_notification_addr = args.value_of("email_addr");
     let repo = args.value_of("github_repo").unwrap().to_owned();
     let secret = args.value_of("secret");
-    let slack_hook_url = args.value_of("slack_hook_url");
-    let slack_channel = args.value_of("slack_channel");
     let taste_commit = args.value_of("taste_commit");
-    let github_api_key = args.value_of("github_api_key");
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
-    let verbose_notify = args.is_present("verbose_notifications");
     let improvement_threshold =
         value_t_or_exit!(args, "default_improvement_reporting_threshold", f64);
     let regression_threshold =
@@ -202,29 +256,10 @@ pub fn main() {
         },
     };
 
+    let notifier: &'static Notifier = Box::leak(Box::new(Notifier::from(&args)));
+
     let mut history = HashMap::new();
     let ws = repo::Workspace::new(&repo, workdir);
-    let en = if let Some(addr) = email_notification_addr {
-        Some(email::EmailNotifier::new(addr, &repo))
-    } else {
-        None
-    };
-    let sn = if let Some(url) = slack_hook_url {
-        Some(slack::SlackNotifier::new(
-            url,
-            slack_channel.unwrap(),
-            &repo,
-            verbose_notify,
-        ))
-    } else {
-        None
-    };
-    let gn = if let Some(key) = github_api_key {
-        Some(github::GithubNotifier::new(key))
-    } else {
-        None
-    };
-
     if taste_commit.is_some() {
         let cid = if let Some("HEAD") = taste_commit {
             ws.repo.head().unwrap().target().unwrap().clone()
@@ -260,20 +295,7 @@ pub fn main() {
                 match res {
                     Err(e) => error!("failed to taste{}: {}", cid, e),
                     Ok((cfg, tr)) => {
-                        // email notification
-                        if en.is_some() {
-                            en.as_ref()
-                                .unwrap()
-                                .notify(cfg.as_ref(), &tr, &push)
-                                .unwrap();
-                        }
-                        // slack notification
-                        if sn.is_some() {
-                            sn.as_ref()
-                                .unwrap()
-                                .notify(cfg.as_ref(), &tr, &push)
-                                .unwrap();
-                        }
+                        notifier.notify(cfg.as_ref(), &tr, &push, None).unwrap();
                         // We're done
                         return;
                     }
@@ -356,121 +378,108 @@ pub fn main() {
         };
         match event {
             Event::Push {
-                ref _ref,
-                ref commits,
-                ref head_commit,
-                ref pusher,
-                ref repository,
+                _ref,
+                commits,
+                head_commit,
+                pusher,
+                repository,
                 ..
             } => {
-                info!(
-                    "Handling {} commits pushed by {}",
-                    commits.len(),
-                    pusher.name
-                );
-
-                // Data structures to represent info from webhook
-                let hc = Commit {
-                    id: git2::Oid::from_str(&head_commit.id).unwrap(),
-                    msg: head_commit.message.clone(),
-                    url: head_commit.url.clone(),
-                };
-                let push = Push {
-                    head_commit: hc,
-                    push_ref: Some(_ref.clone()),
-                    pusher: Some(pusher.name.clone()),
-                    owner_name: Some(repository.owner.name.clone()),
-                    repo_name: Some(repository.name.clone()),
-                };
-
-                let notify_pending = |push: &Push, commit: &Commit| {
-                    // github status notification
-                    if gn.is_some() {
-                        match gn.as_ref().unwrap().notify_pending(&push, &commit) {
-                            Ok(_) => (),
-                            Err(e) => {
-                                error!("failed to deliver GitHub status notification: {:?}", e)
-                            }
-                        }
-                    }
-                };
-
-                let notify = |cfg: Option<&Config>,
-                              res: &taste::TastingResult,
-                              push: &Push,
-                              commit: &Commit| {
-                    // email notification
-                    if en.is_some() {
-                        en.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
-                    }
-                    // slack notification
-                    if sn.is_some() {
-                        sn.as_ref().unwrap().notify(cfg, &res, &push).unwrap();
-                    }
-                    // github status notification
-                    if gn.is_some() {
-                        gn.as_ref()
-                            .unwrap()
-                            .notify(cfg, &res, &push, &commit)
-                            .unwrap();
-                    }
-                };
-
-                {
-                    notify_pending(&push, &push.head_commit);
-                    let ws = wsl.lock().unwrap();
-                    let mut history = hl.lock().unwrap();
-                    // First taste the head commit
-                    ws.fetch().unwrap();
-                    let head_res = taste::taste_commit(
-                        &ws,
-                        &mut history,
-                        &push,
-                        &push.head_commit,
-                        improvement_threshold,
-                        regression_threshold,
-                        timeout,
+                thread::spawn(move || {
+                    info!(
+                        "Handling {} commits pushed by {}",
+                        commits.len(),
+                        pusher.name
                     );
-                    match head_res {
-                        Err(e) => error!("failed to taste HEAD commit {}: {}", head_commit.id, e),
-                        Ok((cfg, tr)) => {
-                            notify(cfg.as_ref(), &tr, &push, &push.head_commit);
-                            // Taste others if needed
-                            if !taste_head_only {
-                                for c in commits.iter() {
-                                    if c.id == head_commit.id {
-                                        // skip HEAD as we've already tested it
-                                        continue;
-                                    }
-                                    let cur_c = Commit {
-                                        id: git2::Oid::from_str(&c.id).unwrap(),
-                                        msg: c.message.clone(),
-                                        url: c.url.clone(),
-                                    };
-                                    notify_pending(&push, &cur_c);
-                                    // taste
-                                    let res = taste::taste_commit(
-                                        &ws,
-                                        &mut history,
-                                        &push,
-                                        &cur_c,
-                                        improvement_threshold,
-                                        regression_threshold,
-                                        timeout,
-                                    );
-                                    match res {
-                                        Err(e) => {
-                                            error!("failed to taste commit {}: {}", c.id, e)
+
+                    // Data structures to represent info from webhook
+                    let hc = Commit {
+                        id: git2::Oid::from_str(&head_commit.id).unwrap(),
+                        msg: head_commit.message.clone(),
+                        url: head_commit.url.clone(),
+                    };
+                    let push = Push {
+                        head_commit: hc,
+                        push_ref: Some(_ref.clone()),
+                        pusher: Some(pusher.name.clone()),
+                        owner_name: Some(repository.owner.name.clone()),
+                        repo_name: Some(repository.name.clone()),
+                    };
+
+                    {
+                        notifier.notify_pending(&push, &push.head_commit);
+                        let ws = wsl.lock().unwrap();
+                        let mut history = hl.lock().unwrap();
+                        // First taste the head commit
+                        ws.fetch().unwrap();
+                        let head_res = taste::taste_commit(
+                            &ws,
+                            &mut history,
+                            &push,
+                            &push.head_commit,
+                            improvement_threshold,
+                            regression_threshold,
+                            timeout,
+                        );
+                        match head_res {
+                            Err(e) => {
+                                error!("failed to taste HEAD commit {}: {}", head_commit.id, e)
+                            }
+                            Ok((cfg, tr)) => {
+                                notifier
+                                    .notify(cfg.as_ref(), &tr, &push, Some(&push.head_commit))
+                                    .unwrap_or_else(|err| {
+                                        error!("Failed to notify about result: {}", err)
+                                    });
+                                // Taste others if needed
+                                if !taste_head_only {
+                                    for c in commits.iter() {
+                                        if c.id == head_commit.id {
+                                            // skip HEAD as we've already tested it
+                                            continue;
                                         }
-                                        Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push, &cur_c),
+                                        let cur_c = Commit {
+                                            id: git2::Oid::from_str(&c.id).unwrap(),
+                                            msg: c.message.clone(),
+                                            url: c.url.clone(),
+                                        };
+                                        notifier.notify_pending(&push, &cur_c);
+                                        // taste
+                                        let res = taste::taste_commit(
+                                            &ws,
+                                            &mut history,
+                                            &push,
+                                            &cur_c,
+                                            improvement_threshold,
+                                            regression_threshold,
+                                            timeout,
+                                        );
+                                        match res {
+                                            Err(e) => {
+                                                error!("failed to taste commit {}: {}", c.id, e)
+                                            }
+                                            Ok((cfg, tr)) => {
+                                                notifier
+                                                    .notify(cfg.as_ref(), &tr, &push, Some(&cur_c))
+                                                    .unwrap_or_else(|err| {
+                                                        error!(
+                                                            "Failed to notify about result: {}",
+                                                            err
+                                                        )
+                                                    });
+                                            }
+                                        }
                                     }
+                                } else if !commits.is_empty() {
+                                    warn!(
+                                        "Skipping {} remaining commits in push!",
+                                        commits.len() - 1
+                                    );
                                 }
-                            } else if !commits.is_empty() {
-                                warn!("Skipping {} remaining commits in push!", commits.len() - 1);
                             }
                         }
                     }
-                }
+                });
             }
             _ => (),
         }
