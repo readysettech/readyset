@@ -3086,6 +3086,7 @@ impl Domain {
     }
 
     pub fn update_state_sizes(&mut self) {
+        let mut reader_size: u64 = 0;
         let total: u64 = self
             .nodes
             .values()
@@ -3098,7 +3099,8 @@ impl Domain {
                     let mut size = 0;
                     n.with_reader(|r| {
                         if r.is_partial() {
-                            size = r.state_size().unwrap_or(0)
+                            size = r.state_size().unwrap_or(0);
+                            reader_size += size;
                         }
                     })
                     .unwrap();
@@ -3137,8 +3139,14 @@ impl Domain {
             "shard" => self.shard.unwrap_or(0).to_string(),
         );
         gauge!(
+            "domain.reader_state_size_bytes",
+            reader_size as f64,
+            "domain" => self.index.index().to_string(),
+            "shard" => self.shard.unwrap_or(0).to_string(),
+        );
+        gauge!(
             "domain.total_node_state_size_bytes",
-            total_node_state as f64,
+            (total_node_state + reader_size) as f64,
             "domain" => self.index.index().to_string(),
             "shard" => self.shard.unwrap_or(0).to_string(),
         );
