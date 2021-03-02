@@ -1,6 +1,0 @@
-dist: trusty
-sudo: false
-language: rust
-rust:
-  - nightly
-cache: cargo

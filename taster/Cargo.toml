@@ -1,20 +1,20 @@
 [package]
 name = "taster"
 version = "0.0.1"
+edition = "2018"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-afterparty = { git = "https://github.com/ms705/afterparty" }
-clap = "2.13"
-env_logger = "0.3"
-git2 = "0.6.4"
-hyper = "0.10"
-lettre = "0.9.2"
-log = "0.3"
-regex = "0.1.80"
-slack-hook = { git = "https://github.com/ms705/rust-slack.git" }
-toml = "0.2.1"
-github-rs = "0.7"
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"
+clap = "2.33.3"
+env_logger = "0.8.3"
+git2 = "0.13.17"
+lettre = "0.9.5"
+log = "0.4.14"
+regex = "1.4.3"
+slack-hook = "0.8"
+toml = "0.5.8"
+github-rs = "0.7.0"
+serde = "1.0.123"
+serde_json = "1.0.64"
+rouille = "3.0.0"
+case = "1.0.0"

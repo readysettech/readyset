@@ -1,19 +1,5 @@
-extern crate env_logger;
-extern crate log;
-
-extern crate afterparty;
 #[macro_use]
 extern crate clap;
-extern crate git2;
-extern crate github_rs;
-extern crate hyper;
-extern crate lettre;
-extern crate regex;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate slack_hook;
-extern crate toml;
 
 mod auth;
 mod config;
@@ -22,18 +8,22 @@ mod github;
 mod repo;
 mod slack;
 mod taste;
+mod webhook;
 
-use afterparty::{Delivery, Event, Hub};
-use hyper::Server;
 use std::collections::HashMap;
-use std::error::Error;
+use std::io::Read;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::thread;
 
-use config::Config;
+use log::{error, info, warn};
+use rouille::{try_or_400, Response};
+use serde_json::json;
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-const TASTER_USAGE: &'static str = "\
+use crate::config::Config;
+use crate::webhook::events::Event;
+
+const TASTER_USAGE: &str = "\
 EXAMPLES:
   taster -w /path/to/workdir -s my_secret
   taster -l 0.0.0.0:1234 -w /path/to/workdir -s my_secret";
@@ -57,7 +47,7 @@ pub struct Push {
 pub fn main() {
     use clap::{App, Arg, ErrorKind};
 
-    env_logger::init().unwrap();
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
     let args = App::new("taster")
         .version("0.0.1")
@@ -112,6 +102,7 @@ pub fn main() {
             Arg::with_name("secret")
                 .short("s")
                 .long("secret")
+                .env("WEBHOOK_SECRET")
                 .takes_value(true)
                 .required(false)
                 .help("GitHub webhook secret"),
@@ -134,6 +125,7 @@ pub fn main() {
         .arg(
             Arg::with_name("github_api_key")
                 .long("github_api_key")
+                .env("GITHUB_API_KEY")
                 .takes_value(true)
                 .required(false)
                 .help("GitHub API key to provide status notifications"),
@@ -177,12 +169,19 @@ pub fn main() {
                 .value_name("REPO_DIR")
                 .help("Directory holding the workspace repo"),
         )
+        .arg(
+            Arg::with_name("no_bootstrap")
+                .long("no-bootstrap")
+                .takes_value(false)
+                .required(false)
+                .help("Disable initial boostrapping of history"),
+        )
         .after_help(TASTER_USAGE)
         .get_matches();
 
     let addr = args.value_of("listen_addr").unwrap();
     let email_notification_addr = args.value_of("email_addr");
-    let repo = args.value_of("github_repo").unwrap();
+    let repo = args.value_of("github_repo").unwrap().to_owned();
     let secret = args.value_of("secret");
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
@@ -204,9 +203,9 @@ pub fn main() {
     };
 
     let mut history = HashMap::new();
-    let ws = repo::Workspace::new(repo, workdir);
+    let ws = repo::Workspace::new(&repo, workdir);
     let en = if let Some(addr) = email_notification_addr {
-        Some(email::EmailNotifier::new(addr, repo))
+        Some(email::EmailNotifier::new(addr, &repo))
     } else {
         None
     };
@@ -214,7 +213,7 @@ pub fn main() {
         Some(slack::SlackNotifier::new(
             url,
             slack_channel.unwrap(),
-            repo,
+            &repo,
             verbose_notify,
         ))
     } else {
@@ -233,7 +232,7 @@ pub fn main() {
             git2::Oid::from_str(taste_commit.unwrap()).unwrap()
         };
         match ws.repo.find_object(cid, None) {
-            Err(e) => panic!(format!("{}", e.description())),
+            Err(e) => panic!(format!("{}", e.to_string())),
             Ok(o) => {
                 let cobj = o.as_commit().unwrap();
                 let hc = Commit {
@@ -259,7 +258,7 @@ pub fn main() {
                     timeout,
                 );
                 match res {
-                    Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
+                    Err(e) => error!("failed to taste{}: {}", cid, e),
                     Ok((cfg, tr)) => {
                         // email notification
                         if en.is_some() {
@@ -284,55 +283,78 @@ pub fn main() {
     }
 
     // If we get here, we must be running in continuous mode
-    if let None = secret {
+    if secret.is_none() {
         panic!("--secret must be set when in continuous webhook handler mode");
     }
 
-    // Initialize history by tasting the HEAD commit of each branch
-    {
-        let branches = ws.branch_heads();
-        for (b, c) in branches.iter() {
-            if b != "origin/master" {
-                continue;
+    let hl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(history)));
+    let wsl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(ws)));
+
+    if !args.is_present("no_bootstrap") {
+        // Initialize history by tasting the HEAD commit of each branch
+        thread::spawn(move || {
+            let ws = wsl.lock().unwrap();
+            let branches = ws.branch_heads();
+            for (b, c) in branches.iter() {
+                if b != "origin/master" {
+                    continue;
+                }
+                info!(
+                    "tasting HEAD of {}: {} / {}",
+                    b,
+                    c.id(),
+                    c.message().unwrap()
+                );
+                let hc = Commit {
+                    id: c.id(),
+                    msg: String::from(c.message().unwrap()),
+                    url: format!("{}/commit/{}", repo, c.id()),
+                };
+                // fake a push
+                let push = Push {
+                    head_commit: hc,
+                    push_ref: Some(b.clone()),
+                    pusher: None,
+                    owner_name: None,
+                    repo_name: None,
+                };
+
+                let mut history = hl.lock().unwrap();
+                let res = taste::taste_commit(
+                    &ws,
+                    &mut history,
+                    &push,
+                    &push.head_commit,
+                    improvement_threshold,
+                    regression_threshold,
+                    timeout,
+                );
+                assert!(res.is_ok());
             }
-            println!(
-                "tasting HEAD of {}: {} / {}",
-                b,
-                c.id(),
-                c.message().unwrap()
-            );
-            let hc = Commit {
-                id: c.id(),
-                msg: String::from(c.message().unwrap()),
-                url: format!("{}/commit/{}", repo, c.id()),
-            };
-            // fake a push
-            let push = Push {
-                head_commit: hc,
-                push_ref: Some(b.clone()),
-                pusher: None,
-                owner_name: None,
-                repo_name: None,
-            };
-            let res = taste::taste_commit(
-                &ws,
-                &mut history,
-                &push,
-                &push.head_commit,
-                improvement_threshold,
-                regression_threshold,
-                timeout,
-            );
-            assert!(res.is_ok());
-        }
+        });
     }
 
-    let hl = Arc::new(Mutex::new(history));
-    let wsl = Mutex::new(ws);
+    info!("Taster listening on {}", addr);
+    rouille::start_server(addr, move |req| {
+        if req.url() != "/hook" {
+            return Response::empty_404();
+        }
 
-    let mut hub = Hub::new();
-    hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
-        match delivery.payload {
+        let event_type = if let Some(et) = req.header("X-Github-Event") {
+            et
+        } else {
+            return Response::text("Missing required X-Github-Event header").with_status_code(400);
+        };
+
+        let event = match serde_json::from_reader(req.data().unwrap())
+            .and_then(|val| Event::from_value(event_type, val))
+        {
+            Ok(ev) => ev,
+            Err(e) => {
+                return Response::json(&json!({ "error": e.to_string() })).with_status_code(400)
+            }
+        };
+        match event {
             Event::Push {
                 ref _ref,
                 ref commits,
@@ -341,7 +363,7 @@ pub fn main() {
                 ref repository,
                 ..
             } => {
-                println!(
+                info!(
                     "Handling {} commits pushed by {}",
                     commits.len(),
                     pusher.name
@@ -367,7 +389,7 @@ pub fn main() {
                         match gn.as_ref().unwrap().notify_pending(&push, &commit) {
                             Ok(_) => (),
                             Err(e) => {
-                                println!("failed to deliver GitHub status notification: {:?}", e)
+                                error!("failed to deliver GitHub status notification: {:?}", e)
                             }
                         }
                     }
@@ -410,10 +432,7 @@ pub fn main() {
                         timeout,
                     );
                     match head_res {
-                        Err(e) => println!(
-                            "ERROR: failed to taste HEAD commit {}: {}",
-                            head_commit.id, e
-                        ),
+                        Err(e) => error!("failed to taste HEAD commit {}: {}", head_commit.id, e),
                         Ok((cfg, tr)) => {
                             notify(cfg.as_ref(), &tr, &push, &push.head_commit);
                             // Taste others if needed
@@ -440,18 +459,14 @@ pub fn main() {
                                         timeout,
                                     );
                                     match res {
-                                        Err(e) => println!(
-                                            "ERROR: failed to taste commit {}: {}",
-                                            c.id, e
-                                        ),
+                                        Err(e) => {
+                                            error!("failed to taste commit {}: {}", c.id, e)
+                                        }
                                         Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push, &cur_c),
                                     }
                                 }
                             } else if !commits.is_empty() {
-                                println!(
-                                    "Skipping {} remaining commits in push!",
-                                    commits.len() - 1
-                                );
+                                warn!("Skipping {} remaining commits in push!", commits.len() - 1);
                             }
                         }
                     }
@@ -459,10 +474,6 @@ pub fn main() {
             }
             _ => (),
         }
+        Response::text("ok")
     });
-
-    let srvc = Server::http(&addr[..]).unwrap().handle(hub);
-
-    println!("Taster listening on {}", addr);
-    srvc.unwrap();
 }

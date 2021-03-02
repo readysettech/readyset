@@ -3,9 +3,9 @@ use slack_hook::{
     Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackLink, SlackText,
 };
 
-use config::Config;
-use taste::{BenchmarkResult, TastingResult};
-use Push;
+use crate::config::Config;
+use crate::taste::{BenchmarkResult, TastingResult};
+use crate::Push;
 
 pub struct SlackNotifier {
     conn: Slack,
@@ -18,7 +18,7 @@ impl SlackNotifier {
         SlackNotifier {
             conn: Slack::new(hook_url).unwrap(),
             channel: String::from(channel),
-            verbose: verbose,
+            verbose,
         }
     }
 

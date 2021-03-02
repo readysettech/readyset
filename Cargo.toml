@@ -11,7 +11,8 @@ members = [
     "unbounded-interval-tree",
     "launchpad",
     "connectors/debezium_connector",
-    "query_generator"
+    "query_generator",
+    "taster"
 ]
 [profile.release]
 debug=true

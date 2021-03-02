@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
-use toml;
 
 #[derive(Clone, Debug)]
 pub struct Benchmark {
@@ -27,47 +26,40 @@ pub fn parse_config(
     def_imp_threshold: f64,
     def_reg_threshold: f64,
 ) -> Result<Config, Error> {
-    let mut f = try!(fs::File::open(cfg));
+    let mut f = fs::File::open(cfg)?;
     let mut buf = String::new();
-    try!(f.read_to_string(&mut buf));
+    f.read_to_string(&mut buf)?;
 
-    let value = match toml::Parser::new(&buf).parse() {
-        None => {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "failed to parse taster config!",
-            ))
-        }
-        Some(v) => v,
-    };
+    let value: toml::value::Table = toml::from_str(&buf)
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "failed to parse taster config!"))?;
 
     let to_bench = |t: (&String, &toml::Value)| Benchmark {
         name: t.0.clone(),
-        cmd: String::from(t.1.lookup("command").unwrap().as_str().unwrap()),
+        cmd: String::from(t.1.get("command").unwrap().as_str().unwrap()),
         args: t.1.as_table().unwrap()["args"]
-            .as_slice()
+            .as_array()
             .unwrap()
             .iter()
             .map(|a| String::from(a.as_str().unwrap()))
             .collect(),
         result_expr: t
             .1
-            .lookup("regexs")
+            .get("regexs")
             .unwrap()
-            .as_slice()
+            .as_array()
             .unwrap()
             .iter()
             .map(|r| Regex::new(r.as_str().unwrap()).unwrap())
             .collect(),
-        lower_is_better: match t.1.lookup("lower_better") {
+        lower_is_better: match t.1.get("lower_better") {
             None => false,
             Some(v) => v.as_bool().unwrap(),
         },
-        improvement_threshold: match t.1.lookup("improvement_threshold") {
+        improvement_threshold: match t.1.get("improvement_threshold") {
             None => def_imp_threshold,
             Some(ref it) => it.as_float().unwrap(),
         },
-        regression_threshold: match t.1.lookup("regression_threshold") {
+        regression_threshold: match t.1.get("regression_threshold") {
             None => def_reg_threshold,
             Some(ref rt) => rt.as_float().unwrap(),
         },
@@ -99,8 +91,8 @@ pub fn parse_config(
         .collect();
 
     Ok(Config {
-        benchmarks: benchmarks,
-        slack_aliases: slack_aliases,
-        version: version,
+        benchmarks,
+        slack_aliases,
+        version,
     })
 }

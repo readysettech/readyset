@@ -1,4 +1,3 @@
-use git2;
 use std::env;
 
 // git authentication logic borrowed from `cargo` crate
@@ -63,7 +62,7 @@ where
         // usernames during one authentication session with libgit2, so to
         // handle this we bail out of this authentication session after setting
         // the flag `ssh_username_requested`, and then we handle this below.
-        if allowed.contains(git2::USERNAME) {
+        if allowed.contains(git2::CredentialType::USERNAME) {
             debug_assert!(username.is_none());
             ssh_username_requested = true;
             return Err(git2::Error::from_str("gonna try usernames later"));
@@ -77,7 +76,7 @@ where
         // If we get called with this then the only way that should be possible
         // is if a username is specified in the URL itself (e.g. `username` is
         // Some), hence the unwrap() here. We try custom usernames down below.
-        if allowed.contains(git2::SSH_KEY) && !tried_sshkey {
+        if allowed.contains(git2::CredentialType::SSH_KEY) && !tried_sshkey {
             // If ssh-agent authentication fails, libgit2 will keep
             // calling this callback asking for other authentication
             // methods to try. Make sure we only try ssh-agent once,
@@ -94,7 +93,7 @@ where
         // but we currently don't! Right now the only way we support fetching a
         // plaintext password is through the `credential.helper` support, so
         // fetch that here.
-        if allowed.contains(git2::USER_PASS_PLAINTEXT) {
+        if allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
             let r = git2::Cred::credential_helper(cfg, url, username);
             cred_helper_bad = Some(r.is_err());
             return r;
@@ -102,7 +101,7 @@ where
 
         // I'm... not sure what the DEFAULT kind of authentication is, but seems
         // easy to support?
-        if allowed.contains(git2::DEFAULT) {
+        if allowed.contains(git2::CredentialType::DEFAULT) {
             return git2::Cred::default();
         }
 
@@ -139,10 +138,10 @@ where
             // we bail out.
             let mut attempts = 0;
             res = f(&mut |_url, username, allowed| {
-                if allowed.contains(git2::USERNAME) {
+                if allowed.contains(git2::CredentialType::USERNAME) {
                     return git2::Cred::username(&s);
                 }
-                if allowed.contains(git2::SSH_KEY) {
+                if allowed.contains(git2::CredentialType::SSH_KEY) {
                     debug_assert_eq!(Some(&s[..]), username);
                     attempts += 1;
                     if attempts == 1 {

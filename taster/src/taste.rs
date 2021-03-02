@@ -1,8 +1,9 @@
-use config::{parse_config, Benchmark, Config};
-use git2;
-use repo::Workspace;
-use Commit;
-use Push;
+use log::{error, info, warn};
+
+use crate::config::{parse_config, Benchmark, Config};
+use crate::repo::Workspace;
+use crate::Commit;
+use crate::Push;
 
 use std::collections::HashMap;
 use std::io;
@@ -29,37 +30,15 @@ pub struct TastingResult {
 }
 
 fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark, timeout: Option<u64>) -> Output {
-    let mut cmd = if cfg.version.is_none() || cfg.version.unwrap() < 2 {
-        // older taster configs assume an implied "cargo" prefix on each benchmark command
-        match timeout {
-            None => {
-                let mut cmd = Command::new("cargo");
-                cmd.arg(&bench.cmd);
-                cmd
-            }
-            Some(timeout) => {
-                let mut cmd = Command::new("timeout");
-                cmd.arg("-k")
-                    .arg(&format!("{}s", timeout + 30))
-                    .arg(&format!("{}s", timeout))
-                    .arg("cargo")
-                    .arg(&bench.cmd);
-                cmd
-            }
-        }
-    } else {
-        // from taster config version 2, we no longer assume an implicit "cargo" prefix on
-        // benchmark commands
-        match timeout {
-            None => Command::new(&bench.cmd),
-            Some(timeout) => {
-                let mut cmd = Command::new("timeout");
-                cmd.arg("-k")
-                    .arg(&format!("{}s", timeout + 30))
-                    .arg(&format!("{}s", timeout))
-                    .arg(&bench.cmd);
-                cmd
-            }
+    let mut cmd = match timeout {
+        None => Command::new(&bench.cmd),
+        Some(timeout) => {
+            let mut cmd = Command::new("timeout");
+            cmd.arg("-k")
+                .arg(&format!("{}s", timeout + 30))
+                .arg(&format!("{}s", timeout))
+                .arg(&bench.cmd);
+            cmd
         }
     };
 
@@ -121,19 +100,20 @@ fn benchmark(
         for (i, regex) in bench.result_expr.iter().enumerate() {
             for cap in regex.captures_iter(l) {
                 let (metric, value) = if cap.len() > 2 {
-                    (String::from(cap.at(1).unwrap()), cap.at(2))
+                    (cap.get(1).unwrap().as_str().to_owned(), cap.get(2))
                 } else {
-                    (format!("{}", i), cap.at(1))
+                    (format!("{}", i), cap.get(1))
                 };
                 let bm_name = format!("{}/{}", bench.name, &metric);
                 if let Some(c) = value {
                     use std::str::FromStr;
-                    let val = match f64::from_str(&c) {
+                    let val = match f64::from_str(c.as_str()) {
                         Ok(f) => f,
                         Err(_) => {
-                            println!(
+                            warn!(
                                 "failed to parse value '{}' for {} into f64 number, ignoring",
-                                c, bm_name
+                                c.as_str(),
+                                bm_name
                             );
                             continue;
                         }
@@ -197,7 +177,7 @@ pub fn taste_commit(
     def_regression_threshold: f64,
     timeout: Option<u64>,
 ) -> Result<(Option<Config>, TastingResult), String> {
-    println!("Tasting commit {}", commit.id);
+    info!("Tasting commit {}", commit.id);
     ws.checkout_commit(&commit.id)?;
 
     let branch = match push.push_ref {
@@ -215,11 +195,11 @@ pub fn taste_commit(
 
     let build_success = {
         let update_success = if do_update {
-            println!("running 'cargo update'");
+            info!("running 'cargo update'");
             let update_output = update(&ws.path);
             write_output(&update_output, commit.id, "update");
             if !update_output.status.success() {
-                println!("update failed: output status is {:?}", update_output.status);
+                error!("update failed: output status is {:?}", update_output.status);
             }
             update_output.status.success()
         } else {
@@ -230,7 +210,7 @@ pub fn taste_commit(
         let build_output = build(&ws.path);
         write_output(&build_output, commit.id, "build");
         if !build_output.status.success() {
-            println!("build failed: output status is {:?}", build_output.status);
+            error!("build failed: output status is {:?}", build_output.status);
         }
 
         update_success && build_output.status.success()
@@ -240,7 +220,7 @@ pub fn taste_commit(
     write_output(&test_output, commit.id, "test");
 
     if !test_output.status.success() {
-        println!("tests failed: output status is {:?}", test_output.status);
+        error!("tests failed: output status is {:?}", test_output.status);
     }
 
     let cfg = match parse_config(
@@ -251,14 +231,14 @@ pub fn taste_commit(
         Ok(c) => c,
         Err(e) => match e.kind() {
             io::ErrorKind::NotFound => {
-                println!(
+                warn!(
                     "Skipping commit {} which doesn't have a Taster config.",
                     commit.id
                 );
                 return Ok((
                     None,
                     TastingResult {
-                        branch: branch,
+                        branch,
                         commit: commit.clone(),
                         build: build_success,
                         test: test_output.status.success(),
@@ -268,14 +248,14 @@ pub fn taste_commit(
                 ));
             }
             io::ErrorKind::InvalidInput => {
-                println!(
+                warn!(
                     "Skipping commit {} which has an invalid Taster config.",
                     commit.id
                 );
                 return Ok((
                     None,
                     TastingResult {
-                        branch: branch,
+                        branch,
                         commit: commit.clone(),
                         build: build_success,
                         test: test_output.status.success(),
@@ -321,7 +301,7 @@ pub fn taste_commit(
     Ok((
         Some(cfg),
         TastingResult {
-            branch: branch,
+            branch,
             commit: commit.clone(),
             build: build_success,
             test: test_output.status.success(),

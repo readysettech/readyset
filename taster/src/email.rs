@@ -2,9 +2,9 @@
 //use lettre::transport::smtp::SmtpTransportBuilder;
 //use lettre::transport::EmailTransport;
 
-use config::Config;
-use taste::TastingResult;
-use Push;
+use crate::config::Config;
+use crate::taste::TastingResult;
+use crate::Push;
 
 pub struct EmailNotifier {
     // mailer: SmtpTransport,

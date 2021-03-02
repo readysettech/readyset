@@ -1,10 +1,11 @@
-use config::Config;
+use crate::config::Config;
+use crate::taste::TastingResult;
+use crate::Commit;
+use crate::Push;
 use github_rs::client::{Executor, Github};
 use github_rs::StatusCode;
-use serde_json;
-use taste::TastingResult;
-use Commit;
-use Push;
+use log::info;
+use serde::{Deserialize, Serialize};
 
 pub struct GithubNotifier {
     api_token: String,
@@ -32,7 +33,7 @@ impl GithubNotifier {
     fn post_status(&self, push: &Push, commit: &Commit, payload: Payload) -> Result<(), String> {
         let owner_name = push.owner_name.clone().unwrap();
         let repo_name = push.repo_name.clone().unwrap();
-        println!(
+        info!(
             "Setting status of {}/{}#{} to {}",
             owner_name, repo_name, commit.id, payload.state
         );
