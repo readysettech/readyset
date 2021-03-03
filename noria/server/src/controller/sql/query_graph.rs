@@ -391,8 +391,10 @@ fn classify_conditionals(
                                     && rf.table.is_some()
                                     && tables
                                         .contains(&Table::from(rf.table.as_ref().unwrap().as_str()))
+                                    && lf.table != rf.table
                                 {
-                                    // both columns' tables appear in table list --> comma join
+                                    // both columns' tables appear in table list and the tables are
+                                    // different --> comma join
                                     if ct.operator == BinaryOperator::Equal
                                         || ct.operator == BinaryOperator::In
                                     {
