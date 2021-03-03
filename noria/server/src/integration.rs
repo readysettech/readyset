@@ -3828,6 +3828,45 @@ async fn query_reuse_aliases() {
     assert!(g.view("q4").await.is_ok());
 }
 
+#[tokio::test(threaded_scheduler)]
+async fn same_table_columns_inequal() {
+    let mut g = start_simple("same_table_columns_inequal").await;
+    g.install_recipe(
+        "CREATE TABLE t1 (a INT, b INT);
+         QUERY q: SELECT * FROM t1 WHERE t1.a != t1.b;",
+    )
+    .await
+    .unwrap();
+
+    let mut t1 = g.table("t1").await.unwrap();
+    t1.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(2i32), DataType::from(2i32)],
+        vec![DataType::from(1i32), DataType::from(2i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+    ])
+    .await
+    .unwrap();
+
+    let mut q = g.view("q").await.unwrap();
+    let res = q.lookup(&[0i32.into()], true).await.unwrap();
+    assert_eq!(
+        res,
+        vec![
+            vec![
+                DataType::from(1i32),
+                DataType::from(2i32),
+                DataType::from(0i32)
+            ],
+            vec![
+                DataType::from(2i32),
+                DataType::from(3i32),
+                DataType::from(0i32)
+            ],
+        ]
+    );
+}
+
 // FIXME: The test is disabled due to panic when querying an aliased view.
 #[ignore]
 #[tokio::test(threaded_scheduler)]
