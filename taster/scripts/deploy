@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+TARGET="taster.readyset.io"
+
+build() (
+    cd "$(git rev-parse --show-toplevel)"
+
+    docker build -f build/Dockerfile \
+        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        .
+
+    docker volume create readyset-target
+    docker volume create readyset-cargo
+    docker volume create readyset-sccache
+
+    docker run --name noria-build --rm -it \
+        -v "$(git rev-parse --show-toplevel):/app" \
+        -v readyset-target:/app/target \
+        -v readyset-cargo:/root/.cargo \
+        -v readyset-sccache:/root/.cache/sccache \
+        -w /app \
+        069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        cargo build "$@"
+)
+
+build --release --bin taster
+mkdir -p target/release
+docker run --rm \
+    -v "$(pwd):/pwd" \
+    -v readyset-target:/target \
+    busybox \
+    cp /target/release/taster /pwd/target/release/taster
+
+strip target/release/taster
+
+scp target/release/taster "admin@$TARGET:~/taster"
+ssh "admin@$TARGET" sudo mv /home/admin/taster /usr/bin/taster
+ssh "admin@$TARGET" sudo systemctl restart taster
+ssh "admin@$TARGET" sudo systemctl status taster
