@@ -29,7 +29,7 @@ pub struct TastingResult {
     pub results: Option<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>,
 }
 
-fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark, timeout: Option<u64>) -> Output {
+fn run_benchmark(workdir: &str, bench: &Benchmark, timeout: Option<u64>) -> Output {
     let mut cmd = match timeout {
         None => Command::new(&bench.cmd),
         Some(timeout) => {
@@ -81,7 +81,7 @@ fn benchmark(
     timeout: Option<u64>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
     // Run the benchmark and collect its output
-    let output = run_benchmark(workdir, cfg, bench, timeout);
+    let output = run_benchmark(workdir, bench, timeout);
     write_output(&output, commit_id, &bench.name);
 
     let lines = str::from_utf8(output.stdout.as_slice())
@@ -216,56 +216,52 @@ pub fn taste_commit(
         update_success && build_output.status.success()
     };
 
-    let test_output = test(&ws.path, timeout);
-    write_output(&test_output, commit.id, "test");
-
-    if !test_output.status.success() {
-        error!("tests failed: output status is {:?}", test_output.status);
-    }
-
     let cfg = match parse_config(
         Path::new(&format!("{}/taster.toml", ws.path)),
         def_improvement_threshold,
         def_regression_threshold,
     ) {
         Ok(c) => c,
-        Err(e) => match e.kind() {
-            io::ErrorKind::NotFound => {
-                warn!(
-                    "Skipping commit {} which doesn't have a Taster config.",
-                    commit.id
-                );
-                return Ok((
-                    None,
-                    TastingResult {
-                        branch,
-                        commit: commit.clone(),
-                        build: build_success,
-                        test: test_output.status.success(),
-                        bench: false,
-                        results: None,
-                    },
-                ));
+        Err(e) => {
+            match e.kind() {
+                io::ErrorKind::NotFound => {
+                    warn!(
+                        "Skipping commit {} which doesn't have a Taster config.",
+                        commit.id
+                    );
+                }
+                io::ErrorKind::InvalidInput => {
+                    warn!(
+                        "Skipping commit {} which has an invalid Taster config.",
+                        commit.id
+                    );
+                }
+                _ => unimplemented!(),
             }
-            io::ErrorKind::InvalidInput => {
-                warn!(
-                    "Skipping commit {} which has an invalid Taster config.",
-                    commit.id
-                );
-                return Ok((
-                    None,
-                    TastingResult {
-                        branch,
-                        commit: commit.clone(),
-                        build: build_success,
-                        test: test_output.status.success(),
-                        bench: false,
-                        results: None,
-                    },
-                ));
-            }
-            _ => unimplemented!(),
-        },
+
+            return Ok((
+                None,
+                TastingResult {
+                    branch,
+                    commit: commit.clone(),
+                    build: build_success,
+                    test: false,
+                    bench: false,
+                    results: None,
+                },
+            ));
+        }
+    };
+
+    let test_success = !cfg.run_tests || {
+        let test_output = test(&ws.path, timeout);
+        write_output(&test_output, commit.id, "test");
+
+        let success = test_output.status.success();
+        if !success {
+            error!("tests failed: output status is {:?}", test_output.status);
+        }
+        success
     };
 
     let bench_results = match branch {
@@ -304,7 +300,7 @@ pub fn taste_commit(
             branch,
             commit: commit.clone(),
             build: build_success,
-            test: test_output.status.success(),
+            test: test_success,
             bench: bench_success,
             results: Some(bench_results),
         },

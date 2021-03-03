@@ -19,6 +19,7 @@ pub struct Config {
     pub benchmarks: Vec<Benchmark>,
     pub slack_aliases: HashMap<String, String>,
     pub version: Option<i64>,
+    pub run_tests: bool,
 }
 
 pub fn parse_config(
@@ -26,6 +27,7 @@ pub fn parse_config(
     def_imp_threshold: f64,
     def_reg_threshold: f64,
 ) -> Result<Config, Error> {
+    // TODO(grfn): Actual error handling rather than unwrap()ing everywhere in this function
     let mut f = fs::File::open(cfg)?;
     let mut buf = String::new();
     f.read_to_string(&mut buf)?;
@@ -90,9 +92,14 @@ pub fn parse_config(
         .map(|t| to_bench(t))
         .collect();
 
+    let run_tests = value
+        .get("run_tests")
+        .map_or(true, |v| v.as_bool().unwrap());
+
     Ok(Config {
         benchmarks,
         slack_aliases,
         version,
+        run_tests,
     })
 }
