@@ -166,6 +166,7 @@ pub fn main() {
         .arg(
             Arg::with_name("slack_hook_url")
                 .long("slack_hook_url")
+                .env("SLACK_HOOK_URL")
                 .takes_value(true)
                 .required(false)
                 .help("Slack webhook URL to push notifications to"),
