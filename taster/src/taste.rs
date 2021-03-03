@@ -74,7 +74,7 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
 
 fn benchmark(
     workdir: &str,
-    cfg: &Config,
+    _cfg: &Config,
     bench: &Benchmark,
     commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,

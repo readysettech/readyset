@@ -3,7 +3,6 @@ extern crate clap;
 
 mod auth;
 mod config;
-mod email;
 mod github;
 mod repo;
 mod slack;
@@ -44,7 +43,6 @@ pub struct Push {
 }
 
 pub struct Notifier {
-    email_notifier: Option<email::EmailNotifier>,
     slack_notifier: Option<slack::SlackNotifier>,
     github_notifier: Option<github::GithubNotifier>,
 }
@@ -54,10 +52,6 @@ impl<'a> From<&'a clap::ArgMatches<'a>> for Notifier {
         let repo = args.value_of("github_repo").unwrap();
 
         Self {
-            email_notifier: args
-                .value_of("email_addr")
-                .map(|addr| email::EmailNotifier::new(addr, repo)),
-
             slack_notifier: args.value_of("slack_hook_url").map(|url| {
                 slack::SlackNotifier::new(
                     url,
@@ -82,9 +76,6 @@ impl Notifier {
         push: &Push,
         commit: Option<&Commit>,
     ) -> Result<(), String> {
-        if let Some(en) = &self.email_notifier {
-            en.notify(cfg, result, push)?;
-        }
         if let Some(sn) = &self.slack_notifier {
             sn.notify(cfg, result, push)?;
         }
@@ -129,13 +120,6 @@ pub fn main() {
                 .value_name("GH_REPO")
                 .default_value("https://github.com/ms705/taster")
                 .help("GitHub repository to taste"),
-        )
-        .arg(
-            Arg::with_name("email_addr")
-                .long("email_addr")
-                .takes_value(true)
-                .required(false)
-                .help("Email address to send notifications to"),
         )
         .arg(
             Arg::with_name("default_regression_reporting_threshold")
