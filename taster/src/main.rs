@@ -10,6 +10,7 @@ mod taste;
 mod webhook;
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 use std::thread;
@@ -19,6 +20,7 @@ use rouille::Response;
 use serde_json::json;
 
 use crate::config::Config;
+use crate::webhook::authentication::authenticate_payload;
 use crate::webhook::events::Event;
 
 const TASTER_USAGE: &str = "\
@@ -92,6 +94,17 @@ impl Notifier {
             }
         }
     }
+}
+
+macro_rules! require_header {
+    ($req: expr, $header: expr) => {
+        if let Some(h) = $req.header($header) {
+            h
+        } else {
+            return Response::text(&format!("Missing required {} header", $header))
+                .with_status_code(400);
+        }
+    };
 }
 
 pub fn main() {
@@ -224,7 +237,7 @@ pub fn main() {
 
     let addr = args.value_of("listen_addr").unwrap();
     let repo = args.value_of("github_repo").unwrap().to_owned();
-    let secret = args.value_of("secret");
+    let secret = args.value_of("secret").map(|v| v.to_owned());
     let taste_commit = args.value_of("taste_commit");
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
@@ -289,9 +302,7 @@ pub fn main() {
     }
 
     // If we get here, we must be running in continuous mode
-    if secret.is_none() {
-        panic!("--secret must be set when in continuous webhook handler mode");
-    }
+    let secret = secret.expect("--secret must be set when in continuous webhook handler mode");
 
     let hl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(history)));
     let wsl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(ws)));
@@ -346,13 +357,16 @@ pub fn main() {
             return Response::empty_404();
         }
 
-        let event_type = if let Some(et) = req.header("X-Github-Event") {
-            et
-        } else {
-            return Response::text("Missing required X-Github-Event header").with_status_code(400);
-        };
+        let signature = require_header!(req, "X-Hub-Signature");
+        let event_type = require_header!(req, "X-Github-Event");
+        let mut payload = String::new();
+        req.data().unwrap().read_to_string(&mut payload).unwrap();
 
-        let event = match serde_json::from_reader(req.data().unwrap())
+        if !authenticate_payload(secret.as_bytes(), payload.as_bytes(), signature.as_bytes()) {
+            return Response::text("Invalid signature").with_status_code(400);
+        }
+
+        let event = match serde_json::from_str(&payload)
             .and_then(|val| Event::from_value(event_type, val))
         {
             Ok(ev) => ev,
