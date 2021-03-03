@@ -1,4 +1,6 @@
 use std::env;
+use std::path::PathBuf;
+use std::str::FromStr;
 
 // git authentication logic borrowed from `cargo` crate
 
@@ -85,7 +87,18 @@ where
             let username = username.unwrap();
             debug_assert!(!ssh_username_requested);
             ssh_agent_attempts.push(username.to_string());
-            return git2::Cred::ssh_key_from_agent(&username);
+            return git2::Cred::ssh_key(
+                username,
+                None,
+                &PathBuf::from_str(
+                    shellexpand::tilde(
+                        &env::var("SSH_KEY_PATH").unwrap_or_else(|_| "~/.ssh/id_rsa".to_owned()),
+                    )
+                    .as_ref(),
+                )
+                .unwrap(),
+                None,
+            );
         }
 
         // Sometimes libgit2 will ask for a username/password in plaintext. This
