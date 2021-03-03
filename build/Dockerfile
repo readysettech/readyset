@@ -23,7 +23,8 @@ RUN apt-get install -y \
     libssl-dev \
     liblz4-dev \
     librdkafka-dev \
-    build-essential
+    build-essential \
+    rsync
 
 ENV CXX /bin/sccache c++
 
