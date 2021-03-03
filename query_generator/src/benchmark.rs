@@ -1,7 +1,8 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use clap::Clap;
 use humantime::format_duration;
 use indicatif::ProgressIterator;
+use itertools::Either;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
@@ -156,8 +157,14 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
 
 #[derive(Clap)]
 pub struct Benchmark {
-    /// Comma-separated list of query operations to benchmark.
-    operations: Operations,
+    /// Comma-separated list of query operations to benchmark. Required if --max-depth is not
+    /// specified
+    operations: Option<Operations>,
+
+    /// Maximum number of query operations to generate in a single query. Required if operations are
+    /// not specified
+    #[clap(long)]
+    max_depth: Option<usize>,
 
     /// Number of shards to run noria with
     #[clap(long)]
@@ -179,17 +186,31 @@ pub struct Benchmark {
 
 impl Benchmark {
     #[tokio::main]
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> anyhow::Result<()> {
         // SAFETY: Called before we spawn any other tasks
         unsafe {
             NoriaMetricsRecorder::install(1024)?;
         }
 
-        let Operations(ops) = &self.operations;
-        eprintln!("Running benchmark of {} queries", ops.len());
-        let mut results = Vec::with_capacity(ops.len());
-        for ops in ops.iter().progress() {
-            match self.benchmark_operations(ops).await {
+        let ops = if let Some(Operations(ops)) = self.operations.take() {
+            eprintln!("Running benchmark of {} queries", ops.len());
+            Either::Left(ops.into_iter())
+        } else if let Some(max_depth) = self.max_depth {
+            eprintln!(
+                "Running benchmark of all permutations of operations up to length {}",
+                max_depth
+            );
+            Either::Right(
+                QueryOperation::permute(max_depth)
+                    .map(|ops| ops.into_iter().cloned().collect::<Vec<_>>()),
+            )
+        } else {
+            bail!("Must specify either --max-depth or a list of operations to benchmark");
+        };
+
+        let mut results = Vec::new();
+        for ops in ops.progress() {
+            match self.benchmark_operations(ops.as_slice()).await {
                 Ok(result) => results.push(result),
                 Err(e) => eprintln!("{}", e),
             }
