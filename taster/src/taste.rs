@@ -1,6 +1,6 @@
 use log::{error, info, warn};
 
-use crate::config::{parse_config, Benchmark, Config};
+use crate::config::{self, parse_config, Benchmark, Config};
 use crate::repo::Workspace;
 use crate::Commit;
 use crate::Push;
@@ -223,14 +223,15 @@ pub fn taste_commit(
     ) {
         Ok(c) => c,
         Err(e) => {
-            match e.kind() {
-                io::ErrorKind::NotFound => {
+            warn!("Error parsing taster.toml from commit {}: {}", commit.id, e);
+            match e {
+                config::Error::IOError(ioe) if ioe.kind() == io::ErrorKind::NotFound => {
                     warn!(
                         "Skipping commit {} which doesn't have a Taster config.",
                         commit.id
                     );
                 }
-                io::ErrorKind::InvalidInput => {
+                config::Error::ParseError(_) | config::Error::DeserializeError(_) => {
                     warn!(
                         "Skipping commit {} which has an invalid Taster config.",
                         commit.id
