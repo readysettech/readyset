@@ -183,6 +183,10 @@ pub struct Benchmark {
     /// "json".
     #[clap(short = 'o', default_value)]
     output_format: OutputFormat,
+
+    /// Enable verbose logging
+    #[clap(short = 'v', long)]
+    verbose: bool,
 }
 
 impl Benchmark {
@@ -229,6 +233,10 @@ impl Benchmark {
         let query = gen.generate_query(ops);
         let query_str = format!("{}", query.statement);
         let res: anyhow::Result<_> = async {
+            if self.verbose {
+                eprintln!("Benchmarking query: {}", query_str)
+            }
+
             let mut noria = self.setup_noria().await?;
             let query_name = "benchmark_query";
             noria.install_recipe(&query.to_recipe(query_name)).await?;
