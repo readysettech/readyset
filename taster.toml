@@ -3,19 +3,19 @@ run_tests = false
 
 [uniform]
 command = "cargo"
-args = ["run", "--release", "--manifest-path", "applications/Cargo.toml", "--bin", "vote", "--", "localsoup"]
+args = ["run", "--release", "--bin", "vote", "--", "localsoup"]
 regexs = ["^(write\t50)\t([0-9.]+)", "^(read\t50)\t([0-9.]+)", "^(write\t95)\t([0-9.]+)", "^(read\t95)\t([0-9.]+)"]
 lower_better = true
 
 [uniform-unsharded]
 command = "cargo"
-args = ["run", "--release", "--manifest-path", "applications/Cargo.toml", "--bin", "vote", "--", "localsoup", "--shards=1"]
+args = ["run", "--release", "--bin", "vote", "--", "localsoup", "--shards=1"]
 regexs = ["^(write\t50)\t([0-9.]+)", "^(read\t50)\t([0-9.]+)", "^(write\t95)\t([0-9.]+)", "^(read\t95)\t([0-9.]+)"]
 lower_better = true
 
 [purged-vote-replay]
 command = "cargo"
-args = ["run", "--release", "--manifest-path", "applications/Cargo.toml", "--bin", "vote-purge-stress", "--", "-t", "3", "--purge", "all"]
+args = ["run", "--release", "--bin", "vote-purge-stress", "--", "-t", "3", "--purge", "all"]
 regexs = ["^(replay\t50)\t([0-9.]+)", "^(replay\t95)\t([0-9.]+)"]
 lower_better = true
 
