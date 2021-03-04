@@ -717,7 +717,7 @@ impl QueryOperation {
 
             QueryOperation::SingleParameter => {
                 let table = state.some_table_mut();
-                let col = table.some_column_name();
+                let col = table.fresh_column();
                 and_where(
                     query,
                     ConditionExpression::ComparisonOp(ConditionTree {
