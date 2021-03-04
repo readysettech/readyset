@@ -769,6 +769,8 @@ impl FromStr for Operations {
     /// | distinct                                | `SELECT DISTINCT`                 |
     /// | joins                                   | Joins, with all [`JoinOperator`]s |
     /// | single_parameter / single_param / param | A single query parameter          |
+    /// | project_literal                         | A projected literal value         |
+    /// | multiple_parameters / params            | Multiple query parameters         |
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use QueryOperation::*;
 
@@ -781,7 +783,8 @@ impl FromStr for Operations {
                         "distinct" => Ok(vec![Distinct]),
                         "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
                         "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
-                        // TODO(grfn): add support for parsing the rest of the query operations
+                        "project_literal" => Ok(vec![ProjectLiteral]),
+                        "multiple_parameters" | "params" => Ok(vec![MultipleParameters]),
                         s => Err(anyhow!("unknown query operation: {}", s)),
                     }
                 })
