@@ -97,13 +97,10 @@ impl Workspace {
         })
     }
 
-    pub fn checkout_commit(&self, commit_id: &git2::Oid) -> Result<(), String> {
+    pub fn checkout_commit(&self, commit_id: &git2::Oid) -> anyhow::Result<()> {
         // N.B.: this will turn into a no-op if the workdir contains the wrong
         // repo, as the commit won't exist
-        let c = self
-            .repo
-            .find_object(*commit_id, None)
-            .map_err(|e| e.to_string())?;
+        let c = self.repo.find_object(*commit_id, None)?;
         match self.repo.reset(&c, ResetType::Hard, None) {
             Ok(_) => info!("Checked out {}", commit_id),
             Err(e) => error!("Failed to check out {}: {}", commit_id, e.message()),

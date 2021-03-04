@@ -1,7 +1,9 @@
 use anyhow::anyhow;
 use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
 
 use crate::config::{self, parse_config, Benchmark, Config, OutputFormat};
+use crate::persistence::Persistence;
 use crate::repo::Workspace;
 use crate::Commit;
 use crate::Push;
@@ -13,7 +15,7 @@ use std::process::{Command, ExitStatus, Output};
 use std::str;
 
 /// `(val, percentage_change)`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BenchmarkResult<T> {
     Improvement(T, f64),
     Regression(T, f64),
@@ -244,13 +246,13 @@ fn build(workdir: &str) -> Output {
 
 pub fn taste_commit(
     ws: &Workspace,
-    history: &mut HashMap<String, HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
+    persistence: &Persistence,
     push: &Push,
     commit: &Commit,
     def_improvement_threshold: f64,
     def_regression_threshold: f64,
     timeout: Option<u64>,
-) -> Result<(Option<Config>, TastingResult), String> {
+) -> anyhow::Result<(Option<Config>, TastingResult)> {
     info!("Tasting commit {}", commit.id);
     ws.checkout_commit(&commit.id)?;
 
@@ -344,7 +346,7 @@ pub fn taste_commit(
     info!("Running benchmarks for commit {}", commit.id);
     let bench_results = match branch {
         Some(ref branch) => {
-            let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
+            let branch_history = persistence.branch(branch)?;
             cfg.benchmarks
                 .iter()
                 .map(|b| {
@@ -357,7 +359,9 @@ pub fn taste_commit(
                         timeout,
                     )
                     .map(|(status, res)| {
-                        branch_history.insert(b.name.clone(), res.clone());
+                        if let Err(e) = persistence.save_result(branch, &b.name, &res) {
+                            error!("Error persisting benchmark result: {}", e);
+                        };
                         (b.clone(), status, res)
                     })
                 })

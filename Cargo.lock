@@ -331,9 +331,9 @@ dependencies = [
 
 [[package]]
 name = "bincode"
-version = "1.3.1"
+version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f30d3a39baa26f9651f17b375061f3233dde33424a8b72b0dbe93a68a0bc896d"
+checksum = "d175dfa69e619905c4c3cdb7c3c203fa3bdd5d51184e3afdb2742c0280493772"
 dependencies = [
  "byteorder",
  "serde",
@@ -3138,7 +3138,7 @@ dependencies = [
  "num_cpus",
  "rand 0.7.3",
  "rand_distr",
- "redis",
+ "redis 0.16.0",
  "regex",
  "slog",
  "slog-term",
@@ -4387,6 +4387,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeb8f8d059ead7805e171fc22de8348a3d611c0f985aaa4f5cf6c0dfc7645407"
+dependencies = [
+ "async-trait",
+ "combine",
+ "dtoa",
+ "itoa",
+ "percent-encoding 2.1.0",
+ "sha1",
+ "url 2.2.0",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.1.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5130,6 +5145,7 @@ name = "taster"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "bincode",
  "case",
  "clap 2.33.3",
  "env_logger 0.8.3",
@@ -5138,6 +5154,8 @@ dependencies = [
  "hex 0.4.2",
  "lettre",
  "log 0.4.14",
+ "maplit",
+ "redis 0.20.0",
  "regex",
  "rouille",
  "rust-crypto",

@@ -4,12 +4,13 @@ extern crate clap;
 mod auth;
 mod config;
 mod github;
+mod persistence;
 mod repo;
 mod slack;
 mod taste;
 mod webhook;
 
-use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
@@ -20,6 +21,7 @@ use rouille::Response;
 use serde_json::json;
 
 use crate::config::Config;
+use crate::persistence::Persistence;
 use crate::webhook::authentication::authenticate_payload;
 use crate::webhook::events::Event;
 
@@ -255,8 +257,9 @@ pub fn main() {
     };
 
     let notifier: &'static Notifier = Box::leak(Box::new(Notifier::from(&args)));
+    let persistence: &'static Persistence =
+        Box::leak(Box::new(Persistence::try_from(&args).unwrap()));
 
-    let mut history = HashMap::new();
     let ws = repo::Workspace::new(&repo, workdir);
     if taste_commit.is_some() {
         let cid = if let Some("HEAD") = taste_commit {
@@ -286,7 +289,7 @@ pub fn main() {
                 };
                 let res = taste::taste_commit(
                     &ws,
-                    &mut history,
+                    &persistence,
                     &push,
                     &push.head_commit,
                     improvement_threshold,
@@ -307,8 +310,6 @@ pub fn main() {
 
     // If we get here, we must be running in continuous mode
     let secret = secret.expect("--secret must be set when in continuous webhook handler mode");
-
-    let hl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(history)));
     let wsl: &'static Mutex<_> = Box::leak::<'static>(Box::new(Mutex::new(ws)));
 
     if !args.is_present("no_bootstrap") {
@@ -340,10 +341,9 @@ pub fn main() {
                     repo_name: None,
                 };
 
-                let mut history = hl.lock().unwrap();
                 let res = taste::taste_commit(
                     &ws,
-                    &mut history,
+                    &persistence,
                     &push,
                     &push.head_commit,
                     improvement_threshold,
@@ -411,12 +411,11 @@ pub fn main() {
                     {
                         notifier.notify_pending(&push, &push.head_commit);
                         let ws = wsl.lock().unwrap();
-                        let mut history = hl.lock().unwrap();
                         // First taste the head commit
                         ws.fetch().unwrap();
                         let head_res = taste::taste_commit(
                             &ws,
-                            &mut history,
+                            &persistence,
                             &push,
                             &push.head_commit,
                             improvement_threshold,
@@ -449,7 +448,7 @@ pub fn main() {
                                         // taste
                                         let res = taste::taste_commit(
                                             &ws,
-                                            &mut history,
+                                            &persistence,
                                             &push,
                                             &cur_c,
                                             improvement_threshold,
