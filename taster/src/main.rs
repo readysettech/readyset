@@ -264,6 +264,9 @@ pub fn main() {
         } else {
             git2::Oid::from_str(taste_commit.unwrap()).unwrap()
         };
+
+        ws.fetch().unwrap();
+
         match ws.repo.find_object(cid, None) {
             Err(e) => panic!(format!("{}", e.to_string())),
             Ok(o) => {

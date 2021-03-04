@@ -1,6 +1,7 @@
+use anyhow::anyhow;
 use log::{error, info, warn};
 
-use crate::config::{self, parse_config, Benchmark, Config};
+use crate::config::{self, parse_config, Benchmark, Config, OutputFormat};
 use crate::repo::Workspace;
 use crate::Commit;
 use crate::Push;
@@ -72,6 +73,141 @@ fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
         .expect("Failed to write output to stderr log file!");
 }
 
+fn parse_output(
+    benchmark_name: &str,
+    format: &OutputFormat,
+    previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
+    output: &Output,
+) -> anyhow::Result<HashMap<String, BenchmarkResult<f64>>> {
+    let mut res = HashMap::new();
+
+    let mut record_result = |bm_name: &str,
+                             val: f64,
+                             lower_is_better: bool,
+                             improvement_threshold: f64,
+                             regression_threshold: f64| {
+        let new_result = match previous_result {
+            None => BenchmarkResult::Improvement(val, 0.0),
+            Some(prev_res) => {
+                let old_val = match prev_res.get(bm_name) {
+                    None => val,
+                    Some(pv) => match *pv {
+                        BenchmarkResult::Improvement(v, _) => v,
+                        BenchmarkResult::Regression(v, _) => v,
+                        BenchmarkResult::Neutral(v, _) => v,
+                    },
+                };
+
+                if lower_is_better {
+                    if val >= old_val * (1.0 + regression_threshold) {
+                        BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                    } else if val < old_val * (1.0 - improvement_threshold) {
+                        BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                    } else {
+                        BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                    }
+                } else {
+                    if val >= old_val * (1.0 + improvement_threshold) {
+                        BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                    } else if val < old_val * (1.0 - regression_threshold) {
+                        BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                    } else {
+                        BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                    }
+                }
+            }
+        };
+        res.insert(bm_name.to_owned(), new_result);
+    };
+
+    match format {
+        OutputFormat::Regex {
+            result_expr,
+            lower_is_better,
+            improvement_threshold,
+            regression_threshold,
+        } => {
+            let lines = str::from_utf8(output.stdout.as_slice())?
+                .lines()
+                .chain(str::from_utf8(output.stderr.as_slice()).unwrap().lines());
+
+            for l in lines {
+                for (i, regex) in result_expr.iter().enumerate() {
+                    for cap in regex.captures_iter(l) {
+                        let (metric, value) = if cap.len() > 2 {
+                            (
+                                cap.get(1)
+                                    .ok_or_else(|| anyhow!("Wrong number of regex captures"))?
+                                    .as_str()
+                                    .to_owned(),
+                                cap.get(2),
+                            )
+                        } else {
+                            (format!("{}", i), cap.get(1))
+                        };
+                        let bm_name = format!("{}/{}", benchmark_name, &metric);
+                        if let Some(c) = value {
+                            use std::str::FromStr;
+                            let val = match f64::from_str(c.as_str()) {
+                                Ok(f) => f,
+                                Err(_) => {
+                                    warn!(
+                                        "failed to parse value '{}' for {} into f64 number, ignoring",
+                                        c.as_str(),
+                                        bm_name
+                                    );
+                                    continue;
+                                }
+                            };
+                            record_result(
+                                &bm_name,
+                                val,
+                                *lower_is_better,
+                                *improvement_threshold,
+                                *regression_threshold,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        OutputFormat::JSON {
+            benchmark_name_key,
+            metrics,
+        } => {
+            let json: Vec<serde_json::Map<String, serde_json::Value>> =
+                serde_json::from_slice(output.stdout.as_slice())?;
+            let expected_key =
+                |k| anyhow!("Benchmark result did not contain expected key \"{}\"", k);
+            let wrong_type = |k, ty| anyhow!("Unexpected type for key \"{}\", expected {}", k, ty);
+            for result in json {
+                let name = result
+                    .get(benchmark_name_key)
+                    .ok_or_else(|| expected_key(benchmark_name_key))?
+                    .as_str()
+                    .ok_or_else(|| wrong_type(benchmark_name_key, "string"))?;
+                for metric in metrics {
+                    let value = result
+                        .get(&metric.key)
+                        .ok_or_else(|| expected_key(&metric.key))?
+                        .as_f64()
+                        .ok_or_else(|| wrong_type(&metric.key, "number"))?;
+                    let name = format!("{}/{}/{}", benchmark_name, name, metric.name);
+                    record_result(
+                        &name,
+                        value,
+                        metric.lower_is_better,
+                        metric.improvement_threshold,
+                        metric.regression_threshold,
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(res)
+}
+
 fn benchmark(
     workdir: &str,
     _cfg: &Config,
@@ -79,82 +215,20 @@ fn benchmark(
     commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
     timeout: Option<u64>,
-) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
+) -> anyhow::Result<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)> {
     // Run the benchmark and collect its output
     let output = run_benchmark(workdir, bench, timeout);
     write_output(&output, commit_id, &bench.name);
 
-    let lines = str::from_utf8(output.stdout.as_slice())
-        .unwrap()
-        .lines()
-        .chain(str::from_utf8(output.stderr.as_slice()).unwrap().lines());
-    let mut res = HashMap::new();
-
     // Don't try parsing the output if we didn't succeed
     if !output.status.success() {
-        return (output.status, res);
+        return Ok((output.status, Default::default()));
     }
 
     // Success, so let's look for the results
-    for l in lines {
-        for (i, regex) in bench.result_expr.iter().enumerate() {
-            for cap in regex.captures_iter(l) {
-                let (metric, value) = if cap.len() > 2 {
-                    (cap.get(1).unwrap().as_str().to_owned(), cap.get(2))
-                } else {
-                    (format!("{}", i), cap.get(1))
-                };
-                let bm_name = format!("{}/{}", bench.name, &metric);
-                if let Some(c) = value {
-                    use std::str::FromStr;
-                    let val = match f64::from_str(c.as_str()) {
-                        Ok(f) => f,
-                        Err(_) => {
-                            warn!(
-                                "failed to parse value '{}' for {} into f64 number, ignoring",
-                                c.as_str(),
-                                bm_name
-                            );
-                            continue;
-                        }
-                    };
-                    let new_result = match previous_result {
-                        None => BenchmarkResult::Improvement(val, 0.0),
-                        Some(prev_res) => {
-                            let old_val = match prev_res.get(&bm_name) {
-                                None => val,
-                                Some(pv) => match *pv {
-                                    BenchmarkResult::Improvement(v, _) => v,
-                                    BenchmarkResult::Regression(v, _) => v,
-                                    BenchmarkResult::Neutral(v, _) => v,
-                                },
-                            };
-                            let new_result = if bench.lower_is_better {
-                                if val >= old_val * (1.0 + bench.regression_threshold) {
-                                    BenchmarkResult::Regression(val, (val / old_val) - 1.0)
-                                } else if val < old_val * (1.0 - bench.improvement_threshold) {
-                                    BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
-                                } else {
-                                    BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
-                                }
-                            } else {
-                                if val >= old_val * (1.0 + bench.improvement_threshold) {
-                                    BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
-                                } else if val < old_val * (1.0 - bench.regression_threshold) {
-                                    BenchmarkResult::Regression(val, (val / old_val) - 1.0)
-                                } else {
-                                    BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
-                                }
-                            };
-                            new_result
-                        }
-                    };
-                    res.insert(bm_name, new_result);
-                }
-            }
-        }
-    }
-    (output.status, res)
+    let res = parse_output(&bench.name, &bench.output_format, previous_result, &output)?;
+
+    Ok((output.status, res))
 }
 
 fn build(workdir: &str) -> Output {
@@ -207,6 +281,7 @@ pub fn taste_commit(
             true
         };
 
+        info!("building commit {}", commit.id);
         let build_output = build(&ws.path);
         write_output(&build_output, commit.id, "build");
         if !build_output.status.success() {
@@ -255,6 +330,7 @@ pub fn taste_commit(
     };
 
     let test_success = !cfg.run_tests || {
+        info!("Running tests for commit {}", commit.id);
         let test_output = test(&ws.path, timeout);
         write_output(&test_output, commit.id, "test");
 
@@ -265,35 +341,40 @@ pub fn taste_commit(
         success
     };
 
+    info!("Running benchmarks for commit {}", commit.id);
     let bench_results = match branch {
         Some(ref branch) => {
             let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let (status, res) = benchmark(
+                    benchmark(
                         &ws.path,
                         &cfg,
                         b,
                         commit.id,
                         branch_history.get(&b.name),
                         timeout,
-                    );
-                    branch_history.insert(b.name.clone(), res.clone());
-                    (b.clone(), status, res)
+                    )
+                    .map(|(status, res)| {
+                        branch_history.insert(b.name.clone(), res.clone());
+                        (b.clone(), status, res)
+                    })
                 })
-                .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
+                .collect::<Result<Vec<_>, _>>()
         }
         None => cfg
             .benchmarks
             .iter()
             .map(|b| {
-                let (status, res) = benchmark(&ws.path, &cfg, b, commit.id, None, timeout);
-                (b.clone(), status, res)
+                benchmark(&ws.path, &cfg, b, commit.id, None, timeout)
+                    .map(|(status, res)| (b.clone(), status, res))
             })
-            .collect::<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>(),
+            .collect::<Result<Vec<_>, _>>(),
     };
-    let bench_success = bench_results.iter().all(|x| x.1.success());
+    let bench_success = bench_results
+        .as_ref()
+        .map_or(false, |results| results.iter().all(|x| x.1.success()));
 
     Ok((
         Some(cfg),
@@ -303,7 +384,7 @@ pub fn taste_commit(
             build: build_success,
             test: test_success,
             bench: bench_success,
-            results: Some(bench_results),
+            results: bench_results.ok(),
         },
     ))
 }

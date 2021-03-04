@@ -22,3 +22,7 @@ shellexpand = "2.1.0"
 hex = "0.4.2"
 rust-crypto = "0.2.36"
 thiserror = "1.0.24"
+anyhow = "1.0.38"
+
+[dev-dependencies]
+tempfile = "3.2.0"

@@ -19,6 +19,22 @@ args = ["run", "--release", "--manifest-path", "applications/Cargo.toml", "--bin
 regexs = ["^(replay\t50)\t([0-9.]+)", "^(replay\t95)\t([0-9.]+)"]
 lower_better = true
 
+[query_generator]
+command = "cargo"
+args = ["run", "--release", "--bin", "query_generator", "--", "benchmark", "param,joins", "-o", "json", "--rows-per-table", "50"]
+format = "json"
+benchmark_name_key = "query"
+
+    [query_generator.metrics]
+    cold_materialization_size = { lower_better = true }
+    cold_write_time_ns = { key = "cold_write_time", lower_better = true }
+    upquery_forward_time_ns = { key = "upquery_forward_time", lower_better = true }
+    cold_read_time_ns = { key = "cold_read_time", lower_better = true }
+    warm_write_time_ns = { key = "warm_write_time", lower_better = true }
+    warm_read_time_ns = { key = "warm_read_time", lower_better = true }
+    warm_materialization_size = { lower_better = true }
+
+
 #[staged]
 #command = "cargo"
 #args = ["run", "--release", "--manifest-path", "benchmarks/Cargo.toml", "--bin", "vote", "--", "--avg", "--articles=100000", "--stage", "--runtime=30"]
