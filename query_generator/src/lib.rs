@@ -647,9 +647,10 @@ impl QueryOperation {
                     right,
                 });
 
-                query
-                    .fields
-                    .push(FieldDefinitionExpression::Col(col.into()));
+                query.fields.push(FieldDefinitionExpression::Col(Column {
+                    table: Some(tbl.name.clone().into()),
+                    ..col.into()
+                }));
 
                 extend_where(query, filter.extend_where_with, cond);
             }
