@@ -21,7 +21,14 @@ lower_better = true
 
 [query_generator]
 command = "cargo"
-args = ["run", "--release", "--bin", "query_generator", "--", "benchmark", "param,joins", "-o", "json", "--rows-per-table", "50"]
+args = [
+    "run", "--release", "--bin", "query_generator", "--", "benchmark", "-o", "json", "--rows-per-table", "50",
+    "param,aggregates",
+    "filters,param",
+    "distinct,param",
+    "joins,param,project_literal",
+    "filters,multiple_parameters,joins"
+]
 format = "json"
 benchmark_name_key = "query"
 
