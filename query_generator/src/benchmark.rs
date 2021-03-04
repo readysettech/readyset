@@ -10,6 +10,7 @@ use serde_with::{serde_as, DurationNanoSeconds};
 use size_format::SizeFormatterSI;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
+use std::mem;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
@@ -159,7 +160,7 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
 pub struct Benchmark {
     /// Comma-separated list of query operations to benchmark. Required if --max-depth is not
     /// specified
-    operations: Option<Operations>,
+    operations: Vec<Operations>,
 
     /// Maximum number of query operations to generate in a single query. Required if operations are
     /// not specified
@@ -192,14 +193,13 @@ impl Benchmark {
             NoriaMetricsRecorder::install(1024)?;
         }
 
-        let ops = if let Some(Operations(ops)) = self.operations.take() {
-            eprintln!("Running benchmark of {} queries", ops.len());
-            Either::Left(ops.into_iter())
+        let ops = if !self.operations.is_empty() {
+            Either::Left(
+                mem::take(&mut self.operations)
+                    .into_iter()
+                    .flat_map(|Operations(ops)| ops),
+            )
         } else if let Some(max_depth) = self.max_depth {
-            eprintln!(
-                "Running benchmark of all permutations of operations up to length {}",
-                max_depth
-            );
             Either::Right(
                 QueryOperation::permute(max_depth)
                     .map(|ops| ops.into_iter().cloned().collect::<Vec<_>>()),
