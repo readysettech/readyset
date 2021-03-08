@@ -21,6 +21,7 @@ fn main() {
                 .long("deployment")
                 .required(true)
                 .takes_value(true)
+                .env("NORIA_DEPLOYMENT")
                 .help("Noria deployment ID."),
         )
         .arg(
@@ -57,6 +58,7 @@ fn main() {
                 .long("zookeeper")
                 .takes_value(true)
                 .default_value("127.0.0.1:2181")
+                .env("ZOOKEEPER_URL")
                 .help("Zookeeper connection info."),
         )
         .arg(
@@ -65,6 +67,7 @@ fn main() {
                 .long("memory")
                 .takes_value(true)
                 .default_value("0")
+                .env("NORIA_MEMORY_BYTES")
                 .help("Memory, in bytes, available for partially materialized state [0 = unlimited]."),
         )
         .arg(
@@ -91,6 +94,7 @@ fn main() {
                 .long("quorum")
                 .takes_value(true)
                 .default_value("1")
+                .env("NORIA_QUORUM")
                 .help("Number of workers to wait for before starting (including this one)."),
         )
         .arg(
@@ -98,6 +102,7 @@ fn main() {
                 .long("shards")
                 .takes_value(true)
                 .default_value("0")
+                .env("NORIA_SHARDS")
                 .help("Shard the graph this many ways (0 = disable sharding)."),
         )
         .arg(
