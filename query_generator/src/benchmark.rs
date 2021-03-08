@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail};
 use clap::Clap;
+
 use humantime::format_duration;
-use indicatif::ProgressIterator;
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
 use itertools::Either;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -25,7 +27,7 @@ use query_generator::{ColumnName, GeneratorState, Operations, QueryOperation, Ta
 
 /// Metrics collected during the run of an individual query
 #[serde_as]
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct QueryMetrics {
     /// Memory (in bytes) used by materialized nodes prior to doing any reads
     cold_materialization_size: usize,
@@ -59,7 +61,7 @@ pub struct QueryMetrics {
 }
 
 /// All information about benchmarks run for an individual query
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct QueryBenchmarkResult {
     query: String,
 
@@ -182,6 +184,10 @@ pub struct Benchmark {
     #[clap(long, default_value = "1000")]
     rows_per_table: usize,
 
+    /// Number of samples to take for each query
+    #[clap(long, default_value = "10")]
+    samples: usize,
+
     /// Dump the graphviz representation of the query graph before benchmarking each query
     #[clap(long)]
     dump_graph: bool,
@@ -230,19 +236,72 @@ impl Benchmark {
             )
         } else {
             bail!("Must specify either --max-depth or a list of operations to benchmark");
-        };
+        }
+        .collect::<Vec<_>>();
 
-        let mut results = Vec::new();
-        for ops in ops.progress() {
-            match self.benchmark_operations(ops.as_slice()).await {
+        eprintln!("Running benchmark of {} queries", ops.len());
+        let mut results = Vec::with_capacity(ops.len());
+        let pb = ProgressBar::new(ops.len() as _);
+        pb.set_style(ProgressStyle::default_bar().template("{bar:50} {pos}/{len} {wide_msg}"));
+        for ops in ops.iter() {
+            pb.set_message(&format!("{:?}", ops));
+            match self
+                .repeatedly_benchmark_operations(ops, self.samples)
+                .await
+            {
                 Ok(result) => results.push(result),
                 Err(e) => eprintln!("{}", e),
             }
+            pb.inc(1);
         }
+        pb.finish_and_clear();
 
         write_results(&results, self.output_format)?;
 
         Ok(())
+    }
+
+    async fn repeatedly_benchmark_operations(
+        &self,
+        ops: &[QueryOperation],
+        n_samples: usize,
+    ) -> Result<QueryBenchmarkResult, QueryBenchmarkError> {
+        let mut ret = Vec::with_capacity(n_samples);
+        let mut qbr = None;
+        let pb = ProgressBar::new(n_samples as _);
+        pb.set_style(
+            ProgressStyle::default_bar().template("{bar:50.cyan/blue} {pos}/{len} {wide_msg}"),
+        );
+        pb.set_message("sampling");
+        for _ in (0..n_samples).into_iter() {
+            pb.inc(1);
+            let this_qbr = self.benchmark_operations(ops).await?;
+            if qbr.is_none() {
+                qbr = Some(this_qbr.clone());
+            }
+            ret.push(this_qbr.metrics);
+        }
+        pb.set_message("averaging");
+        macro_rules! medians_by_key {
+            ($samples:ident, $n_samples:ident, $out:ident, $($field:ident),*) => {
+            $(
+                $samples.sort_by_key(|m| m.$field);
+                let $field = $samples[$n_samples / 2].$field;
+            )*
+                let $out = QueryMetrics {
+                $($field),*
+                };
+            };
+        }
+        medians_by_key! {
+            ret, n_samples, median_metrics,
+            cold_materialization_size, cold_read_time, cold_write_time, upquery_time, forward_time,
+            warm_materialization_size, warm_read_time, warm_write_time
+        }
+        let mut qbr = qbr.expect("no samples taken");
+        qbr.metrics = median_metrics;
+        pb.finish_and_clear();
+        Ok(qbr)
     }
 
     async fn benchmark_operations(
