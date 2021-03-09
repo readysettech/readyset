@@ -320,7 +320,6 @@ impl Benchmark {
             .cloned()
             .map(ColumnName::from)
             .collect::<Vec<_>>();
-        table.i_promise_dst_is_same_process();
         table
             .insert_many(data.into_iter().map(|mut row| {
                 columns
