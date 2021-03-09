@@ -120,7 +120,6 @@ fn main() {
                 .long("password")
                 .short("p")
                 .takes_value(true)
-                .required(true)
                 .empty_values(false)
                 .help("Password to authenticate database connections with. Ignored if --no-require-authentication is passed")
         )
@@ -147,9 +146,13 @@ fn main() {
     let mysql_url = matches.value_of("mysql-url").map(|s| s.to_owned());
     let require_authentication = !matches.is_present("no-require-authentication");
 
-    let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
-        matches.value_of("username").unwrap().to_owned() =>
-            matches.value_of("password").unwrap().to_owned()
+    let users: &'static HashMap<String, String> = Box::leak(Box::new(if require_authentication {
+        hashmap! {
+            matches.value_of("username").unwrap().to_owned() =>
+                matches.value_of("password").unwrap().to_owned()
+        }
+    } else {
+        HashMap::new()
     }));
 
     use tracing_subscriber::Layer;
