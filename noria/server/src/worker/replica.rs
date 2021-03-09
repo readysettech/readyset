@@ -28,6 +28,7 @@ use pin_project::pin_project;
 use slog;
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
 use std::{
@@ -108,6 +109,7 @@ impl Replica {
         valve: &Valve,
         mut domain: Domain,
         on: tokio::net::TcpListener,
+        external_addr: IpAddr,
         locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
         ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
         log: slog::Logger,
@@ -115,7 +117,9 @@ impl Replica {
     ) -> Self {
         let id = domain.id();
         let id = format!("{}.{}", id.0.index(), id.1);
-        domain.booted(on.local_addr().unwrap());
+        let mut domain_addr = on.local_addr().unwrap();
+        domain_addr.set_ip(external_addr);
+        domain.booted(domain_addr);
         Replica {
             coord: cc,
             domain,

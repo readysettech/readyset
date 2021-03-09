@@ -15,6 +15,7 @@ pub struct Builder {
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
+    external_addr: IpAddr,
     log: slog::Logger,
 }
 impl Default for Builder {
@@ -22,6 +23,7 @@ impl Default for Builder {
         Self {
             config: Config::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
+            external_addr: "127.0.0.1".parse().unwrap(),
             log: slog::Logger::root(slog::Discard, o!()),
             memory_limit: None,
             memory_check_frequency: None,
@@ -83,6 +85,11 @@ impl Builder {
         self.listen_addr = listen_addr;
     }
 
+    /// Set the external IP address that the worker should advertise to other noria instances
+    pub fn set_external_addr(&mut self, external_addr: IpAddr) {
+        self.external_addr = external_addr;
+    }
+
     /// Set the logger that the derived worker should use. By default, it uses `slog::Discard`.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
@@ -118,6 +125,7 @@ impl Builder {
     {
         let Builder {
             listen_addr,
+            external_addr,
             ref config,
             memory_limit,
             memory_check_frequency,
@@ -130,6 +138,7 @@ impl Builder {
         crate::startup::start_instance(
             authority,
             listen_addr,
+            external_addr,
             config,
             memory_limit,
             memory_check_frequency,

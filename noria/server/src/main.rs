@@ -1,8 +1,23 @@
 use clap::value_t_or_exit;
+use futures_util::future::{self, Either};
 use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::process;
 use std::sync::Arc;
 use std::time::Duration;
+
+const PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
+
+/// Obtain the private ipv4 address of the AWS instance that the current program is running on using
+/// the AWS metadata service
+pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
+    Ok(reqwest::get(PRIVATE_IP_ENDPOINT)
+        .await?
+        .text()
+        .await?
+        .parse()?)
+}
 
 fn main() {
     use clap::{App, Arg};
@@ -16,6 +31,18 @@ fn main() {
                 .default_value("127.0.0.1")
                 .help("IP address to listen on"),
         )
+        .arg(
+            Arg::with_name("external_address")
+                .long("external-address")
+                .takes_value(true)
+                .help("IP address to advertise to other Noria instances running in the same deployment.
+If not specified, defaults to the value of `address`")
+        )
+        .arg(
+            Arg::with_name("use_aws_external_address")
+                .long("use-aws-external-address")
+        .help("Use the AWS EC2 metadata service to determine the external address of this noria instance.
+If specified, overrides the value of --external-address"))
         .arg(
             Arg::with_name("deployment")
                 .long("deployment")
@@ -124,7 +151,16 @@ fn main() {
     let log = noria_server::logger_pls();
 
     let durability = matches.value_of("durability").unwrap();
-    let listen_addr = matches.value_of("address").unwrap().parse().unwrap();
+    let listen_addr: IpAddr = matches.value_of("address").unwrap().parse().unwrap();
+    let external_addr = if matches.is_present("use_aws_external_address") {
+        Either::Left(get_aws_private_ip())
+    } else {
+        Either::Right(future::ok(
+            matches
+                .value_of("external_address")
+                .map_or(listen_addr.clone(), |addr| addr.parse().unwrap()),
+        ))
+    };
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let memory = value_t_or_exit!(matches, "memory", usize);
     let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
@@ -189,7 +225,16 @@ fn main() {
         rt.core_threads(threads);
     }
     let mut rt = rt.build().unwrap();
-    let (_server, done) = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+    let (_server, done) = rt
+        .block_on(async move {
+            let external_addr = external_addr.await.unwrap_or_else(|err| {
+                eprintln!("Error obtaining external IP address: {}", err);
+                process::exit(1)
+            });
+            builder.set_external_addr(external_addr);
+            builder.start(Arc::new(authority)).await
+        })
+        .unwrap();
     rt.block_on(done);
     drop(rt);
 }
