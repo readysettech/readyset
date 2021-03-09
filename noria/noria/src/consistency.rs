@@ -1,7 +1,8 @@
 //! Primitives and structs related to maintaining different consistency
 //! models within the Noria dataflow graph.
-use crate::map::Map;
+use crate::LocalNodeIndex;
 use proptest::arbitrary::Arbitrary;
+use std::collections::HashMap;
 
 /// The timestamp maps a each base table to a monotonically increasing
 /// identifier, the transaction id of the last transaction executed on the
@@ -10,14 +11,28 @@ use proptest::arbitrary::Arbitrary;
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Timestamp {
     /// A map from  a base table's LocalNodeIndex to timestamp.
-    pub map: Map<u64>,
+    pub map: HashMap<LocalNodeIndex, u64>,
 }
+
 impl Arbitrary for Timestamp {
     type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Timestamp>;
+
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
-        any::<Map<u64>>().prop_map(|map| Self { map }).boxed()
+
+        any::<Vec<u32>>()
+            .prop_map(|ts| {
+                let mut timestamp = Timestamp::default();
+                // Keep local node indices contiguous.
+                for (i, t) in ts.into_iter().enumerate() {
+                    timestamp
+                        .map
+                        .insert(unsafe { LocalNodeIndex::make(i as u32) }, t as u64);
+                }
+                timestamp
+            })
+            .boxed()
     }
 }
 
@@ -38,7 +53,7 @@ impl Timestamp {
                         *current_value = *value;
                     }
                 } else {
-                    ret.map.insert(table, *value);
+                    ret.map.insert(*table, *value);
                 }
             }
         }
@@ -54,7 +69,7 @@ impl Timestamp {
         // value of t1[key], t2[key]. This iterates over both t1 and t2's keys.
         let mut ret = Timestamp::default();
         for key in t1.map.keys().chain(t2.map.keys()) {
-            ret.map.entry(key).or_insert_with(|| {
+            ret.map.entry(*key).or_insert_with(|| {
                 let v1 = t1.map.get(key);
                 let v2 = t2.map.get(key);
                 match v1 {
