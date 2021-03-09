@@ -56,6 +56,7 @@ fn main() {
                 .long("deployment")
                 .takes_value(true)
                 .required(true)
+                .env("NORIA_DEPLOYMENT")
                 .help("Noria deployment ID to attach to."),
         )
         .arg(
@@ -63,6 +64,7 @@ fn main() {
                 .long("zookeeper-address")
                 .short("z")
                 .default_value("127.0.0.1:2181")
+                .env("ZOOKEEPER_URL")
                 .help("IP:PORT for Zookeeper."),
         )
         .arg(
