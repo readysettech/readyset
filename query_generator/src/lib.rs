@@ -116,6 +116,51 @@ fn value_of_type(typ: &SqlType) -> DataType {
     }
 }
 
+/// Generate a unique value with the given [`SqlType`] from a monotonically increasing counter,
+/// `idx`.
+///
+/// This is an injective function (from `(idx, typ)` to the resultant [`DataType`]).
+///
+/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+///
+/// - [`SqlType::Date`]
+/// - [`SqlType::Enum`]
+/// - [`SqlType::Bool`]
+fn unique_value_of_type(typ: &SqlType, idx: u8) -> DataType {
+    match typ {
+        SqlType::Char(_)
+        | SqlType::Varchar(_)
+        | SqlType::Blob
+        | SqlType::Longblob
+        | SqlType::Mediumblob
+        | SqlType::Tinyblob
+        | SqlType::Tinytext
+        | SqlType::Mediumtext
+        | SqlType::Longtext
+        | SqlType::Text
+        | SqlType::Binary(_)
+        | SqlType::Varbinary(_) => format!("{}", idx).into(),
+        SqlType::Int(_) => (2i32 + idx as i32).into(),
+        SqlType::Bigint(_) => (2i64 + idx as i64).into(),
+        SqlType::UnsignedInt(_) => (2u32 + idx as u32).into(),
+        SqlType::UnsignedBigint(_) => (2u64 + idx as u64).into(),
+        SqlType::Tinyint(_) => (2i8 + idx as i8).into(),
+        SqlType::UnsignedTinyint(_) => (2u8 + idx).into(),
+        SqlType::Smallint(_) => (2i16 + idx as i16).into(),
+        SqlType::UnsignedSmallint(_) => (1u16 + idx as u16).into(),
+        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
+            (1.5 + idx as f64).into()
+        }
+        SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
+            .and_hms(12, idx as _, 30)
+            .into(),
+        SqlType::Date => unimplemented!(),
+        SqlType::Enum(_) => unimplemented!(),
+        SqlType::Bool => unimplemented!(),
+        SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
 pub struct TableName(String);
@@ -362,7 +407,9 @@ pub struct QueryState<'a> {
     gen: &'a mut GeneratorState,
     tables: HashSet<TableName>,
     parameters: Vec<(TableName, ColumnName)>,
+    unique_parameters: HashMap<TableName, Vec<(ColumnName, DataType)>>,
     alias_counter: u32,
+    datatype_counter: u8,
 }
 
 impl<'a> QueryState<'a> {
@@ -370,8 +417,10 @@ impl<'a> QueryState<'a> {
         Self {
             gen,
             tables: HashSet::new(),
+            unique_parameters: HashMap::new(),
             parameters: Vec::new(),
             alias_counter: 0,
+            datatype_counter: 0,
         }
     }
 
@@ -397,15 +446,28 @@ impl<'a> QueryState<'a> {
     }
 
     /// Generate `rows_per_table` rows of data for all the tables referenced in the query for this
-    /// QueryState
+    /// QueryState.
+    ///
+    /// If `make_unique` is true and `make_unique_key` was previously called, the returned rows
+    /// are modified to match the key returned by `make_unique_key`.
     pub fn generate_data(
         &self,
         rows_per_table: usize,
+        make_unique: bool,
     ) -> HashMap<&TableName, Vec<HashMap<&ColumnName, DataType>>> {
         self.tables
             .iter()
             .map(|table_name| {
-                let rows = self.gen.generate_data_for_table(table_name, rows_per_table);
+                let mut rows = self.gen.generate_data_for_table(table_name, rows_per_table);
+                if make_unique {
+                    if let Some(column_data) = self.unique_parameters.get(table_name) {
+                        for row in &mut rows {
+                            for (column, data) in column_data {
+                                row.insert(&column, data.clone());
+                            }
+                        }
+                    }
+                }
                 (table_name, rows)
             })
             .collect()
@@ -415,6 +477,26 @@ impl<'a> QueryState<'a> {
     /// given table
     pub fn add_parameter(&mut self, table_name: TableName, column_name: ColumnName) {
         self.parameters.push((table_name, column_name))
+    }
+
+    /// Make a new, unique key for all the parameters in the query.
+    ///
+    /// To get data that matches this key, call `generate_data()` after calling this function.
+    pub fn make_unique_key(&mut self) -> Vec<DataType> {
+        let mut ret = Vec::with_capacity(self.parameters.len());
+        for (table_name, column_name) in self.parameters.iter() {
+            let val = unique_value_of_type(
+                &self.gen.tables[table_name].columns[column_name],
+                self.datatype_counter,
+            );
+            self.unique_parameters
+                .entry(table_name.clone())
+                .or_insert_with(|| vec![])
+                .push((column_name.clone(), val.clone()));
+            self.datatype_counter += 1;
+            ret.push(val);
+        }
+        ret
     }
 
     /// Returns a lookup key for the parameters in the query that will return results
