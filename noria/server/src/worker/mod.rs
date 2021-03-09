@@ -47,6 +47,7 @@ pub(super) async fn main(
     alive: tokio::sync::mpsc::Sender<()>,
     mut worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,
+    external_addr: IpAddr,
     waddr: SocketAddr,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
@@ -143,6 +144,7 @@ pub(super) async fn main(
                     waddr,
                     coord.clone(),
                     listen_addr,
+                    external_addr,
                     rep_rx,
                 )
                 .await;
@@ -182,6 +184,7 @@ async fn listen_df<'a>(
     waddr: SocketAddr,
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
+    external_addr: IpAddr,
     mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
 ) -> Result<(), anyhow::Error> {
     // first, try to connect to controller
@@ -208,8 +211,9 @@ async fn listen_df<'a>(
     // reader setup
     let readers = Arc::new(Mutex::new(HashMap::new()));
     let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-    let raddr = rport.local_addr()?;
+    let mut raddr = rport.local_addr()?;
     info!(log, "listening for reads"; "on" => ?raddr);
+    raddr.set_ip(external_addr);
 
     // start controller message handler
     let mut ctrl = AsyncBincodeWriter::from(ctrl).for_async();
@@ -300,7 +304,9 @@ async fn listen_df<'a>(
                 let shard = d.shard.unwrap_or(0);
 
                 let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-                let addr = on.local_addr()?;
+                let mut addr = on.local_addr()?;
+                info!(log, "listening for domains"; "on" => ?addr);
+                addr.set_ip(external_addr);
 
                 let state_size = Arc::new(AtomicUsize::new(0));
                 let d = tokio::task::block_in_place(|| {
@@ -330,6 +336,7 @@ async fn listen_df<'a>(
                     &valve,
                     d,
                     on,
+                    external_addr,
                     rx,
                     ctrl_tx.clone(),
                     log.clone(),

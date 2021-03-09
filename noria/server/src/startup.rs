@@ -67,6 +67,7 @@ impl fmt::Debug for Event {
 pub(super) async fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
+    external_addr: IpAddr,
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
@@ -80,17 +81,17 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     // we'll be listening for a couple of different types of events:
     // first, events from workers
     let wport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
-    let waddr = wport.local_addr()?;
+    let mut waddr = wport.local_addr()?;
     // second, messages from the "real world"
     let xport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 6033))
         .or_else(|_| tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)))
         .await?;
-    let xaddr = xport.local_addr()?;
+    let mut xaddr = xport.local_addr()?;
     // and third, domain control traffic. this traffic is a little special, since we may need to
     // receive from it while handling control messages (e.g., for replay acks). because of this, we
     // give it its own channel.
     let cport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
-    let caddr = cport.local_addr()?;
+    let mut caddr = cport.local_addr()?;
 
     // set up different loops for the controller "part" and the worker "part" of us. this is
     // necessary because sometimes the two need to communicate (e.g., for migrations), and if they
@@ -151,6 +152,10 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         }
     });
 
+    xaddr.set_ip(external_addr);
+    waddr.set_ip(external_addr);
+    caddr.set_ip(external_addr);
+
     let descriptor = ControllerDescriptor {
         external_addr: xaddr,
         worker_addr: waddr,
@@ -172,6 +177,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         alive.clone(),
         worker_rx,
         listen_addr,
+        external_addr,
         waddr,
         memory_limit,
         memory_check_frequency,
