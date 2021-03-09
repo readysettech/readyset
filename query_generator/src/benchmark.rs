@@ -17,6 +17,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use noria::consensus::LocalAuthority;
+use noria::metrics::MetricsDump;
 use noria::DataType;
 use noria_server::metrics::NoriaMetricsRecorder;
 use noria_server::{DurabilityMode, PersistenceParameters};
@@ -35,7 +36,11 @@ pub struct QueryMetrics {
 
     /// Time spent forwarding dataflow during upqueries
     #[serde_as(as = "DurationNanoSeconds")]
-    upquery_forward_time: Duration,
+    upquery_time: Duration,
+
+    /// Time spent forwarding dataflow outside of upqueries (i.e. during normal writes)
+    #[serde_as(as = "DurationNanoSeconds")]
+    forward_time: Duration,
 
     /// Total time to read when we hit a hole
     #[serde_as(as = "DurationNanoSeconds")]
@@ -123,13 +128,14 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
             table.set_format(*prettytable::format::consts::FORMAT_BOX_CHARS);
             table.set_titles(row![
                 bFb => "Query",
-                "cold_materialization_size",
-                "cold_write_time",
-                "upquery_forward_time",
-                "cold_read_time",
-                "warm_write_time",
-                "warm_read_time",
-                "warm_materialization_size",
+                "mat 🧊",
+                "mat 🔥",
+                "write 🧊",
+                "write 🔥",
+                "read 🧊",
+                "read 🔥",
+                "upquery 🤔",
+                "forward 🤔",
             ]);
             for result in results {
                 table.add_row(row![
@@ -137,14 +143,15 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
                     format!("{:.2}B", SizeFormatterSI::new(
                         result.metrics.cold_materialization_size as u64
                     )),
-                    format_duration(result.metrics.cold_write_time),
-                    format_duration(result.metrics.upquery_forward_time),
-                    format_duration(result.metrics.cold_read_time),
-                    "TODO", // format_duration(result.metrics.warm_write_time),
-                    format_duration(result.metrics.warm_read_time),
                     format!("{:.2}B", SizeFormatterSI::new(
                         result.metrics.warm_materialization_size as u64
                     )),
+                    format_duration(result.metrics.cold_write_time),
+                    format_duration(result.metrics.warm_write_time),
+                    format_duration(result.metrics.cold_read_time),
+                    format_duration(result.metrics.warm_read_time),
+                    format_duration(result.metrics.upquery_time),
+                    format_duration(result.metrics.forward_time),
                 ]);
             }
             table.printstd();
@@ -189,6 +196,19 @@ pub struct Benchmark {
     verbose: bool,
 }
 
+fn total_upquery_time_us(m: &MetricsDump) -> usize {
+    [
+        "domain.handle_replay_time_us",
+        "domain.reader_replay_request_time_us",
+        "domain.seed_replay_time_us",
+        "domain.finish_replay_time_us",
+        "domain.seed_all_time_us",
+    ]
+    .iter()
+    .map(|metric| m.total(*metric).unwrap_or(0f64).floor() as usize)
+    .sum()
+}
+
 impl Benchmark {
     #[tokio::main]
     pub async fn run(mut self) -> anyhow::Result<()> {
@@ -230,7 +250,7 @@ impl Benchmark {
         ops: &[QueryOperation],
     ) -> Result<QueryBenchmarkResult, QueryBenchmarkError> {
         let mut gen = GeneratorState::default();
-        let query = gen.generate_query(ops);
+        let mut query = gen.generate_query(ops);
         let query_str = format!("{}", query.statement);
         let res: anyhow::Result<_> = async {
             if self.verbose {
@@ -245,8 +265,9 @@ impl Benchmark {
                 println!("{}", noria.graphviz().await?);
             }
 
+            let data = query.state.generate_data(self.rows_per_table, false);
             let start = Instant::now();
-            for (table_name, rows) in query.state.generate_data(self.rows_per_table) {
+            for (table_name, rows) in data {
                 self.seed_data(&mut noria, table_name, rows).await?;
             }
             let cold_write_time = start.elapsed();
@@ -258,7 +279,11 @@ impl Benchmark {
                 .unwrap_or(0f64)
                 .floor() as usize;
 
-            let baseline_forward_time = metrics.total("domain.forward_time_us").unwrap_or(0f64);
+            assert_eq!(
+                total_upquery_time_us(&metrics),
+                0,
+                "upqueries have somehow happened while cold"
+            );
 
             let mut view = noria.view(query_name).await?;
             let lookup_key = query.state.key();
@@ -273,14 +298,31 @@ impl Benchmark {
                 .unwrap_or(0f64)
                 .floor() as usize;
 
-            let post_upquery_forward_time = metrics.total("domain.forward_time_us").unwrap_or(0f64);
-            let upquery_forward_time = Duration::from_micros(
-                (post_upquery_forward_time - baseline_forward_time).round() as u64,
-            );
+            let upquery_time = Duration::from_micros(total_upquery_time_us(&metrics) as _);
 
             let start = Instant::now();
             view.lookup(&lookup_key, true).await?;
             let warm_read_time = start.elapsed();
+            let unique_key = query.state.make_unique_key();
+            let unique_data = query.state.generate_data(self.rows_per_table, true);
+            // trigger an upquery for the unique key, to make sure that key is materialized
+            // as empty
+            // (we're just testing how long it takes for this set of data to propagate through
+            // the graph here)
+            assert!(view
+                .lookup(&unique_key, true)
+                .await?
+                .iter()
+                .next()
+                .is_none());
+            let start = Instant::now();
+            for (table_name, rows) in unique_data {
+                self.seed_data(&mut noria, table_name, rows).await?;
+            }
+            view.lookup(&unique_key, true).await?;
+            let warm_write_time = start.elapsed();
+            let forward_time = metrics.total("domain.forward_time_us").unwrap_or(0f64);
+            let forward_time = Duration::from_micros(forward_time.round() as u64);
 
             NoriaMetricsRecorder::get().clear();
             Ok(QueryBenchmarkResult {
@@ -289,13 +331,12 @@ impl Benchmark {
                 metrics: QueryMetrics {
                     cold_materialization_size,
                     cold_write_time,
-                    upquery_forward_time, // TODO
+                    upquery_time,
                     cold_read_time,
-                    // TODO(grfn): To collect this, we need to write a unique row then time how long
-                    // it takes to do a blocking read of that row
-                    warm_write_time: Duration::ZERO,
+                    warm_write_time,
                     warm_read_time,
                     warm_materialization_size,
+                    forward_time,
                 },
             })
         }
