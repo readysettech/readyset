@@ -51,6 +51,15 @@ steps:
       - ecr#v2.2.0:
           login: true
 
+  - label: ':terraform: Check terraform formatting'
+    commands:
+    - cd ops
+    - terraform fmt -check
+    plugins:
+    - docker#v3.7.0:
+        image: hashicorp/terraform:0.14.7
+        entrypoint: ""
+        shell: ["/bin/sh", "-c"]
 
   - label: ':rust: Build noria-logictest'
     key: build-noria-logictest
