@@ -1,0 +1,19 @@
+[package]
+name = "noria-tools"
+version = "0.1.0"
+authors = ["Readyset Technology, Inc."]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.38"
+clap = "2.33.3"
+noria = { path = "../noria" }
+tokio = { version = "0.2", features = ["macros"] }
+
+[[bin]]
+name = "view_checker"
+path = "src/view_checker.rs"
+
+[[bin]]
+name = "query_installer"
+path = "src/query_installer.rs"

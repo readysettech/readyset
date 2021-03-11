@@ -1148,7 +1148,7 @@ dependencies = [
  "clap 2.33.3",
  "derive_more",
  "futures 0.3.12",
- "noria-server",
+ "noria",
  "rdkafka",
  "serde",
  "serde_json",
@@ -2594,16 +2594,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lz4-sys"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dca79aa95d8b3226213ad454d328369853be3a1382d89532a854f4d69640acae"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3524,6 +3514,16 @@ dependencies = [
  "vec1",
  "vec_map",
  "zookeeper",
+]
+
+[[package]]
+name = "noria-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 2.33.3",
+ "noria",
+ "tokio 0.2.24",
 ]
 
 [[package]]
@@ -4624,7 +4624,6 @@ dependencies = [
  "cmake",
  "libc",
  "libz-sys",
- "lz4-sys",
  "num_enum",
  "pkg-config",
 ]

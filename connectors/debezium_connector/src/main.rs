@@ -3,8 +3,6 @@ extern crate serde_json;
 extern crate derive_more;
 
 use clap::{App, Arg};
-use std::net::IpAddr;
-use std::str::FromStr;
 
 mod debezium_connector_application;
 
@@ -37,15 +35,6 @@ async fn main() {
                     .takes_value(true)
                     .required(true)
                     .help("The db name."),
-            )
-            .arg(
-                Arg::with_name("noria-connection")
-                    .short("n")
-                    .long("noria-connection")
-                    .takes_value(true)
-                    .required(true)
-                    .default_value("127.0.0.1")
-                    .help("Noria connection IP."),
             )
             .arg(
                 Arg::with_name("zookeeper-connection")
@@ -90,9 +79,6 @@ async fn main() {
         .unwrap()
         .map(|s| s.to_string())
         .collect();
-    let addr: Option<IpAddr> = matches
-        .value_of("noria-connection")
-        .map(|ip| IpAddr::from_str(ip).unwrap());
     let zookeeper_conn = matches.value_of("zookeeper-connection").unwrap();
     let timeout = matches.value_of("kafka-timeout").unwrap();
     let eof = matches.is_present("kafka-partition-eof");
@@ -104,7 +90,6 @@ async fn main() {
         db_name.to_string(),
         tables,
         format!("{}.{}", server_name, db_name),
-        addr,
         zookeeper_conn.to_string(),
         timeout.to_string(),
         eof,
