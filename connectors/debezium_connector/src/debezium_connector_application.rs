@@ -3,14 +3,11 @@ extern crate serde_json;
 use anyhow::{Error, Result};
 use noria::consensus::ZookeeperAuthority;
 use noria::consistency::Timestamp;
-use noria::Builder;
-use noria::Handle;
+use noria::ControllerHandle;
 use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::Message;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::net::IpAddr;
-use std::sync::Arc;
 use tokio::stream::StreamExt;
 
 mod debezium_message_parser;
@@ -31,7 +28,6 @@ enum Topic {
 
 pub struct DebeziumConnector {
     kafka_consumer: kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper,
-    noria_ip: Option<IpAddr>,
     zookeeper_conn: String,
     topics: HashMap<String, Topic>,
 }
@@ -43,7 +39,6 @@ impl DebeziumConnector {
         db_name: String,
         tables: Vec<String>,
         group_id: String,
-        noria_ip: Option<IpAddr>,
         zookeeper_conn: String,
         timeout: String,
         eof: bool,
@@ -79,14 +74,13 @@ impl DebeziumConnector {
 
         DebeziumConnector {
             kafka_consumer: consumer,
-            noria_ip,
             zookeeper_conn,
             topics,
         }
     }
 
     async fn handle_schema_message(
-        noria_authority: &mut Handle<ZookeeperAuthority>,
+        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
         message: SchemaChange,
     ) -> Result<()> {
         noria_authority.extend_recipe(&message.payload.ddl).await?;
@@ -94,7 +88,7 @@ impl DebeziumConnector {
     }
 
     async fn handle_change_message(
-        noria_authority: &mut Handle<ZookeeperAuthority>,
+        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
         key_message: EventKey,
         message: DataChange,
     ) -> Result<()> {
@@ -138,7 +132,7 @@ impl DebeziumConnector {
     /// timestamps associated with each changed base table. This new timestamp
     /// will be propagated on the data flow graph.
     async fn handle_transaction_message(
-        noria_authority: &mut Handle<ZookeeperAuthority>,
+        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
         message: Transaction,
     ) -> Result<()> {
         let payload = &message.payload;
@@ -185,10 +179,7 @@ impl DebeziumConnector {
         let mut message_stream = self.kafka_consumer.kafka_consumer.start();
 
         let authority = ZookeeperAuthority::new(&self.zookeeper_conn)?;
-        let mut builder = Builder::default();
-        builder.set_listen_addr(self.noria_ip.unwrap());
-        let (mut noria_authority, _) = builder.start(Arc::new(authority)).await?;
-
+        let mut ch = ControllerHandle::new(authority).await?;
         while let Some(message) = message_stream.next().await {
             if let Ok(m) = message {
                 let owned_message = m.detach();
@@ -207,7 +198,7 @@ impl DebeziumConnector {
                 match topic {
                     Topic::SchemaChange => {
                         DebeziumConnector::handle_schema_message(
-                            &mut noria_authority,
+                            &mut ch,
                             value_message.try_into().unwrap(),
                         )
                         .await?;
@@ -218,7 +209,7 @@ impl DebeziumConnector {
                         let key_string = std::str::from_utf8(owned_message.key().unwrap())?;
                         let key_message = serde_json::from_str(&key_string)?;
                         DebeziumConnector::handle_change_message(
-                            &mut noria_authority,
+                            &mut ch,
                             key_message,
                             value_message.try_into().unwrap(),
                         )
@@ -230,11 +221,8 @@ impl DebeziumConnector {
                                 std::str::from_utf8(owned_message.payload().unwrap())?;
                             let transaction: Transaction = serde_json::from_str(transaction)?;
 
-                            DebeziumConnector::handle_transaction_message(
-                                &mut noria_authority,
-                                transaction,
-                            )
-                            .await?;
+                            DebeziumConnector::handle_transaction_message(&mut ch, transaction)
+                                .await?;
                         }
                     }
                 }
