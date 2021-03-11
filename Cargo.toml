@@ -8,6 +8,7 @@ members = [
     "noria/server",
     "noria/applications",
     "noria/noria-logictest",
+    "noria/timestamp_service",
     "unbounded-interval-tree",
     "launchpad",
     "connectors/debezium_connector",
