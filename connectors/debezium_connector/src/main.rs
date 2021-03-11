@@ -4,7 +4,7 @@ extern crate derive_more;
 
 use clap::{App, Arg};
 
-mod debezium_connector_application;
+mod debezium_connector;
 
 #[tokio::main]
 async fn main() {
@@ -84,7 +84,7 @@ async fn main() {
     let eof = matches.is_present("kafka-partition-eof");
     let auto_commit = !matches.is_present("kafka-no-auto-commit");
 
-    let mut application = debezium_connector_application::DebeziumConnector::new(
+    let mut connector = debezium_connector::DebeziumConnector::new(
         bootstrap_servers.to_string(),
         server_name.to_string(),
         db_name.to_string(),
@@ -96,5 +96,5 @@ async fn main() {
         auto_commit,
     );
 
-    application.start().await.unwrap();
+    connector.start().await.unwrap();
 }
