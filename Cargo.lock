@@ -5547,6 +5547,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "timestamp_service"
+version = "0.7.0"
+dependencies = [
+ "noria",
+]
+
+[[package]]
 name = "tiny-keccak"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

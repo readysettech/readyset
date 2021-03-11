@@ -1,0 +1,9 @@
+[package]
+name = "timestamp_service"
+version = "0.7.0"
+edition = "2018"
+authors = ["ReadySet"]
+
+[dependencies]
+# local deps 
+noria = { version = "0.7.0", path = "../noria" }
