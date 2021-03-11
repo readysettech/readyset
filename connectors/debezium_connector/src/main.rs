@@ -6,8 +6,10 @@ use clap::{App, Arg};
 
 mod debezium_connector;
 
+pub use debezium_connector::{Builder, DebeziumConnector};
+
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let matches =
         App::new("noria-debezium-connector")
             .version("0.0.1")
@@ -84,17 +86,16 @@ async fn main() {
     let eof = matches.is_present("kafka-partition-eof");
     let auto_commit = !matches.is_present("kafka-no-auto-commit");
 
-    let mut connector = debezium_connector::DebeziumConnector::new(
-        bootstrap_servers.to_string(),
-        server_name.to_string(),
-        db_name.to_string(),
-        tables,
-        format!("{}.{}", server_name, db_name),
-        zookeeper_conn.to_string(),
-        timeout.to_string(),
-        eof,
-        auto_commit,
-    );
-
-    connector.start().await.unwrap();
+    DebeziumConnector::builder()
+        .set_bootstrap_servers(bootstrap_servers)
+        .set_server_name(server_name)
+        .set_db_name(db_name)
+        .set_tables(tables)
+        .set_zookeeper_conn(zookeeper_conn)
+        .set_timeout(timeout)
+        .set_eof(eof)
+        .set_auto_commit(auto_commit)
+        .build()
+        .start()
+        .await
 }

@@ -32,51 +32,140 @@ pub struct DebeziumConnector {
     topics: HashMap<String, Topic>,
 }
 
-impl DebeziumConnector {
-    pub fn new(
-        bootstrap_servers: String,
-        server_name: String,
-        db_name: String,
-        tables: Vec<String>,
-        group_id: String,
-        zookeeper_conn: String,
-        timeout: String,
-        eof: bool,
-        auto_commit: bool,
-    ) -> DebeziumConnector {
+#[derive(Debug, Default)]
+pub struct Builder {
+    bootstrap_servers: Option<String>,
+    server_name: Option<String>,
+    db_name: Option<String>,
+    tables: Vec<String>,
+    group_id: Option<String>,
+    zookeeper_conn: Option<String>,
+    timeout: Option<String>,
+    eof: bool,
+    auto_commit: bool,
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_bootstrap_servers<S>(&mut self, bootstrap_servers: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.bootstrap_servers = Some(bootstrap_servers.to_owned());
+        self
+    }
+
+    pub fn set_server_name<S>(&mut self, server_name: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.server_name = Some(server_name.to_owned());
+        self
+    }
+
+    pub fn set_db_name<S>(&mut self, db_name: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.db_name = Some(db_name.to_owned());
+        self
+    }
+
+    pub fn set_tables(&mut self, tables: Vec<String>) -> &mut Self {
+        self.tables = tables;
+        self
+    }
+
+    pub fn set_group_id<S>(&mut self, group_id: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.group_id = Some(group_id.to_owned());
+        self
+    }
+
+    pub fn set_zookeeper_conn<S>(&mut self, zookeeper_conn: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.zookeeper_conn = Some(zookeeper_conn.to_owned());
+        self
+    }
+
+    pub fn set_timeout<S>(&mut self, timeout: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.timeout = Some(timeout.to_owned());
+        self
+    }
+
+    pub fn set_eof(&mut self, eof: bool) -> &mut Self {
+        self.eof = eof;
+        self
+    }
+
+    pub fn set_auto_commit(&mut self, auto_commit: bool) -> &mut Self {
+        self.auto_commit = auto_commit;
+        self
+    }
+
+    pub fn build(&self) -> DebeziumConnector {
         // for each table, we listen to the topic <dbserver>.<dbname>.<tablename>
         let mut topic_names: Vec<String> = Vec::new();
         let mut topics: HashMap<String, Topic> = HashMap::new();
-        tables
+        self.tables
             .iter()
-            .map(|table_name| format!("{}.{}.{}", server_name, db_name, table_name))
+            .map(|table_name| {
+                format!(
+                    "{}.{}.{}",
+                    self.server_name.as_ref().unwrap(),
+                    self.db_name.as_ref().unwrap(),
+                    table_name
+                )
+            })
             .for_each(|t| {
                 topic_names.push(t.clone());
                 topics.insert(t, Topic::DataChange);
             });
 
         // we also listen to the schema change topic, which is just named <dbserver>
-        topic_names.push(server_name.clone());
-        topics.insert(server_name.clone(), Topic::SchemaChange);
+        topic_names.push(self.server_name.clone().unwrap());
+        topics.insert(self.server_name.clone().unwrap(), Topic::SchemaChange);
 
-        let transaction_topic = server_name + ".transaction";
+        let transaction_topic = self.server_name.clone().unwrap() + ".transaction";
         topic_names.push(transaction_topic.clone());
         topics.insert(transaction_topic, Topic::Transaction);
 
         let consumer = kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper::new(
-            bootstrap_servers,
+            self.bootstrap_servers.clone().unwrap(),
             topic_names,
-            group_id,
-            timeout,
-            eof,
-            auto_commit,
+            self.group_id.clone().unwrap_or_else(|| {
+                format!(
+                    "{}.{}",
+                    self.server_name.as_ref().unwrap(),
+                    self.db_name.as_ref().unwrap()
+                )
+            }),
+            self.timeout.clone().unwrap(),
+            self.eof,
+            self.auto_commit,
         );
 
         DebeziumConnector {
             kafka_consumer: consumer,
-            zookeeper_conn,
+            zookeeper_conn: self.zookeeper_conn.clone().unwrap(),
             topics,
         }
+    }
+}
+
+impl DebeziumConnector {
+    pub fn builder() -> Builder {
+        Builder::new()
     }
 
     async fn handle_schema_message(
@@ -147,9 +236,9 @@ impl DebeziumConnector {
         let collections = payload
             .data_collections
             .as_ref()
-            .ok_or(Error::msg("Transaction metadata had no data collections"))?;
+            .ok_or_else(|| Error::msg("Transaction metadata had no data collections"))?;
         let tables = collections.iter().map(|c| {
-            let mut tokens = c.data_collection.split(".");
+            let mut tokens = c.data_collection.split('.');
 
             // Postgres and MySql have different data collection naming schemes.
             // Postgres names tables as: schema.table, while MySql uses: table.
@@ -161,9 +250,9 @@ impl DebeziumConnector {
 
             match second {
                 Some(t) => Ok(t),
-                None => first.ok_or(Error::msg(
-                    "Data collection did not include a valid table name",
-                )),
+                None => first.ok_or_else(|| {
+                    Error::msg("Data collection did not include a valid table name")
+                }),
             }
         });
 
