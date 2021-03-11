@@ -465,7 +465,7 @@ steps:
     - apt-get install -y rsync
     - mkdir -p ~/.ssh
     - echo 'docs.readyset.io ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBByYJ6scdtZbyjpIeBB1BrIcfUI/jMYo/re6/0U8ulKEdeh8gyhQ/ujaktSeTQy6yJUE7bIPlpYja2zMsHkOycg=' > ~/.ssh/known_hosts
-    - rsync -azPve ssh target/doc/ admin@docs.readyset.io:/var/www/docs
+    - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
