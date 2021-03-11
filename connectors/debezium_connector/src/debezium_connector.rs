@@ -9,6 +9,7 @@ use rdkafka::Message;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use tokio::stream::StreamExt;
+use tracing::{info, trace, warn};
 
 mod debezium_message_parser;
 mod kafka_message_consumer_wrapper;
@@ -113,7 +114,7 @@ impl Builder {
         self
     }
 
-    pub fn build(&self) -> DebeziumConnector {
+    pub fn build(&self) -> Result<DebeziumConnector> {
         // for each table, we listen to the topic <dbserver>.<dbname>.<tablename>
         let mut topic_names: Vec<String> = Vec::new();
         let mut topics: HashMap<String, Topic> = HashMap::new();
@@ -140,7 +141,7 @@ impl Builder {
         topic_names.push(transaction_topic.clone());
         topics.insert(transaction_topic, Topic::Transaction);
 
-        let consumer = kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper::new(
+        let kafka_consumer = kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper::new(
             self.bootstrap_servers.clone().unwrap(),
             topic_names,
             self.group_id.clone().unwrap_or_else(|| {
@@ -153,13 +154,13 @@ impl Builder {
             self.timeout.clone().unwrap(),
             self.eof,
             self.auto_commit,
-        );
+        )?;
 
-        DebeziumConnector {
-            kafka_consumer: consumer,
+        Ok(DebeziumConnector {
+            kafka_consumer,
             zookeeper_conn: self.zookeeper_conn.clone().unwrap(),
             topics,
-        }
+        })
     }
 }
 
@@ -172,6 +173,7 @@ impl DebeziumConnector {
         noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
         message: SchemaChange,
     ) -> Result<()> {
+        info!("Handling schema change message");
         noria_authority.extend_recipe(&message.payload.ddl).await?;
         Ok(())
     }
@@ -181,6 +183,7 @@ impl DebeziumConnector {
         key_message: EventKey,
         message: DataChange,
     ) -> Result<()> {
+        trace!("Handling data change message");
         match &message.payload {
             DataChangePayload::Create(p) => {
                 // We know that the payload consist of before, after and source fields
@@ -224,6 +227,7 @@ impl DebeziumConnector {
         noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
         message: Transaction,
     ) -> Result<()> {
+        trace!("Handling transaction message");
         let payload = &message.payload;
         // We currently do not process payload begin messages or transactions
         // that have not modified anys
@@ -265,22 +269,30 @@ impl DebeziumConnector {
     }
 
     pub async fn start(&mut self) -> Result<()> {
+        info!("Running debezium connector");
         let mut message_stream = self.kafka_consumer.kafka_consumer.start();
 
+        info!(
+            zookeeper_addr = &self.zookeeper_conn.as_str(),
+            "Connecting to Noria"
+        );
         let authority = ZookeeperAuthority::new(&self.zookeeper_conn)?;
         let mut ch = ControllerHandle::new(authority).await?;
         while let Some(message) = message_stream.next().await {
             if let Ok(m) = message {
                 let owned_message = m.detach();
 
-                if owned_message.payload().is_none() {
+                let payload = if let Some(payload) = owned_message.payload() {
+                    payload
+                } else {
+                    warn!("Received message with empty payload");
                     self.kafka_consumer
                         .kafka_consumer
                         .commit_message(&m, CommitMode::Async)?;
                     return Ok(());
-                }
+                };
 
-                let value_string = std::str::from_utf8(owned_message.payload().unwrap())?;
+                let value_string = std::str::from_utf8(payload)?;
                 let value_message: EventValue = serde_json::from_str(&value_string)?;
                 let topic = self.topics.get(owned_message.topic()).unwrap();
 
@@ -293,8 +305,9 @@ impl DebeziumConnector {
                         .await?;
                     }
                     Topic::DataChange => {
-                        // We have to check existence because on deletes, a tombstone message is sent by the kafka connector.
-                        // We really dont use the for anything, so we just ignore them for now.
+                        // We have to check existence because on deletes, a tombstone message is
+                        // sent by the kafka connector.  We really dont use the for anything, so we
+                        // just ignore them for now.
                         let key_string = std::str::from_utf8(owned_message.key().unwrap())?;
                         let key_message = serde_json::from_str(&key_string)?;
                         DebeziumConnector::handle_change_message(
