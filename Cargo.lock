@@ -3338,6 +3338,7 @@ dependencies = [
  "noria-server",
  "regex",
  "slog",
+ "timestamp_service",
  "tokio 0.2.24",
  "tracing",
  "vec1",
