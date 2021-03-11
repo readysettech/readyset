@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "js-client",
     "msql-srv",
     "nom-sql",
     "noria-client",

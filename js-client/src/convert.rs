@@ -1,0 +1,218 @@
+use crate::utils;
+use msql_srv::Column;
+use neon::prelude::*;
+use noria::{results::Results, DataType};
+use noria_client::backend::{error::Error, PrepareResult, QueryResult, SelectSchema};
+
+// TODO: implement convert_error
+pub(crate) fn convert_error<'a>(_e: Error) -> NeonResult<Handle<'a, JsObject>> {
+    unimplemented!("error handling for JS client")
+}
+
+fn convert_cols<'a, C>(cx: &mut C, cols: Vec<Column>) -> NeonResult<Handle<'a, JsArray>>
+where
+    C: Context<'a>,
+{
+    let js_cols = cx.empty_array();
+    for (i, col) in cols.iter().enumerate() {
+        let js_col = cx.empty_object();
+        utils::set_str_field(cx, &js_col, "tableName", &col.table)?; // TODO: this table name is NOT always the expected user-friendly name....
+        utils::set_str_field(cx, &js_col, "columnName", &col.column)?;
+        // TODO: deal with colType and flags?
+        js_cols.set(cx, i as u32, js_col)?;
+    }
+    Ok(js_cols)
+}
+
+pub(crate) fn convert_prepare_result<'a, C>(
+    cx: &mut C,
+    raw_prepare_result: PrepareResult,
+) -> NeonResult<Handle<'a, JsObject>>
+where
+    C: Context<'a>,
+{
+    let js_prepare_result = cx.empty_object();
+    match raw_prepare_result {
+        PrepareResult::NoriaPrepareSelect {
+            statement_id,
+            params,
+            schema,
+        }
+        | PrepareResult::NoriaPrepareInsert {
+            statement_id,
+            params,
+            schema,
+        } => {
+            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+            let js_params = convert_cols(cx, params)?;
+            utils::set_jsval_field(
+                cx,
+                &js_prepare_result,
+                "params",
+                js_params.upcast::<JsValue>(),
+            )?;
+            let js_schema = convert_cols(cx, schema)?;
+            utils::set_jsval_field(
+                cx,
+                &js_prepare_result,
+                "schema",
+                js_schema.upcast::<JsValue>(),
+            )?;
+        }
+        PrepareResult::NoriaPrepareUpdate {
+            statement_id,
+            params,
+        } => {
+            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+            let js_params = convert_cols(cx, params)?;
+            utils::set_jsval_field(
+                cx,
+                &js_prepare_result,
+                "params",
+                js_params.upcast::<JsValue>(),
+            )?;
+        }
+        PrepareResult::MySqlPrepareWrite { statement_id } => {
+            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+        }
+    }
+    Ok(js_prepare_result)
+}
+
+fn convert_datum<'a, C>(cx: &mut C, d: &DataType) -> Handle<'a, JsValue>
+where
+    C: Context<'a>,
+{
+    match d {
+        DataType::None => cx.null().upcast::<JsValue>(),
+        DataType::Int(n) => cx.number(*n).upcast::<JsValue>(),
+        DataType::UnsignedInt(n) => cx.number(*n).upcast::<JsValue>(),
+        DataType::BigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
+        DataType::UnsignedBigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
+        DataType::Real(_, _) => {
+            // TODO: test that Real to f64 conversion really works
+            let n = f64::from(d);
+            cx.number(n).upcast::<JsValue>()
+        }
+        DataType::Text(_) => {
+            let s = String::from(d);
+            cx.string(s).upcast::<JsValue>()
+        }
+        DataType::TinyText(_) => {
+            let s = String::from(d);
+            cx.string(s).upcast::<JsValue>()
+        }
+        DataType::Timestamp(_) => unimplemented!("Timestamp conversion to JS type"), // TODO: convert Timestamp DataType to JS
+        DataType::Time(_) => unimplemented!("Time conversion to JS type"),
+    }
+}
+
+fn convert_data<'a, C>(
+    cx: &mut C,
+    data: Vec<Results>,
+    select_schema: &SelectSchema,
+) -> NeonResult<Handle<'a, JsArray>>
+where
+    C: Context<'a>,
+{
+    let js_data = cx.empty_array();
+    let col_names = &select_schema.columns;
+    for resultsets in data {
+        let mut row_num = 0;
+        for row_struct in resultsets {
+            let row_vec: Vec<_> = row_struct.into();
+            let js_current_row = cx.empty_object();
+            for (i, col_name) in col_names.iter().enumerate() {
+                if select_schema.use_bogo && col_name == "bogokey" {
+                    continue;
+                }
+                let js_datum = convert_datum(cx, &row_vec[i]);
+                utils::set_jsval_field(cx, &js_current_row, col_name, js_datum)?;
+                js_data.set(cx, row_num as u32, js_current_row)?;
+            }
+            row_num += 1;
+        }
+    }
+    Ok(js_data)
+}
+
+pub(crate) fn convert_query_result<'a, C>(
+    cx: &mut C,
+    raw_query_result: QueryResult,
+) -> NeonResult<Handle<'a, JsObject>>
+where
+    C: Context<'a>,
+{
+    let js_query_result = cx.empty_object();
+    match raw_query_result {
+        QueryResult::NoriaCreateTable | QueryResult::NoriaCreateView => (),
+        QueryResult::NoriaInsert {
+            num_rows_inserted,
+            first_inserted_id,
+        } => {
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "numRowsInserted",
+                num_rows_inserted as f64,
+            )?;
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "firstInsertedId",
+                first_inserted_id as f64,
+            )?;
+        }
+        QueryResult::NoriaSelect {
+            data,
+            select_schema,
+        } => {
+            let js_data = convert_data(cx, data, &select_schema)?;
+            utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
+            utils::set_str_field(cx, &js_query_result, "selectSchema", "unimplemented")?;
+        }
+        QueryResult::NoriaUpdate {
+            num_rows_updated,
+            last_inserted_id,
+        } => {
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "numRowsUpdated",
+                num_rows_updated as f64,
+            )?;
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "lastInsertedId",
+                last_inserted_id as f64,
+            )?;
+        }
+        QueryResult::NoriaDelete { num_rows_deleted } => {
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "numRowsDeleted",
+                num_rows_deleted as f64,
+            )?;
+        }
+        QueryResult::MySqlWrite {
+            num_rows_affected,
+            last_inserted_id,
+        } => {
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "numRowsAffected",
+                num_rows_affected as f64,
+            )?;
+            utils::set_num_field(
+                cx,
+                &js_query_result,
+                "lastInsertedId",
+                last_inserted_id as f64,
+            )?;
+        }
+    }
+    Ok(js_query_result)
+}

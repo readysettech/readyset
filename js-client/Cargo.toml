@@ -1,0 +1,25 @@
+[package]
+name = "js-client"
+version = "0.1.0"
+license = "MIT"
+edition = "2018"
+exclude = ["index.node"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+msql-srv = { version = "0.8.8", path = "../msql-srv" }
+noria-client = { version = "0.1.0", path = "../noria-client" }
+noria = { version = "0.7", path = "../noria/noria/" }
+nom-sql = { version =  "0.0.11", path = "../nom-sql" }
+slog = "2.4.0"
+zookeeper = "0.5.4"
+noria-server = { version = "0.7", path = "../noria/server/" }
+tokio = { version = "0.2.0", features = ["full"] }
+maplit = "1.0.2"
+
+[dependencies.neon]
+version = "0.7.1-napi"
+default-features = false
+features = ["napi-6", "event-queue-api"]
