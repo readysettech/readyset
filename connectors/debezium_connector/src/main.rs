@@ -10,6 +10,8 @@ pub use debezium_connector::{Builder, DebeziumConnector};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().init();
+
     let matches =
         App::new("noria-debezium-connector")
             .version("0.0.1")
@@ -95,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .set_timeout(timeout)
         .set_eof(eof)
         .set_auto_commit(auto_commit)
-        .build()
+        .build()?
         .start()
         .await
 }
