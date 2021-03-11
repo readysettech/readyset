@@ -1,6 +1,6 @@
 use noria::{
-    ControllerHandle, DataType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
-    ViewQueryOperator, ZookeeperAuthority,
+    consistency::Timestamp, ControllerHandle, DataType, Table, TableOperation, View, ViewQuery,
+    ViewQueryFilter, ViewQueryOperator, ZookeeperAuthority,
 };
 
 use msql_srv::{self, *};
@@ -607,6 +607,7 @@ impl NoriaConnector {
         mut keys: Vec<Vec<DataType>>,
         schema: &Vec<Column>,
         key_column_indices: &[usize],
+        ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
@@ -732,7 +733,7 @@ impl NoriaConnector {
             filter,
             // TODO(andrew): Add a timestamp to views when RYW consistency
             // is specified.
-            timestamp: None,
+            timestamp: ticket,
         };
 
         let data = getter.raw_lookup(vq).await?;
@@ -779,6 +780,7 @@ impl NoriaConnector {
         &mut self,
         q: nom_sql::SelectStatement,
         use_params: Vec<Literal>,
+        ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         trace!("query::select::access view");
         let qname = self.get_or_create_view(&q, false).await?;
@@ -821,7 +823,7 @@ impl NoriaConnector {
             .collect::<Vec<_>>();
 
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &q, keys, &schema, &key_column_indices)
+        self.do_read(&qname, &q, keys, &schema, &key_column_indices, ticket)
             .await
     }
 
@@ -906,6 +908,7 @@ impl NoriaConnector {
         &mut self,
         q_id: u32,
         params: ParamParser<'_>,
+        ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
@@ -968,7 +971,7 @@ impl NoriaConnector {
                 };
 
                 return self
-                    .do_read(name, q, keys, schema, key_column_indices)
+                    .do_read(name, q, keys, schema, key_column_indices, ticket)
                     .await;
             }
             _ => {

@@ -1,9 +1,10 @@
-use noria::results::Results;
 use noria::DataType;
+use noria::{consistency::Timestamp, results::Results};
+use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use derive_more::From;
 use msql_srv::{self, *};
-use nom_sql::{self, Literal, SqlQuery};
+use nom_sql::{self, DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 
 use async_trait::async_trait;
 use std::collections::hash_map::Entry;
@@ -100,6 +101,8 @@ pub struct BackendBuilder {
     permissive: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
+    ticket: Option<Timestamp>,
+    timestamp_client: Option<TimestampClient>,
 }
 
 impl Default for BackendBuilder {
@@ -113,6 +116,8 @@ impl Default for BackendBuilder {
             permissive: false,
             users: Default::default(),
             require_authentication: true,
+            ticket: None,
+            timestamp_client: None,
         }
     }
 }
@@ -138,6 +143,8 @@ impl BackendBuilder {
             permissive: self.permissive,
             users: self.users,
             require_authentication: self.require_authentication,
+            ticket: self.ticket,
+            timestamp_client: self.timestamp_client,
         }
     }
 
@@ -180,6 +187,17 @@ impl BackendBuilder {
         self.require_authentication = require_authentication;
         self
     }
+
+    /// Specifies whether RYW consistency should be enabled. If true, RYW consistency
+    /// constraints will be enforced on all reads.
+    pub fn enable_ryw(mut self, enable_ryw: bool) -> Self {
+        if enable_ryw {
+            // initialize with an empty timestamp, which will be satisfied by any data version
+            self.ticket = Some(Timestamp::default());
+            self.timestamp_client = Some(TimestampClient::default())
+        }
+        self
+    }
 }
 
 pub struct Backend {
@@ -198,6 +216,15 @@ pub struct Backend {
     /// Map from username to password for all users allowed to connect to the db
     users: HashMap<String, String>,
     require_authentication: bool,
+    /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
+    /// be updated as the client makes writes so as to be an accurate low watermark timestamp
+    /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
+    /// checked by noria view nodes.
+    ticket: Option<Timestamp>,
+    /// `timestamp_client` is the Backends connection to the TimestampService. The TimestampService
+    /// is responsible for creating accurate RYW timestamps/tickets based on writes made by the
+    /// Backend client.
+    timestamp_client: Option<TimestampClient>,
 }
 
 #[derive(Debug)]
@@ -346,6 +373,7 @@ impl Backend {
 
     /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
     /// belonging to the calling `Backend` struct.
+    // TODO(andrew, justin): add RYW support for executing prepared queries
     pub async fn execute(
         &mut self,
         id: u32,
@@ -364,7 +392,10 @@ impl Backend {
 
         let res = match prep {
             SqlQuery::Select(_) => {
-                let (data, select_schema) = self.reader.execute_prepared_select(id, params).await?;
+                let (data, select_schema) = self
+                    .reader
+                    .execute_prepared_select(id, params, self.ticket.clone())
+                    .await?;
                 Ok(QueryResult::NoriaSelect {
                     data,
                     select_schema,
@@ -438,90 +469,47 @@ impl Backend {
         let query = self.sanitize_query(query);
         let (parsed_query, use_params) = self.parse_query(&query, true)?;
 
-        let res = match parsed_query {
-            nom_sql::SqlQuery::CreateTable(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+        let res = match &mut self.writer {
+            // Interacting directly with Noria writer (No RYW support)
+            // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
+            Writer::NoriaConnector(connector) => match parsed_query {
+                nom_sql::SqlQuery::Select(q) => {
+                    let (data, select_schema) = self
+                        .reader
+                        .handle_select(q, use_params, self.ticket.clone())
+                        .await?;
+                    Ok(QueryResult::NoriaSelect {
+                        data,
+                        select_schema,
+                    })
+                }
+                nom_sql::SqlQuery::CreateView(q) => {
+                    self.reader.handle_create_view(q).await?;
+                    Ok(QueryResult::NoriaCreateView)
+                }
+                nom_sql::SqlQuery::CreateTable(q) => {
                     connector.handle_create_table(q).await?;
                     Ok(QueryResult::NoriaCreateTable)
                 }
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&q.to_string()).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-            },
-            nom_sql::SqlQuery::CreateView(q) => {
-                self.reader.handle_create_view(q).await?;
-                Ok(QueryResult::NoriaCreateView)
-            }
-            nom_sql::SqlQuery::Insert(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+                nom_sql::SqlQuery::Insert(q) => {
                     let (num_rows_inserted, first_inserted_id) = connector.handle_insert(q).await?;
                     Ok(QueryResult::NoriaInsert {
                         num_rows_inserted,
                         first_inserted_id,
                     })
                 }
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&q.to_string()).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-            },
-            nom_sql::SqlQuery::Select(q) => {
-                let (data, select_schema) = self.reader.handle_select(q, use_params).await?;
-                Ok(QueryResult::NoriaSelect {
-                    data,
-                    select_schema,
-                })
-            }
-            nom_sql::SqlQuery::Update(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+                nom_sql::SqlQuery::Update(q) => {
                     let (num_rows_updated, last_inserted_id) = connector.handle_update(q).await?;
                     Ok(QueryResult::NoriaUpdate {
                         num_rows_updated,
                         last_inserted_id,
                     })
                 }
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&q.to_string()).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-            },
-            nom_sql::SqlQuery::Delete(q) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+                nom_sql::SqlQuery::Delete(q) => {
                     let num_rows_deleted = connector.handle_delete(q).await?;
                     Ok(QueryResult::NoriaDelete { num_rows_deleted })
                 }
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&q.to_string()).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-            },
-            nom_sql::SqlQuery::DropTable(q) => match &mut self.writer {
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&q.to_string()).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-                _ => {
+                nom_sql::SqlQuery::DropTable(_) => {
                     warn!("Ignoring drop table because using Noria writer not Mysql writer.");
                     if self.permissive {
                         warn!("Permissive flag enabled, so returning successful drop table despite failure.");
@@ -533,19 +521,74 @@ impl Backend {
                         unimplemented!()
                     }
                 }
+                _ => {
+                    error!("unsupported query");
+                    Err(Error::UnsupportedError("Unsupported query".to_string()))
+                }
             },
-            _ => match &mut self.writer {
-                Writer::MySqlConnector(connector) => {
-                    let (num_rows_affected, last_inserted_id) =
-                        connector.on_query(&parsed_query.to_string()).await?;
+            Writer::MySqlConnector(connector) => match parsed_query {
+                nom_sql::SqlQuery::Select(q) => {
+                    let (data, select_schema) = self
+                        .reader
+                        .handle_select(q, use_params, self.ticket.clone())
+                        .await?;
+                    Ok(QueryResult::NoriaSelect {
+                        data,
+                        select_schema,
+                    })
+                }
+                nom_sql::SqlQuery::CreateView(q) => {
+                    self.reader.handle_create_view(q).await?;
+                    Ok(QueryResult::NoriaCreateView)
+                }
+                nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
+                | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
+                | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                    let (num_rows_affected, last_inserted_id, identifier) = connector
+                        .on_query(&query, !self.timestamp_client.is_none())
+                        .await?;
+
+                    // Update ticket if RYW enabled
+                    if let Some(timestamp_service) = &mut self.timestamp_client {
+                        let affected_tables = vec![WriteKey::TableName(t.name.clone())];
+                        let new_timestamp =
+                            timestamp_service.append_write(
+                                WriteId::TransactionId(identifier.expect(
+                                    "RYW enabled writes should always produce an identifier",
+                                )),
+                                affected_tables,
+                            );
+                        self.ticket = Some(Timestamp::join(
+                            &self
+                                .ticket
+                                .as_ref()
+                                .expect("RYW enabled backends must have a current ticket"),
+                            &new_timestamp,
+                        ));
+                    }
                     Ok(QueryResult::MySqlWrite {
                         num_rows_affected,
                         last_inserted_id,
                     })
                 }
+                // Table Create / Drop (RYW not supported)
+                // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
+                nom_sql::SqlQuery::CreateTable(_) | nom_sql::SqlQuery::DropTable(_) => {
+                    let (num_rows_affected, last_inserted_id, _) =
+                        connector.on_query(&parsed_query.to_string(), false).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
+                }
+                // Other queries that we are not expecting, just pass straight to MySQL
                 _ => {
-                    error!("unsupported query");
-                    Err(Error::UnsupportedError("Unsupported query".to_string()))
+                    let (num_rows_affected, last_inserted_id, _) =
+                        connector.on_query(&parsed_query.to_string(), false).await?;
+                    Ok(QueryResult::MySqlWrite {
+                        num_rows_affected,
+                        last_inserted_id,
+                    })
                 }
             },
         };
@@ -562,6 +605,11 @@ impl Backend {
         }
 
         res
+    }
+
+    // For debugging purposes
+    pub fn ticket(&self) -> &Option<Timestamp> {
+        &self.ticket
     }
 
     fn sanitize_query(&mut self, query: &str) -> String {
@@ -613,7 +661,9 @@ impl Backend {
         e: String,
     ) -> io::Result<()> {
         if let Writer::MySqlConnector(connector) = &mut self.writer {
-            Backend::write_query_results(connector.on_query(q).await, results).await
+            let res = connector.on_query(q, false).await;
+            let res = res.map(|(row_count, last_insert, _)| (row_count, last_insert));
+            Backend::write_query_results(res, results).await
         } else {
             results
                 .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())

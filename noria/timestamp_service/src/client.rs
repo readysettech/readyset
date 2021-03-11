@@ -1,9 +1,10 @@
 use noria::consistency::Timestamp;
 
+pub type TransactionId = String;
 /// Unique identifier for a client write discernable at both the
 /// debezium connector and the noria client.
 pub enum WriteId {
-    TransactionId(u64),
+    TransactionId(TransactionId),
 }
 
 /// A key identifying the objects we are maintaining read-your-write
