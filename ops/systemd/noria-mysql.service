@@ -1,0 +1,11 @@
+[Unit]
+After=network.target
+Description=Noria MySQL Adapter
+
+[Service]
+ExecStart=/bin/noria-mysql --no-require-authentication --address 0.0.0.0:3306
+EnvironmentFile=/etc/default/noria-mysql
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
