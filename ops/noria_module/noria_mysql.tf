@@ -1,11 +1,3 @@
-data "template_file" "noria_mysql_init" {
-  template = file("${path.module}/noria_mysql_init.sh")
-  vars = {
-    deployment   = var.deployment
-    zookeeper_ip = aws_instance.zookeeper.private_ip
-  }
-}
-
 data "aws_ami" "noria_mysql" {
   owners      = ["069491470376"]
   most_recent = true
@@ -46,7 +38,10 @@ resource "aws_instance" "noria_mysql" {
   instance_type = var.noria_mysql_instance_type
   key_name      = var.key_name
 
-  user_data = data.template_file.noria_mysql_init.rendered
+  user_data = templatefile("${path.module}/noria_mysql_init.sh", {
+    deployment   = var.deployment
+    zookeeper_ip = aws_instance.zookeeper.private_ip
+  })
 
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
@@ -57,11 +52,5 @@ resource "aws_instance" "noria_mysql" {
 
   tags = {
     Name = "noria_mysql"
-  }
-
-  lifecycle {
-    ignore_changes = [
-      user_data
-    ]
   }
 }

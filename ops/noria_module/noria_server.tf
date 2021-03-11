@@ -1,14 +1,3 @@
-data "template_file" "noria_server_init" {
-  template = file("${path.module}/noria_server_init.sh")
-  vars = {
-    deployment         = var.deployment
-    zookeeper_ip       = aws_instance.zookeeper.private_ip
-    noria_memory_bytes = var.noria_memory_bytes
-    quorum             = var.noria_quorum
-    shards             = var.noria_shards
-  }
-}
-
 data "aws_ami" "noria_server" {
   owners      = ["069491470376"]
   most_recent = true
@@ -63,7 +52,13 @@ resource "aws_instance" "noria_server" {
   instance_type = var.noria_server_instance_type
   key_name      = var.key_name
 
-  user_data = data.template_file.noria_server_init.rendered
+  user_data = templatefile("${path.module}/noria_server_init.sh", {
+    deployment         = var.deployment
+    zookeeper_ip       = aws_instance.zookeeper.private_ip
+    noria_memory_bytes = var.noria_memory_bytes
+    quorum             = var.noria_quorum
+    shards             = var.noria_shards
+  })
 
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
@@ -81,11 +76,5 @@ resource "aws_instance" "noria_server" {
     device_name           = "/dev/sdf"
     encrypted             = var.encrypt_noria_disk
     volume_size           = var.noria_disk_size_gb
-  }
-
-  lifecycle {
-    ignore_changes = [
-      user_data
-    ]
   }
 }
