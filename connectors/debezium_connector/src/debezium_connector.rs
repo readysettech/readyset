@@ -69,7 +69,8 @@ pub struct Builder {
     db_name: Option<String>,
     tables: Vec<String>,
     group_id: Option<String>,
-    zookeeper_conn: Option<String>,
+    zookeeper_address: Option<String>,
+    deployment: Option<String>,
     timeout: Option<String>,
     eof: bool,
     auto_commit: bool,
@@ -117,11 +118,19 @@ impl Builder {
         self
     }
 
-    pub fn set_zookeeper_conn<S>(&mut self, zookeeper_conn: &S) -> &mut Self
+    pub fn set_zookeeper_address<S>(&mut self, zookeeper_address: &S) -> &mut Self
     where
         S: ToOwned<Owned = String> + ?Sized,
     {
-        self.zookeeper_conn = Some(zookeeper_conn.to_owned());
+        self.zookeeper_address = Some(zookeeper_address.to_owned());
+        self
+    }
+
+    pub fn set_deployment<S>(&mut self, deployment: &S) -> &mut Self
+    where
+        S: ToOwned<Owned = String> + ?Sized,
+    {
+        self.deployment = Some(deployment.to_owned());
         self
     }
 
@@ -185,9 +194,10 @@ impl Builder {
             self.auto_commit,
         )?);
 
-        let zookeeper_conn = self.zookeeper_conn.as_ref().unwrap().as_str();
-        info!(zookeeper_conn, "Connecting to Noria");
-        let authority = ZookeeperAuthority::new(&zookeeper_conn)?;
+        let zookeeper_address = self.zookeeper_address.as_ref().unwrap().as_str();
+        let deployment = self.deployment.as_ref().unwrap().as_str();
+        info!(zookeeper_address, deployment, "Connecting to Noria");
+        let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment))?;
         let noria = ControllerHandle::new(authority).await?;
         info!("Connection to Noria established");
 

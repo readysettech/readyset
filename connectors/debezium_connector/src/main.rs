@@ -22,6 +22,8 @@ async fn main() -> anyhow::Result<()> {
                     .takes_value(true)
                     .multiple(true)
                     .required(true)
+                    .env("TABLES")
+                    .use_delimiter(true)
                     .help("Tables to track."),
             )
             .arg(
@@ -30,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
                     .long("server-name")
                     .takes_value(true)
                     .required(true)
+                    .env("SERVER_NAME")
                     .help("The database server name."),
             )
             .arg(
@@ -38,16 +41,26 @@ async fn main() -> anyhow::Result<()> {
                     .long("db-name")
                     .takes_value(true)
                     .required(true)
+                    .env("DB_NAME")
                     .help("The db name."),
             )
             .arg(
-                Arg::with_name("zookeeper-connection")
+                Arg::with_name("zookeeper-address")
                     .short("z")
-                    .long("zookeeper-connection")
+                    .long("zookeeper-address")
                     .takes_value(true)
                     .required(true)
-                    .default_value("127.0.0.1:2181/myapp")
-                    .help("Zookeeper address in the form IP:PORT/<NORIA_DEPLOYMENT>"),
+                    .default_value("127.0.0.1:2181")
+                    .env("ZOOKEEPER_URL")
+                    .help("IP:PORT for Zookeeper."),
+            )
+            .arg(
+                Arg::with_name("deployment")
+                    .long("deployment")
+                    .takes_value(true)
+                    .required(true)
+                    .env("NORIA_DEPLOYMENT")
+                    .help("Noria deployment ID to attach to."),
             )
             .arg(
                 Arg::with_name("kafka-bootstrap-servers")
@@ -56,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
                     .takes_value(true)
                     .required(true)
                     .default_value("localhost:9092")
+                    .env("KAFKA_URL")
                     .help("Kafka connection"),
             )
             .arg(
@@ -83,7 +97,8 @@ async fn main() -> anyhow::Result<()> {
         .unwrap()
         .map(|s| s.to_string())
         .collect();
-    let zookeeper_conn = matches.value_of("zookeeper-connection").unwrap();
+    let zookeeper_address = matches.value_of("zookeeper-address").unwrap();
+    let deployment = matches.value_of("deployment").unwrap();
     let timeout = matches.value_of("kafka-timeout").unwrap();
     let eof = matches.is_present("kafka-partition-eof");
     let auto_commit = !matches.is_present("kafka-no-auto-commit");
@@ -93,7 +108,8 @@ async fn main() -> anyhow::Result<()> {
         .set_server_name(server_name)
         .set_db_name(db_name)
         .set_tables(tables)
-        .set_zookeeper_conn(zookeeper_conn)
+        .set_zookeeper_address(zookeeper_address)
+        .set_deployment(deployment)
         .set_timeout(timeout)
         .set_eof(eof)
         .set_auto_commit(auto_commit)
