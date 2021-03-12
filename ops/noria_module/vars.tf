@@ -109,3 +109,58 @@ variable "associate_public_ip_addresses" {
   default     = true
   description = "Whether or not to associate a public IP address with all provisioned instances"
 }
+
+variable "enable_rds_connector" {
+  type        = bool
+  default     = false
+  description = "Whether to enable streaming writes from an Amazon RDS instance to Noria"
+}
+
+variable "rds_instance_id" {
+  type        = string
+  default     = ""
+  description = "ID of the RDS instance to stream writes from. Required if enable_rds_connector is true"
+}
+
+variable "db_name" {
+  type        = string
+  default     = ""
+  description = "Name of the MySQL database to replicate to Noria"
+}
+
+variable "db_user" {
+  type        = string
+  default     = ""
+  description = "MySQL user to use to connect to RDS"
+}
+
+variable "db_password" {
+  type        = string
+  default     = ""
+  description = "Password for the MySQL user to use to connect to RDS"
+  sensitive   = true
+}
+
+variable "kafka_instance_type" {
+  type        = string
+  default     = "m5.xlarge"
+  description = "EC2 instance type to use for the Kafka instance"
+}
+
+variable "debezium_instance_type" {
+  type        = string
+  default     = "t3.medium"
+  description = "EC2 instance type to use for the Debezium instance"
+}
+
+variable "debezium_connector_instance_type" {
+  type        = string
+  default     = "t3.medium"
+  description = "EC2 instance type to use for the Debezium Connector instance"
+}
+
+variable "tables" {
+  type        = list(string)
+  default     = []
+  description = "List of tables to replicate from RDS"
+}

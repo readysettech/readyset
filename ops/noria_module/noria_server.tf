@@ -1,5 +1,5 @@
 data "aws_ami" "noria_server" {
-  owners      = ["069491470376"]
+  owners      = [local.readyset_account_id]
   most_recent = true
 
   filter {
@@ -12,6 +12,7 @@ data "aws_ami" "noria_server" {
     values = [var.noria_version]
   }
 }
+
 resource "aws_security_group" "noria_server" {
   name        = "noria_server"
   description = "Allow connection to noria server"
@@ -23,9 +24,12 @@ resource "aws_security_group" "noria_server" {
     to_port     = 6033
     protocol    = "tcp"
     self        = true
-    security_groups = [
-      aws_security_group.noria_mysql.id
-    ]
+    security_groups = concat(
+      [aws_security_group.noria_mysql.id],
+      var.enable_rds_connector ? [
+        aws_security_group.debezium-connector[0].id
+      ] : []
+    )
   }
 
   ingress {
@@ -34,9 +38,12 @@ resource "aws_security_group" "noria_server" {
     to_port     = 65535
     protocol    = "tcp"
     self        = true
-    security_groups = [
-      aws_security_group.noria_mysql.id
-    ]
+    security_groups = concat(
+      [aws_security_group.noria_mysql.id],
+      var.enable_rds_connector ? [
+        aws_security_group.debezium-connector[0].id
+      ] : []
+    )
   }
 
   egress {

@@ -1,5 +1,5 @@
 data "aws_ami" "zookeeper" {
-  owners      = ["069491470376"]
+  owners      = [local.readyset_account_id]
   most_recent = true
 
   filter {
@@ -34,10 +34,17 @@ resource "aws_security_group" "zookeeper" {
     from_port   = 2181
     to_port     = 2181
     protocol    = "tcp"
-    security_groups = [
-      aws_security_group.noria_server.id,
-      aws_security_group.noria_mysql.id
-    ]
+    security_groups = concat(
+      [
+        aws_security_group.noria_server.id,
+        aws_security_group.noria_mysql.id
+      ],
+      var.enable_rds_connector ? [
+        aws_security_group.kafka[0].id,
+        aws_security_group.debezium[0].id,
+        aws_security_group.debezium-connector[0].id
+      ] : []
+    )
   }
 
   egress {
@@ -56,7 +63,7 @@ resource "aws_instance" "zookeeper" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.zookeeper.id],
-    var.extra_security_groups
+    var.extra_security_groups,
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 

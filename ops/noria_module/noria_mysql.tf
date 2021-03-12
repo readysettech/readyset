@@ -1,5 +1,5 @@
 data "aws_ami" "noria_mysql" {
-  owners      = ["069491470376"]
+  owners      = [local.readyset_account_id]
   most_recent = true
 
   filter {

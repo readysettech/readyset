@@ -1,0 +1,26 @@
+[Unit]
+Description=Debezium Connect
+After=docker.service
+Requires=docker.service
+
+[Service]
+TimeoutStartSec=0
+Restart=always
+ExecStartPre=-/usr/bin/docker stop %n
+ExecStartPre=-/usr/bin/docker rm %n
+ExecStartPre=/usr/bin/docker pull debezium/connect:1.4
+ExecStart=/usr/bin/docker run \
+                          --rm \
+                          --name %n \
+                          -p 8083:8083 \
+                          -e GROUP_ID=1 \
+                          -e CONFIG_STORAGE_TOPIC=noria_connect_configs \
+                          -e OFFSET_STORAGE_TOPIC=noria_connect_offsets \
+                          -e STATUS_STORAGE_TOPIC=noria_connect_statuses \
+                          --env BOOTSTRAP_SERVERS \
+                          --restart always \
+                          debezium/connect:1.4
+EnvironmentFile=/etc/default/debezium-connect
+
+[Install]
+WantedBy=multi-user.target
