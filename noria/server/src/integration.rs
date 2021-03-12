@@ -3650,19 +3650,15 @@ async fn test_join_across_shards_with_param() {
 // FIXME: The test is disabled because aliasing the result columns with names reused from other
 // columns causes incorrect results to be returned. (See above 'join_param_results' test for
 // correct behavior in the no-param case, when column names are not reused.)
-#[ignore]
 #[tokio::test(threaded_scheduler)]
-async fn join_reused_name_results() {
-    let mut g = start_simple("join_reused_name_results").await;
+async fn test_join_with_reused_column_name() {
+    let mut g = start_simple("test_join_with_reused_column_name").await;
     g.install_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW all_user_recs: SELECT votes.user as user, recs.other as story
              FROM votes \
-             JOIN recs ON (votes.story = recs.story);
-         VIEW user_recs: SELECT votes.user as user, recs.other as story
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+             JOIN recs ON (votes.story = recs.story);",
     )
     .await
     .unwrap();
@@ -3673,12 +3669,12 @@ async fn join_reused_name_results() {
     votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
     votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
     votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-    let mut votes = g.table("recs").await.unwrap();
-    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut recs = g.table("recs").await.unwrap();
+    recs.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'all_user_recs' results.
     let mut query = g.view("all_user_recs").await.unwrap();
@@ -3702,6 +3698,33 @@ async fn join_reused_name_results() {
         (3, 3),
     ];
     assert_eq!(results, expected);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn test_join_with_reused_column_name_with_param() {
+    let mut g = start_simple("test_join_with_reused_column_name").await;
+    g.install_recipe(
+        "CREATE TABLE votes (story int, user int);
+         CREATE TABLE recs (story int, other int);
+         VIEW user_recs: SELECT votes.user as user, recs.other as story
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("votes").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut recs = g.table("recs").await.unwrap();
+    recs.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'user_recs' results.
     let mut query = g.view("user_recs").await.unwrap();

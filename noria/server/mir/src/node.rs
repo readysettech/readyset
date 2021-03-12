@@ -215,6 +215,39 @@ impl MirNode {
         self.columns.as_slice()
     }
 
+    /// Finds the source of a child column within the node.
+    /// This is currently used for locating the source of a projected column.
+    pub fn find_source_for_child_column(
+        &self,
+        child: &Column,
+        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+    ) -> usize {
+        // we give the alias preference here because in a query like
+        // SELECT table1.column1 AS my_alias
+        // my_alias will be the column name and "table1.column1" will be the alias.
+        // This is slightly backwards from what intuition suggests when you first look at the
+        // column struct but means its the "alias" that will exist in the parent node,
+        // not the column name.
+        let parent_index = if child.aliases.is_empty() {
+            self.columns.iter().position(|c| c == child)
+        } else {
+            self.columns.iter().position(|c| child.aliases.contains(c))
+        };
+        // TODO : ideally, we would prioritize the alias when using the table mapping if we are looking
+        // for a child column. However, I am not sure this case is totally possible so for now,
+        // we are leaving it as is.
+        parent_index.unwrap_or_else(|| {
+            self.get_column_id_from_table_mapping(child, table_mapping)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "tried to look up non-existent column {:?} on node \
+                                 \"{}\" (columns: {:?})",
+                        child, self.name, self.columns
+                    );
+                })
+        })
+    }
+
     pub fn column_id_for_column(
         &self,
         c: &Column,
@@ -244,58 +277,16 @@ impl MirNode {
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c, table_mapping),
             // otherwise, just look up in the column set
             _ => match self.columns.iter().position(|cc| cc == c) {
-                None => {
-                    let get_column_index = |c: &Column, t_name: &str| -> usize {
-                        let mut ac = c.clone();
-                        ac.table = Some(t_name.to_owned());
-                        self.columns
-                            .iter()
-                            .position(|cc| *cc == ac)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "tried to look up non-existent column {:?} on node \
-                                     \"{}\" (columns: {:?})",
-                                    c, self.name, self.columns
-                                )
-                            })
-                    };
-                    // See if table mapping was passed in
-                    match table_mapping {
-                        // if mapping was passed in, then see if c has an associated table, and check
-                        // the mapping for a key based on this
-                        Some(map) => match c.table {
-                            Some(ref table) => {
-                                let key = (c.name.clone(), Some(table.clone()));
-                                match map.get(&key) {
-                                    Some(ref t_name) => get_column_index(c, t_name),
-                                    None => match map.get(&(c.name.clone(), None)) {
-                                        Some(ref t_name) => get_column_index(c, t_name),
-                                        None => {
-                                            panic!("alias is not in mapping table!");
-                                        }
-                                    },
-                                }
-                            }
-                            None => match map.get(&(c.name.clone(), None)) {
-                                Some(ref t_name) => get_column_index(c, t_name),
-                                None => panic!(
-                                    "tried to look up non-existent column {:?} on node \
-                                     \"{}\" (columns: {:?})",
-                                    c, self.name, self.columns
-                                ),
-                            },
-                        },
-                        // panic if no mapping was passed in
-                        None => {
-                            panic!(
-                                "tried to look up non-existent column {:?} on node \"{}\" \
-                                 (columns: {:?})",
-                                c, self.name, self.columns
-                            );
-                        }
-                    }
-                }
                 Some(id) => id,
+                None => self
+                    .get_column_id_from_table_mapping(c, table_mapping)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "tried to look up non-existent column {:?} on node \
+                                 \"{}\" (columns: {:?})",
+                            c, self.name, self.columns
+                        );
+                    }),
             },
         }
     }
@@ -307,6 +298,34 @@ impl MirNode {
             } => column_specs.as_slice(),
             _ => panic!("non-base MIR nodes don't have column specifications!"),
         }
+    }
+
+    fn get_column_id_from_table_mapping(
+        &self,
+        c: &Column,
+        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
+    ) -> Option<usize> {
+        let get_column_index = |c: &Column, t_name: &str| -> Option<usize> {
+            let mut ac = c.clone();
+            ac.table = Some(t_name.to_owned());
+            self.columns.iter().position(|cc| *cc == ac)
+        };
+        // See if table mapping was passed in
+        table_mapping.and_then(|map|
+            // if mapping was passed in, then see if c has an associated table, and check
+            // the mapping for a key based on this
+            match c.table {
+                Some(ref table) => {
+                    let key = (c.name.clone(), Some(table.clone()));
+                    match map.get(&key) {
+                        Some(t_name) => get_column_index(c, t_name),
+                        None => map.get(&(c.name.clone(), None)).and_then(|t_name| get_column_index(c, t_name)),
+                    }
+                }
+                None => map.get(&(c.name.clone(), None))
+                    .and_then(|t_name| get_column_index(c, t_name)),
+            }
+        )
     }
 
     pub fn flow_node_addr(&self) -> Result<NodeIndex, String> {
@@ -1053,5 +1072,158 @@ impl Debug for MirNodeType {
                 ref operator,
             } => write!(f, "σφ [{:?}, {:?}, {:?}]", col, emit_key, operator),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::node::{MirNode, MirNodeType};
+    use crate::Column;
+    use nom_sql::{ColumnSpecification, SqlType};
+
+    // tests the simple case where the child column has no alias, therefore mapping to the parent
+    // column with the same name
+    #[test]
+    fn find_source_for_child_column_with_no_alias() {
+        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+            (
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                None,
+            )
+        };
+
+        let parent_columns = vec![Column::from("c1"), Column::from("c2"), Column::from("c3")];
+
+        let a = MirNode {
+            name: "a".to_string(),
+            from_version: 0,
+            columns: parent_columns,
+            inner: MirNodeType::Base {
+                column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
+                keys: vec![Column::from("c1")],
+                adapted_over: None,
+            },
+            ancestors: vec![],
+            children: vec![],
+            flow_node: None,
+        };
+
+        let child_column = Column::from("c3");
+
+        let idx = a.find_source_for_child_column(&child_column, Option::None);
+        assert_eq!(2, idx);
+    }
+
+    // tests the case where the child column has an alias, therefore mapping to the parent
+    // column with the same name as the alias
+    #[test]
+    fn find_source_for_child_column_with_alias() {
+        let c1 = Column {
+            table: Some("table".to_string()),
+            name: "c1".to_string(),
+            function: None,
+            aliases: vec![],
+        };
+        let c2 = Column {
+            table: Some("table".to_string()),
+            name: "c2".to_string(),
+            function: None,
+            aliases: vec![],
+        };
+        let c3 = Column {
+            table: Some("table".to_string()),
+            name: "c3".to_string(),
+            function: None,
+            aliases: vec![],
+        };
+
+        let child_column = Column {
+            table: Some("table".to_string()),
+            name: "child".to_string(),
+            function: None,
+            aliases: vec![Column {
+                table: Some("table".to_string()),
+                name: "c3".to_string(),
+                function: None,
+                aliases: vec![],
+            }],
+        };
+
+        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+            (
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                None,
+            )
+        };
+
+        let parent_columns = vec![c1, c2, c3];
+
+        let a = MirNode {
+            name: "a".to_string(),
+            from_version: 0,
+            columns: parent_columns,
+            inner: MirNodeType::Base {
+                column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
+                keys: vec![Column::from("c1")],
+                adapted_over: None,
+            },
+            ancestors: vec![],
+            children: vec![],
+            flow_node: None,
+        };
+
+        let idx = a.find_source_for_child_column(&child_column, Option::None);
+        assert_eq!(2, idx);
+    }
+
+    // tests the case where the child column is named the same thing as a parent column BUT has an alias.
+    // Typically, this alias would map to a different parent column however for testing purposes
+    // that column is missing here to ensure it will not match with the wrong column.
+    #[test]
+    #[should_panic]
+    fn find_source_for_child_column_with_alias_to_parent_column() {
+        let c1 = Column {
+            table: Some("table".to_string()),
+            name: "c1".to_string(),
+            function: None,
+            aliases: vec![],
+        };
+
+        let child_column = Column {
+            table: Some("table".to_string()),
+            name: "c1".to_string(),
+            function: None,
+            aliases: vec![Column {
+                table: Some("table".to_string()),
+                name: "other_name".to_string(),
+                function: None,
+                aliases: vec![],
+            }],
+        };
+
+        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+            (
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                None,
+            )
+        };
+
+        let parent_columns = vec![c1];
+
+        let a = MirNode {
+            name: "a".to_string(),
+            from_version: 0,
+            columns: parent_columns,
+            inner: MirNodeType::Base {
+                column_specs: vec![cspec("c1")],
+                keys: vec![Column::from("c1")],
+                adapted_over: None,
+            },
+            ancestors: vec![],
+            children: vec![],
+            flow_node: None,
+        };
+
+        a.find_source_for_child_column(&child_column, Option::None);
     }
 }
