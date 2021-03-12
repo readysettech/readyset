@@ -356,36 +356,58 @@ impl<'a> Plan<'a> {
                             // the same shard as ourselves. this is because any answers from other
                             // shards would necessarily just be with records that do not match our
                             // sharding key anyway, and that we should thus never see.
+
+                            // Note : segments[0] looks something like this :
+                            // ( DomainIndex(0),
+                            //     [
+                            //          (NodeIndex(1), Some([1])),
+                            //          (NodeIndex(3), Some([1])),
+                            //          (NodeIndex(4), Some([0])),
+                            //          (NodeIndex(11), Some([0]))
+                            //     ]
+                            // )
                             let src_sharding = self.graph[segments[0].1[0].0].sharded_by();
                             let shards = src_sharding.shards().unwrap_or(1);
-                            let lookup_key_to_shard = match src_sharding {
+                            let lookup_key_index_to_shard = match src_sharding {
                                 Sharding::Random(..) => None,
                                 Sharding::ByColumn(c, _) => {
-                                    let lookup_key =
-                                        nodes.iter().next().unwrap().1.as_ref().unwrap();
-                                    if lookup_key.len() == 1 {
-                                        if c == lookup_key[0] {
-                                            Some(0)
-                                        } else {
-                                            None
+                                    // we want to check the source of the key column. If the source node
+                                    // is sharded by that column, we are able to ONLY look at a single
+                                    // shard on the source. Otherwise, we need to check all of the shards.
+                                    let key_column_source = &segments[0].1[0].1;
+                                    match key_column_source {
+                                        Some(source_index_vector) => {
+                                            if source_index_vector.len() == 1 {
+                                                if source_index_vector[0] == c {
+                                                    // the source node is sharded by the key column.
+                                                    Some(0)
+                                                } else {
+                                                    // the node is sharded by a different column than
+                                                    // the key column, so we need to go ahead and query all
+                                                    // shards. BUMMER.
+                                                    None
+                                                }
+                                            } else {
+                                                // we're using a compound key to look up into a node that's
+                                                // sharded by a single column. if the sharding key is one
+                                                // of the lookup keys, then we indeed only need to look at
+                                                // one shard, otherwise we need to ask all
+                                                source_index_vector
+                                                    .iter()
+                                                    .position(|source_column| source_column == &c)
+                                            }
                                         }
-                                    } else {
-                                        // we're using a compound key to look up into a node that's
-                                        // sharded by a single column. if the sharding key is one
-                                        // of the lookup keys, then we indeed only need to look at
-                                        // one shard, otherwise we need to ask all
-                                        //
-                                        // NOTE: this _could_ be merged with the if arm above,
-                                        // but keeping them separate allows us to make this case
-                                        // explicit and more obvious
-                                        lookup_key.iter().position(|&kc| kc == c)
+                                        // This means the key column has no provenance in
+                                        // the source. This could be because it comes from multiple columns.
+                                        // Or because the node is fully materialized so replays are not necessary.
+                                        None => None,
                                     }
                                 }
                                 s if s.is_none() => None,
                                 s => unreachable!("unhandled new sharding pattern {:?}", s),
                             };
 
-                            let selection = if let Some(i) = lookup_key_to_shard {
+                            let selection = if let Some(i) = lookup_key_index_to_shard {
                                 // if we are not sharded, all is okay.
                                 //
                                 // if we are sharded:
