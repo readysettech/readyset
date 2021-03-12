@@ -3553,21 +3553,17 @@ async fn join_column_projection() {
     );
 }
 
-// FIXME: The test is disabled because the rows returned when a parameter is provided are not the
-// correct filtered subset of the rows returned when a parameter is not provided.
-#[ignore]
+// Tests the case where the source is sharded by a different column than the key column
+// with no parameter.
 #[tokio::test(threaded_scheduler)]
-async fn join_param_results() {
-    let mut g = start_simple("join_param_results").await;
+async fn test_join_across_shards() {
+    let mut g = start_simple("test_join_across_shards").await;
     g.install_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW all_user_recs: SELECT votes.user as u, recs.other as s
              FROM votes \
-             JOIN recs ON (votes.story = recs.story);
-         VIEW user_recs: SELECT votes.user as u, recs.other as s
-             FROM votes \
-             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+             JOIN recs ON (votes.story = recs.story);",
     )
     .await
     .unwrap();
@@ -3578,12 +3574,12 @@ async fn join_param_results() {
     votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
     votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
     votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-    let mut votes = g.table("recs").await.unwrap();
-    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut recs = g.table("recs").await.unwrap();
+    recs.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    recs.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'all_user_recs' results.
     let mut query = g.view("all_user_recs").await.unwrap();
@@ -3607,6 +3603,35 @@ async fn join_param_results() {
         (3, 3),
     ];
     assert_eq!(results, expected);
+}
+
+// Tests the case where the source is sharded by a different column than the key column
+// with a parameter.
+#[tokio::test(threaded_scheduler)]
+async fn test_join_across_shards_with_param() {
+    let mut g = start_simple("test_join_across_shards_with_param").await;
+    g.install_recipe(
+        "CREATE TABLE votes (story int, user int);
+         CREATE TABLE recs (story int, other int);
+         VIEW user_recs: SELECT votes.user as u, recs.other as s
+             FROM votes \
+             JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut votes = g.table("votes").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+    let mut votes = g.table("recs").await.unwrap();
+    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
+    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
+    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'user_recs' results.
     let mut query = g.view("user_recs").await.unwrap();
