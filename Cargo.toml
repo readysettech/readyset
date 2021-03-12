@@ -9,6 +9,7 @@ members = [
     "noria/applications",
     "noria/noria-logictest",
     "noria/timestamp_service",
+    "psql-srv",
     "unbounded-interval-tree",
     "launchpad",
     "connectors/debezium_connector",
