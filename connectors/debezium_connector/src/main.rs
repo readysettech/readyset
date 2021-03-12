@@ -97,7 +97,8 @@ async fn main() -> anyhow::Result<()> {
         .set_timeout(timeout)
         .set_eof(eof)
         .set_auto_commit(auto_commit)
-        .build()?
+        .build()
+        .await?
         .start()
         .await
 }

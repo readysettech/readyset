@@ -1,21 +1,25 @@
 extern crate serde_json;
 
-use anyhow::{Error, Result};
+use anyhow::{anyhow, Context};
 use noria::consensus::ZookeeperAuthority;
 use noria::consistency::Timestamp;
 use noria::ControllerHandle;
 use rdkafka::consumer::{CommitMode, Consumer};
+use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use thiserror::Error;
 use tokio::stream::StreamExt;
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace};
 
 mod debezium_message_parser;
 mod kafka_message_consumer_wrapper;
 use debezium_message_parser::{
     DataChange, DataChangePayload, EventKey, EventValue, SchemaChange, Transaction,
 };
+
+use self::kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper;
 
 /// Kafka topics the debezium connector reads from.
 enum Topic {
@@ -27,10 +31,35 @@ enum Topic {
     Transaction,
 }
 
-pub struct DebeziumConnector {
-    kafka_consumer: kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper,
-    zookeeper_conn: String,
-    topics: HashMap<String, Topic>,
+/// Errors encountered when handling a messagae from Kafka
+#[derive(Debug, Error)]
+enum MessageError {
+    /// Errors caused by invalid messages.
+    ///
+    /// Since messages that cause these errors cannot be retried,
+    /// if an error of this type occurs while handling a message the message will still be committed
+    /// in Kafka
+    #[error("Invalid message from kafka: {0}")]
+    InvalidMessage(anyhow::Error),
+
+    /// Recoverable errors encountered when handling a message.
+    ///
+    /// If an error of this type occurs while handling a message the message will *not* be committed
+    /// in Kafka
+    ///
+    /// Since falsely marking an error as internal is safer than falsely marking an error as
+    /// invalid, this is the default variant given by the [`From`] impl for this type.
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
+}
+
+impl MessageError {
+    fn invalid<E>(e: E) -> Self
+    where
+        E: std::error::Error + 'static + Send + Sync,
+    {
+        Self::InvalidMessage(e.into())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -114,7 +143,7 @@ impl Builder {
         self
     }
 
-    pub fn build(&self) -> Result<DebeziumConnector> {
+    pub async fn build(&self) -> anyhow::Result<DebeziumConnector> {
         // for each table, we listen to the topic <dbserver>.<dbname>.<tablename>
         let mut topic_names: Vec<String> = Vec::new();
         let mut topics: HashMap<String, Topic> = HashMap::new();
@@ -141,7 +170,7 @@ impl Builder {
         topic_names.push(transaction_topic.clone());
         topics.insert(transaction_topic, Topic::Transaction);
 
-        let kafka_consumer = kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper::new(
+        let kafka_consumer = Some(KafkaMessageConsumerWrapper::new(
             self.bootstrap_servers.clone().unwrap(),
             topic_names,
             self.group_id.clone().unwrap_or_else(|| {
@@ -154,14 +183,26 @@ impl Builder {
             self.timeout.clone().unwrap(),
             self.eof,
             self.auto_commit,
-        )?;
+        )?);
+
+        let zookeeper_conn = self.zookeeper_conn.as_ref().unwrap().as_str();
+        info!(zookeeper_conn, "Connecting to Noria");
+        let authority = ZookeeperAuthority::new(&zookeeper_conn)?;
+        let noria = ControllerHandle::new(authority).await?;
+        info!("Connection to Noria established");
 
         Ok(DebeziumConnector {
             kafka_consumer,
-            zookeeper_conn: self.zookeeper_conn.clone().unwrap(),
             topics,
+            noria,
         })
     }
+}
+
+pub struct DebeziumConnector {
+    kafka_consumer: Option<KafkaMessageConsumerWrapper>,
+    topics: HashMap<String, Topic>,
+    noria: ControllerHandle<ZookeeperAuthority>,
 }
 
 impl DebeziumConnector {
@@ -169,20 +210,17 @@ impl DebeziumConnector {
         Builder::new()
     }
 
-    async fn handle_schema_message(
-        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
-        message: SchemaChange,
-    ) -> Result<()> {
+    async fn handle_schema_message(&mut self, message: SchemaChange) -> anyhow::Result<()> {
         info!("Handling schema change message");
-        noria_authority.extend_recipe(&message.payload.ddl).await?;
+        self.noria.extend_recipe(&message.payload.ddl).await?;
         Ok(())
     }
 
     async fn handle_change_message(
-        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
-        key_message: EventKey,
+        &mut self,
+        key_message: Option<EventKey>,
         message: DataChange,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         trace!("Handling data change message");
         match &message.payload {
             DataChangePayload::Create(p) => {
@@ -191,18 +229,30 @@ impl DebeziumConnector {
                 if let Some(table_name) = &p.source.table {
                     let after_field_schema = &message.schema.fields[1];
                     let create_vector = p.get_create_vector(after_field_schema)?;
-                    let mut table_mutator = noria_authority.table(table_name).await?;
+                    let mut table_mutator =
+                        self.noria.table(table_name).await.with_context(|| {
+                            format!("Fetching builder for table \"{}\"", table_name)
+                        })?;
                     table_mutator.insert(create_vector).await?
                 }
             }
             DataChangePayload::Update(p) => {
                 if let Some(table_name) = &p.source.table {
-                    let pk_datatype = key_message.get_pk_datatype()?;
+                    let pk_datatype = key_message
+                        .ok_or_else(|| {
+                            MessageError::InvalidMessage(anyhow!(
+                                "Update data change message missing key"
+                            ))
+                        })?
+                        .get_pk_datatype()?;
                     // We know that the payload consist of before, after and source fields
                     // and that too in that specific order.
                     let after_field_schema = &message.schema.fields[1];
                     let update_vector = p.get_update_vector(after_field_schema)?;
-                    let mut table_mutator = noria_authority.table(table_name).await?;
+                    let mut table_mutator =
+                        self.noria.table(table_name).await.with_context(|| {
+                            format!("Fetching builder for table \"{}\"", table_name)
+                        })?;
                     table_mutator
                         .update(vec![pk_datatype], update_vector)
                         .await?
@@ -210,8 +260,17 @@ impl DebeziumConnector {
             }
             DataChangePayload::Delete { source: src } => {
                 if let Some(table_name) = &src.table {
-                    let pk_datatype = key_message.get_pk_datatype()?;
-                    let mut table_mutator = noria_authority.table(table_name).await?;
+                    let pk_datatype = key_message
+                        .ok_or_else(|| {
+                            MessageError::InvalidMessage(anyhow!(
+                                "Delete data change message missing key"
+                            ))
+                        })?
+                        .get_pk_datatype()?;
+                    let mut table_mutator =
+                        self.noria.table(table_name).await.with_context(|| {
+                            format!("Fetching builder for table \"{}\"", table_name)
+                        })?;
                     table_mutator.delete(vec![pk_datatype]).await?
                 }
             }
@@ -223,10 +282,7 @@ impl DebeziumConnector {
     /// When a transaction end message is received, we will increment the
     /// timestamps associated with each changed base table. This new timestamp
     /// will be propagated on the data flow graph.
-    async fn handle_transaction_message(
-        noria_authority: &mut ControllerHandle<ZookeeperAuthority>,
-        message: Transaction,
-    ) -> Result<()> {
+    async fn handle_transaction_message(&mut self, message: Transaction) -> anyhow::Result<()> {
         trace!("Handling transaction message");
         let payload = &message.payload;
         // We currently do not process payload begin messages or transactions
@@ -240,7 +296,7 @@ impl DebeziumConnector {
         let collections = payload
             .data_collections
             .as_ref()
-            .ok_or_else(|| Error::msg("Transaction metadata had no data collections"))?;
+            .ok_or_else(|| anyhow!("Transaction metadata had no data collections"))?;
         let tables = collections.iter().map(|c| {
             let mut tokens = c.data_collection.split('.');
 
@@ -254,84 +310,97 @@ impl DebeziumConnector {
 
             match second {
                 Some(t) => Ok(t),
-                None => first.ok_or_else(|| {
-                    Error::msg("Data collection did not include a valid table name")
-                }),
+                None => first
+                    .ok_or_else(|| anyhow!("Data collection did not include a valid table name")),
             }
         });
 
         for table in tables {
             // Propagate any collection naming errors
-            let mut table_mutator = noria_authority.table(table?).await?;
+            let mut table_mutator = self.noria.table(table?).await?;
             table_mutator.update_timestamp(Timestamp::default()).await?;
         }
         Ok(())
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    async fn handle_message(&mut self, message: &BorrowedMessage<'_>) -> Result<(), MessageError> {
+        trace!("Handling message");
+        let owned_message = message.detach();
+
+        let payload = if let Some(payload) = owned_message.payload() {
+            payload
+        } else {
+            trace!("Received message with empty payload");
+            return Ok(());
+        };
+
+        let value_string = std::str::from_utf8(payload).map_err(MessageError::invalid)?;
+        let value_message: EventValue =
+            serde_json::from_str(&value_string).map_err(MessageError::invalid)?;
+        let topic = self.topics.get(owned_message.topic()).unwrap();
+
+        match topic {
+            Topic::SchemaChange => {
+                self.handle_schema_message(value_message.try_into().unwrap())
+                    .await?;
+            }
+            Topic::DataChange => {
+                // We have to check existence because on deletes, a tombstone message is
+                // sent by the kafka connector.  We really dont use the for anything, so we
+                // just ignore them for now.
+                let key_message = owned_message
+                    .key()
+                    .map(|k| -> anyhow::Result<_> {
+                        let key_string = std::str::from_utf8(k).map_err(MessageError::invalid)?;
+                        let key_message =
+                            serde_json::from_str(&key_string).map_err(MessageError::invalid)?;
+                        Ok(key_message)
+                    })
+                    .transpose()?;
+                self.handle_change_message(key_message, value_message.try_into().unwrap())
+                    .await?;
+            }
+            Topic::Transaction => {
+                if let Some(payload) = owned_message.payload() {
+                    let transaction =
+                        std::str::from_utf8(payload).map_err(MessageError::invalid)?;
+                    let transaction: Transaction =
+                        serde_json::from_str(transaction).map_err(MessageError::invalid)?;
+
+                    self.handle_transaction_message(transaction).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn start(&mut self) -> anyhow::Result<()> {
         info!("Running debezium connector");
-        let mut message_stream = self.kafka_consumer.kafka_consumer.start();
+        let consumer = self
+            .kafka_consumer
+            .take()
+            .expect("Cannot start() a debezium connector twice");
+        let mut message_stream = consumer.kafka_consumer.start();
 
-        info!(
-            zookeeper_addr = &self.zookeeper_conn.as_str(),
-            "Connecting to Noria"
-        );
-        let authority = ZookeeperAuthority::new(&self.zookeeper_conn)?;
-        let mut ch = ControllerHandle::new(authority).await?;
         while let Some(message) = message_stream.next().await {
-            if let Ok(m) = message {
-                let owned_message = m.detach();
-
-                let payload = if let Some(payload) = owned_message.payload() {
-                    payload
-                } else {
-                    warn!("Received message with empty payload");
-                    self.kafka_consumer
-                        .kafka_consumer
-                        .commit_message(&m, CommitMode::Async)?;
-                    return Ok(());
-                };
-
-                let value_string = std::str::from_utf8(payload)?;
-                let value_message: EventValue = serde_json::from_str(&value_string)?;
-                let topic = self.topics.get(owned_message.topic()).unwrap();
-
-                match topic {
-                    Topic::SchemaChange => {
-                        DebeziumConnector::handle_schema_message(
-                            &mut ch,
-                            value_message.try_into().unwrap(),
-                        )
-                        .await?;
-                    }
-                    Topic::DataChange => {
-                        // We have to check existence because on deletes, a tombstone message is
-                        // sent by the kafka connector.  We really dont use the for anything, so we
-                        // just ignore them for now.
-                        let key_string = std::str::from_utf8(owned_message.key().unwrap())?;
-                        let key_message = serde_json::from_str(&key_string)?;
-                        DebeziumConnector::handle_change_message(
-                            &mut ch,
-                            key_message,
-                            value_message.try_into().unwrap(),
-                        )
-                        .await?;
-                    }
-                    Topic::Transaction => {
-                        if owned_message.payload().is_some() {
-                            let transaction =
-                                std::str::from_utf8(owned_message.payload().unwrap())?;
-                            let transaction: Transaction = serde_json::from_str(transaction)?;
-
-                            DebeziumConnector::handle_transaction_message(&mut ch, transaction)
-                                .await?;
+            match message {
+                Ok(message) => {
+                    if let Err(e) = self.handle_message(&message).await {
+                        error!("Error handling message: {:#}", e);
+                        if matches!(e, MessageError::InvalidMessage(_)) {
+                            // Continue so we don't commit the message
+                            continue;
                         }
                     }
-                }
 
-                self.kafka_consumer
-                    .kafka_consumer
-                    .commit_message(&m, CommitMode::Async)?;
+                    consumer
+                        .kafka_consumer
+                        .commit_message(&message, CommitMode::Async)?;
+                }
+                Err(e) => error!(
+                    error = e.to_string().as_str(),
+                    "Received error from kafka message stream"
+                ),
             }
         }
         Ok(())
