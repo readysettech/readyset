@@ -902,7 +902,11 @@ fn make_project_node(
 
     let projected_column_ids = emit
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, table_mapping))
+        .map(|c| {
+            parent
+                .borrow()
+                .find_source_for_child_column(c, table_mapping)
+        })
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
