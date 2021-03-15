@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+systemctl stop debezium-connector
+
 sudo tee /etc/default/debezium-connector > /dev/null <<EOF
 TABLES=${tables}
 SERVER_NAME=${db_name}
@@ -10,4 +12,5 @@ KAFKA_URL=${kafka_ip}:9092
 NORIA_DEPLOYMENT=${deployment}
 EOF
 
+systemctl reset-failed
 systemctl restart debezium-connector

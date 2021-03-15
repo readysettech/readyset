@@ -17,6 +17,8 @@ find_nvme_device() {
     return 1
 }
 
+systemctl stop zookeeper
+
 block_device_name=$(curl http://169.254.169.254/latest/meta-data/block-device-mapping/ebs1)
 if [ -f "/dev/$block_device_name" ]; then
     block_device="/dev/$block_device_name"
@@ -32,4 +34,6 @@ fi
 mkfs.ext4 "$block_device"
 mount "$block_device" /var/lib/zookeeper
 echo "$block_device /var/lib/zookeeper ext4 rw,discard,x-systemd.growfs 0 0" >> /etc/fstab
+
+systemctl reset-failed
 systemctl restart zookeeper

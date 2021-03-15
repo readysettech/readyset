@@ -17,6 +17,8 @@ find_nvme_device() {
     return 1
 }
 
+systemctl stop noria
+
 sudo tee /etc/default/noria > /dev/null <<EOF
 NORIA_DEPLOYMENT=${deployment}
 ZOOKEEPER_URL=${zookeeper_ip}:2181
@@ -41,4 +43,5 @@ mkfs.ext4 "$block_device"
 mount "$block_device" /var/lib/noria
 echo "$block_device /var/lib/noria ext4 rw,discard,x-systemd.growfs 0 0" >> /etc/fstab
 
-systemctl restart noria
+systemctl reset-failed
+systemctl start noria

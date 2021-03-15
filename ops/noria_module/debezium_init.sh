@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+systemctl stop debezium-connect
+
 sudo tee /etc/default/debezium-connect > /dev/null <<EOF
 BOOTSTRAP_SERVERS=${kafka_ip}:9092
 EOF
 
+systemctl reset-failed
 systemctl restart debezium-connect
 
 # Wait 120 seconds for it to come up
