@@ -34,6 +34,7 @@ const DESCRIBE_TYPE_PREPARED_STATEMENT: u8 = b'S';
 const SSL_REQUEST_CODE: i32 = 80877103;
 
 const STARTUP_MESSAGE_DATABASE_PARAMETER: &str = "database";
+const STARTUP_MESSAGE_TERMINATOR: &str = "";
 const STARTUP_MESSAGE_USER_PARAMETER: &str = "user";
 
 const HEADER_LENGTH: usize = 5;
@@ -87,7 +88,7 @@ impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
                     let mut database: Option<BytesStr> = None;
                     loop {
                         let key = get_str(msg)?;
-                        if key.borrow() as &str == "" {
+                        if key.borrow() as &str == STARTUP_MESSAGE_TERMINATOR {
                             break;
                         }
                         let val = get_str(msg)?;
