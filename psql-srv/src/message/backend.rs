@@ -15,11 +15,11 @@ const SSL_RESPONSE_N: u8 = b'N';
 ///
 /// # Type Parameters
 ///
-/// * `R` - Represents a row of data values. A value of type `R`, upon iteration, emits values that
-///         are convertable into type `Value`, which can be serialized along with the rest of the
-///         `BackendMessage`.
+/// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein
+///         a value of type `R` will, upon iteration, emit values that are convertable into type
+///         `Value`, which can be serialized along with the rest of the `BackendMessage`.
 #[derive(Debug)]
-pub enum BackendMessage<R: IntoIterator<Item: Into<Value>>> {
+pub enum BackendMessage<R> {
     AuthenticationOk,
     BindComplete,
     CloseComplete,
