@@ -38,7 +38,12 @@ impl<R: IntoIterator<Item: Into<Value>>> Codec<R> {
     /// Set the data types of a prepared statement's parameters. These data types must be set
     /// before the data values within a `FrontendMessage::Bind` message referencing the named
     /// pepared statement can be parsed.
-    pub fn set_statement_param_types(&mut self, statement_name: String, types: Vec<Type>) {
-        self.statement_param_types.insert(statement_name, types);
+    pub fn set_statement_param_types(&mut self, statement_name: &str, types: Vec<Type>) {
+        self.statement_param_types
+            .insert(statement_name.to_string(), types);
+    }
+
+    pub fn clear_statement_param_types(&mut self, statement_name: &str) {
+        self.statement_param_types.remove(statement_name);
     }
 }

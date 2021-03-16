@@ -2,6 +2,7 @@ use crate::bytes::BytesStr;
 use crate::message::TransferFormat;
 use crate::r#type::Type;
 use crate::value::Value;
+use std::fmt;
 
 /// A message received from a Postgresql frontend (client). The different types of frontend
 /// messages, and the fields they contain, are described in the
@@ -56,4 +57,21 @@ pub enum FrontendMessage {
 pub enum StatementName {
     Portal(BytesStr),
     PreparedStatement(BytesStr),
+}
+
+impl fmt::Display for FrontendMessage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Bind { .. } => write!(f, "Bind"),
+            Self::Close { .. } => write!(f, "Close"),
+            Self::Describe { .. } => write!(f, "Describe"),
+            Self::Execute { .. } => write!(f, "Execute"),
+            Self::Parse { .. } => write!(f, "Parse"),
+            Self::Query { .. } => write!(f, "Query"),
+            Self::SSLRequest => write!(f, "SSLRequest"),
+            Self::StartupMessage { .. } => write!(f, "StartupMessage"),
+            Self::Sync => write!(f, "Sync"),
+            Self::Terminate => write!(f, "Terminate"),
+        }
+    }
 }

@@ -72,6 +72,7 @@ pub enum CommandCompleteTag {
     Update(u64),
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum ErrorSeverity {
     Error,

@@ -91,9 +91,9 @@ impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
                     Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
                 };
                 let tag_str = std::str::from_utf8(&tag_buf)?;
-                let tag_data_len = tag_str.find(NUL_CHAR).ok_or(Error::InternalError(
-                    "error formatting command complete tag".to_string(),
-                ))?;
+                let tag_data_len = tag_str.find(NUL_CHAR).ok_or_else(|| {
+                    Error::InternalError("error formatting command complete tag".to_string())
+                })?;
                 put_str(&tag_str[..tag_data_len], dst);
             }
 
@@ -194,9 +194,9 @@ fn put_i16(val: i16, dst: &mut BytesMut) {
 }
 
 fn set_i16(val: i16, dst: &mut BytesMut, ofs: usize) -> Result<(), Error> {
-    let mut window = dst.get_mut(ofs..ofs + 2).ok_or(Error::InternalError(
-        "error writing message field".to_string(),
-    ))?;
+    let mut window = dst
+        .get_mut(ofs..ofs + 2)
+        .ok_or_else(|| Error::InternalError("error writing message field".to_string()))?;
     window.put_i16(val);
     Ok(())
 }
@@ -206,9 +206,9 @@ fn put_i32(val: i32, dst: &mut BytesMut) {
 }
 
 fn set_i32(val: i32, dst: &mut BytesMut, ofs: usize) -> Result<(), Error> {
-    let mut window = dst.get_mut(ofs..ofs + 4).ok_or(Error::InternalError(
-        "error writing message field".to_string(),
-    ))?;
+    let mut window = dst
+        .get_mut(ofs..ofs + 4)
+        .ok_or_else(|| Error::InternalError("error writing message field".to_string()))?;
     window.put_i32(val);
     Ok(())
 }
