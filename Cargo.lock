@@ -4221,6 +4221,7 @@ dependencies = [
  "bytes 0.5.6",
  "chrono",
  "futures 0.3.12",
+ "nom-sql",
  "postgres 0.17.5",
  "postgres-types",
  "thiserror",

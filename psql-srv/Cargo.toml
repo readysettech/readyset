@@ -14,8 +14,15 @@ async-trait = "0.1"
 bytes = "0.5"
 chrono = "0.4.19"
 futures = "0.3.12"
+nom-sql = { version = "0.0.11", path = "../nom-sql" }
 postgres = "0.17"
 postgres-types = { version = "0.1", features = ["with-chrono-0_4"] }
 thiserror = "1.0.24"
 tokio = { version = "0.2.0" }
 tokio-util = { version = "0.2", features = ["codec"] }
+
+[dev-dependencies]
+tokio = { version = "0.2.0", features = ["macros", "net"] }
+
+[[example]]
+name = "serve_one"

@@ -58,12 +58,12 @@ impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
             let message_length = if self.is_starting_up {
                 let mut length_window = src
                     .get(0..4)
-                    .ok_or(Error::InternalError("missing message header".to_string()))?;
+                    .ok_or_else(|| Error::InternalError("missing message header".to_string()))?;
                 usize::try_from(length_window.get_i32())?
             } else {
                 let mut length_window = src
                     .get(1..5)
-                    .ok_or(Error::InternalError("missing message header".to_string()))?;
+                    .ok_or_else(|| Error::InternalError("missing message header".to_string()))?;
                 usize::try_from(length_window.get_i32())? + 1 // add length of message id byte
             };
 
@@ -129,9 +129,9 @@ impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
                 let param_data_types = self
                     .statement_param_types
                     .get(prepared_statement_name.borrow() as &str)
-                    .ok_or(Error::UnknownPreparedStatement(
-                        prepared_statement_name.to_string(),
-                    ))?;
+                    .ok_or_else(|| {
+                        Error::UnknownPreparedStatement(prepared_statement_name.to_string())
+                    })?;
                 let n_params = get_i16(msg)?;
                 if usize::try_from(n_params)? != param_data_types.len() {
                     Err(Error::IncorrectParameterCount(n_params))?;
@@ -414,7 +414,7 @@ mod tests {
     fn test_decode_bind_simple() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();
-        codec.set_statement_param_types("prepared_statement_name".to_string(), vec![]);
+        codec.set_statement_param_types("prepared_statement_name", vec![]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
         buf.put_i32(4 + 12 + 24 + 2 + 2 + 2); // size
@@ -436,10 +436,7 @@ mod tests {
     fn test_decode_bind_complex() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();
-        codec.set_statement_param_types(
-            "prepared_statement_name".to_string(),
-            vec![Type::INT4, Type::TEXT],
-        );
+        codec.set_statement_param_types("prepared_statement_name", vec![Type::INT4, Type::TEXT]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
         buf.put_i32(4 + 12 + 24 + 2 + 2 * 2 + 2 + 4 + 4 + 4 + 9 + 2 + 3 * 2); // size
@@ -473,7 +470,7 @@ mod tests {
     fn test_decode_bind_null() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();
-        codec.set_statement_param_types("prepared_statement_name".to_string(), vec![Type::TEXT]);
+        codec.set_statement_param_types("prepared_statement_name", vec![Type::TEXT]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
         buf.put_i32(4 + 12 + 24 + 2 + 2 + 2 + 4 + 2); // size
@@ -497,7 +494,7 @@ mod tests {
     fn test_decode_bind_invalid_value() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();
-        codec.set_statement_param_types("prepared_statement_name".to_string(), vec![Type::TEXT]);
+        codec.set_statement_param_types("prepared_statement_name", vec![Type::TEXT]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
         buf.put_i32(4 + 12 + 24 + 2 + 1 * 2 + 2 + 4 + 10 + 2); // size
@@ -516,7 +513,7 @@ mod tests {
     fn test_decode_bind_incomplete_format() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();
-        codec.set_statement_param_types("prepared_statement_name".to_string(), vec![]);
+        codec.set_statement_param_types("prepared_statement_name", vec![]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
         buf.put_i32(4 + 12 + 24 + 2 + 2 + 2); // size
