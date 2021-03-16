@@ -2,9 +2,9 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use column::Column;
-use common::{column_identifier_no_alias, ws_sep_comma};
-use keywords::escape_if_keyword;
+use crate::column::Column;
+use crate::common::{column_identifier_no_alias, ws_sep_comma};
+use crate::keywords::escape_if_keyword;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -82,7 +82,7 @@ pub fn order_clause(i: &[u8]) -> IResult<&[u8], OrderClause> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use select::selection;
+    use crate::select::selection;
 
     #[test]
     fn order_clause() {

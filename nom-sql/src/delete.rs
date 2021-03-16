@@ -1,15 +1,15 @@
 use nom::character::complete::multispace1;
 use std::{fmt, str};
 
-use common::{schema_table_reference, statement_terminator};
-use condition::ConditionExpression;
-use keywords::escape_if_keyword;
+use crate::common::{schema_table_reference, statement_terminator};
+use crate::condition::ConditionExpression;
+use crate::keywords::escape_if_keyword;
+use crate::select::where_clause;
+use crate::table::Table;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
-use select::where_clause;
-use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
@@ -50,12 +50,12 @@ pub fn deletion(i: &[u8]) -> IResult<&[u8], DeleteStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use column::Column;
-    use common::{BinaryOperator, Literal};
-    use condition::ConditionBase::*;
-    use condition::ConditionExpression::*;
-    use condition::ConditionTree;
-    use table::Table;
+    use crate::column::Column;
+    use crate::common::{BinaryOperator, Literal};
+    use crate::condition::ConditionBase::*;
+    use crate::condition::ConditionExpression::*;
+    use crate::condition::ConditionTree;
+    use crate::table::Table;
 
     #[test]
     fn simple_delete() {

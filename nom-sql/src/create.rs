@@ -3,23 +3,23 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use column::{column_specification, Column, ColumnSpecification};
-use common::{
+use crate::column::{column_specification, Column, ColumnSpecification};
+use crate::common::{
     column_identifier_no_alias, schema_table_reference, sql_identifier, statement_terminator,
     ws_sep_comma, TableKey,
 };
-use compound_select::{compound_selection, CompoundSelectStatement};
-use create_table_options::table_options;
-use keywords::escape_if_keyword;
+use crate::compound_select::{compound_selection, CompoundSelectStatement};
+use crate::create_table_options::table_options;
+use crate::keywords::escape_if_keyword;
+use crate::order::{order_type, OrderType};
+use crate::select::{nested_selection, SelectStatement};
+use crate::table::Table;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::{many0, many1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
-use order::{order_type, OrderType};
-use select::{nested_selection, SelectStatement};
-use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -339,8 +339,8 @@ mod tests {
     use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
 
     use super::*;
-    use column::Column;
-    use table::Table;
+    use crate::column::Column;
+    use crate::table::Table;
 
     #[test]
     fn sql_types() {
@@ -669,8 +669,8 @@ mod tests {
 
     #[test]
     fn simple_create_view() {
-        use common::{BinaryOperator, FieldDefinitionExpression};
-        use condition::{ConditionBase, ConditionExpression, ConditionTree};
+        use crate::common::{BinaryOperator, FieldDefinitionExpression};
+        use crate::condition::{ConditionBase, ConditionExpression, ConditionTree};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
@@ -700,8 +700,8 @@ mod tests {
 
     #[test]
     fn compound_create_view() {
-        use common::FieldDefinitionExpression;
-        use compound_select::{CompoundSelectOperator, CompoundSelectStatement};
+        use crate::common::FieldDefinitionExpression;
+        use crate::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
 

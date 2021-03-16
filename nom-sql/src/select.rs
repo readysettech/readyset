@@ -2,22 +2,22 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use column::Column;
-use common::FieldDefinitionExpression;
-use common::{
+use crate::column::Column;
+use crate::common::FieldDefinitionExpression;
+use crate::common::{
     as_alias, field_definition_expr, field_list, statement_terminator, table_list, table_reference,
     unsigned_number,
 };
-use condition::{condition_expr, ConditionExpression};
-use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
+use crate::condition::{condition_expr, ConditionExpression};
+use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
+use crate::order::{order_clause, OrderClause};
+use crate::table::Table;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
-use order::{order_clause, OrderClause};
-use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -313,16 +313,16 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use case::{CaseWhenExpression, ColumnOrLiteral};
-    use column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
-    use common::{
+    use crate::case::{CaseWhenExpression, ColumnOrLiteral};
+    use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
+    use crate::common::{
         BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
     };
-    use condition::ConditionBase::*;
-    use condition::ConditionExpression::*;
-    use condition::ConditionTree;
-    use order::OrderType;
-    use table::Table;
+    use crate::condition::ConditionBase::*;
+    use crate::condition::ConditionExpression::*;
+    use crate::condition::ConditionTree;
+    use crate::order::OrderType;
+    use crate::table::Table;
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn select_literals() {
-        use common::Literal;
+        use crate::common::Literal;
 
         let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
         // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
@@ -1326,7 +1326,7 @@ mod tests {
 
     #[test]
     fn project_arithmetic_expressions() {
-        use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+        use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 
         let qstr = "SELECT MAX(o_id)-3333 FROM orders;";
         let res = selection(qstr.as_bytes());
@@ -1356,7 +1356,7 @@ mod tests {
 
     #[test]
     fn project_arithmetic_expressions_with_aliases() {
-        use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+        use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 
         let qstr = "SELECT max(o_id) * 2 as double_max FROM orders;";
         let res = selection(qstr.as_bytes());

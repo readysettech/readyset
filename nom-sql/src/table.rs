@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str;
 
-use keywords::escape_if_keyword;
+use crate::keywords::escape_if_keyword;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Table {

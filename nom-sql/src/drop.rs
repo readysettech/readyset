@@ -1,13 +1,13 @@
 use nom::character::complete::multispace0;
 use std::{fmt, str};
 
-use common::{statement_terminator, table_list};
-use keywords::escape_if_keyword;
+use crate::common::{statement_terminator, table_list};
+use crate::keywords::escape_if_keyword;
+use crate::table::Table;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
-use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
@@ -64,7 +64,7 @@ pub fn drop_table(i: &[u8]) -> IResult<&[u8], DropTableStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use table::Table;
+    use crate::table::Table;
 
     #[test]
     fn simple_drop_table() {

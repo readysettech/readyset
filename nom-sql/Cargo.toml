@@ -1,15 +1,14 @@
 [package]
 name = "nom-sql"
 version = "0.0.11"
-authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
+authors = ["Malte Schwarzkopf <malte@csail.mit.edu>", "ReadySet Technology, inc."]
+edition = "2018"
 
-documentation = "https://docs.rs/nom-sql"
-homepage = "https://github.com/ms705/nom-sql"
-repository = "https://github.com/ms705/nom-sql.git"
+documentation = "https://docs.readyset.io/nom_sql/index.html"
+homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql"
+repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 
 description = "A SQL parser written using nom."
-
-license = "MIT"
 
 [dependencies]
 serde = "1.0"

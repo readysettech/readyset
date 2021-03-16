@@ -2,15 +2,15 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use common::{opt_delimited, statement_terminator};
+use crate::common::{opt_delimited, statement_terminator};
+use crate::order::{order_clause, OrderClause};
+use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
-use order::{order_clause, OrderClause};
-use select::{limit_clause, nested_selection, LimitClause, SelectStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -131,9 +131,9 @@ pub fn compound_selection(i: &[u8]) -> IResult<&[u8], CompoundSelectStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use column::Column;
-    use common::{FieldDefinitionExpression, FieldValueExpression, Literal};
-    use table::Table;
+    use crate::column::Column;
+    use crate::common::{FieldDefinitionExpression, FieldValueExpression, Literal};
+    use crate::table::Table;
 
     #[test]
     fn union() {

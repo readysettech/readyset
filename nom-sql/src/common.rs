@@ -7,16 +7,16 @@ use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
 
-use arithmetic::{arithmetic_expression, ArithmeticExpression};
-use case::case_when_column;
-use column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
-use keywords::{escape_if_keyword, sql_keyword};
+use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
+use crate::case::case_when_column;
+use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
+use crate::keywords::{escape_if_keyword, sql_keyword};
+use crate::table::Table;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::combinator::opt;
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {

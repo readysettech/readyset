@@ -3,9 +3,9 @@ use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
 
-use case::CaseWhenExpression;
-use common::{column_identifier_no_alias, parse_comment, sql_identifier, Literal, SqlType};
-use keywords::escape_if_keyword;
+use crate::case::CaseWhenExpression;
+use crate::common::{column_identifier_no_alias, parse_comment, sql_identifier, Literal, SqlType};
+use crate::keywords::escape_if_keyword;
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
