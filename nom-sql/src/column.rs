@@ -10,7 +10,7 @@ use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
 
@@ -263,6 +263,8 @@ fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         multispace0,
         tag_no_case("default"),
         multispace1,
+        // TODO(grfn): This really should just be a generic expression parser T.T
+        // https://app.clubhouse.io/readysettech/story/101/unify-the-expression-ast
         alt((
             map(
                 delimited(tag("'"), take_until("'"), tag("'")),
@@ -275,9 +277,10 @@ fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
             }),
             map(tag("''"), |_| Literal::String(String::from(""))),
             map(tag_no_case("null"), |_| Literal::Null),
-            map(tag_no_case("current_timestamp"), |_| {
-                Literal::CurrentTimestamp
-            }),
+            map(
+                terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
+                |_| Literal::CurrentTimestamp,
+            ),
         )),
         multispace0,
     ))(i)?;
@@ -410,5 +413,29 @@ mod tests {
         assert_eq!(format!("{}", c1), "count(*) AS foo");
         assert_eq!(format!("{}", c2), "count(*)");
         assert_eq!(format!("{}", c3), "sum(mytab.foo)");
+    }
+
+    #[test]
+    fn multiple_constraints() {
+        let (_, res) =
+            column_specification(b"`created_at` timestamp NOT NULL DEFAULT current_timestamp()")
+                .unwrap();
+        assert_eq!(
+            res,
+            ColumnSpecification {
+                column: Column {
+                    name: "created_at".to_owned(),
+                    alias: None,
+                    table: None,
+                    function: None
+                },
+                sql_type: SqlType::Timestamp,
+                comment: None,
+                constraints: vec![
+                    ColumnConstraint::NotNull,
+                    ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
+                ]
+            }
+        );
     }
 }
