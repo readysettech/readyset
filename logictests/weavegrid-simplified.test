@@ -1,0 +1,103 @@
+# CONFIDENTIAL TO WEAVEGRID
+
+statement ok
+CREATE TABLE `users` (
+  `user_id` int(11) NOT NULL AUTO_INCREMENT,
+  `email_address` varchar(64) NOT NULL,
+  `signup_date` date DEFAULT NULL,
+  `user_first_name` varchar(32) DEFAULT NULL,
+  `user_last_name` varchar(32) DEFAULT NULL,
+  `utility_id` int(11) NOT NULL DEFAULT 1,
+  `role` varchar(16) DEFAULT 'user',
+  `confirmed_dttm` timestamp NULL DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT 1,
+  `password_hash` varchar(128) DEFAULT NULL,
+  `avatar_hash` varchar(32) DEFAULT NULL,
+  `session_token` varchar(256) NOT NULL,
+  `last_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp()
+)
+
+statement ok
+CREATE TABLE `registrations` (
+  `registration_id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `oem_id` int(11) NOT NULL,
+  `oem_username` varchar(128) DEFAULT NULL,
+  `oem_token_key` varchar(32) DEFAULT NULL,
+  `last_poll_status` tinyint(4) DEFAULT NULL,
+  `last_poll_msg` varchar(128) DEFAULT NULL,
+  `last_poll_attempt` timestamp NULL DEFAULT current_timestamp(),
+  `last_polled_at` timestamp NULL DEFAULT NULL,
+  `poll_freq_secs` int(11) DEFAULT 86400,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`registration_id`),
+  UNIQUE KEY `user_oem` (`user_id`,`oem_id`),
+)
+
+statement ok
+CREATE TABLE `utilities` (
+  `utility_id` int(11) NOT NULL AUTO_INCREMENT,
+  `utility_acronym` varchar(8) DEFAULT NULL,
+  `utility_display_name` varchar(32) DEFAULT NULL,
+  `time_zone` varchar(64) NOT NULL DEFAULT 'UTC',
+  `is_eligible` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`utility_id`),
+  UNIQUE KEY `utility_name` (`utility_display_name`)
+)
+
+statement ok
+CREATE TABLE `utility_peak_periods` (
+  `peak_periods_id` int(11) NOT NULL AUTO_INCREMENT,
+  `utility_id` int(11) DEFAULT NULL,
+  `start_month` int(11) DEFAULT NULL,
+  `end_month` int(11) DEFAULT NULL,
+  `local_start_time` time DEFAULT NULL,
+  `local_end_time` time DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`peak_periods_id`)
+)
+
+statement ok
+CREATE TABLE `vehicles` (
+  `vehicle_id` int(11) NOT NULL AUTO_INCREMENT,
+  `registration_id` int(11) NOT NULL,
+  `vin` char(32) NOT NULL,
+  `display_name` varchar(128) DEFAULT NULL,
+  `ext_color` varchar(32) DEFAULT NULL,
+  `model` varchar(32) DEFAULT NULL,
+  `model_year` char(4) DEFAULT NULL,
+  `battery_size_kwh` int(11) DEFAULT NULL,
+  `home_location_id` int(11) DEFAULT NULL,
+  `last_poll_status` tinyint(4) DEFAULT NULL,
+  `last_poll_msg` varchar(128) DEFAULT NULL,
+  `last_poll_attempt` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_polled_at` timestamp NULL DEFAULT NULL,
+  `poll_freq_secs` smallint(5) unsigned DEFAULT 900,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`vehicle_id`),
+)
+
+statement ok
+CREATE TABLE `vehicle_load_profiles` (
+  `vehicle_load_profile_id` int(11) NOT NULL AUTO_INCREMENT,
+  `vehicle_id` int(11) NOT NULL,
+  `charge_event_id` int(11) DEFAULT NULL,
+  `start_dttm` timestamp NULL DEFAULT NULL,
+  `end_dttm` timestamp NULL DEFAULT NULL,
+  `is_home` tinyint(1) DEFAULT NULL,
+  `energy_delivered` float DEFAULT NULL,
+  `energy_added` float DEFAULT NULL,
+  `soc_added` float DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`vehicle_load_profile_id`),
+)
