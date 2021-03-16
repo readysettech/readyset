@@ -50,6 +50,8 @@ pub enum DataType {
     TinyText([u8; TINYTEXT_WIDTH]),
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
+    /// A time-of-day without a date part
+    Time(NaiveTime),
 }
 
 impl fmt::Display for DataType {
@@ -74,6 +76,7 @@ impl fmt::Display for DataType {
                 }
             }
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
+            DataType::Time(t) => write!(f, "{}", t.format(TIME_FORMAT)),
         }
     }
 }
@@ -96,12 +99,17 @@ impl fmt::Debug for DataType {
             DataType::UnsignedInt(n) => write!(f, "UnsignedInt({})", n),
             DataType::BigInt(n) => write!(f, "BigInt({})", n),
             DataType::UnsignedBigInt(n) => write!(f, "UnsignedBigInt({})", n),
+            DataType::Time(t) => f.debug_tuple("Time").field(&t).finish(),
         }
     }
 }
 
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+/// The format for times when parsed as text
+pub const TIME_FORMAT: &str = "%H:%M:%S";
+
 /// The format for dates when parsed as text
 pub const DATE_FORMAT: &str = "%Y-%m-%d";
 
@@ -113,13 +121,14 @@ impl DataType {
             DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText([0; 15]),
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MIN_DATE,
-                chrono::naive::NaiveTime::from_hms(0, 0, 0),
+                NaiveTime::from_hms(0, 0, 0),
             )),
             DataType::Real(..) => DataType::Real(i64::min_value(), i32::max_value()),
             DataType::Int(_) => DataType::Int(i32::min_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
             DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
+            DataType::Time(_) => DataType::Time(NaiveTime::from_hms(0, 0, 0)),
         }
     }
 
@@ -132,13 +141,14 @@ impl DataType {
             DataType::TinyText(_) => DataType::TinyText([u8::max_value(); 15]),
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MAX_DATE,
-                chrono::naive::NaiveTime::from_hms(23, 59, 59),
+                NaiveTime::from_hms(23, 59, 59),
             )),
             DataType::Real(..) => DataType::Real(i64::max_value(), i32::max_value()),
             DataType::Int(_) => DataType::Int(i32::max_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(u32::max_value()),
             DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
+            DataType::Time(_) => DataType::Time(NaiveTime::from_hms(23, 59, 59)),
         }
     }
 
@@ -196,6 +206,7 @@ impl DataType {
             Self::Text(_) => Some(Text),
             Self::TinyText(_) => Some(Tinytext),
             Self::Timestamp(_) => Some(Timestamp),
+            Self::Time(_) => Some(Time),
         }
     }
 
@@ -300,6 +311,12 @@ impl DataType {
                     .map(|date| {
                         Self::Timestamp(NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0)))
                     })
+                    .map(Cow::Owned)
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
+                NaiveTime::parse_from_str(self.into(), TIME_FORMAT)
+                    .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
+                    .map(Self::Time)
                     .map(Cow::Owned)
             }
             (_, Some(Bigint(_)), Int(_)) => {
@@ -431,6 +448,7 @@ impl PartialEq for DataType {
             }
             (&DataType::Real(ai, af), &DataType::Real(bi, bf)) => ai == bi && af == bf,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
+            (&DataType::Time(ta), &DataType::Time(tb)) => ta == tb,
             (&DataType::None, &DataType::None) => true,
 
             _ => false,
@@ -480,6 +498,7 @@ impl Ord for DataType {
                 ai.cmp(bi).then_with(|| af.cmp(bf))
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
+            (&DataType::Time(ta), &DataType::Time(ref tb)) => ta.cmp(tb),
             (&DataType::None, &DataType::None) => Ordering::Equal,
 
             // order Ints, Reals, Text, Timestamps, None
@@ -489,7 +508,7 @@ impl Ord for DataType {
             | (&DataType::UnsignedBigInt(..), _) => Ordering::Greater,
             (&DataType::Real(..), _) => Ordering::Greater,
             (&DataType::Text(..), _) | (&DataType::TinyText(..), _) => Ordering::Greater,
-            (&DataType::Timestamp(..), _) => Ordering::Greater,
+            (&DataType::Timestamp(..) | DataType::Time(_), _) => Ordering::Greater,
             (&DataType::None, _) => Ordering::Greater,
         }
     }
@@ -519,6 +538,7 @@ impl Hash for DataType {
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
+            DataType::Time(t) => t.hash(state),
         }
     }
 }
@@ -658,6 +678,12 @@ impl<'a> From<&'a Literal> for DataType {
 impl From<Literal> for DataType {
     fn from(l: Literal) -> Self {
         (&l).into()
+    }
+}
+
+impl From<NaiveTime> for DataType {
+    fn from(t: NaiveTime) -> Self {
+        DataType::Time(t)
     }
 }
 
@@ -1081,7 +1107,7 @@ impl Arbitrary for DataType {
     type Strategy = proptest::strategy::BoxedStrategy<DataType>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use crate::util::arbitrary::arbitrary_naive_date_time;
+        use crate::util::arbitrary::{arbitrary_naive_date_time, arbitrary_naive_time};
         use proptest::arbitrary::any;
         use proptest::prelude::*;
         use DataType::*;
@@ -1095,6 +1121,7 @@ impl Arbitrary for DataType {
             any::<(i64, i32)>().prop_map(|(i, f)| Real(i, f)),
             any::<String>().prop_map(DataType::from),
             arbitrary_naive_date_time().prop_map(Timestamp),
+            arbitrary_naive_time().prop_map(Time),
         ]
         .boxed()
     }
@@ -1723,9 +1750,34 @@ mod tests {
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
     }
 
+    #[allow(clippy::eq_op)]
+    mod eq {
+        use super::*;
+        use test_strategy::proptest;
+
+        #[proptest]
+        fn reflexive(dt: DataType) {
+            assert!(dt == dt);
+        }
+
+        #[proptest]
+        fn symmetric(dt1: DataType, dt2: DataType) {
+            assert_eq!(dt1 == dt2, dt2 == dt1);
+        }
+
+        #[proptest]
+        fn transitive(dt1: DataType, dt2: DataType, dt3: DataType) {
+            if dt1 == dt2 && dt2 == dt3 {
+                assert!(dt1 == dt3)
+            }
+        }
+    }
+
     mod coerce_to {
         use super::*;
-        use crate::util::arbitrary::{arbitrary_naive_date, arbitrary_naive_date_time};
+        use crate::util::arbitrary::{
+            arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
+        };
         use proptest::sample::select;
         use proptest::strategy::Strategy;
         use test_strategy::proptest;
@@ -1743,6 +1795,14 @@ mod tests {
             let expected = DataType::from(ndt);
             let input = DataType::from(ndt.format(TIMESTAMP_FORMAT).to_string());
             let result = input.coerce_to(&Timestamp).unwrap();
+            assert_eq!(*result, expected);
+        }
+
+        #[proptest]
+        fn times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
+            let expected = DataType::from(nt);
+            let input = DataType::from(nt.format(TIME_FORMAT).to_string());
+            let result = input.coerce_to(&Time).unwrap();
             assert_eq!(*result, expected);
         }
 

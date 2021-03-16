@@ -314,7 +314,7 @@ async fn check_query(
                             let s: &str = (&v).into();
                             s.to_string()
                         }
-                        DataType::Timestamp(_) => unimplemented!(),
+                        DataType::Timestamp(_) | DataType::Time(_) => unimplemented!(),
                     })
                     .collect()
             })

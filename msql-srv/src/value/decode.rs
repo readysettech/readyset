@@ -205,7 +205,7 @@ impl<'a> Into<&'a str> for Value<'a> {
     }
 }
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 impl<'a> Into<NaiveDate> for Value<'a> {
     fn into(self) -> NaiveDate {
         if let ValueInner::Date(mut v) = self.0 {
@@ -243,6 +243,23 @@ impl<'a> Into<NaiveDateTime> for Value<'a> {
             }
         } else {
             panic!("invalid type conversion from {:?} to datetime", self)
+        }
+    }
+}
+
+impl<'a> Into<NaiveTime> for Value<'a> {
+    fn into(self) -> NaiveTime {
+        if let ValueInner::Time(mut v) = self.0 {
+            v.read_u8().unwrap(); // sign
+            v.read_u32::<LittleEndian>().unwrap(); // days
+            NaiveTime::from_hms_micro(
+                v.read_u8().unwrap().into(),
+                v.read_u8().unwrap().into(),
+                v.read_u8().unwrap().into(),
+                v.read_u32::<LittleEndian>().unwrap_or(0),
+            )
+        } else {
+            panic!("Invalid type conversion from {:?} to time", self)
         }
     }
 }
@@ -449,10 +466,16 @@ mod tests {
     );
 
     rt!(
-        time,
+        date_only_time,
         chrono::NaiveDate,
         chrono::Local::today().naive_local(),
         ColumnType::MYSQL_TYPE_DATE
+    );
+    rt!(
+        time,
+        chrono::NaiveTime,
+        chrono::NaiveTime::from_hms(20, 15, 14),
+        ColumnType::MYSQL_TYPE_TIME
     );
     rt!(
         datetime,

@@ -55,7 +55,7 @@
 #![feature(duration_zero)]
 
 use anyhow::anyhow;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -109,6 +109,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
+        SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
         SqlType::Date => unimplemented!(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),

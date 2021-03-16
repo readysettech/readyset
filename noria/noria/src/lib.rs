@@ -305,7 +305,7 @@ impl<T> From<T> for Tagged<T> {
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
     DataType, Modification, Operation, TableOperation, ValueCoerceError, DATE_FORMAT,
-    TIMESTAMP_FORMAT,
+    TIMESTAMP_FORMAT, TIME_FORMAT,
 };
 pub use crate::map::Map;
 pub use crate::table::{Table, TableRequest};

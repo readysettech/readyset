@@ -9,7 +9,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use msql_srv::MysqlIntermediary;
 use mysql::prelude::*;
 use nom_sql::SelectStatement;
@@ -1213,4 +1213,45 @@ fn write_timestamps() {
         result.1,
         NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 08, 24)
     );
+}
+
+#[test]
+fn round_trip_time_type() {
+    let d = Deployment::new("round_trip_time_type");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE daily_events (start_time time, end_time time)")
+        .unwrap();
+    conn.query_drop(
+        "INSERT INTO daily_events (start_time, end_time) VALUES ('08:00:00', '09:00:00')",
+    )
+    .unwrap();
+
+    conn.exec_drop(
+        "INSERT INTO daily_events (start_time, end_time) VALUES (?, ?)",
+        (
+            NaiveTime::from_hms(10, 30, 00),
+            NaiveTime::from_hms(10, 45, 15),
+        ),
+    )
+    .unwrap();
+
+    let mut res: Vec<(NaiveTime, NaiveTime)> = conn
+        .query("SELECT start_time, end_time FROM daily_events")
+        .unwrap();
+    assert_eq!(res.len(), 2);
+    res.sort();
+    assert_eq!(
+        res,
+        vec![
+            (
+                NaiveTime::from_hms(8, 00, 00),
+                NaiveTime::from_hms(9, 00, 00),
+            ),
+            (
+                NaiveTime::from_hms(10, 30, 00),
+                NaiveTime::from_hms(10, 45, 15),
+            )
+        ]
+    )
 }
