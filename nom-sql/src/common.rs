@@ -44,6 +44,7 @@ pub enum SqlType {
     Text,
     Date,
     DateTime(u16),
+    Time,
     Timestamp,
     Binary(u16),
     Varbinary(u16),
@@ -78,6 +79,7 @@ impl fmt::Display for SqlType {
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
             SqlType::DateTime(len) => write!(f, "DATETIME({})", len),
+            SqlType::Time => write!(f, "TIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::Binary(len) => write!(f, "BINARY({})", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
@@ -558,12 +560,13 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             )),
             |t| SqlType::Varchar(len_as_u16(t.1)),
         ),
-        decimal_or_numeric,
+        map(tag_no_case("time"), |_| SqlType::Time),
     ))(i)
 }
 
 fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
+        decimal_or_numeric,
         map(
             tuple((tag_no_case("binary"), delim_digit, multispace0)),
             |t| SqlType::Binary(len_as_u16(t.1)),

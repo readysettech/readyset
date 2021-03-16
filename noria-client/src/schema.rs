@@ -80,6 +80,7 @@ pub(crate) fn convert_column(cs: &ColumnSpecification) -> msql_srv::Column {
                 flags |= msql_srv::ColumnFlags::ENUM_FLAG;
                 MYSQL_TYPE_VAR_STRING
             }
+            SqlType::Time => MYSQL_TYPE_TIME,
         },
         colflags: {
             for c in &cs.constraints {
