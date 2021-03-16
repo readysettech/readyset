@@ -63,7 +63,7 @@ pub fn case_when_column(i: &[u8]) -> IResult<&[u8], CaseWhenExpression> {
     ))(i)?;
 
     let then_expr = ColumnOrLiteral::Column(column);
-    let else_expr = else_val.map(|v| ColumnOrLiteral::Literal(v));
+    let else_expr = else_val.map(ColumnOrLiteral::Literal);
 
     Ok((
         remaining_input,
@@ -98,7 +98,7 @@ mod tests {
                     Literal::Integer(0),
                 ))),
             }),
-            then_expr: ColumnOrLiteral::Column(c1.clone()),
+            then_expr: ColumnOrLiteral::Column(c1),
             else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(1))),
         };
 

@@ -560,7 +560,7 @@ mod tests {
             flat_condition_tree(
                 BinaryOperator::Equal,
                 ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Literal(Literal::Integer(42 as i64))
+                ConditionBase::Literal(Literal::Integer(42_i64))
             )
         );
 
@@ -586,7 +586,7 @@ mod tests {
             flat_condition_tree(
                 BinaryOperator::GreaterOrEqual,
                 ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Literal(Literal::Integer(42 as i64))
+                ConditionBase::Literal(Literal::Integer(42_i64))
             )
         );
 
@@ -596,7 +596,7 @@ mod tests {
             flat_condition_tree(
                 BinaryOperator::LessOrEqual,
                 ConditionBase::Field(Column::from("foo")),
-                ConditionBase::Literal(Literal::Integer(5 as i64))
+                ConditionBase::Literal(Literal::Integer(5_i64))
             )
         );
     }

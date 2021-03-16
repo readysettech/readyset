@@ -104,7 +104,7 @@ impl fmt::Display for SelectStatement {
                 .join(", ")
         )?;
 
-        if self.tables.len() > 0 {
+        if !self.tables.is_empty() {
             write!(f, " FROM ")?;
             write!(
                 f,
@@ -180,10 +180,7 @@ pub fn limit_clause(i: &[u8]) -> IResult<&[u8], LimitClause> {
         unsigned_number,
         opt(offset),
     ))(i)?;
-    let offset = match opt_offset {
-        None => 0,
-        Some(v) => v,
-    };
+    let offset = opt_offset.unwrap_or(0);
 
     Ok((remaining_input, LimitClause { limit, offset }))
 }
@@ -249,7 +246,7 @@ fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
     let nested_join = map(delimited(tag("("), join_clause, tag(")")), |nj| {
         JoinRightSide::NestedJoin(Box::new(nj))
     });
-    let table = map(table_reference, |t| JoinRightSide::Table(t));
+    let table = map(table_reference, JoinRightSide::Table);
     let tables = map(delimited(tag("("), table_list, tag(")")), |tables| {
         JoinRightSide::Tables(tables)
     });

@@ -124,7 +124,7 @@ impl fmt::Display for Column {
 
 impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
-        match c.find(".") {
+        match c.find('.') {
             None => Column {
                 name: String::from(c),
                 alias: None,
