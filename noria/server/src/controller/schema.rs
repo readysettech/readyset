@@ -11,22 +11,6 @@ type Path = std::vec::Vec<(
     std::vec::Vec<std::option::Option<usize>>,
 )>;
 
-fn to_sql_type(d: &DataType) -> Option<SqlType> {
-    match d {
-        DataType::Int(_) => Some(SqlType::Int(32)),
-        DataType::UnsignedInt(_) => Some(SqlType::UnsignedInt(32)),
-        DataType::BigInt(_) => Some(SqlType::Bigint(64)),
-        DataType::UnsignedBigInt(_) => Some(SqlType::UnsignedBigint(64)),
-        DataType::Real(_, _) => Some(SqlType::Real),
-        DataType::Text(_) => Some(SqlType::Text),
-        DataType::TinyText(_) => Some(SqlType::Varchar(8)),
-        // TODO(malte): There is no SqlType for `NULL` (as it's not a
-        // type), so caller must handle appropriately.
-        DataType::None => None,
-        DataType::Timestamp(_) => Some(SqlType::Timestamp),
-    }
-}
-
 fn type_for_internal_column(
     node: &dataflow::node::Node,
     column_index: usize,
@@ -49,7 +33,7 @@ fn type_for_internal_column(
             } else {
                 // literal
                 let off = column_index - (emits.0.len() + emits.2.len());
-                to_sql_type(&emits.1[off])
+                emits.1[off].sql_type()
             }
         }
         ops::NodeOperator::Aggregation(ref grouped_op) => {

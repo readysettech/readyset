@@ -1,5 +1,6 @@
 use crate::data::DataType;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, NaiveTime};
+use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use std::convert::TryFrom;
 use std::fmt;
@@ -42,6 +43,7 @@ impl serde::ser::Serialize for DataType {
             DataType::Timestamp(v) => {
                 serializer.serialize_newtype_variant("DataType", 4, "Timestamp", &v)
             }
+            DataType::Time(v) => serializer.serialize_newtype_variant("DataType", 5, "Time", &v),
         }
     }
 }
@@ -52,11 +54,12 @@ impl<'de> serde::Deserialize<'de> for DataType {
         D: serde::Deserializer<'de>,
     {
         enum Field {
-            Field0,
-            Field1,
-            Field2,
-            Field3,
-            Field4,
+            None,
+            Int,
+            Real,
+            Text,
+            Timestamp,
+            Time,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -69,11 +72,12 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 E: serde::de::Error,
             {
                 match val {
-                    0u64 => Ok(Field::Field0),
-                    1u64 => Ok(Field::Field1),
-                    2u64 => Ok(Field::Field2),
-                    3u64 => Ok(Field::Field3),
-                    4u64 => Ok(Field::Field4),
+                    0u64 => Ok(Field::None),
+                    1u64 => Ok(Field::Int),
+                    2u64 => Ok(Field::Real),
+                    3u64 => Ok(Field::Text),
+                    4u64 => Ok(Field::Timestamp),
+                    5u64 => Ok(Field::Time),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
                         &"variant index 0 <= i < 5",
@@ -85,11 +89,11 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 E: serde::de::Error,
             {
                 match val {
-                    "None" => Ok(Field::Field0),
-                    "Int" => Ok(Field::Field1),
-                    "Real" => Ok(Field::Field2),
-                    "Text" => Ok(Field::Field3),
-                    "Timestamp" => Ok(Field::Field4),
+                    "None" => Ok(Field::None),
+                    "Int" => Ok(Field::Int),
+                    "Real" => Ok(Field::Real),
+                    "Text" => Ok(Field::Text),
+                    "Timestamp" => Ok(Field::Timestamp),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -98,11 +102,11 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 E: serde::de::Error,
             {
                 match val {
-                    b"None" => Ok(Field::Field0),
-                    b"Int" => Ok(Field::Field1),
-                    b"Real" => Ok(Field::Field2),
-                    b"Text" => Ok(Field::Field3),
-                    b"Timestamp" => Ok(Field::Field4),
+                    b"None" => Ok(Field::None),
+                    b"Int" => Ok(Field::Int),
+                    b"Real" => Ok(Field::Real),
+                    b"Text" => Ok(Field::Text),
+                    b"Timestamp" => Ok(Field::Timestamp),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -129,16 +133,11 @@ impl<'de> serde::Deserialize<'de> for DataType {
 
             fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
             where
-                A: serde::de::EnumAccess<'de>,
+                A: EnumAccess<'de>,
             {
-                match match serde::de::EnumAccess::variant(data) {
-                    Ok(val) => val,
-                    Err(err) => {
-                        return Err(err);
-                    }
-                } {
-                    (Field::Field0, variant) => {
-                        match serde::de::VariantAccess::unit_variant(variant) {
+                match EnumAccess::variant(data)? {
+                    (Field::None, variant) => {
+                        match VariantAccess::unit_variant(variant) {
                             Ok(val) => val,
                             Err(err) => {
                                 return Err(err);
@@ -146,17 +145,16 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         };
                         Ok(DataType::None)
                     }
-                    (Field::Field1, variant) => {
-                        serde::de::VariantAccess::newtype_variant::<i128>(variant).and_then(|x| {
+                    (Field::Int, variant) => VariantAccess::newtype_variant::<i128>(variant)
+                        .and_then(|x| {
                             DataType::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
                                     serde::de::Unexpected::Other(format!("{}", x).as_str()),
                                     &"integer (i128)",
                                 )
                             })
-                        })
-                    }
-                    (Field::Field2, variant) => {
+                        }),
+                    (Field::Real, variant) => {
                         struct Visitor;
                         impl<'de> serde::de::Visitor<'de> for Visitor {
                             type Value = DataType;
@@ -203,24 +201,24 @@ impl<'de> serde::Deserialize<'de> for DataType {
                                 Ok(DataType::Real(field0, field1))
                             }
                         }
-                        serde::de::VariantAccess::tuple_variant(variant, 2usize, Visitor)
+                        VariantAccess::tuple_variant(variant, 2usize, Visitor)
                     }
-                    (Field::Field3, variant) => {
-                        serde::de::VariantAccess::newtype_variant::<&'_ [u8]>(variant).and_then(
-                            |x| {
-                                DataType::try_from(x).map_err(|_| {
-                                    serde::de::Error::invalid_value(
-                                        serde::de::Unexpected::Bytes(x),
-                                        &"valid utf-8 or short TinyText",
-                                    )
-                                })
-                            },
-                        )
-                    }
-                    (Field::Field4, variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<NaiveDateTime>(variant),
+                    (Field::Text, variant) => VariantAccess::newtype_variant::<&'_ [u8]>(variant)
+                        .and_then(|x| {
+                            DataType::try_from(x).map_err(|_| {
+                                serde::de::Error::invalid_value(
+                                    serde::de::Unexpected::Bytes(x),
+                                    &"valid utf-8 or short TinyText",
+                                )
+                            })
+                        }),
+                    (Field::Timestamp, variant) => Result::map(
+                        VariantAccess::newtype_variant::<NaiveDateTime>(variant),
                         DataType::Timestamp,
                     ),
+                    (Field::Time, variant) => {
+                        VariantAccess::newtype_variant::<NaiveTime>(variant).map(DataType::Time)
+                    }
                 }
             }
         }

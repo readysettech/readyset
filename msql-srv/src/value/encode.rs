@@ -412,7 +412,7 @@ where
     }
 }
 
-use chrono::{self, Datelike, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{self, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 impl ToMysqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(
@@ -427,6 +427,50 @@ impl ToMysqlValue for NaiveDate {
                 w.write_u16::<LittleEndian>(self.year() as u16)?;
                 w.write_u8(self.month() as u8)?;
                 w.write_u8(self.day() as u8)
+            }
+            _ => Err(bad(self, c)),
+        }
+    }
+}
+
+impl ToMysqlValue for NaiveTime {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        let us = self.nanosecond() / 1_000;
+        if us == 0 {
+            w.write_lenenc_str(
+                format!(
+                    "{:02}:{:02}:{:02}",
+                    self.hour(),
+                    self.minute(),
+                    self.second(),
+                )
+                .as_bytes(),
+            )
+        } else {
+            w.write_lenenc_str(
+                format!(
+                    "{:02}:{:02}:{:02}.{:06}",
+                    self.hour(),
+                    self.minute(),
+                    self.second(),
+                    us
+                )
+                .as_bytes(),
+            )
+        }
+        .map(|_| ())
+    }
+
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        match c.coltype {
+            ColumnType::MYSQL_TYPE_TIME => {
+                w.write_u8(0x0cu8)?;
+                w.write_u8(1u8)?; // sign
+                w.write_u32::<LittleEndian>(0u32)?; // days, unused for NaiveTime
+                w.write_u8(self.hour() as u8)?;
+                w.write_u8(self.minute() as u8)?;
+                w.write_u8(self.second() as u8)?;
+                w.write_u32::<LittleEndian>(self.nanosecond())
             }
             _ => Err(bad(self, c)),
         }

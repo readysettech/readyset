@@ -78,6 +78,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             _ => unreachable!(),
         },
         DataType::Timestamp(ts) => rw.write_col(ts).await,
+        DataType::Time(t) => rw.write_col(t).await,
     };
     match written {
         Ok(_) => (),
