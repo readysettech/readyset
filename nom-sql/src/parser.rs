@@ -1,18 +1,18 @@
 use std::fmt;
 use std::str;
 
-use alter::{alter_table_statement, AlterTableStatement};
-use compound_select::{compound_selection, CompoundSelectStatement};
-use create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
-use delete::{deletion, DeleteStatement};
-use drop::{drop_table, DropTableStatement};
-use insert::{insertion, InsertStatement};
+use crate::alter::{alter_table_statement, AlterTableStatement};
+use crate::compound_select::{compound_selection, CompoundSelectStatement};
+use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
+use crate::delete::{deletion, DeleteStatement};
+use crate::drop::{drop_table, DropTableStatement};
+use crate::insert::{insertion, InsertStatement};
+use crate::select::{selection, SelectStatement};
+use crate::set::{set, SetStatement};
+use crate::update::{updating, UpdateStatement};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::IResult;
-use select::{selection, SelectStatement};
-use set::{set, SetStatement};
-use update::{updating, UpdateStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
@@ -83,7 +83,7 @@ mod tests {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    use table::Table;
+    use crate::table::Table;
 
     #[test]
     fn hash_query() {

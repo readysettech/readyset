@@ -2,7 +2,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
-use common::{literal, sql_identifier, statement_terminator, Literal};
+use crate::common::{literal, sql_identifier, statement_terminator, Literal};
 use nom::sequence::tuple;
 use nom::IResult;
 

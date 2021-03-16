@@ -1,4 +1,4 @@
-use common::eof;
+use crate::common::eof;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::peek;

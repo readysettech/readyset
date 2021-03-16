@@ -1,14 +1,14 @@
 use std::fmt;
 use std::str;
 
-use column::Column;
-use condition::ConditionExpression;
+use crate::column::Column;
+use crate::condition::ConditionExpression;
+use crate::select::{JoinClause, SelectStatement};
+use crate::table::Table;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::IResult;
-use select::{JoinClause, SelectStatement};
-use table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -107,11 +107,11 @@ pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{BinaryOperator, FieldDefinitionExpression};
-    use condition::ConditionBase::*;
-    use condition::ConditionExpression::{self, *};
-    use condition::ConditionTree;
-    use select::{selection, JoinClause, SelectStatement};
+    use crate::common::{BinaryOperator, FieldDefinitionExpression};
+    use crate::condition::ConditionBase::*;
+    use crate::condition::ConditionExpression::{self, *};
+    use crate::condition::ConditionTree;
+    use crate::select::{selection, JoinClause, SelectStatement};
 
     #[test]
     fn inner_join() {

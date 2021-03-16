@@ -2,18 +2,18 @@ use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
 
-use column::Column;
-use common::{
+use crate::column::Column;
+use crate::common::{
     assignment_expr_list, field_list, schema_table_reference, statement_terminator, value_list,
     ws_sep_comma, FieldValueExpression, Literal,
 };
-use keywords::escape_if_keyword;
+use crate::keywords::escape_if_keyword;
+use crate::table::Table;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
-use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -116,10 +116,10 @@ pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
-    use column::Column;
-    use common::ItemPlaceholder;
-    use table::Table;
+    use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+    use crate::column::Column;
+    use crate::common::ItemPlaceholder;
+    use crate::table::Table;
 
     #[test]
     fn simple_insert() {

@@ -2,12 +2,13 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
 
-use arithmetic::{arithmetic_expression, ArithmeticExpression};
-use column::Column;
-use common::{
+use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
+use crate::column::Column;
+use crate::common::{
     binary_comparison_operator, column_identifier, literal, value_list, BinaryOperator, Literal,
 };
 
+use crate::select::{nested_selection, SelectStatement};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -18,7 +19,6 @@ use nom::{
     character::complete::{multispace0, multispace1},
     delimited, do_parse, map, named, preceded, tag, tag_no_case, terminated,
 };
-use select::{nested_selection, SelectStatement};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
@@ -352,9 +352,9 @@ mod tests {
     use crate::ArithmeticItem;
 
     use super::*;
-    use arithmetic::{ArithmeticBase, ArithmeticOperator};
-    use column::Column;
-    use common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
+    use crate::arithmetic::{ArithmeticBase, ArithmeticOperator};
+    use crate::column::Column;
+    use crate::common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
     use ConditionBase::*;
     use ConditionExpression::*;
 
@@ -620,7 +620,7 @@ mod tests {
     fn parenthesis() {
         let cond = "(foo = ? or bar = 12) and foobar = 'a'";
 
-        use common::Literal;
+        use crate::common::Literal;
         use ConditionBase::*;
         use ConditionExpression::*;
 
@@ -664,7 +664,7 @@ mod tests {
     fn order_of_operations() {
         let cond = "foo = ? and bar = 12 or foobar = 'a'";
 
-        use common::Literal;
+        use crate::common::Literal;
         use ConditionBase::*;
         use ConditionExpression::*;
 
@@ -708,7 +708,7 @@ mod tests {
     fn negation() {
         let cond = "not bar = 12 or foobar = 'a'";
 
-        use common::Literal::*;
+        use crate::common::Literal::*;
         use ConditionBase::*;
         use ConditionExpression::*;
 
@@ -736,9 +736,8 @@ mod tests {
 
     #[test]
     fn nested_select() {
-        use select::SelectStatement;
-        use std::default::Default;
-        use table::Table;
+        use crate::select::SelectStatement;
+        use crate::table::Table;
         use ConditionBase::*;
 
         let cond = "bar in (select col from foo)";
@@ -762,9 +761,8 @@ mod tests {
 
     #[test]
     fn exists_in_select() {
-        use select::SelectStatement;
-        use std::default::Default;
-        use table::Table;
+        use crate::select::SelectStatement;
+        use crate::table::Table;
 
         let cond = "exists (  select col from foo  )";
 
@@ -783,9 +781,8 @@ mod tests {
 
     #[test]
     fn not_exists_in_select() {
-        use select::SelectStatement;
-        use std::default::Default;
-        use table::Table;
+        use crate::select::SelectStatement;
+        use crate::table::Table;
 
         let cond = "not exists (select col from foo)";
 
@@ -805,9 +802,8 @@ mod tests {
 
     #[test]
     fn and_with_nested_select() {
-        use select::SelectStatement;
-        use std::default::Default;
-        use table::Table;
+        use crate::select::SelectStatement;
+        use crate::table::Table;
         use ConditionBase::*;
 
         let cond = "paperId in (select paperId from PaperConflict) and size > 0";
@@ -860,7 +856,7 @@ mod tests {
 
     #[test]
     fn is_null() {
-        use common::Literal;
+        use crate::common::Literal;
         use ConditionBase::*;
 
         let cond = "bar IS NULL";
@@ -886,7 +882,7 @@ mod tests {
 
     #[test]
     fn complex_bracketing() {
-        use common::Literal;
+        use crate::common::Literal;
         use ConditionBase::*;
 
         let cond = "`read_ribbons`.`is_following` = 1 \

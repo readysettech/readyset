@@ -1,6 +1,6 @@
 use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
-use common::{integer_literal, sql_identifier, string_literal, ws_sep_comma, ws_sep_equals};
+use crate::common::{integer_literal, sql_identifier, string_literal, ws_sep_comma, ws_sep_equals};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};

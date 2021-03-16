@@ -1,16 +1,18 @@
 use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
-use column::Column;
-use common::{assignment_expr_list, statement_terminator, table_reference, FieldValueExpression};
-use condition::ConditionExpression;
-use keywords::escape_if_keyword;
+use crate::column::Column;
+use crate::common::{
+    assignment_expr_list, statement_terminator, table_reference, FieldValueExpression,
+};
+use crate::condition::ConditionExpression;
+use crate::keywords::escape_if_keyword;
+use crate::select::where_clause;
+use crate::table::Table;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom::IResult;
-use select::where_clause;
-use table::Table;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -66,13 +68,13 @@ pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
-    use column::Column;
-    use common::{BinaryOperator, ItemPlaceholder, Literal, LiteralExpression, Real};
-    use condition::ConditionBase::*;
-    use condition::ConditionExpression::*;
-    use condition::ConditionTree;
-    use table::Table;
+    use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+    use crate::column::Column;
+    use crate::common::{BinaryOperator, ItemPlaceholder, Literal, LiteralExpression, Real};
+    use crate::condition::ConditionBase::*;
+    use crate::condition::ConditionExpression::*;
+    use crate::condition::ConditionTree;
+    use crate::table::Table;
 
     #[test]
     fn simple_update() {
