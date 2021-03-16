@@ -38,6 +38,7 @@ steps:
     commands:
     - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
+    - "( echo '--- :rust: Checking nom-sql'; cargo clippy -p nom-sql -- -D warnings)"
     depends_on:
     - build-image
     plugins:

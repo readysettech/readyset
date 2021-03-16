@@ -24,7 +24,7 @@ pub struct UpdateStatement {
 impl fmt::Display for UpdateStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "UPDATE {} ", escape_if_keyword(&self.table.name))?;
-        assert!(self.fields.len() > 0);
+        assert!(!self.fields.is_empty());
         write!(
             f,
             "SET {}",

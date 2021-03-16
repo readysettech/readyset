@@ -56,6 +56,7 @@ impl fmt::Display for CreateTableStatement {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // TODO: maybe this actually matters
 pub enum SelectSpecification {
     Compound(CompoundSelectStatement),
     Simple(SelectStatement),
@@ -99,6 +100,7 @@ impl fmt::Display for CreateViewStatement {
 }
 
 // MySQL grammar element for index column definition (§13.1.18, index_col_name)
+#[allow(clippy::type_complexity)]
 pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
     let (remaining_input, (column, len_u8, order)) = tuple((
         terminated(column_identifier_no_alias, multispace0),
@@ -261,35 +263,31 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
         .collect();
 
     // and to keys:
-    let keys = keys_list.and_then(|ks| {
-        Some(
-            ks.into_iter()
-                .map(|key| {
-                    let attach_names = |columns: Vec<Column>| {
-                        columns
-                            .into_iter()
-                            .map(|column| Column {
-                                table: Some(table.name.clone()),
-                                ..column
-                            })
-                            .collect()
-                    };
+    let keys = keys_list.map(|ks| {
+        ks.into_iter()
+            .map(|key| {
+                let attach_names = |columns: Vec<Column>| {
+                    columns
+                        .into_iter()
+                        .map(|column| Column {
+                            table: Some(table.name.clone()),
+                            ..column
+                        })
+                        .collect()
+                };
 
-                    match key {
-                        TableKey::PrimaryKey(columns) => {
-                            TableKey::PrimaryKey(attach_names(columns))
-                        }
-                        TableKey::UniqueKey(name, columns) => {
-                            TableKey::UniqueKey(name, attach_names(columns))
-                        }
-                        TableKey::FulltextKey(name, columns) => {
-                            TableKey::FulltextKey(name, attach_names(columns))
-                        }
-                        TableKey::Key(name, columns) => TableKey::Key(name, attach_names(columns)),
+                match key {
+                    TableKey::PrimaryKey(columns) => TableKey::PrimaryKey(attach_names(columns)),
+                    TableKey::UniqueKey(name, columns) => {
+                        TableKey::UniqueKey(name, attach_names(columns))
                     }
-                })
-                .collect(),
-        )
+                    TableKey::FulltextKey(name, columns) => {
+                        TableKey::FulltextKey(name, attach_names(columns))
+                    }
+                    TableKey::Key(name, columns) => TableKey::Key(name, attach_names(columns)),
+                }
+            })
+            .collect()
     });
 
     Ok((
@@ -314,8 +312,8 @@ pub fn view_creation(i: &[u8]) -> IResult<&[u8], CreateViewStatement> {
         tag_no_case("as"),
         multispace1,
         alt((
-            map(compound_selection, |s| SelectSpecification::Compound(s)),
-            map(nested_selection, |s| SelectSpecification::Simple(s)),
+            map(compound_selection, SelectSpecification::Compound),
+            map(nested_selection, SelectSpecification::Simple),
         )),
         statement_terminator,
     ))(i)?;

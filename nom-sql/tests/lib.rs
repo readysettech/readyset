@@ -41,12 +41,12 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
         .lines()
         .filter(|l| {
             !l.is_empty()
-                && !l.starts_with("#")
+                && !l.starts_with('#')
                 && !l.starts_with("--")
                 && !(l.starts_with("/*") && l.ends_with("*/;"))
         })
         .map(|l| {
-            if !(l.ends_with("\n") || l.ends_with(";")) {
+            if !(l.ends_with('\n') || l.ends_with(';')) {
                 String::from(l) + "\n"
             } else {
                 String::from(l)
@@ -75,7 +75,7 @@ fn parse_file(path: &str) -> (i32, i32) {
         .map(str::trim)
         .filter(|l| {
             !l.is_empty()
-                && !l.starts_with("#")
+                && !l.starts_with('#')
                 && !l.starts_with("--")
                 && !l.starts_with("DROP")
                 && !(l.starts_with("/*") && l.ends_with("*/;"))
@@ -84,7 +84,7 @@ fn parse_file(path: &str) -> (i32, i32) {
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {
-        if !l.ends_with(";") {
+        if !l.ends_with(';') {
             q.push_str(l);
         } else {
             // end of query
@@ -153,18 +153,18 @@ fn hotcrp_schema() {
         .lines()
         .map(str::trim)
         .filter(|l| {
-            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP")
+            !l.is_empty() && !l.starts_with('#') && !l.starts_with("--") && !l.starts_with("DROP")
         })
         .collect();
     let mut q = String::new();
     let mut queries = Vec::new();
     for l in lines {
         // remove inline comments, bah
-        let l = match l.find("#") {
+        let l = match l.find('#') {
             None => l,
             Some(pos) => &l[0..pos - 1],
         };
-        if !l.ends_with(";") {
+        if !l.ends_with(';') {
             q.push_str(l);
         } else {
             // end of query
