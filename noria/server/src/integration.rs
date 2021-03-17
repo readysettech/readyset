@@ -3075,7 +3075,8 @@ async fn remove_query() {
     sleep().await;
 
     match qb.lookup(&[0.into()], true).await.unwrap_err() {
-        noria::error::ViewError::NotYetAvailable => {}
+        // FIXME(eta): this sucks and should be looking for ViewNotYetAvailable.
+        noria::errors::ReadySetError::ViewError { .. } => {}
         e => unreachable!("{:?}", e),
     }
 }

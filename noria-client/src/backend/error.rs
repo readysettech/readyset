@@ -1,6 +1,5 @@
 use crate::backend::error::Error::*;
 use msql_srv::ErrorKind;
-use noria::error::{TableError, ViewError};
 use std::{fmt, io};
 
 /// An enum of the common error types experiences when reading and writing from the data store.
@@ -9,8 +8,8 @@ use std::{fmt, io};
 pub enum Error {
     MySqlError(mysql::error::Error),
     MySqlAsyncError(mysql_async::error::Error),
-    NoriaReadError(ViewError),
-    NoriaWriteError(TableError),
+    NoriaReadError(anyhow::Error),
+    NoriaWriteError(anyhow::Error),
     NoriaRecipeError(anyhow::Error),
     ParseError(String),
     IOError(io::Error),
@@ -70,8 +69,8 @@ impl std::error::Error for Error {
         match self {
             MySqlError(e) => Some(e),
             MySqlAsyncError(e) => Some(e),
-            NoriaReadError(e) => Some(e),
-            NoriaWriteError(e) => Some(e),
+            NoriaReadError(_) => None,
+            NoriaWriteError(_) => None,
             NoriaRecipeError(_) => None,
             ParseError(_) => None,
             IOError(e) => Some(e),
@@ -91,18 +90,6 @@ impl From<mysql::error::Error> for Error {
 impl From<mysql_async::error::Error> for Error {
     fn from(e: mysql_async::error::Error) -> Self {
         MySqlAsyncError(e)
-    }
-}
-
-impl From<ViewError> for Error {
-    fn from(e: ViewError) -> Self {
-        NoriaReadError(e)
-    }
-}
-
-impl From<TableError> for Error {
-    fn from(e: TableError) -> Self {
-        NoriaWriteError(e)
     }
 }
 

@@ -1,10 +1,8 @@
 use crate::channel::CONNECTION_FROM_BASE;
-use crate::consistency;
 use crate::data::*;
-use crate::errors::wrap_boxed_error;
+use crate::errors::{table_err, ReadySetError, ReadySetResult};
 use crate::internal::*;
-use crate::LocalOrNot;
-use crate::{Tagged, Tagger};
+use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
 
@@ -16,12 +14,11 @@ use futures_util::{
 use nom_sql::CreateTableStatement;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::{fmt, io};
-use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower_balance::p2c::Balance;
@@ -48,7 +45,8 @@ type Transport = AsyncBincodeStream<
 ///
 ///
 /// ```rust
-/// async fn add_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+/// use noria::errors::ReadySetResult;
+/// async fn add_user(users: &mut noria::Table) -> ReadySetResult<()> {
 ///   let user = noria::row!(users,
 ///     "username" => "jonhoo",
 ///     "password" => "hunter2",
@@ -143,7 +141,7 @@ macro_rules! row {
 // the doc test will not show the source of the error _inside_ the macro since it's cross-crate.
 #[cfg(test)]
 #[allow(dead_code)]
-async fn add_user(users: &mut Table) -> Result<(), TableError> {
+async fn add_user(users: &mut Table) -> ReadySetResult<()> {
     let s = String::from("non copy");
     let user = row!(users,
       "username" => "jonhoo",
@@ -164,7 +162,7 @@ async fn add_user(users: &mut Table) -> Result<(), TableError> {
 ///
 ///
 /// ```rust
-/// async fn update_user(users: &mut noria::Table) -> Result<(), noria::error::TableError> {
+/// async fn update_user(users: &mut noria::Table) -> Result<(), noria::errors::ReadySetError> {
 ///   let user = noria::update!(users,
 ///     "password" => "hunter3",
 ///     "logins" => noria::Modification::Apply(noria::Operation::Add, 1.into()),
@@ -199,7 +197,7 @@ macro_rules! update {
 
 #[cfg(test)]
 #[allow(dead_code)]
-async fn update_user(users: &mut Table) -> Result<(), TableError> {
+async fn update_user(users: &mut Table) -> ReadySetResult<()> {
     let user = update!(users,
       "password" => "hunter3",
       "logins" => crate::Modification::Apply(crate::Operation::Add, 1.into()),
@@ -281,32 +279,6 @@ pub(crate) type TableRpc = Buffer<
     Tagged<LocalOrNot<PacketData>>,
 >;
 
-/// A failed [`Table`] operation.
-#[derive(Debug, Error)]
-pub enum TableError {
-    /// The wrong number of columns was given when inserting a row.
-    #[error("wrong number of columns specified: expected {0}, got {1}")]
-    WrongColumnCount(usize, usize),
-
-    /// The wrong number of key columns was given when modifying a row.
-    #[error("wrong number of key columns used: expected {0}, got {1}")]
-    WrongKeyColumnCount(usize, usize),
-
-    /// The underlying connection to Noria produced an error.
-    #[error("{0}")]
-    TransportError(#[source] anyhow::Error),
-
-    /// The table operation was passed an incorrect packet data type.
-    #[error("wrong packet data type")]
-    WrongPacketDataType(),
-}
-
-impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for TableError {
-    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        TableError::TransportError(wrap_boxed_error(e))
-    }
-}
-
 /// Wrapper of packet payloads with their destination node.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PacketData {
@@ -349,10 +321,7 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub(crate) fn build(
-        self,
-        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
-    ) -> Result<Table, io::Error> {
+    pub(crate) fn build(self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>) -> Table {
         let mut addrs = Vec::with_capacity(self.txs.len());
         let mut conns = Vec::with_capacity(self.txs.len());
         for (shardi, &addr) in self.txs.iter().enumerate() {
@@ -388,7 +357,7 @@ impl TableBuilder {
         }
 
         let dispatch = tracing::dispatcher::get_default(|d| d.clone());
-        Ok(Table {
+        Table {
             ni: self.ni,
             node: self.addr,
             key: self.key,
@@ -403,7 +372,7 @@ impl TableBuilder {
             shards: conns,
 
             dispatch,
-        })
+        }
     }
 }
 
@@ -454,7 +423,7 @@ impl Table {
     fn input(
         &mut self,
         mut i: PacketData,
-    ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
+    ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "table-request",
@@ -469,17 +438,20 @@ impl Table {
             let ncols = self.columns.len() + self.dropped.len();
             let ops: &Vec<TableOperation> = (&i.data)
                 .try_into()
-                .map_err(|_| TableError::WrongPacketDataType())?;
+                .map_err(|_| ReadySetError::WrongPacketDataType)?;
             for op in ops {
                 match op {
                     TableOperation::Insert(ref row) => {
                         if row.len() != ncols {
-                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                            return Err(ReadySetError::WrongColumnCount(ncols, row.len()));
                         }
                     }
                     TableOperation::Delete { ref key } => {
                         if key.len() != self.key.len() {
-                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                            return Err(ReadySetError::WrongKeyColumnCount(
+                                self.key.len(),
+                                key.len(),
+                            ));
                         }
                     }
                     TableOperation::InsertOrUpdate {
@@ -487,11 +459,11 @@ impl Table {
                         ref update,
                     } => {
                         if row.len() != ncols {
-                            return Err(TableError::WrongColumnCount(ncols, row.len()));
+                            return Err(ReadySetError::WrongColumnCount(ncols, row.len()));
                         }
                         if update.len() > self.columns.len() {
                             // NOTE: < is okay to allow dropping tailing no-ops
-                            return Err(TableError::WrongColumnCount(
+                            return Err(ReadySetError::WrongColumnCount(
                                 self.columns.len(),
                                 update.len(),
                             ));
@@ -499,11 +471,14 @@ impl Table {
                     }
                     TableOperation::Update { ref set, ref key } => {
                         if key.len() != self.key.len() {
-                            return Err(TableError::WrongKeyColumnCount(self.key.len(), key.len()));
+                            return Err(ReadySetError::WrongKeyColumnCount(
+                                self.key.len(),
+                                key.len(),
+                            ));
                         }
                         if set.len() > self.columns.len() {
                             // NOTE: < is okay to allow dropping tailing no-ops
-                            return Err(TableError::WrongColumnCount(
+                            return Err(ReadySetError::WrongColumnCount(
                                 self.columns.len(),
                                 set.len(),
                             ));
@@ -523,9 +498,12 @@ impl Table {
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
             future::Either::Right(future::Either::Left(
-                self.shards[0].call(request).map_err(TableError::from),
+                self.shards[0]
+                    .call(request)
+                    .map_err(rpc_err!("Table::input")),
             ))
         } else {
+            // FIXME(eta): proper error handling here!
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
             }
@@ -584,7 +562,7 @@ impl Table {
             future::Either::Right(future::Either::Right(
                 wait_for
                     .try_for_each(|_| async { Ok(()) })
-                    .map_err(TableError::from)
+                    .map_err(rpc_err!("Table::input"))
                     .map_ok(Tagged::from),
             ))
         }
@@ -595,10 +573,14 @@ impl Table {
     fn timestamp(
         &mut self,
         t: PacketData,
-    ) -> impl Future<Output = Result<Tagged<()>, TableError>> + Send {
+    ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
         if self.shards.len() == 1 {
             let request = Tagged::from(unsafe { LocalOrNot::new_for_dst(t, self.dst_is_local) });
-            future::Either::Left(self.shards[0].call(request).map_err(TableError::from))
+            future::Either::Left(
+                self.shards[0]
+                    .call(request)
+                    .map_err(rpc_err!("Table::timestamp")),
+            )
         } else {
             if self.key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -618,7 +600,7 @@ impl Table {
             future::Either::Right(
                 wait_for
                     .try_for_each(|_| async { Ok(()) })
-                    .map_err(TableError::from)
+                    .map_err(rpc_err!("Table::timestamp"))
                     .map_ok(Tagged::from),
             )
         }
@@ -634,33 +616,36 @@ pub enum TableRequest {
 }
 
 impl Service<TableRequest> for Table {
-    type Error = TableError;
+    type Error = ReadySetError;
     type Response = <TableRpc as Service<Tagged<LocalOrNot<PacketData>>>>::Response;
 
     #[cfg(not(doc))]
-    type Future = impl Future<Output = Result<Tagged<()>, TableError>> + Send;
+    type Future = impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send;
     #[cfg(doc)]
-    type Future = crate::doc_mock::Future<Result<Tagged<()>, TableError>>;
+    type Future = crate::doc_mock::Future<Result<Tagged<()>, ReadySetError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
-            ready!(s.poll_ready(cx)).map_err(TableError::from)?;
+            ready!(s.poll_ready(cx))
+                .map_err(rpc_err!("<Table as Service<TableRequest>>::poll_ready"))?;
         }
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: TableRequest) -> Self::Future {
+        // TODO(eta): error handling impl adds overhead
+        let tn = self.table_name.to_owned();
         match req {
             TableRequest::TableOperations(ops) => {
                 let i = self.prep_records(ops);
-                future::Either::Left(self.input(i))
+                future::Either::Left(self.input(i).map_err(|e| table_err(tn, e)))
             }
             TableRequest::Timestamp(t) => {
                 let p = PacketData {
                     dst: self.node,
                     data: PacketPayload::Timestamp(t),
                 };
-                future::Either::Right(self.timestamp(p))
+                future::Either::Right(self.timestamp(p).map_err(|e| table_err(tn, e)))
             }
         }
     }
@@ -803,7 +788,7 @@ impl Table {
     }
 
     /// Insert a single row of data into this base table.
-    pub async fn insert<V>(&mut self, u: V) -> Result<(), TableError>
+    pub async fn insert<V>(&mut self, u: V) -> ReadySetResult<()>
     where
         V: Into<Vec<DataType>>,
     {
@@ -814,7 +799,7 @@ impl Table {
     }
 
     /// Insert multiple rows of data into this base table.
-    pub async fn insert_many<I, V>(&mut self, rows: I) -> Result<(), TableError>
+    pub async fn insert_many<I, V>(&mut self, rows: I) -> ReadySetResult<()>
     where
         I: IntoIterator<Item = V>,
         V: Into<Vec<DataType>>,
@@ -828,7 +813,7 @@ impl Table {
     }
 
     /// Perform multiple operation on this base table.
-    pub async fn perform_all<I, V>(&mut self, i: I) -> Result<(), TableError>
+    pub async fn perform_all<I, V>(&mut self, i: I) -> ReadySetResult<()>
     where
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
@@ -840,7 +825,7 @@ impl Table {
     }
 
     /// Delete the row with the given key from this base table.
-    pub async fn delete<I>(&mut self, key: I) -> Result<(), TableError>
+    pub async fn delete<I>(&mut self, key: I) -> ReadySetResult<()>
     where
         I: Into<Vec<DataType>>,
     {
@@ -854,19 +839,21 @@ impl Table {
     ///
     /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
     /// `m` will be applied to column `i` of the record with key `key`.
-    pub async fn update<V>(&mut self, key: Vec<DataType>, u: V) -> Result<(), TableError>
+    pub async fn update<V>(&mut self, key: Vec<DataType>, u: V) -> ReadySetResult<()>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
-        assert!(
-            !self.key.is_empty() && self.key_is_primary,
-            "update operations can only be applied to base nodes with key columns"
-        );
+        if !(!self.key.is_empty() && self.key_is_primary) {
+            unsupported!("update operations can only be applied to base nodes with key columns")
+        }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
-                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
+                Err(table_err(
+                    self.table_name(),
+                    ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
+                ))?;
             }
             set[coli] = m;
         }
@@ -885,19 +872,21 @@ impl Table {
         &mut self,
         insert: Vec<DataType>,
         update: V,
-    ) -> Result<(), TableError>
+    ) -> ReadySetResult<()>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
-        assert!(
-            !self.key.is_empty() && self.key_is_primary,
-            "update operations can only be applied to base nodes with key columns"
-        );
+        if !(!self.key.is_empty() && self.key_is_primary) {
+            unsupported!("update operations can only be applied to base nodes with key columns")
+        }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
-                return Err(TableError::WrongColumnCount(self.columns.len(), coli + 1));
+                Err(table_err(
+                    self.table_name(),
+                    ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
+                ))?;
             }
             set[coli] = m;
         }
@@ -912,7 +901,7 @@ impl Table {
     }
 
     /// Updates the timestamp of the base table in the data flow graph.
-    pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> Result<(), TableError> {
+    pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> ReadySetResult<()> {
         self.quick_n_dirty(TableRequest::Timestamp(t)).await
     }
 }
