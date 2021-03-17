@@ -219,6 +219,7 @@ impl DataType {
     /// * Parsing strings ([`Text`], [`Tinytext`], [`Mediumtext`]) as timestamps
     /// * Changing numeric type sizes (bigint -> int, int -> bigint, etc)
     /// * Converting [`Real`]s with a zero fractional part to an integer
+    /// * Removing information from date/time data types (timestamps to dates or times)
     ///
     /// More coercions will likely need to be added in the future
     ///
@@ -250,10 +251,10 @@ impl DataType {
     ///   DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
     /// );
     /// ```
-    pub fn coerce_to<'a>(&'a self, ty: &'a SqlType) -> Result<Cow<'a, Self>, ValueCoerceError<'a>> {
+    pub fn coerce_to<'a>(&'a self, ty: &SqlType) -> Result<Cow<'a, Self>, ValueCoerceError> {
         let mk_err = |message: String, source: Option<anyhow::Error>| ValueCoerceError {
-            value: self,
-            expected_type: ty,
+            value: self.clone(),
+            expected_type: ty.clone(),
             message,
             source,
         };
@@ -319,6 +320,10 @@ impl DataType {
                     .map(Self::Time)
                     .map(Cow::Owned)
             }
+            (Self::Timestamp(ts), Some(Timestamp), Date) => {
+                Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
+            }
+            (Self::Timestamp(ts), Some(Timestamp), Time) => Ok(Cow::Owned(Self::Time(ts.time()))),
             (_, Some(Bigint(_)), Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(i32::try_from(self).map_err(
                     |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
@@ -394,8 +399,8 @@ impl DataType {
                     })
             }
             (_, Some(src_type), tgt_type) => Err(ValueCoerceError {
-                value: self,
-                expected_type: ty,
+                value: self.clone(),
+                expected_type: ty.clone(),
                 message: format!("Cannot coerce {:?} to {:?}", src_type, tgt_type),
                 source: None,
             }),
@@ -684,6 +689,12 @@ impl From<Literal> for DataType {
 impl From<NaiveTime> for DataType {
     fn from(t: NaiveTime) -> Self {
         DataType::Time(t)
+    }
+}
+
+impl From<NaiveDate> for DataType {
+    fn from(dt: NaiveDate) -> Self {
+        DataType::Timestamp(dt.and_hms(0, 0, 0))
     }
 }
 
@@ -1131,11 +1142,11 @@ impl Arbitrary for DataType {
 /// [`DataType::coerce_to`]
 #[derive(Debug, Error)]
 #[error("error coercing value {value:?} to {expected_type:?}: {message}")]
-pub struct ValueCoerceError<'a> {
+pub struct ValueCoerceError {
     /// The value that was being coerced
-    pub value: &'a DataType,
+    pub value: DataType,
     /// The type that we were trying to coerce to
-    pub expected_type: &'a SqlType,
+    pub expected_type: SqlType,
     /// A human-readable message for the error
     pub message: String,
     source: Option<anyhow::Error>,
@@ -1791,7 +1802,7 @@ mod tests {
         }
 
         #[proptest]
-        fn timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
+        fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
             let expected = DataType::from(ndt);
             let input = DataType::from(ndt.format(TIMESTAMP_FORMAT).to_string());
             let result = input.coerce_to(&Timestamp).unwrap();
@@ -1799,7 +1810,7 @@ mod tests {
         }
 
         #[proptest]
-        fn times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
+        fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
             let expected = DataType::from(nt);
             let input = DataType::from(nt.format(TIME_FORMAT).to_string());
             let result = input.coerce_to(&Time).unwrap();
@@ -1807,11 +1818,24 @@ mod tests {
         }
 
         #[proptest]
-        fn dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
+        fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let expected = DataType::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
             let input = DataType::from(nd.format(DATE_FORMAT).to_string());
             let result = input.coerce_to(&Date).unwrap();
             assert_eq!(*result, expected);
+        }
+
+        #[test]
+        fn timestamp_surjections() {
+            let input = DataType::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
+            assert_eq!(
+                *input.coerce_to(&Date).unwrap(),
+                NaiveDate::from_ymd(2021, 3, 17).into()
+            );
+            assert_eq!(
+                *input.coerce_to(&Time).unwrap(),
+                NaiveTime::from_hms(11, 34, 56).into()
+            );
         }
 
         #[proptest]
