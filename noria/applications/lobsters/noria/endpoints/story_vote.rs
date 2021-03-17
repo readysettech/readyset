@@ -1,3 +1,4 @@
+use noria::DataType;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::{StoryId, UserId, Vote};
@@ -38,7 +39,7 @@ where
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let mut votes = c.table("votes").await?.ready_oneshot().await?;
-    let vote = noria::row!(votes,
+    let vote: Result<Vec<DataType>, anyhow::Error> = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,
         "story_id" => story,
@@ -47,6 +48,7 @@ where
             Vote::Down => 0,
         },
     );
+    let vote: Vec<DataType> = vote?;
     votes.insert(vote).await?;
 
     Ok((c, false))

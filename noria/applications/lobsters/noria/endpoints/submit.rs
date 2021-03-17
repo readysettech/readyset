@@ -62,7 +62,7 @@ where
     // NOTE: MySQL technically does everything inside this and_then in a transaction,
     // but let's be nice to it
     let mut stories = c.table("stories").await?.ready_oneshot().await?;
-    let story = noria::row!(stories,
+    let story: Result<Vec<DataType>, anyhow::Error> = noria::row!(stories,
         "id" => story_id,
         "created_at" => chrono::Local::now().naive_local(),
         "user_id" => user,
@@ -71,14 +71,16 @@ where
         "short_id" => ::std::str::from_utf8(&id[..]).unwrap(),
         "markeddown_description" => "body",
     );
+    let story = story?;
     stories.insert(story).await?;
 
     let mut taggings = c.table("taggings").await?.ready_oneshot().await?;
-    let tagging = noria::row!(taggings,
+    let tagging: Result<Vec<DataType>, anyhow::Error> = noria::row!(taggings,
         "id" => rand::random::<i64>(),
         "story_id" => story_id,
         "tag_id" => tag,
     );
+    let tagging = tagging?;
     taggings.insert(tagging).await?;
 
     if !priming {
@@ -92,12 +94,13 @@ where
     }
 
     let mut votes = c.table("votes").await?.ready_oneshot().await?;
-    let vote = noria::row!(votes,
+    let vote: Result<Vec<DataType>, anyhow::Error> = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,
         "story_id" => story_id,
         "vote" => 1,
     );
+    let vote = vote?;
     votes.insert(vote).await?;
 
     Ok((c, false))

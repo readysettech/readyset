@@ -3,6 +3,7 @@
 use clap::value_t_or_exit;
 use clap::{App, Arg};
 use flurry::HashMap as ConcurrentHashMap;
+use noria::DataType;
 use noria::{self, ControllerHandle, ZookeeperAuthority};
 use std::borrow::Cow;
 use std::future::Future;
@@ -78,7 +79,9 @@ impl Service<bool> for NoriaTrawlerBuilder {
             if priming {
                 c.install_recipe(SCHEMA).await?;
                 let mut tbl = c.table("tags").await?;
-                let tag = noria::row!(tbl, "id" => 1, "tag" => "test");
+                let tagged: Result<Vec<DataType>, anyhow::Error> =
+                    noria::row!(tbl, "id" => 1, "tag" => "test");
+                let tag: Vec<DataType> = tagged?;
                 tbl.insert(tag).await?;
                 c.extend_recipe(QUERIES).await?;
             }
@@ -172,8 +175,9 @@ impl Service<TrawlerRequest> for NoriaTrawler {
                         if user.is_none() {
                             let uid = acting_as.unwrap();
                             let mut tbl = c.table("users").await?.ready_oneshot().await?;
-                            let user =
+                            let user: Result<Vec<DataType>, anyhow::Error> =
                                 noria::row!(tbl, "id" => uid, "username" => format!("user{}", uid));
+                            let user = user?;
                             tbl.insert(user).await?;
                         }
 

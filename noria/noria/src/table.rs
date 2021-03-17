@@ -47,13 +47,13 @@ type Transport = AsyncBincodeStream<
 /// ```rust
 /// use noria::errors::ReadySetResult;
 /// async fn add_user(users: &mut noria::Table) -> ReadySetResult<()> {
-///   let user = noria::row!(users,
+///   let user: ReadySetResult<_> = noria::row!(users,
 ///     "username" => "jonhoo",
 ///     "password" => "hunter2",
 ///     "created_at" => chrono::Local::now().naive_local(),
 ///     "logins" => 0,
 ///   );
-///   users.insert(user).await
+///   users.insert(user?).await
 /// }
 /// ```
 #[macro_export]
@@ -96,10 +96,14 @@ macro_rules! row {
             match &**col {
                 $($k => {
                     // TODO: check row[coli] against schema.fields[coli].sql_type ?
-                    row[coli] = vals[$idx].take().expect("field name appears twice -- should be caught by match");
+                    row[coli] = vals[$idx].take()
+                        .ok_or_else(|| $crate::errors::internal_err("field name appears twice -- should be caught by match"))?;
                     if let Some(ref schema) = schema {
                         if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
-                            assert!(!row[coli].is_none(), "Attempted to set NOT NULL column '{}' to DataType::None", col);
+                            Err($crate::errors::ReadySetError::TableError {
+                                 name: $tbl.table_name().into(),
+                                 source: Box::new($crate::errors::ReadySetError::NonNullable { col: col.into() })
+                            })?
                         }
                     }
                 },)|+
@@ -126,14 +130,16 @@ macro_rules! row {
                     }
 
                     if !allow_null && row[coli].is_none() {
-                        panic!("Column {} is declared NOT NULL, has no default, and was not provided", cname);
+                       Err($crate::errors::ReadySetError::TableError {
+                            name: $tbl.table_name().into(),
+                            source: Box::new($crate::errors::ReadySetError::ColumnRequired { col: cname.into() })
+                       })?
                     }
                 }
                 _ => { /* leave column value as None */ }
             }
         }
-
-        row
+        Ok(row)
     }};
 }
 
@@ -143,14 +149,14 @@ macro_rules! row {
 #[allow(dead_code)]
 async fn add_user(users: &mut Table) -> ReadySetResult<()> {
     let s = String::from("non copy");
-    let user = row!(users,
+    let user: ReadySetResult<_> = row!(users,
       "username" => "jonhoo",
       "password" => "hunter2",
       "created_at" => chrono::Local::now().naive_local(),
       "not an ident" => s,
       "logins" => 0,
     );
-    users.insert(user).await
+    users.insert(user?).await
 }
 
 /// Create an update for a given [`Table`] using column names.

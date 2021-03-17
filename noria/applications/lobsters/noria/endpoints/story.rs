@@ -1,4 +1,5 @@
 use chrono;
+use noria::DataType;
 use std::collections::HashSet;
 use std::future::Future;
 use tower_util::ServiceExt;
@@ -48,13 +49,14 @@ where
             .await?;
         let now = chrono::Local::now().naive_local();
         let mut tbl = c.table("read_ribbons").await?.ready_oneshot().await?;
-        let row = noria::row!(tbl,
+        let row: Result<Vec<DataType>, anyhow::Error> = noria::row!(tbl,
             "id" => (i64::from(uid) << 32) + Into::<i64>::into(&story),
             "created_at" => now,
             "updated_at" => now,
             "user_id" => uid,
             "story_id" => &story,
         );
+        let row: Vec<DataType> = row?;
         let set = noria::update!(tbl,
             "updated_at" => noria::Modification::Set(now.into())
         );
