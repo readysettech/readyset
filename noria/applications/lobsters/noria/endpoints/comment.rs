@@ -1,4 +1,5 @@
 use chrono;
+use noria::DataType;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::{CommentId, StoryId, UserId};
@@ -93,7 +94,7 @@ where
     let mut tbl = c.table("comments").await?.ready_oneshot().await?;
 
     let comment = if let Some((parent, thread)) = parent {
-        noria::row!(tbl,
+        let res: Result<Vec<DataType>, anyhow::Error> = noria::row!(tbl,
             "id" => comment_id,
             "created_at" => now,
             "updated_at" => now,
@@ -104,9 +105,10 @@ where
             "thread_id" => thread,
             "comment" => "moar",
             "markeddown_comment" => "moar",
-        )
+        );
+        res?
     } else {
-        noria::row!(tbl,
+        let res: Result<Vec<DataType>, anyhow::Error> = noria::row!(tbl,
             "id" => comment_id,
             "created_at" => now,
             "updated_at" => now,
@@ -115,7 +117,8 @@ where
             "user_id" => user,
             "comment" => "moar",
             "markeddown_comment" => "moar",
-        )
+        );
+        res?
     };
     tbl.insert(comment).await?;
 
@@ -131,13 +134,14 @@ where
     }
 
     let mut votes = c.table("votes").await?.ready_oneshot().await?;
-    let vote = noria::row!(votes,
+    let vote: Result<Vec<DataType>, anyhow::Error> = noria::row!(votes,
         "id" => rand::random::<i64>(),
         "user_id" => user,
         "story_id" => story,
         "comment_id" => comment_id,
         "vote" => 1,
     );
+    let vote = vote?;
     votes.insert(vote).await?;
 
     Ok((c, false))
