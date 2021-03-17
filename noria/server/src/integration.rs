@@ -4231,3 +4231,53 @@ async fn aggregate_expression() {
 
     assert_eq!(&res["max_num"], &DataType::from(100));
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn post_join_filter() {
+    let mut g = start_simple("post_join_filter").await;
+
+    g.install_recipe(
+        "CREATE TABLE t1 (id int, val_1 int);
+         CREATE TABLE t2 (id int, val_2 int);
+         QUERY q:
+            SELECT t1.id AS id_1, t1.val_1 AS val_1, t2.val_2 AS val_2
+            FROM t1
+            JOIN t2 ON t1.id = t2.id
+            WHERE t1.val_1 >= t2.val_2",
+    )
+    .await
+    .unwrap();
+
+    let mut t1 = g.table("t1").await.unwrap();
+    let mut t2 = g.table("t2").await.unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    t1.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(2)],
+        vec![DataType::from(3), DataType::from(3)],
+        vec![DataType::from(4), DataType::from(4)],
+    ])
+    .await
+    .unwrap();
+
+    t2.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(5)],
+        vec![DataType::from(3), DataType::from(5)],
+    ])
+    .await
+    .unwrap();
+
+    let mut res: Vec<_> = q.lookup(&[0.into()], true).await.unwrap().into();
+    res.sort();
+
+    assert_eq!(
+        res,
+        vec![
+            vec![1.into(), 1.into(), 1.into(), 0.into()],
+            vec![2.into(), 2.into(), 1.into(), 0.into()]
+        ]
+    );
+}
