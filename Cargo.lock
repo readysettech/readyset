@@ -3392,6 +3392,7 @@ dependencies = [
  "slog",
  "stream-cancel",
  "tempfile",
+ "thiserror",
  "timekeeper",
  "tokio 0.2.24",
  "tuple",

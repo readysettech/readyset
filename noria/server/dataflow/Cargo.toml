@@ -53,6 +53,7 @@ common = { version = "0.7.0", path = "../common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../../noria" }
 unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
+thiserror = "1.0.24"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
