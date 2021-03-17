@@ -1,6 +1,7 @@
 use crate::message::TransferFormat;
 use crate::r#type::Type;
 use crate::value::Value;
+use std::rc::Rc;
 
 pub use postgres::error::SqlState;
 
@@ -28,6 +29,7 @@ pub enum BackendMessage<R> {
     },
     DataRow {
         values: R,
+        explicit_transfer_formats: Option<Rc<Vec<TransferFormat>>>,
     },
     ErrorResponse {
         severity: ErrorSeverity,
@@ -88,5 +90,5 @@ pub struct FieldDescription {
     pub data_type: Type,
     pub data_type_size: i16,
     pub type_modifier: i32,
-    pub format: TransferFormat,
+    pub transfer_format: TransferFormat,
 }

@@ -37,9 +37,11 @@ const STARTUP_MESSAGE_DATABASE_PARAMETER: &str = "database";
 const STARTUP_MESSAGE_TERMINATOR: &str = "";
 const STARTUP_MESSAGE_USER_PARAMETER: &str = "user";
 
+const BOOL_TRUE_TEXT_REP: &str = "t";
 const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
+const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
 impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
     type Item = FrontendMessage;
@@ -122,7 +124,7 @@ impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
                 let prepared_statement_name = get_str(msg)?;
 
                 let n_param_format_codes = get_i16(msg)?;
-                let _param_transfer_formats = (0..n_param_format_codes)
+                let param_transfer_formats = (0..n_param_format_codes)
                     .map(|_| get_format(msg))
                     .collect::<Result<Vec<TransferFormat>, Error>>()?;
 
@@ -132,13 +134,33 @@ impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
                     .ok_or_else(|| {
                         Error::UnknownPreparedStatement(prepared_statement_name.to_string())
                     })?;
-                let n_params = get_i16(msg)?;
-                if usize::try_from(n_params)? != param_data_types.len() {
+                let n_params = usize::try_from(get_i16(msg)?)?;
+                if n_params != param_data_types.len() {
+                    // TODO If the text transfer format is used, the frontend has the option of not
+                    // pre-specifying parameter data types in the Parse message that created the
+                    // prepared statement. In that case, the parameter data types must be inferred
+                    // from the text representation of the values themselves. This is not currently
+                    // implemented.
                     Err(Error::IncorrectParameterCount(n_params))?;
                 }
+                let param_transfer_formats = match param_transfer_formats[..] {
+                    [] => vec![Text; n_params],
+                    [f] => vec![f; n_params],
+                    _ => {
+                        if param_transfer_formats.len() == n_params {
+                            param_transfer_formats
+                        } else {
+                            Err(Error::IncorrectParameterCount(n_params))?
+                        }
+                    }
+                };
                 let params = param_data_types
                     .iter()
-                    .map(|t| get_binary_value(msg, t))
+                    .zip(param_transfer_formats.iter())
+                    .map(|(t, f)| match f {
+                        Binary => get_binary_value(msg, t),
+                        Text => get_text_value(msg, t),
+                    })
                     .collect::<Result<Vec<Value>, Error>>()?;
 
                 let n_result_format_codes = msg.get_i16();
@@ -270,14 +292,55 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 
     let buf = &mut src.split_to(usize::try_from(len)?);
     match *t {
-        Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
-        Type::INT8 => Ok(Value::BigInt(i64::from_sql(t, buf)?)),
-        Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
-        Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
-        Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+        Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
+        Type::CHAR => Ok(Value::Char(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
         Type::VARCHAR => Ok(Value::Varchar(ArcCStr::try_from(<&str>::from_sql(
             t, buf,
         )?)?)),
+        Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
+        Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
+        Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
+        Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
+        Type::FLOAT4 => Ok(Value::Real(f32::from_sql(t, buf)?)),
+        Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
+        Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+        _ => Err(Error::UnsupportedType(t.clone())),
+    }
+}
+
+fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
+    let len = get_i32(src)?;
+    if len == LENGTH_NULL_SENTINEL {
+        return Ok(Value::Null);
+    }
+
+    let text = BytesStr::try_from(src.split_to(usize::try_from(len)?))?;
+    let text_str: &str = text.borrow();
+    match *t {
+        Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
+        Type::CHAR => Ok(Value::Char(ArcCStr::try_from(text_str)?)),
+        Type::VARCHAR => Ok(Value::Varchar(ArcCStr::try_from(text_str)?)),
+        Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
+        Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
+        Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),
+        Type::FLOAT8 => {
+            // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
+            Ok(Value::Double(text_str.parse::<f64>()?))
+        }
+        Type::FLOAT4 => {
+            // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
+            Ok(Value::Real(text_str.parse::<f32>()?))
+        }
+        Type::TEXT => Ok(Value::Text(ArcCStr::try_from(text_str)?)),
+        Type::TIMESTAMP => {
+            // TODO: Does not correctly handle all valid timestamp representations. For example,
+            // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
+            Ok(Value::Timestamp(NaiveDateTime::parse_from_str(
+                text_str,
+                TIMESTAMP_FORMAT,
+            )?))
+        }
+
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -788,7 +851,7 @@ mod tests {
         buf.put_i64(0x1234567890abcdef); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            Value::BigInt(0x1234567890abcdef)
+            Value::Bigint(0x1234567890abcdef)
         );
     }
 

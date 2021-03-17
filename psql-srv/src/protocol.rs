@@ -6,16 +6,19 @@ use crate::message::{
     FrontendMessage::{self, *},
     SqlState,
     StatementName::*,
-    TransferFormat::*,
+    TransferFormat::{self, *},
 };
 use crate::r#type::{ColType, Type};
 use crate::value::Value;
 use crate::{Backend, PrepareResponse, QueryResponse::*, Schema};
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::rc::Rc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 const ATTTYPMOD_NONE: i32 = -1;
+const TYPLEN_1: i16 = 1;
+const TYPLEN_2: i16 = 2;
 const TYPLEN_4: i16 = 4;
 const TYPLEN_8: i16 = 8;
 const TYPLEN_VARLENA: i16 = -1;
@@ -38,6 +41,7 @@ struct PortalData {
     prepared_statement_id: u32,
     prepared_statement_name: String,
     params: Vec<Value>,
+    result_transfer_formats: Rc<Vec<TransferFormat>>,
 }
 
 impl Protocol {
@@ -57,7 +61,7 @@ impl Protocol {
     ) -> Result<(), Error> {
         if self.is_starting_up {
             match message {
-                SSLRequest { .. } => channel.send(BackendMessage::ssl_response_n()).await?,
+                SSLRequest { .. } => channel.feed(BackendMessage::ssl_response_n()).await?,
 
                 StartupMessage { database, .. } => {
                     let database = database
@@ -69,12 +73,13 @@ impl Protocol {
                     channel.set_start_up_complete();
 
                     channel.feed(AuthenticationOk).await?;
-                    channel.send(BackendMessage::ready_for_query_idle()).await?;
+                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
                 }
 
                 m => Err(Error::UnsupportedMessage(m))?,
             };
 
+            channel.flush().await?;
             return Ok(());
         }
 
@@ -83,10 +88,11 @@ impl Protocol {
                 prepared_statement_name,
                 portal_name,
                 params,
-                ..
+                result_transfer_formats,
             } => {
                 let PreparedStatementData {
                     prepared_statement_id,
+                    row_schema,
                     ..
                 } = self
                     .prepared_statements
@@ -95,16 +101,30 @@ impl Protocol {
                         Error::MissingPreparedStatement(prepared_statement_name.to_string())
                     })?;
 
+                let n_cols = row_schema.len();
+                let result_transfer_formats = match result_transfer_formats[..] {
+                    [] => vec![Text; n_cols],
+                    [f] => vec![f; n_cols],
+                    _ => {
+                        if result_transfer_formats.len() == n_cols {
+                            result_transfer_formats
+                        } else {
+                            Err(Error::IncorrectFormatCount(n_cols))?
+                        }
+                    }
+                };
+
                 self.portals.insert(
                     portal_name.to_string(),
                     PortalData {
                         prepared_statement_id: *prepared_statement_id,
                         prepared_statement_name: prepared_statement_name.to_string(),
                         params,
+                        result_transfer_formats: Rc::new(result_transfer_formats),
                     },
                 );
 
-                channel.send(BindComplete).await?;
+                channel.feed(BindComplete).await?;
             }
 
             Close { name } => {
@@ -126,13 +146,14 @@ impl Protocol {
                         }
                     }
                 };
-                channel.send(CloseComplete).await?;
+                channel.feed(CloseComplete).await?;
             }
 
             Describe { name } => match name {
                 Portal(name) => {
                     let PortalData {
                         prepared_statement_name,
+                        result_transfer_formats,
                         ..
                     } = self
                         .portals
@@ -146,12 +167,14 @@ impl Protocol {
                             Error::InternalError("missing prepared statement".to_string())
                         })?;
 
+                    debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
                     channel
-                        .send(RowDescription {
+                        .feed(RowDescription {
                             field_descriptions: row_schema
                                 .iter()
-                                .map(make_field_description)
-                                .collect(),
+                                .zip(result_transfer_formats.iter())
+                                .map(|(i, f)| make_field_description(i, *f))
+                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
                         })
                         .await?;
                 }
@@ -171,15 +194,15 @@ impl Protocol {
                             parameter_data_types: param_schema
                                 .iter()
                                 .map(|(_, t)| to_type(t))
-                                .collect(),
+                                .collect::<Result<Vec<Type>, Error>>()?,
                         })
                         .await?;
                     channel
-                        .send(RowDescription {
+                        .feed(RowDescription {
                             field_descriptions: row_schema
                                 .iter()
-                                .map(make_field_description)
-                                .collect(),
+                                .map(|i| make_field_description(i, Text))
+                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
                         })
                         .await?;
                 }
@@ -189,6 +212,7 @@ impl Protocol {
                 let PortalData {
                     prepared_statement_id,
                     params,
+                    result_transfer_formats,
                     ..
                 } = self
                     .portals
@@ -200,38 +224,12 @@ impl Protocol {
                 if let Select { rows, .. } = response {
                     let mut n_rows = 0;
                     for r in rows {
-                        channel.feed(DataRow { values: r }).await?;
-                        n_rows += 1;
-                    }
-                    channel
-                        .send(CommandComplete {
-                            tag: CommandCompleteTag::Select(n_rows),
-                        })
-                        .await?;
-                } else {
-                    let tag = match response {
-                        Insert(n) => CommandCompleteTag::Insert(n),
-                        Update(n) => CommandCompleteTag::Update(n),
-                        Delete(n) => CommandCompleteTag::Delete(n),
-                        Command => CommandCompleteTag::Empty,
-                        Select { .. } => unreachable!(),
-                    };
-                    channel.send(CommandComplete { tag }).await?;
-                }
-            }
-
-            Query { query } => {
-                let response = backend.on_query(query.borrow()).await?;
-
-                if let Select { schema, rows } = response {
-                    channel
-                        .feed(RowDescription {
-                            field_descriptions: schema.iter().map(make_field_description).collect(),
-                        })
-                        .await?;
-                    let mut n_rows = 0;
-                    for r in rows {
-                        channel.feed(DataRow { values: r }).await?;
+                        channel
+                            .feed(DataRow {
+                                values: r,
+                                explicit_transfer_formats: Some(result_transfer_formats.clone()),
+                            })
+                            .await?;
                         n_rows += 1;
                     }
                     channel
@@ -239,7 +237,6 @@ impl Protocol {
                             tag: CommandCompleteTag::Select(n_rows),
                         })
                         .await?;
-                    channel.send(BackendMessage::ready_for_query_idle()).await?;
                 } else {
                     let tag = match response {
                         Insert(n) => CommandCompleteTag::Insert(n),
@@ -249,7 +246,47 @@ impl Protocol {
                         Select { .. } => unreachable!(),
                     };
                     channel.feed(CommandComplete { tag }).await?;
-                    channel.send(BackendMessage::ready_for_query_idle()).await?;
+                }
+            }
+
+            Query { query } => {
+                let response = backend.on_query(query.borrow()).await?;
+
+                if let Select { schema, rows } = response {
+                    channel
+                        .feed(RowDescription {
+                            field_descriptions: schema
+                                .iter()
+                                .map(|i| make_field_description(i, Text))
+                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
+                        })
+                        .await?;
+                    let mut n_rows = 0;
+                    for r in rows {
+                        channel
+                            .feed(DataRow {
+                                values: r,
+                                explicit_transfer_formats: None,
+                            })
+                            .await?;
+                        n_rows += 1;
+                    }
+                    channel
+                        .feed(CommandComplete {
+                            tag: CommandCompleteTag::Select(n_rows),
+                        })
+                        .await?;
+                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
+                } else {
+                    let tag = match response {
+                        Insert(n) => CommandCompleteTag::Insert(n),
+                        Update(n) => CommandCompleteTag::Update(n),
+                        Delete(n) => CommandCompleteTag::Delete(n),
+                        Command => CommandCompleteTag::Empty,
+                        Select { .. } => unreachable!(),
+                    };
+                    channel.feed(CommandComplete { tag }).await?;
+                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
                 }
             }
 
@@ -266,7 +303,10 @@ impl Protocol {
 
                 channel.set_statement_param_types(
                     prepared_statement_name.borrow() as &str,
-                    param_schema.iter().map(|(_, t)| to_type(t)).collect(),
+                    param_schema
+                        .iter()
+                        .map(|(_, t)| to_type(t))
+                        .collect::<Result<Vec<Type>, Error>>()?,
                 );
                 self.prepared_statements.insert(
                     prepared_statement_name.to_string(),
@@ -277,10 +317,10 @@ impl Protocol {
                     },
                 );
 
-                channel.send(ParseComplete).await?;
+                channel.feed(ParseComplete).await?;
             }
 
-            Sync => channel.send(BackendMessage::ready_for_query_idle()).await?,
+            Sync => channel.feed(BackendMessage::ready_for_query_idle()).await?,
 
             Terminate => {
                 // no response is sent
@@ -289,6 +329,7 @@ impl Protocol {
             m => Err(Error::UnsupportedMessage(m))?,
         }
 
+        channel.flush().await?;
         Ok(())
     }
 
@@ -298,11 +339,12 @@ impl Protocol {
         channel: &mut Channel<C, B::Row>,
     ) -> Result<(), Error> {
         if self.is_starting_up {
-            channel.send(make_error_response(error)).await?;
+            channel.feed(make_error_response(error)).await?;
         } else {
             channel.feed(make_error_response(error)).await?;
-            channel.send(BackendMessage::ready_for_query_idle()).await?;
+            channel.feed(BackendMessage::ready_for_query_idle()).await?;
         }
+        channel.flush().await?;
         Ok(())
     }
 }
@@ -311,6 +353,7 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
     let sqlstate = match error {
         Error::DecodeError(_) => SqlState::IO_ERROR,
         Error::EncodeError(_) => SqlState::IO_ERROR,
+        Error::IncorrectFormatCount(_) => SqlState::IO_ERROR,
         Error::InternalError(_) => SqlState::INTERNAL_ERROR,
         Error::InvalidInteger(_) => SqlState::DATATYPE_MISMATCH,
         Error::IoError(_) => SqlState::IO_ERROR,
@@ -321,6 +364,7 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
         Error::Unknown(_) => SqlState::INTERNAL_ERROR,
         Error::Unsupported(_) => SqlState::FEATURE_NOT_SUPPORTED,
         Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
+        Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
     };
     ErrorResponse {
         severity: ErrorSeverity::Error,
@@ -329,36 +373,84 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
     }
 }
 
-fn make_field_description((name, col_type): &(String, ColType)) -> FieldDescription {
-    let data_type = to_type(col_type);
+fn make_field_description(
+    (name, col_type): &(String, ColType),
+    transfer_format: TransferFormat,
+) -> Result<FieldDescription, Error> {
+    let data_type = to_type(col_type)?;
     let (data_type_size, type_modifier) = match *col_type {
+        ColType::Bool => (TYPLEN_1, ATTTYPMOD_NONE),
+        ColType::Char(v) => (TYPLEN_1, i32::from(v)),
         ColType::Varchar(v) => (TYPLEN_VARLENA, i32::from(v)),
+        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Int(_) => (TYPLEN_4, ATTTYPMOD_NONE),
         ColType::Bigint(_) => (TYPLEN_8, ATTTYPMOD_NONE),
+        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Smallint(_) => (TYPLEN_2, ATTTYPMOD_NONE),
+        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Blob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Double => (TYPLEN_8, ATTTYPMOD_NONE),
+        ColType::Float => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Real => (TYPLEN_4, ATTTYPMOD_NONE),
+        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Text => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
+        ColType::Date => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Timestamp => (TYPLEN_8, ATTTYPMOD_NONE),
-        _ => unimplemented!(),
+        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone()))?,
     };
-    FieldDescription {
+    Ok(FieldDescription {
         field_name: name.clone(),
         table_id: UNKNOWN_TABLE,
         col_id: UNKNOWN_COLUMN,
         data_type,
         data_type_size,
         type_modifier,
-        format: Binary,
-    }
+        transfer_format: transfer_format,
+    })
 }
 
-fn to_type(col_type: &ColType) -> Type {
-    match *col_type {
+fn to_type(col_type: &ColType) -> Result<Type, Error> {
+    let t = match *col_type {
+        ColType::Bool => Type::BOOL,
+        ColType::Char(_) => Type::CHAR,
         ColType::Varchar(_) => Type::VARCHAR,
         ColType::Int(_) => Type::INT4,
+        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Bigint(_) => Type::INT8,
+        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Smallint(_) => Type::INT2,
+        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Blob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Double => Type::FLOAT8,
+        ColType::Float => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Real => Type::FLOAT4,
+        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Text => Type::TEXT,
+        ColType::Date => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Timestamp => Type::TIMESTAMP,
-        _ => unimplemented!(),
-    }
+        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone()))?,
+    };
+    Ok(t)
 }

@@ -11,7 +11,6 @@ use crate::value::Value;
 use bytes::{BufMut, BytesMut};
 use postgres_types::ToSql;
 use std::convert::TryFrom;
-use std::io::Write;
 use tokio_util::codec::Encoder;
 
 const ID_AUTHENTICATION_OK: u8 = b'R';
@@ -42,17 +41,22 @@ const ERROR_RESPONSE_SEVERITY_FATAL: &str = "FATAL";
 const ERROR_RESPONSE_SEVERITY_PANIC: &str = "PANIC";
 const ERROR_RESPONSE_TERMINATOR: u8 = b'\0';
 
+const BOOL_FALSE_TEXT_REP: &str = "f";
+const BOOL_TRUE_TEXT_REP: &str = "t";
 const COUNT_PLACEHOLDER: i16 = -1;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
+const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
 impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
     type Item = BackendMessage<R>;
     type Error = Error;
 
     fn encode(&mut self, message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error> {
+        use std::io::Write;
+
         // Handle SSLResponse as a special case, since it has a nonstandard message format.
         if let SSLResponse { byte } = message {
             put_u8(byte, dst);
@@ -97,13 +101,27 @@ impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
                 put_str(&tag_str[..tag_data_len], dst);
             }
 
-            DataRow { values } => {
+            DataRow {
+                values,
+                explicit_transfer_formats,
+            } => {
                 put_u8(ID_DATA_ROW, dst);
                 put_i32(LENGTH_PLACEHOLDER, dst);
                 put_i16(COUNT_PLACEHOLDER, dst);
                 let mut n_values = 0;
-                for v in values {
-                    put_binary_value(v.into(), dst)?;
+                for (i, v) in values.into_iter().enumerate() {
+                    let format = match explicit_transfer_formats {
+                        Some(ref fs) => *fs.get(i).ok_or_else(|| {
+                            Error::InternalError(
+                                "incorrect DataRow transfer format length".to_string(),
+                            )
+                        })?,
+                        None => Text,
+                    };
+                    match format {
+                        Binary => put_binary_value(v.into(), dst)?,
+                        Text => put_text_value(v.into(), dst)?,
+                    };
                     n_values += 1;
                 }
                 // Update the value count field to match the number of values just serialized.
@@ -166,7 +184,7 @@ impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
                     put_type(d.data_type, dst)?;
                     put_i16(d.data_type_size, dst);
                     put_i32(d.type_modifier, dst);
-                    put_format(d.format, dst);
+                    put_format(d.transfer_format, dst);
                 }
             }
 
@@ -234,7 +252,7 @@ fn put_type(val: Type, dst: &mut BytesMut) -> Result<(), Error> {
 }
 
 fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
-    if let Value::Null = val {
+    if val == Value::Null {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
     }
@@ -243,26 +261,98 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     put_i32(LENGTH_PLACEHOLDER, dst);
     match val {
         Value::Null => {
-            // Null is handled as a special case above.
-            unreachable!();
+            unreachable!("Null is handled as a special case above.");
         }
-        Value::Int(i) => {
-            i.to_sql(&Type::INT4, dst)?;
+        Value::Bool(v) => {
+            v.to_sql(&Type::BOOL, dst)?;
         }
-        Value::BigInt(i) => {
-            i.to_sql(&Type::INT8, dst)?;
+        Value::Char(v) => {
+            v.to_bytes().to_sql(&Type::CHAR, dst)?;
         }
-        Value::Double(d) => {
-            d.to_sql(&Type::FLOAT8, dst)?;
+        Value::Varchar(v) => {
+            v.to_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
-        Value::Text(t) => {
-            t.to_bytes().to_sql(&Type::TEXT, dst)?;
+        Value::Int(v) => {
+            v.to_sql(&Type::INT4, dst)?;
         }
-        Value::Timestamp(t) => {
-            t.to_sql(&Type::TIMESTAMP, dst)?;
+        Value::Bigint(v) => {
+            v.to_sql(&Type::INT8, dst)?;
         }
-        Value::Varchar(t) => {
-            t.to_bytes().to_sql(&Type::VARCHAR, dst)?;
+        Value::Smallint(v) => {
+            v.to_sql(&Type::INT2, dst)?;
+        }
+        Value::Double(v) => {
+            v.to_sql(&Type::FLOAT8, dst)?;
+        }
+        Value::Real(v) => {
+            v.to_sql(&Type::FLOAT4, dst)?;
+        }
+        Value::Text(v) => {
+            v.to_bytes().to_sql(&Type::TEXT, dst)?;
+        }
+        Value::Timestamp(v) => {
+            v.to_sql(&Type::TIMESTAMP, dst)?;
+        }
+    };
+    // Update the length field to match the recently serialized data length in `dst`. The 4 byte
+    // length field itself is excluded from the length calculation.
+    let value_len = dst.len() - start_ofs - 4;
+    set_i32(i32::try_from(value_len)?, dst, start_ofs)?;
+    Ok(())
+}
+
+fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
+    use std::fmt::Write;
+
+    if val == Value::Null {
+        put_i32(LENGTH_NULL_SENTINEL, dst);
+        return Ok(());
+    }
+
+    let start_ofs = dst.len();
+    put_i32(LENGTH_PLACEHOLDER, dst);
+    match val {
+        Value::Null => {
+            unreachable!("Null is handled as a special case above.");
+        }
+        Value::Bool(v) => {
+            let text = if v {
+                BOOL_TRUE_TEXT_REP
+            } else {
+                BOOL_FALSE_TEXT_REP
+            };
+            write!(dst, "{}", text)?;
+        }
+        Value::Char(v) => {
+            dst.extend_from_slice(v.to_bytes());
+        }
+        Value::Varchar(v) => {
+            dst.extend_from_slice(v.to_bytes());
+        }
+        Value::Int(v) => {
+            write!(dst, "{}", v)?;
+        }
+        Value::Bigint(v) => {
+            write!(dst, "{}", v)?;
+        }
+        Value::Smallint(v) => {
+            write!(dst, "{}", v)?;
+        }
+        Value::Double(v) => {
+            // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
+            write!(dst, "{}", v)?;
+        }
+        Value::Real(v) => {
+            // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
+            write!(dst, "{}", v)?;
+        }
+        Value::Text(v) => {
+            dst.extend_from_slice(v.to_bytes());
+        }
+        Value::Timestamp(v) => {
+            // TODO: Does not correctly handle all valid timestamp representations. For example,
+            // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
+            write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
         }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
@@ -280,6 +370,7 @@ mod tests {
     use arccstr::ArcCStr;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
+    use std::rc::Rc;
 
     #[test]
     fn test_encode_ssl_response() {
@@ -401,7 +492,15 @@ mod tests {
     fn test_encode_data_row_empty() {
         let mut codec = Codec::<Vec<Value>>::new();
         let mut buf = BytesMut::new();
-        codec.encode(DataRow { values: vec![] }, &mut buf).unwrap();
+        codec
+            .encode(
+                DataRow {
+                    values: vec![],
+                    explicit_transfer_formats: Some(Rc::new(vec![])),
+                },
+                &mut buf,
+            )
+            .unwrap();
         let mut exp = BytesMut::new();
         exp.put_u8(b'D'); // message id
         exp.put_i32(4 + 2); // message length
@@ -417,6 +516,7 @@ mod tests {
             .encode(
                 DataRow {
                     values: vec![Value::Int(42)],
+                    explicit_transfer_formats: Some(Rc::new(vec![Binary])),
                 },
                 &mut buf,
             )
@@ -442,6 +542,7 @@ mod tests {
                         Value::Null,
                         Value::Text(ArcCStr::try_from("some text").unwrap()),
                     ],
+                    explicit_transfer_formats: Some(Rc::new(vec![Binary, Binary, Binary])),
                 },
                 &mut buf,
             )
@@ -567,7 +668,7 @@ mod tests {
                             data_type: Type::INT4,
                             data_type_size: 4,
                             type_modifier: 0,
-                            format: Binary,
+                            transfer_format: Binary,
                         },
                         FieldDescription {
                             field_name: "two".to_string(),
@@ -576,7 +677,7 @@ mod tests {
                             data_type: Type::INT8,
                             data_type_size: 8,
                             type_modifier: 0,
-                            format: Text,
+                            transfer_format: Text,
                         },
                         FieldDescription {
                             field_name: "three".to_string(),
@@ -585,7 +686,7 @@ mod tests {
                             data_type: Type::TEXT,
                             data_type_size: -2,
                             type_modifier: 0,
-                            format: Binary,
+                            transfer_format: Binary,
                         },
                     ],
                 },
@@ -665,7 +766,7 @@ mod tests {
     #[test]
     fn test_encode_binary_big_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(Value::BigInt(0x1234567890abcdef), &mut buf).unwrap();
+        put_binary_value(Value::Bigint(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_i64(0x1234567890abcdef); // value
