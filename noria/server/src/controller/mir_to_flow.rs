@@ -1,6 +1,7 @@
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator,
-    ColumnConstraint, ColumnSpecification, Literal, OrderType,
+    ColumnConstraint, ColumnSpecification, Expression, FunctionArgument, FunctionExpression,
+    Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -272,7 +273,7 @@ fn mir_node_to_flow_parts(
                 MirNodeType::Project {
                     ref emit,
                     ref literals,
-                    ref arithmetic,
+                    ref expressions,
                 } => {
                     assert_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
@@ -281,7 +282,7 @@ fn mir_node_to_flow_parts(
                         parent,
                         mir_node.columns.as_slice(),
                         emit,
-                        arithmetic,
+                        expressions,
                         literals,
                         mig,
                         table_mapping,
@@ -382,18 +383,14 @@ fn adapt_base_node(
     };
 
     for a in add.iter() {
-        let default_value = match a
+        let default_value = a
             .constraints
             .iter()
-            .filter_map(|c| match *c {
+            .find_map(|c| match *c {
                 ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
                 _ => None,
             })
-            .next()
-        {
-            None => DataType::None,
-            Some(dv) => dv,
-        };
+            .unwrap_or(DataType::None);
         let column_id = mig.add_column(na, &a.column.name, default_value);
 
         // store the new column ID in the column specs for this node
@@ -420,7 +417,7 @@ fn adapt_base_node(
     FlowNode::Existing(na)
 }
 
-fn column_names<'a>(cs: &'a [Column]) -> Vec<&'a str> {
+fn column_names(cs: &[Column]) -> Vec<&str> {
     cs.iter().map(|c| c.name.as_str()).collect()
 }
 
@@ -583,11 +580,7 @@ fn make_grouped_node(
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| {
-            parent
-                .borrow()
-                .column_id_for_column(c, table_mapping.clone())
-        })
+        .map(|c| parent.borrow().column_id_for_column(c, table_mapping))
         .collect::<Vec<_>>();
 
     assert!(!group_col_indx.is_empty());
@@ -841,14 +834,17 @@ fn arithmetic_item_to_project_expression(
             ProjectExpression::Literal(literal.into())
         }
         ArithmeticItem::Base(ArithmeticBase::Bracketed(ref arithmetic)) => {
-            generate_project_expression(parent, arithmetic)
+            arithmetic_to_project_expression(parent, arithmetic)
         }
-        ArithmeticItem::Expr(arithmetic) => generate_project_expression(parent, arithmetic),
+        ArithmeticItem::Expr(arithmetic) => arithmetic_to_project_expression(parent, arithmetic),
     }
 }
 
-/// Converts a nom_sql Arithmetic expression into a ProjectExpression
-fn generate_project_expression(parent: &MirNodeRef, arithmetic: &Arithmetic) -> ProjectExpression {
+/// Converts a nom_sql Expression into a ProjectExpression
+fn arithmetic_to_project_expression(
+    parent: &MirNodeRef,
+    arithmetic: &Arithmetic,
+) -> ProjectExpression {
     ProjectExpression::Op {
         op: arithmetic.op.clone(),
         left: Box::new(arithmetic_item_to_project_expression(
@@ -862,18 +858,47 @@ fn generate_project_expression(parent: &MirNodeRef, arithmetic: &Arithmetic) -> 
     }
 }
 
+fn generate_project_expression(parent: &MirNodeRef, expr: Expression) -> ProjectExpression {
+    match expr {
+        Expression::Arithmetic(ArithmeticExpression { ari, .. }) => {
+            arithmetic_to_project_expression(parent, &ari)
+        }
+        Expression::Call(FunctionExpression::Cast(arg, ty)) => ProjectExpression::Cast(
+            match arg {
+                FunctionArgument::Column(col) => Box::new(ProjectExpression::Column(
+                    parent
+                        .borrow()
+                        .column_id_for_column(&Column::from(col), None),
+                )),
+                _ => unimplemented!(),
+            },
+            ty,
+        ),
+        Expression::Call(call) => unreachable!(
+            "Unexpected (aggregate?) call node in project expression: {:?}",
+            call
+        ),
+        Expression::Literal(lit) => ProjectExpression::Literal(lit.into()),
+        Expression::Column { name, table } => ProjectExpression::Column(
+            parent
+                .borrow()
+                .column_id_for_column(&Column::new(table.as_deref(), &name), None),
+        ),
+    }
+}
+
 fn make_project_node(
     name: &str,
     parent: MirNodeRef,
-    columns: &[Column],
+    source_columns: &[Column],
     emit: &[Column],
-    arithmetic: &[(String, ArithmeticExpression)],
+    expressions: &[(String, Expression)],
     literals: &[(String, DataType)],
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = column_names(columns);
+    let column_names = column_names(source_columns);
 
     let projected_column_ids = emit
         .iter()
@@ -882,9 +907,9 @@ fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
-    let projected_arithmetic: Vec<ProjectExpression> = arithmetic
+    let projected_expressions: Vec<ProjectExpression> = expressions
         .iter()
-        .map(|&(_, ref e)| generate_project_expression(&parent, &e.ari))
+        .map(|(_, e)| generate_project_expression(&parent, e.clone()))
         .collect();
 
     let n = mig.add_ingredient(
@@ -894,7 +919,7 @@ fn make_project_node(
             parent_na,
             projected_column_ids.as_slice(),
             Some(literal_values),
-            Some(projected_arithmetic),
+            Some(projected_expressions),
         ),
     );
     FlowNode::New(n)

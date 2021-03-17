@@ -9,6 +9,7 @@ pub(super) mod security;
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
+use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
 use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
@@ -18,8 +19,8 @@ use ::mir::reuse as mir_reuse;
 use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
-use nom_sql::{parser as sql_parser, ArithmeticItem};
-use nom_sql::{ArithmeticBase, BinaryOperator, CreateTableStatement};
+use nom_sql::parser as sql_parser;
+use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
 use petgraph::graph::NodeIndex;
@@ -272,23 +273,8 @@ impl SqlIncorporator {
                     // GROUP BY clause
                     let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
-                        OutputColumn::Arithmetic(ref ac) => {
-                            let mut is_function = false;
-                            if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) =
-                                ac.expression.ari.left
-                            {
-                                is_function = is_function || c.function.is_some();
-                            }
-
-                            if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) =
-                                ac.expression.ari.right
-                            {
-                                is_function = is_function || c.function.is_some();
-                            }
-
-                            !is_function
-                        }
-                        OutputColumn::Data(ref dc) => dc.function.is_none(),
+                        OutputColumn::Expression(ref ec) => contains_aggregate(&ec.expression),
+                        OutputColumn::Data(ref dc) => !dc.function.iter().any(|f| is_aggregate(f)),
                     });
 
                     // The reuse implementation below may only be performed when all parameters
@@ -366,10 +352,10 @@ impl SqlIncorporator {
                         let may_rewind = match parent.borrow().inner {
                             MirNodeType::Identity => true,
                             MirNodeType::Project {
-                                arithmetic: ref a,
+                                expressions: ref e,
                                 literals: ref l,
                                 ..
-                            } => a.is_empty() && l.is_empty(),
+                            } => e.is_empty() && l.is_empty(),
                             _ => false,
                         };
                         let ancestor = if may_rewind {

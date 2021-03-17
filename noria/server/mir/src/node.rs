@@ -1,4 +1,4 @@
-use nom_sql::{ArithmeticExpression, BinaryOperator, ColumnSpecification, Literal, OrderType};
+use nom_sql::{BinaryOperator, ColumnSpecification, Expression, Literal, OrderType};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
@@ -459,7 +459,7 @@ pub enum MirNodeType {
     /// emit columns
     Project {
         emit: Vec<Column>,
-        arithmetic: Vec<(String, ArithmeticExpression)>,
+        expressions: Vec<(String, Expression)>,
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
@@ -706,13 +706,13 @@ impl MirNodeType {
             MirNodeType::Project {
                 emit: ref our_emit,
                 literals: ref our_literals,
-                arithmetic: ref our_arithmetic,
+                expressions: ref our_expressions,
             } => match *other {
                 MirNodeType::Project {
                     ref emit,
                     ref literals,
-                    ref arithmetic,
-                } => our_emit == emit && our_literals == literals && our_arithmetic == arithmetic,
+                    ref expressions,
+                } => our_emit == emit && our_literals == literals && our_expressions == expressions,
                 _ => false,
             },
             MirNodeType::Distinct {
@@ -991,38 +991,24 @@ impl Debug for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
-                ref arithmetic,
+                ref expressions,
             } => write!(
                 f,
-                "π [{}{}{}]",
+                "π [{}]",
                 emit.iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                if arithmetic.is_empty() {
-                    "".into()
-                } else {
-                    format!(
-                        ", {}",
-                        arithmetic
+                    .map(|c| c.name.clone())
+                    .chain(
+                        expressions
                             .iter()
                             .map(|&(ref n, ref e)| format!("{}: {}", n, e))
-                            .collect::<Vec<_>>()
-                            .join(", ")
                     )
-                },
-                if literals.is_empty() {
-                    "".into()
-                } else {
-                    format!(
-                        ", lit: {}",
+                    .chain(
                         literals
                             .iter()
                             .map(|&(ref n, ref v)| format!("{}: {}", n, v))
-                            .collect::<Vec<_>>()
-                            .join(", ")
                     )
-                },
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ),
             MirNodeType::Reuse { ref node } => write!(
                 f,

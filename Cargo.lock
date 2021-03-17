@@ -3432,6 +3432,7 @@ dependencies = [
 name = "noria-mir"
 version = "0.7.0"
 dependencies = [
+ "itertools 0.10.0",
  "nom-sql",
  "noria-common",
  "noria-dataflow",
@@ -3475,6 +3476,7 @@ dependencies = [
  "async-timer",
  "backtrace",
  "bincode",
+ "chrono",
  "clap 2.33.3",
  "crossbeam 0.8.0",
  "diff",

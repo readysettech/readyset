@@ -324,7 +324,7 @@ mod tests {
             vec![Column::from("aa")],
             MirNodeType::Project {
                 emit: vec![Column::from("aa")],
-                arithmetic: vec![],
+                expressions: vec![],
                 literals: vec![],
             },
             vec![c.clone()],

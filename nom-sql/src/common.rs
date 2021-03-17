@@ -1,22 +1,23 @@
-use nom::branch::alt;
-use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
-use nom::character::is_alphanumeric;
-use nom::combinator::{map, not, peek};
-use nom::{IResult, InputLength};
-use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
+
+use nom::branch::alt;
+use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
+use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
+use nom::character::is_alphanumeric;
+use nom::combinator::opt;
+use nom::combinator::{map, not, peek};
+use nom::error::{ErrorKind, ParseError};
+use nom::multi::{fold_many0, many0, many1, separated_list};
+use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
+use nom::{char, complete, do_parse, named, tag_no_case, IResult, InputLength};
+use std::fmt::{self, Display};
 
 use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
 use crate::case::case_when_column;
 use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
 use crate::keywords::{escape_if_keyword, sql_keyword};
 use crate::table::Table;
-use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
-use nom::combinator::opt;
-use nom::error::{ErrorKind, ParseError};
-use nom::multi::{fold_many0, many0, many1, separated_list};
-use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -624,6 +625,20 @@ fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
     delimited(tag("("), function_arguments, tag(")"))(i)
 }
 
+named!(cast(&[u8]) -> FunctionExpression, do_parse!(
+    complete!(tag_no_case!("cast"))
+        >> multispace0
+        >> complete!(char!('('))
+        >> arg: function_argument_parser
+        >> multispace1
+        >> complete!(tag_no_case!("as"))
+        >> multispace1
+        >> type_: type_identifier
+        >> multispace0
+        >> complete!(char!(')'))
+        >> (FunctionExpression::Cast(arg, type_))
+));
+
 pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
     let delim_group_concat_fx = delimited(tag("("), group_concat_fx, tag(")"));
     alt((
@@ -643,6 +658,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
         map(preceded(tag_no_case("min"), delim_fx_args), |args| {
             FunctionExpression::Min(args.0)
         }),
+        cast,
         map(
             preceded(tag_no_case("group_concat"), delim_group_concat_fx),
             |spec| {
@@ -1133,6 +1149,22 @@ mod tests {
         let expected = FunctionExpression::GroupConcat(
             FunctionArgument::Column(Column::from("x")),
             ", ".to_owned(),
+        );
+        let res = column_function(qs);
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn cast() {
+        let qs = b"cast(`lp`.`start_ddtm` as date)";
+        let expected = FunctionExpression::Cast(
+            FunctionArgument::Column(Column {
+                table: Some("lp".to_owned()),
+                name: "start_ddtm".to_owned(),
+                alias: None,
+                function: None,
+            }),
+            SqlType::Date,
         );
         let res = column_function(qs);
         assert_eq!(res.unwrap().1, expected);

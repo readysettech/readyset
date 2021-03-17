@@ -159,6 +159,7 @@ fn rewrite_selection(
                             | Sum(FunctionArgument::Column(ref mut fe), _)
                             | Min(FunctionArgument::Column(ref mut fe))
                             | Max(FunctionArgument::Column(ref mut fe))
+                            | Cast(FunctionArgument::Column(ref mut fe), _)
                             | GroupConcat(FunctionArgument::Column(ref mut fe), _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);

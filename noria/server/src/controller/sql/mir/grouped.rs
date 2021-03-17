@@ -32,7 +32,8 @@ fn target_columns_from_computed_column(computed_col: &nom_sql::Column) -> Column
             }),
             _,
         )
-        | Sum(FunctionArgument::Column(ref col), _) => Column::from(col),
+        | Sum(FunctionArgument::Column(ref col), _)
+        | Cast(FunctionArgument::Column(ref col), _) => Column::from(col),
         CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")

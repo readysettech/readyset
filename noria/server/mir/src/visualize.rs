@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
@@ -254,39 +255,24 @@ impl GraphViz for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
-                ref arithmetic,
+                ref expressions,
             } => {
                 write!(
                     out,
-                    "π: {}{}{}",
+                    "π: {}",
                     emit.iter()
                         .map(|c| print_col(c))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    if arithmetic.is_empty() {
-                        "".into()
-                    } else {
-                        format!(
-                            ", {}",
-                            arithmetic
-                                .iter()
-                                .map(|&(ref n, ref e)| format!("{}: {}", n, e))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    },
-                    if literals.is_empty() {
-                        "".into()
-                    } else {
-                        format!(
-                            ", lit: {}",
+                        .chain(
                             literals
                                 .iter()
                                 .map(|&(ref n, ref v)| format!("{}: {}", n, v))
-                                .collect::<Vec<_>>()
-                                .join(", ")
                         )
-                    }
+                        .chain(
+                            expressions
+                                .iter()
+                                .map(|&(ref n, ref e)| format!("{}: {}", n, e))
+                        )
+                        .join(", ")
                 )?;
             }
             MirNodeType::Reuse { ref node } => {

@@ -25,6 +25,7 @@ pub enum FunctionExpression {
     Max(FunctionArgument),
     Min(FunctionArgument),
     GroupConcat(FunctionArgument, String),
+    Cast(FunctionArgument, SqlType),
     Generic(String, FunctionArguments),
 }
 
@@ -44,6 +45,7 @@ impl Display for FunctionExpression {
             FunctionExpression::GroupConcat(ref col, ref s) => {
                 write!(f, "group_concat({} separator '{}')", col, s)
             }
+            FunctionExpression::Cast(ref arg, ref typ) => write!(f, "CAST({} AS {})", arg, typ),
             FunctionExpression::Generic(ref name, ref args) => write!(f, "{}({})", name, args),
         }
     }

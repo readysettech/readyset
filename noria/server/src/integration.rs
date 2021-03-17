@@ -17,6 +17,7 @@ use noria::{
     ViewQueryFilter, ViewQueryOperator,
 };
 
+use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -4123,4 +4124,38 @@ async fn post_read_ilike() {
             vec![DataType::from("BAZ"), DataType::from(4)],
         ]
     )
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn cast_projection() {
+    let mut g = start_simple("cast").await;
+
+    g.install_recipe(
+        "CREATE TABLE users (id int, created_at timestamp);
+         QUERY user: SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut table = g.table("users").await.unwrap();
+    table
+        .insert(vec![
+            1i32.into(),
+            NaiveDate::from_ymd(2020, 3, 16).and_hms(16, 40, 30).into(),
+        ])
+        .await
+        .unwrap();
+
+    let mut view = g.view("user").await.unwrap();
+
+    let result = view
+        .lookup_first(&[1i32.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        result,
+        vec![DataType::from(1), NaiveDate::from_ymd(2020, 3, 16).into()]
+    );
 }

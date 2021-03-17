@@ -171,6 +171,9 @@ fn rewrite_function_expression(
             rewrite_function_argument(col_table_remap, arg),
             s.clone(),
         ),
+        FunctionExpression::Cast(arg, t) => {
+            FunctionExpression::Cast(rewrite_function_argument(col_table_remap, arg), t.clone())
+        }
         FunctionExpression::Generic(s, args) => FunctionExpression::Generic(
             s.clone(),
             FunctionArguments {
