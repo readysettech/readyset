@@ -208,7 +208,6 @@ pub mod consistency;
 mod controller;
 mod data;
 mod data_serde;
-#[doc(hidden)]
 pub mod errors;
 mod map;
 pub mod metrics;
@@ -232,6 +231,8 @@ pub mod internal;
 pub use nom_sql::ColumnConstraint;
 
 pub use crate::consensus::ZookeeperAuthority;
+// FIXME(eta): get rid of these
+pub use crate::errors::{ReadySetError, ReadySetResult};
 use crate::internal::*;
 use std::future::Future;
 use std::pin::Pin;
