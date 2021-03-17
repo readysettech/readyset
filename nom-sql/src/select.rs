@@ -314,6 +314,7 @@ mod tests {
     use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
     use crate::common::{
         BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
+        SqlType,
     };
     use crate::condition::ConditionBase::*;
     use crate::condition::ConditionExpression::*;
@@ -1416,5 +1417,38 @@ mod tests {
         };
 
         assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn alias_cast() {
+        let qstr = "SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;";
+        let res = selection(qstr.as_bytes());
+        assert!(res.is_ok(), "!{:?}.is_ok()", res);
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec!["users".into()],
+                fields: vec![
+                    FieldDefinitionExpression::Col(Column::from("id")),
+                    FieldDefinitionExpression::Col(Column {
+                        name: "created_day".to_owned(),
+                        table: None,
+                        alias: Some("created_day".to_owned()),
+                        function: Some(Box::new(FunctionExpression::Cast(
+                            FunctionArgument::Column(Column::from("created_at")),
+                            SqlType::Date
+                        ))),
+                    }),
+                ],
+                where_clause: Some(ComparisonOp(ConditionTree {
+                    left: Box::new(Base(Field(Column::from("id")))),
+                    right: Box::new(Base(Literal(Literal::Placeholder(
+                        ItemPlaceholder::QuestionMark
+                    )))),
+                    operator: BinaryOperator::Equal,
+                })),
+                ..Default::default()
+            }
+        )
     }
 }

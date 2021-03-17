@@ -1,7 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator, Column, ConditionBase,
-    ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table,
+    ArithmeticBase, ArithmeticItem, BinaryOperator, Column, ConditionBase, ConditionExpression,
+    ConditionTree, Expression, FieldDefinitionExpression, FieldValueExpression, JoinConstraint,
+    JoinOperator, JoinRightSide, Literal, Table,
 };
 use nom_sql::{OrderType, SelectStatement};
 
@@ -11,6 +11,8 @@ use std::vec::Vec;
 use std::{cmp::Ordering, num::NonZeroU64};
 use std::{collections::HashMap, convert::TryInto};
 
+use super::query_utils::is_aggregate;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
     pub name: String,
@@ -19,23 +21,23 @@ pub struct LiteralColumn {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ArithmeticColumn {
+pub struct ExpressionColumn {
     pub name: String,
     pub table: Option<String>,
-    pub expression: ArithmeticExpression,
+    pub expression: Expression,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OutputColumn {
     Data(Column),
-    Arithmetic(ArithmeticColumn),
     Literal(LiteralColumn),
+    Expression(ExpressionColumn),
 }
 
 impl Ord for OutputColumn {
     fn cmp(&self, other: &OutputColumn) -> Ordering {
         match *self {
-            OutputColumn::Arithmetic(ArithmeticColumn {
+            OutputColumn::Expression(ExpressionColumn {
                 ref name,
                 ref table,
                 ..
@@ -50,7 +52,7 @@ impl Ord for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
-                OutputColumn::Arithmetic(ArithmeticColumn {
+                OutputColumn::Expression(ExpressionColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
@@ -82,7 +84,7 @@ impl Ord for OutputColumn {
 impl PartialOrd for OutputColumn {
     fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
         match *self {
-            OutputColumn::Arithmetic(ArithmeticColumn {
+            OutputColumn::Expression(ExpressionColumn {
                 ref name,
                 ref table,
                 ..
@@ -97,7 +99,7 @@ impl PartialOrd for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
-                OutputColumn::Arithmetic(ArithmeticColumn {
+                OutputColumn::Expression(ExpressionColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
@@ -747,9 +749,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     // Adds a computed column to the query graph if the given column has a function:
     let add_computed_column = |query_graph: &mut QueryGraph, column: &Column| {
-        match column.function {
-            None => (), // we've already dealt with this column as part of some relation
-            Some(_) => {
+        match &column.function {
+            Some(f) if is_aggregate(f) => {
                 // add a special node representing the computed columns; if it already
                 // exists, add another computed column to it
                 let n = query_graph
@@ -759,6 +760,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                 n.columns.push(column.clone());
             }
+            _ => (), // we've already dealt with this column as part of some relation
         }
     };
 
@@ -788,15 +790,27 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     add_computed_column(&mut qg, c);
                 }
 
-                qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
+                qg.columns.push(OutputColumn::Expression(ExpressionColumn {
                     name: a.alias.clone().unwrap_or_else(|| a.to_string()),
                     table: None,
-                    expression: a.clone(),
+                    expression: Expression::Arithmetic(a.clone()),
                 }));
             }
             FieldDefinitionExpression::Col(ref c) => {
                 add_computed_column(&mut qg, c);
-                qg.columns.push(OutputColumn::Data(c.clone()));
+                qg.columns.push(if let Some(function) = &c.function {
+                    if is_aggregate(function) {
+                        OutputColumn::Data(c.clone())
+                    } else {
+                        OutputColumn::Expression(ExpressionColumn {
+                            name: c.alias.clone().unwrap_or_else(|| c.name.clone()),
+                            table: None,
+                            expression: Expression::Call((**function).clone()),
+                        })
+                    }
+                } else {
+                    OutputColumn::Data(c.clone())
+                });
             }
         }
     }

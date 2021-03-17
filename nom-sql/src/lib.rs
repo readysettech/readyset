@@ -24,6 +24,7 @@ pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement}
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};
 pub use self::delete::DeleteStatement;
+pub use self::expression::Expression;
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};
@@ -48,6 +49,7 @@ mod create;
 mod create_table_options;
 mod delete;
 mod drop;
+mod expression;
 mod insert;
 mod join;
 mod order;

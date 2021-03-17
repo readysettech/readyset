@@ -80,6 +80,7 @@ diff = "0.1.10"
 tempfile = "3.0.2"
 mysql = "18.0.0"
 proptest = "0.10.1"
+chrono = "0.4.19"
 
 [lib]
 name = "noria_server"

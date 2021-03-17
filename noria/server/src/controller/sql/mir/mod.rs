@@ -10,13 +10,12 @@ use dataflow::ops::join::JoinType;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    ArithmeticExpression, BinaryOperator, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
-    CompoundSelectOperator, ConditionBase, ConditionExpression, ConditionTree, Literal, SqlQuery,
-    TableKey,
+    BinaryOperator, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
+    CompoundSelectOperator, ConditionBase, ConditionExpression, ConditionTree, Expression, Literal,
+    SqlQuery, TableKey,
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
-use slog;
 use std::collections::{HashMap, HashSet};
 
 use std::ops::Deref;
@@ -71,10 +70,10 @@ fn value_columns_needed_for_predicates(
     value_columns
         .iter()
         .filter_map(|oc| match *oc {
-            OutputColumn::Arithmetic(ref ac) => Some((
+            OutputColumn::Expression(ref ec) => Some((
                 Column {
-                    name: ac.name.clone(),
-                    table: ac.table.clone(),
+                    name: ec.name.clone(),
+                    table: ec.table.clone(),
                     function: None,
                     aliases: vec![],
                 },
@@ -304,7 +303,7 @@ impl SqlToMirConverter {
                 MirNodeType::Project {
                     emit: columns.clone(),
                     literals: vec![],
-                    arithmetic: vec![],
+                    expressions: vec![],
                 },
                 vec![parent.clone()],
                 vec![],
@@ -1379,13 +1378,13 @@ impl SqlToMirConverter {
         name: &str,
         parent_node: MirNodeRef,
         proj_cols: Vec<&Column>,
-        arithmetic: Vec<(String, ArithmeticExpression)>,
+        expressions: Vec<(String, Expression)>,
         literals: Vec<(String, DataType)>,
         is_leaf: bool,
     ) -> MirNodeRef {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
-        let names: Vec<String> = arithmetic
+        let names: Vec<String> = expressions
             .iter()
             .map(|&(ref n, _)| n.clone())
             .chain(literals.iter().map(|&(ref n, _)| n.clone()))
@@ -1421,7 +1420,7 @@ impl SqlToMirConverter {
             MirNodeType::Project {
                 emit: emit_cols,
                 literals,
-                arithmetic,
+                expressions,
             },
             vec![parent_node.clone()],
             vec![],
@@ -1634,21 +1633,20 @@ impl SqlToMirConverter {
             value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
 
         if !arith_and_lit_columns_needed.is_empty() {
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> =
-                arith_and_lit_columns_needed
-                    .iter()
-                    .filter_map(|&(_, ref oc)| match oc {
-                        OutputColumn::Arithmetic(ref ac) => {
-                            Some((ac.name.clone(), ac.expression.clone()))
-                        }
-                        OutputColumn::Data(_) => None,
-                        OutputColumn::Literal(_) => None,
-                    })
-                    .collect();
+            let projected_expressions: Vec<(String, Expression)> = arith_and_lit_columns_needed
+                .iter()
+                .filter_map(|&(_, ref oc)| match oc {
+                    OutputColumn::Expression(ref ac) => {
+                        Some((ac.name.clone(), ac.expression.clone()))
+                    }
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect();
             let projected_literals: Vec<(String, DataType)> = arith_and_lit_columns_needed
                 .iter()
                 .filter_map(|&(_, ref oc)| match oc {
-                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Expression(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
                         Some((lc.name.clone(), DataType::from(&lc.value)))
@@ -1665,9 +1663,9 @@ impl SqlToMirConverter {
             let passthru_cols: Vec<_> = parent.borrow().columns().to_vec();
             let projected = self.make_project_node(
                 &format!("q_{:x}_n{}{}", qg.signature().hash, node_count, universe),
-                parent.clone(),
+                parent,
                 passthru_cols.iter().collect(),
-                projected_arithmetic,
+                projected_expressions,
                 projected_literals,
                 false,
             );
@@ -1916,7 +1914,7 @@ impl SqlToMirConverter {
 
                 let num_local_predicates = predicate_nodes.len();
 
-                // 5. Determine literals and arithmetic expressions that global predicates depend
+                // 5. Determine literals and expressions that global predicates depend
                 //    on and add them here; remembering that we've already added them-
                 if let Some(projected) =
                     self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
@@ -2049,7 +2047,7 @@ impl SqlToMirConverter {
                 qg.columns
                     .iter()
                     .filter_map(|oc| match *oc {
-                        OutputColumn::Arithmetic(_) => None,
+                        OutputColumn::Expression(_) => None,
                         OutputColumn::Data(ref c) => Some(Column::from(c)),
                         OutputColumn::Literal(_) => None,
                     })
@@ -2062,16 +2060,16 @@ impl SqlToMirConverter {
                 final_node_cols.to_vec()
             };
 
-            // We may already have added some of the arithmetic and literal columns
+            // We may already have added some of the expression and literal columns
             let (_, already_computed): (Vec<_>, Vec<_>) =
                 value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
                     .into_iter()
                     .unzip();
-            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg
+            let projected_expressions: Vec<(String, Expression)> = qg
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(ref ac) => {
+                    OutputColumn::Expression(ref ac) => {
                         if !already_computed.contains(oc) {
                             Some((ac.name.clone(), ac.expression.clone()))
                         } else {
@@ -2087,7 +2085,7 @@ impl SqlToMirConverter {
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
-                    OutputColumn::Arithmetic(_) => None,
+                    OutputColumn::Expression(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
                         if !already_computed.contains(oc) {
@@ -2172,7 +2170,7 @@ impl SqlToMirConverter {
                 &ident,
                 final_node,
                 projected_columns.iter().collect(),
-                projected_arithmetic,
+                projected_expressions,
                 projected_literals,
                 !has_leaf,
             );
