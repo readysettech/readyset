@@ -68,8 +68,10 @@ macro_rules! noria_await {
     ($self:expr, $fut:expr) => {{
         let noria = &mut $self.noria;
 
-        futures_util::future::poll_fn(|cx| noria.poll_ready(cx)).await?;
-        $fut.await
+        futures_util::future::poll_fn(|cx| noria.poll_ready(cx))
+            .await
+            .map_err(|e| NoriaRecipeError(e.into()))?;
+        $fut.await.map_err(|e| NoriaRecipeError(e.into()))
     }};
 }
 
@@ -433,7 +435,7 @@ impl NoriaConnector {
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                         ) {
                             error!(error = %e, "add query failed");
-                            return Err(NoriaRecipeError(e));
+                            return Err(NoriaRecipeError(e.into()));
                         }
 
                         let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());

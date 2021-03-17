@@ -93,12 +93,6 @@ impl From<mysql_async::error::Error> for Error {
     }
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(e: anyhow::Error) -> Self {
-        NoriaRecipeError(e)
-    }
-}
-
 impl Into<io::Error> for Error {
     fn into(self) -> io::Error {
         io::Error::new(io::ErrorKind::Other, self.message())
