@@ -441,7 +441,7 @@ impl Replica {
 
         if *this.timed_out {
             *this.timed_out = false;
-            this.domain.on_event(this.out, PollEvent::Timeout);
+            this.domain.on_event(this.out, PollEvent::Timeout).unwrap();
             processed = true;
         }
 
@@ -621,7 +621,7 @@ impl Future for Replica {
                             } => $outbox.saw_input(token, epoch),
                             _ => {}
                         }
-                        $pp(packet)
+                        $pp(packet).unwrap()
                     } {
                         // domain got a message to quit
                         // TODO: should we finish up remaining work?
@@ -719,7 +719,11 @@ impl Future for Replica {
             self.out.dirty = false;
             loop {
                 let mut this = self.as_mut().project();
-                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
+                match this
+                    .domain
+                    .on_event(this.out, PollEvent::ResumePolling)
+                    .unwrap()
+                {
                     ProcessResult::KeepPolling(timeout) => {
                         if let Some(timeout) = timeout {
                             if timeout == time::Duration::new(0, 0) {
