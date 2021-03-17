@@ -4,7 +4,9 @@ use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
 use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{rpc_err, ActivationResult, ReadySetResult};
+use crate::{
+    rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetResult,
+};
 use futures_util::future;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -414,6 +416,21 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn simple_graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> {
         self.rpc("simple_graphviz", ())
+    }
+
+    /// Replicate the readers associated with the list of queries to the given worker.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn replicate_readers(
+        &mut self,
+        queries: Vec<String>,
+        worker_addr: Option<SocketAddr>,
+    ) -> impl Future<Output = ReadySetResult<ReaderReplicationResult>> {
+        let request = ReaderReplicationSpec {
+            queries,
+            worker_addr,
+        };
+        self.rpc("replicate_readers", request)
     }
 
     /// Remove the given external view from the graph.

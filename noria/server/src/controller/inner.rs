@@ -6,6 +6,7 @@ use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
+use crate::{ReaderReplicationResult, ReaderReplicationSpec};
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
@@ -298,6 +299,12 @@ impl ControllerInner {
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| self.create_universe(args))
                 .map(|universe| Ok(json::to_string(&universe).unwrap())),
+            (Method::POST, "/replicate_readers") => json::from_slice(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.replicate_readers(args)
+                        .map(|readers| json::to_string(&readers).unwrap())
+                }),
             (Method::POST, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
@@ -438,6 +445,124 @@ impl ControllerInner {
         Ok(())
     }
 
+    pub(super) fn replicate_readers(
+        &mut self,
+        spec: ReaderReplicationSpec,
+    ) -> ReadySetResult<ReaderReplicationResult> {
+        let mut reader_nodes = Vec::new();
+        let worker_addr = spec.worker_addr;
+        // If we've been specified to replicate readers into a specific worker,
+        // we must then check that the worker is registered in the Controller.
+        // Otherwise, we return a BAD_REQUEST error.
+        if let Some(addr) = worker_addr {
+            if !self.workers.contains_key(&addr) {
+                let c = self
+                    .workers
+                    .keys()
+                    .map(|wi| wi.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(bad_request_err(format!(
+                    "The specified worker '{:?}' is not registered. Workers: {:?}",
+                    &addr, c
+                )));
+            }
+        }
+
+        // We then proceed to retrieve the node indexes of each
+        // query.
+        let mut node_indexes = Vec::new();
+        for query_name in &spec.queries {
+            node_indexes.push((
+                query_name,
+                self.recipe
+                    .node_addr_for(query_name)
+                    .map_err(|e| {
+                        warn!(self.log, "Reader replication failed: no node was found for query '{:?}'. Error: {:?}",
+                        query_name, e);
+                        bad_request_err(format!("Reader replication failed: no node was found for query '{:?}'", query_name))
+                    })?,
+            ));
+        }
+
+        // Now we look for the reader nodes of each of the query nodes.
+        let mut new_readers = HashMap::new();
+        for (query_name, node_index) in node_indexes {
+            // The logic to find the reader nodes is the same as [`self::find_view_for(NodeIndex,&str)`],
+            // but we perform some extra operations here.
+            // TODO(Fran): In the future we should try to find a good abstraction to avoid duplicating the logic.
+            let mut bfs = Bfs::new(&self.ingredients, node_index);
+            while let Some(child_index) = bfs.next(&self.ingredients) {
+                let child: &Node = &self.ingredients[child_index];
+                if child
+                    .with_reader(|r| r.is_for() == node_index)
+                    .unwrap_or(false)
+                    && child.name() == query_name
+                {
+                    // Now the child is the reader node of the query we are looking at.
+                    // Here, we extract its [`BinaryOperator`] and use it to create a new
+                    // mirror node.
+                    let op = child.with_reader(|r| r.operator).unwrap();
+                    let mut reader_node = self.ingredients[node_index].named_mirror(
+                        node::special::Reader::new(node_index, op),
+                        child.name().to_string(),
+                    );
+                    // We also take the associated keys of the original reader node.
+                    let keys_opt = child.with_reader(|r| r.key()).unwrap_or(None);
+                    if let Some(keys) = keys_opt {
+                        // And set the keys to the replicated reader.
+                        reader_node.with_reader_mut(|r| r.set_key(keys)).unwrap();
+                    }
+                    // We add the replicated reader to the graph.
+                    let reader_index = self.ingredients.add_node(reader_node);
+                    self.ingredients.add_edge(node_index, reader_index, ());
+                    // We keep track of the replicated reader and query node indexes, so
+                    // we can use them to run a migration.
+                    reader_nodes.push((node_index, reader_index));
+                    // We store the reader indexes by query, to use as a reply
+                    // to the user.
+                    new_readers
+                        .entry(query_name)
+                        .or_insert(Vec::new())
+                        .push(reader_index);
+                    break;
+                }
+            }
+        }
+
+        // We run a migration with the new reader nodes.
+        // The migration will take care of creating the domains and
+        // sending them to the specified worker (or distribute them along all
+        // workers if no worker was specified).
+        self.migrate(move |mig| {
+            mig.worker = worker_addr;
+            for (node_index, reader_index) in reader_nodes {
+                mig.added.insert(reader_index);
+                mig.readers.insert(node_index, reader_index);
+            }
+        })?;
+
+        // We retrieve the domain of the replicated readers.
+        let mut query_information = HashMap::new();
+        for (query_name, reader_indexes) in new_readers {
+            let mut domain_mappings = HashMap::new();
+            for reader_index in reader_indexes {
+                let reader = &self.ingredients[reader_index];
+                domain_mappings
+                    .entry(reader.domain())
+                    .or_insert(Vec::new())
+                    .push(reader_index)
+            }
+            query_information.insert(query_name.clone(), domain_mappings);
+        }
+
+        // We return information about which replicated readers got in which domain,
+        // for which query.
+        Ok(ReaderReplicationResult {
+            new_readers: query_information,
+        })
+    }
+
     /// Construct `ControllerInner` with a specified listening interface
     pub(super) fn new(
         log: slog::Logger,
@@ -529,6 +654,7 @@ impl ControllerInner {
         num_shards: Option<usize>,
         log: &Logger,
         nodes: Vec<(NodeIndex, bool)>,
+        worker_id_opt: Option<WorkerIdentifier>,
     ) -> ReadySetResult<DomainHandle> {
         // TODO: can we just redirect all domain traffic through the worker's connection?
         let mut assignments = Vec::new();
@@ -543,8 +669,38 @@ impl ControllerInner {
                 .collect(),
         );
 
-        // TODO(malte): simple round-robin placement for the moment
-        let mut wi = self.workers.iter_mut();
+        // Use the specific worker that's been assigned. If that worker
+        // is not valid, log a warning and fallback to using
+        // all the available workers in a simple round-robin fashion.
+        let selected_worker = match worker_id_opt {
+            Some(worker_id)
+                if self
+                    .workers
+                    .get(&worker_id)
+                    .filter(|worker| worker.healthy)
+                    .is_some() =>
+            {
+                worker_id_opt
+            }
+            Some(worker_id) => {
+                warn!(
+                    log,
+                    "Attempted to make a migration with a worker node that it's \
+                    either not present or not healthy. Will fallback to use all workers instead.\
+                    Worker ID: {:?}",
+                    worker_id
+                );
+                None
+            }
+            _ => None,
+        };
+        let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &mut Worker)| {
+            (selected_worker.is_none())
+                || (selected_worker
+                    .filter(|s_worker_id| **worker_id == *s_worker_id)
+                    .is_some())
+        };
+        let mut wi = self.workers.iter_mut().filter(&worker_selector);
 
         // Send `AssignDomain` to each shard of the given domain
         for i in 0..num_shards.unwrap_or(1) {
@@ -569,7 +725,7 @@ impl ControllerInner {
                         break (*i, w);
                     }
                 } else {
-                    wi = self.workers.iter_mut();
+                    wi = self.workers.iter_mut().filter(&worker_selector);
                 }
             };
 
@@ -631,13 +787,22 @@ impl ControllerInner {
         // with the migration waiting for a domain to become ready when trying to send
         // the information. (We used to do this in the controller thread, with the
         // result of a nasty deadlock.)
-        for endpoint in self.workers.values_mut() {
+        for (address, endpoint) in self.workers.iter_mut() {
             for &dd in &announce {
-                endpoint.sender.send(CoordinationMessage {
+                if let Err(e) = endpoint.sender.send(CoordinationMessage {
                     epoch: self.epoch,
                     source: endpoint.sender.local_addr().unwrap(),
                     payload: CoordinationPayload::DomainBooted(dd),
-                })?;
+                }) {
+                    // TODO(Fran): We need better error handling for workers
+                    //   that failed before the controller noticed.
+                    error!(
+                        log,
+                        "Worker could not be reached and will be ignored. Address: {:?} | Error: {:?}",
+                        address.to_string(),
+                        e
+                    );
+                }
             }
         }
 
@@ -683,6 +848,7 @@ impl ControllerInner {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
+            worker: None,
             context,
             start: time::Instant::now(),
             log: miglog,
@@ -706,6 +872,7 @@ impl ControllerInner {
             columns: Default::default(),
             readers: Default::default(),
             context: Default::default(),
+            worker: None,
             start: time::Instant::now(),
             log: miglog,
         };
@@ -1278,9 +1445,9 @@ impl ControllerInner {
                     // ok to remove original start leaf
                     && (parent == start || !self.recipe.sql_inc().is_leaf_address(parent))
                     && self
-                        .ingredients
-                        .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
-                        .count() == 0
+                    .ingredients
+                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                    .count() == 0
                 {
                     nodes.push(parent);
                 }

@@ -20,7 +20,6 @@
 //!
 //! Beware, Here be dragons™
 
-use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
 use metrics::histogram;
@@ -30,10 +29,9 @@ use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use petgraph;
-use slog;
+use crate::controller::{ControllerInner, WorkerIdentifier};
 
-mod assignment;
+pub(crate) mod assignment;
 mod augmentation;
 pub(crate) mod materialization;
 mod routing;
@@ -55,6 +53,7 @@ pub struct Migration<'a> {
     pub(super) added: HashSet<NodeIndex>,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
+    pub(super) worker: Option<WorkerIdentifier>,
 
     pub(super) start: Instant,
     pub(super) log: slog::Logger,
@@ -524,6 +523,7 @@ impl<'a> Migration<'a> {
                 mainline.ingredients[nodes[0].0].sharded_by().shards(),
                 &log,
                 nodes,
+                self.worker,
             )?;
             mainline.domains.insert(domain, d);
         }

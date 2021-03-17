@@ -316,6 +316,7 @@ pub use crate::view::{
     KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, ViewQuery, ViewQueryFilter,
     ViewQueryOperator,
 };
+use std::net::SocketAddr;
 
 #[doc(hidden)]
 pub mod builders {
@@ -337,6 +338,22 @@ pub struct ActivationResult {
     pub expressions_added: usize,
     /// Number of expressions the recipe removed compared to the prior recipe.
     pub expressions_removed: usize,
+}
+
+/// Represents a request to replicate readers for the given queries into the given worker.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReaderReplicationSpec {
+    /// Name of the queries that will have their reader nodes replicated.
+    pub queries: Vec<String>,
+    /// Worker node address.
+    pub worker_addr: Option<SocketAddr>,
+}
+
+/// Represents the result of a reader replication.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReaderReplicationResult {
+    /// Map of query names to the new `DomainIndex`es and their `NodeIndex`es.
+    pub new_readers: HashMap<String, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
 #[doc(hidden)]
