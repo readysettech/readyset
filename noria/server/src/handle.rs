@@ -89,8 +89,9 @@ impl<A: Authority + 'static> Handle<A> {
     /// Install a new set of policies on the controller.
     #[must_use]
     pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
-        self.rpc("set_security_config", p, "failed to set security config")
+        self.rpc("set_security_config", p)
             .await
+            .map_err(|e| e.into())
     }
 
     /// Install a new set of policies on the controller.
@@ -106,12 +107,9 @@ impl<A: Authority + 'static> Handle<A> {
             .expect("Universe context must have id")
             .clone();
         let _ = self
-            .rpc::<_, ()>(
-                "create_universe",
-                &context,
-                "failed to create security universe",
-            )
-            .await?;
+            .rpc::<_, ()>("create_universe", &context)
+            .await
+            .map_err(|e| anyhow::Error::from(e))?;
 
         // Write to Context table
         let bname = match context.get("group") {

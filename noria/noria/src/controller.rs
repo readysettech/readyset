@@ -1,13 +1,10 @@
 use crate::consensus::{self, Authority};
 use crate::debug::stats;
-use crate::errors::wrap_boxed_error;
+use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
 use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::ActivationResult;
-use anyhow::anyhow;
-// need to rename this to not shadow the `Context` struct
-use anyhow::Context as AnyhowContext;
+use crate::{rpc_err, ActivationResult, ReadySetResult};
 use futures_util::future;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -60,7 +57,7 @@ where
     A: 'static + Authority,
 {
     type Response = hyper::body::Bytes;
-    type Error = anyhow::Error;
+    type Error = ReadySetError;
 
     #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -85,9 +82,13 @@ where
                     // TODO: don't do blocking things here...
                     // TODO: cache this value?
                     let descriptor: ControllerDescriptor = serde_json::from_slice(
-                        &auth.get_leader().context("failed to get current leader")?.1,
-                    )
-                    .context("failed to deserialize authority reply")?;
+                        &auth
+                            .get_leader()
+                            .map_err(|e| {
+                                internal_err(format!("failed to get current leader: {}", e))
+                            })?
+                            .1,
+                    )?;
 
                     url = Some(format!("http://{}/{}", descriptor.external_addr, path));
                 }
@@ -96,23 +97,25 @@ where
                     .body(hyper::Body::from(body.clone()))
                     .unwrap();
 
+                // TODO(eta): custom error types here?
+
                 let res = client
                     .request(r)
                     .await
-                    .map_err(|he| anyhow::Error::from(he).context("hyper request failed"))?;
+                    .map_err(|he| internal_err(format!("hyper request failed: {}", he)))?;
 
                 let status = res.status();
                 let body = hyper::body::to_bytes(res.into_body())
                     .await
-                    .map_err(|he| anyhow::Error::from(he).context("hyper response failed"))?;
+                    .map_err(|he| internal_err(format!("hyper response failed: {}", he)))?;
 
                 match status {
                     hyper::StatusCode::OK => return Ok(body),
-                    hyper::StatusCode::INTERNAL_SERVER_ERROR => bail!(
-                        "rpc call to {} failed: {}",
-                        path,
-                        String::from_utf8_lossy(&*body)
-                    ),
+                    hyper::StatusCode::INTERNAL_SERVER_ERROR => {
+                        let body = String::from_utf8_lossy(&*body);
+                        let err: ReadySetError = serde_json::from_str(&body)?;
+                        Err(err)?
+                    }
                     s => {
                         if s == hyper::StatusCode::SERVICE_UNAVAILABLE {
                             url = None;
@@ -171,7 +174,7 @@ where
 impl ControllerHandle<consensus::ZookeeperAuthority> {
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
-    pub async fn from_zk(zookeeper_address: &str) -> Result<Self, anyhow::Error> {
+    pub async fn from_zk(zookeeper_address: &str) -> ReadySetResult<Self> {
         let auth = consensus::ZookeeperAuthority::new(zookeeper_address)?;
         ControllerHandle::new(auth).await
     }
@@ -180,29 +183,30 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
 #[cfg(not(doc))]
-type RpcFuture<A, R> = impl Future<Output = Result<R, anyhow::Error>>;
+type RpcFuture<A, R> = impl Future<Output = ReadySetResult<R>>;
 #[cfg(doc)]
 type RpcFuture<A, R> = crate::doc_mock::FutureWithExtra<Result<R, anyhow::Error>, A>;
 
 // Needed b/c of https://github.com/rust-lang/rust/issues/65442
 async fn finalize<R>(
-    fut: impl Future<Output = Result<hyper::body::Bytes, anyhow::Error>>,
-    err: &'static str,
-) -> Result<R, anyhow::Error>
+    fut: impl Future<
+        Output = Result<hyper::body::Bytes, Box<dyn std::error::Error + Sync + Send + 'static>>,
+    >,
+    path: &'static str,
+) -> ReadySetResult<R>
 where
     for<'de> R: Deserialize<'de>,
 {
-    let body: hyper::body::Bytes = fut.await.context(err)?;
+    let body: hyper::body::Bytes = fut.await.map_err(rpc_err!(path))?;
 
     serde_json::from_slice::<R>(&body)
-        .context("failed to response")
-        .context(err)
-        .map_err(anyhow::Error::from)
+        .map_err(ReadySetError::from)
+        .map_err(|e| rpc_err_no_downcast(path, e))
 }
 
 impl<A: Authority + 'static> ControllerHandle<A> {
     #[doc(hidden)]
-    pub async fn make(authority: Arc<A>) -> Result<Self, anyhow::Error> {
+    pub async fn make(authority: Arc<A>) -> ReadySetResult<Self> {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
         Ok(ControllerHandle {
@@ -223,15 +227,17 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ///
     /// Note that this method _must_ return `Poll::Ready` before any other methods that return
     /// a `Future` on `ControllerHandle` can be called.
-    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), anyhow::Error>> {
-        self.handle.poll_ready(cx).map_err(wrap_boxed_error)
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<ReadySetResult<()>> {
+        self.handle
+            .poll_ready(cx)
+            .map_err(rpc_err!("ControllerHandle::poll_ready"))
     }
 
     /// A future that resolves when the controller can accept more messages.
     ///
     /// When this future resolves, you it is safe to call any methods that require `poll_ready` to
     /// have returned `Poll::Ready`.
-    pub async fn ready(&mut self) -> Result<(), anyhow::Error> {
+    pub async fn ready(&mut self) -> ReadySetResult<()> {
         future::poll_fn(move |cx| self.poll_ready(cx)).await
     }
 
@@ -239,7 +245,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `ControllerHandle::from_zk` instead.
-    pub async fn new(authority: A) -> Result<Self, anyhow::Error>
+    pub async fn new(authority: A) -> ReadySetResult<Self>
     where
         A: Send + 'static,
     {
@@ -251,22 +257,16 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn inputs(
-        &mut self,
-    ) -> impl Future<Output = Result<BTreeMap<String, NodeIndex>, anyhow::Error>> {
+    pub fn inputs(&mut self) -> impl Future<Output = ReadySetResult<BTreeMap<String, NodeIndex>>> {
         let fut = self
             .handle
             .call(ControllerRequest::new("inputs", &()).unwrap());
 
         async move {
-            let body: hyper::body::Bytes = fut
-                .await
-                .map_err(wrap_boxed_error)
-                .context("failed to fetch inputs")?;
+            let body: hyper::body::Bytes =
+                fut.await.map_err(rpc_err!("ControllerHandle::inputs"))?;
 
-            serde_json::from_slice(&body)
-                .context("couldn't parse input response")
-                .map_err(anyhow::Error::from)
+            Ok(serde_json::from_slice(&body)?)
         }
     }
 
@@ -275,29 +275,23 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn outputs(
-        &mut self,
-    ) -> impl Future<Output = Result<BTreeMap<String, NodeIndex>, anyhow::Error>> {
+    pub fn outputs(&mut self) -> impl Future<Output = ReadySetResult<BTreeMap<String, NodeIndex>>> {
         let fut = self
             .handle
             .call(ControllerRequest::new("outputs", &()).unwrap());
 
         async move {
-            let body: hyper::body::Bytes = fut
-                .await
-                .map_err(wrap_boxed_error)
-                .context("failed to fetch outputs")?;
+            let body: hyper::body::Bytes =
+                fut.await.map_err(rpc_err!("ControllerHandle::outputs"))?;
 
-            serde_json::from_slice(&body)
-                .context("couldn't parse output response")
-                .map_err(anyhow::Error::from)
+            Ok(serde_json::from_slice(&body)?)
         }
     }
 
     /// Obtain a `View` that allows you to query the given external view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view(&mut self, name: &str) -> impl Future<Output = Result<View, anyhow::Error>> {
+    pub fn view(&mut self, name: &str) -> impl Future<Output = ReadySetResult<View>> {
         // This call attempts to detect if this function is being called in a loop. If this is
         // getting false positives, then it is safe to increase the allowed hit count, however, the
         // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
@@ -310,17 +304,14 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .handle
             .call(ControllerRequest::new("view_builder", &name).unwrap());
         async move {
-            let body: hyper::body::Bytes = fut
-                .await
-                .map_err(wrap_boxed_error)
-                .context("failed to fetch view builder")?;
+            let body: hyper::body::Bytes = fut.await.map_err(rpc_err!("ControllerHandle::view"))?;
 
-            match serde_json::from_slice::<Option<ViewBuilder>>(&body) {
-                Ok(Some(vb)) => Ok(vb.build(views)),
-                Ok(None) => Err(anyhow!("view does not exist")),
-                Err(e) => Err(anyhow::Error::from(e)),
+            match serde_json::from_slice::<ReadySetResult<Option<ViewBuilder>>>(&body)?
+                .map_err(|e| rpc_err_no_downcast("ControllerHandle::view", e))?
+            {
+                Some(vb) => Ok(vb.build(views)),
+                None => Err(ReadySetError::ViewNotFound(name))?,
             }
-            .map_err(move |e| e.context(format!("building view for {}", name)).into())
         }
     }
 
@@ -328,7 +319,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// given base table.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn table(&mut self, name: &str) -> impl Future<Output = Result<Table, anyhow::Error>> {
+    pub fn table(&mut self, name: &str) -> impl Future<Output = ReadySetResult<Table>> {
         // This call attempts to detect if this function is being called in a loop. If this
         // is getting false positives, then it is safe to increase the allowed hit count.
         #[cfg(debug_assertions)]
@@ -341,52 +332,43 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .call(ControllerRequest::new("table_builder", &name).unwrap());
 
         async move {
-            let body: hyper::body::Bytes = fut
-                .await
-                .map_err(wrap_boxed_error)
-                .context("failed to fetch table builder")?;
+            let body: hyper::body::Bytes =
+                fut.await.map_err(rpc_err!("ControllerHandle::table"))?;
 
-            match serde_json::from_slice::<Option<TableBuilder>>(&body) {
-                Ok(Some(tb)) => Ok(tb.build(domains)),
-                Ok(None) => Err(anyhow!("view table not exist")),
-                Err(e) => Err(anyhow::Error::from(e)),
+            match serde_json::from_slice::<ReadySetResult<Option<TableBuilder>>>(&body)?
+                .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
+            {
+                Some(tb) => Ok(tb.build(domains)),
+                None => Err(ReadySetError::TableNotFound(name))?,
             }
-            .map_err(move |e| e.context(format!("building table for {}", name)).into())
         }
     }
 
+    /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
     #[doc(hidden)]
-    pub fn rpc<Q: Serialize, R: 'static>(
-        &mut self,
-        path: &'static str,
-        r: Q,
-        err: &'static str,
-    ) -> RpcFuture<A, R>
+    pub fn rpc<Q: Serialize, R: 'static>(&mut self, path: &'static str, r: Q) -> RpcFuture<A, R>
     where
         for<'de> R: Deserialize<'de>,
         R: Send,
     {
-        use futures_util::TryFutureExt;
-        let fut = self
-            .handle
-            .call(ControllerRequest::new(path, r).unwrap())
-            .map_err(wrap_boxed_error);
+        let req = ControllerRequest::new(path, r).unwrap();
+        let fut = self.handle.call(req);
 
-        finalize(fut, err)
+        finalize(fut, path)
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn statistics(&mut self) -> impl Future<Output = Result<stats::GraphStats, anyhow::Error>> {
-        self.rpc("get_statistics", (), "failed to get stats")
+    pub fn statistics(&mut self) -> impl Future<Output = ReadySetResult<stats::GraphStats>> {
+        self.rpc("get_statistics", ())
     }
 
     /// Flush all partial state, evicting all rows present.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn flush_partial(&mut self) -> impl Future<Output = Result<(), anyhow::Error>> {
-        self.rpc("flush_partial", (), "failed to flush partial")
+    pub fn flush_partial(&mut self) -> impl Future<Output = ReadySetResult<()>> {
+        self.rpc("flush_partial", ())
     }
 
     /// Extend the existing recipe with the given set of queries.
@@ -395,8 +377,8 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn extend_recipe(
         &mut self,
         recipe_addition: &str,
-    ) -> impl Future<Output = Result<ActivationResult, anyhow::Error>> {
-        self.rpc("extend_recipe", recipe_addition, "failed to extend recipe")
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> {
+        self.rpc("extend_recipe", recipe_addition)
     }
 
     /// Replace the existing recipe with this one.
@@ -405,43 +387,36 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn install_recipe(
         &mut self,
         new_recipe: &str,
-    ) -> impl Future<Output = Result<ActivationResult, anyhow::Error>> {
-        self.rpc("install_recipe", new_recipe, "failed to install recipe")
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> {
+        self.rpc("install_recipe", new_recipe)
     }
 
     /// Fetch a graphviz description of the dataflow graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn graphviz(&mut self) -> impl Future<Output = Result<String, anyhow::Error>> {
-        self.rpc("graphviz", (), "failed to fetch graphviz output")
+    pub fn graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> {
+        self.rpc("graphviz", ())
     }
 
     /// Fetch a simplified graphviz description of the dataflow graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn simple_graphviz(&mut self) -> impl Future<Output = Result<String, anyhow::Error>> {
-        self.rpc(
-            "simple_graphviz",
-            (),
-            "failed to fetch simple graphviz output",
-        )
+    pub fn simple_graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> {
+        self.rpc("simple_graphviz", ())
     }
 
     /// Remove the given external view from the graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn remove_node(
-        &mut self,
-        view: NodeIndex,
-    ) -> impl Future<Output = Result<(), anyhow::Error>> {
+    pub fn remove_node(&mut self, view: NodeIndex) -> impl Future<Output = ReadySetResult<()>> {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
-        self.rpc("remove_node", view, "failed to remove node")
+        self.rpc("remove_node", view)
     }
 
     /// Fetch a dump of metrics values from the running noria instance
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn metrics_dump(&mut self) -> impl Future<Output = Result<MetricsDump, anyhow::Error>> {
-        self.rpc("metrics_dump", (), "failed to dump metrics")
+    pub fn metrics_dump(&mut self) -> impl Future<Output = ReadySetResult<MetricsDump>> {
+        self.rpc("metrics_dump", ())
     }
 }
