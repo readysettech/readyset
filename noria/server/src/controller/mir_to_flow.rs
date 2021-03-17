@@ -10,7 +10,7 @@ use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
-use dataflow::ops::project::{Project, ProjectExpression, ProjectExpressionBase};
+use dataflow::ops::project::{Project, ProjectExpression};
 use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
@@ -835,10 +835,10 @@ fn arithmetic_item_to_project_expression(
             let column_id = parent
                 .borrow()
                 .column_id_for_column(&Column::from(column), None);
-            ProjectExpression::Base(ProjectExpressionBase::Column(column_id))
+            ProjectExpression::Column(column_id)
         }
         ArithmeticItem::Base(ArithmeticBase::Scalar(ref literal)) => {
-            ProjectExpression::Base(ProjectExpressionBase::Literal(literal.into()))
+            ProjectExpression::Literal(literal.into())
         }
         ArithmeticItem::Base(ArithmeticBase::Bracketed(ref arithmetic)) => {
             generate_project_expression(parent, arithmetic)

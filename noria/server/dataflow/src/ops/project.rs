@@ -1,55 +1,13 @@
-use nom_sql::ArithmeticOperator;
+mod expression;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt;
 
 use crate::prelude::*;
-use ProjectExpressionBase::{Column, Literal};
+pub use expression::ProjectExpression;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProjectExpressionBase {
-    Column(usize),
-    Literal(DataType),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProjectExpression {
-    Base(ProjectExpressionBase),
-    Op {
-        op: ArithmeticOperator,
-        left: Box<ProjectExpression>,
-        right: Box<ProjectExpression>,
-    },
-}
-
-impl fmt::Display for ProjectExpressionBase {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ProjectExpressionBase::Column(u) => write!(f, "{}", u),
-            ProjectExpressionBase::Literal(ref l) => write!(f, "(lit: {})", l),
-        }
-    }
-}
-
-impl fmt::Display for ProjectExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ProjectExpression::Base(base) => write!(f, "{}", base),
-            ProjectExpression::Op { op, left, right } => {
-                let op = match op {
-                    ArithmeticOperator::Add => "+",
-                    ArithmeticOperator::Subtract => "-",
-                    ArithmeticOperator::Divide => "/",
-                    ArithmeticOperator::Multiply => "*",
-                };
-                write!(f, "({} {} {})", left, op, right)
-            }
-        }
-    }
-}
-
-/// Permutes or omits columns from its source node, or adds additional literal value columns.
+/// Permutes or omits columns from its source node, or adds additional columns whose values are
+/// given by expressions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     us: Option<IndexPair>,
@@ -61,7 +19,7 @@ pub struct Project {
 }
 
 impl Project {
-    /// Construct a new permuter operator.
+    /// Construct a new project operator.
     pub fn new(
         src: NodeIndex,
         emit: &[usize],
@@ -95,24 +53,6 @@ impl Project {
             self.additional.as_ref().map(Vec::as_slice).unwrap_or(&[]),
             self.expressions.as_ref().map(Vec::as_slice).unwrap_or(&[]),
         )
-    }
-}
-
-fn eval_expression(expression: &ProjectExpression, record: &[DataType]) -> DataType {
-    match expression {
-        ProjectExpression::Base(Column(i)) => record[*i].clone(),
-        ProjectExpression::Base(Literal(ref data)) => data.clone(),
-        ProjectExpression::Op { op, left, right } => {
-            let left_val = eval_expression(left, record);
-            let right_val = eval_expression(right, record);
-
-            match op {
-                ArithmeticOperator::Add => &left_val + &right_val,
-                ArithmeticOperator::Subtract => &left_val - &right_val,
-                ArithmeticOperator::Multiply => &left_val * &right_val,
-                ArithmeticOperator::Divide => &left_val / &right_val,
-            }
-        }
     }
 }
 
@@ -165,7 +105,9 @@ impl Ingredient for Project {
                         Some(emit) => Box::new(rs.map(move |r| {
                             let mut new_r = Vec::with_capacity(r.len());
                             let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
-                                e.iter().map(|i| eval_expression(i, &r[..])).collect()
+                                e.iter()
+                                    .map(|expr| expr.eval(&r).unwrap().into_owned())
+                                    .collect()
                             } else {
                                 vec![]
                             };
@@ -236,7 +178,7 @@ impl Ingredient for Project {
                 }
 
                 if let Some(ref e) = self.expressions {
-                    new_r.extend(e.iter().map(|i| eval_expression(i, &r[..])));
+                    new_r.extend(e.iter().map(|expr| expr.eval(&r).unwrap().into_owned()));
                 }
 
                 if let Some(ref a) = self.additional {
@@ -306,8 +248,8 @@ impl Ingredient for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ProjectExpression::{Base, Op};
-    use ProjectExpressionBase::{Column, Literal};
+    use nom_sql::ArithmeticOperator;
+    use ProjectExpression::{Column, Literal, Op};
 
     use crate::ops;
 
@@ -351,8 +293,8 @@ mod tests {
 
     fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
         let expression = ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
-            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
+            left: Box::new(ProjectExpression::Column(0)),
+            right: Box::new(Column(1)),
             op,
         };
 
@@ -473,10 +415,8 @@ mod tests {
     fn it_forwards_arithmetic_w_literals() {
         let number: DataType = 40.into();
         let expression = ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
-            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(
-                number,
-            ))),
+            left: Box::new(Column(0)),
+            right: Box::new(Literal(number)),
             op: ArithmeticOperator::Multiply,
         };
 
@@ -493,8 +433,8 @@ mod tests {
         let a: DataType = 80.into();
         let b: DataType = 40.into();
         let expression = ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(a))),
-            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Literal(b))),
+            left: Box::new(Literal(a)),
+            right: Box::new(Literal(b)),
             op: ArithmeticOperator::Divide,
         };
 
@@ -619,8 +559,8 @@ mod tests {
     fn it_queries_through_w_arithmetic_and_literals() {
         let additional = Some(vec![DataType::Int(42)]);
         let expressions = Some(vec![ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
-            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
+            left: Box::new(Column(0)),
+            right: Box::new(Column(1)),
             op: ArithmeticOperator::Add,
         }]);
 
@@ -634,8 +574,8 @@ mod tests {
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
         let expressions = Some(vec![ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(0))),
-            right: Box::new(ProjectExpression::Base(ProjectExpressionBase::Column(1))),
+            left: Box::new(Column(0)),
+            right: Box::new(Column(1)),
             op: ArithmeticOperator::Add,
         }]);
 
@@ -655,11 +595,11 @@ mod tests {
         let expression = Op {
             op: ArithmeticOperator::Multiply,
             left: Box::new(Op {
-                left: Box::new(Base(Column(0))),
-                right: Box::new(Base(Column(1))),
+                left: Box::new(Column(0)),
+                right: Box::new(Column(1)),
                 op: ArithmeticOperator::Add,
             }),
-            right: Box::new(Base(Literal(DataType::Int(2)))),
+            right: Box::new(Literal(DataType::Int(2))),
         };
 
         let state = Box::new(PersistentState::new(
