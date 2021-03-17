@@ -42,7 +42,7 @@ where
         self.0.feed(item).await
     }
 
-    pub async fn send(&mut self, item: BackendMessage<R>) -> Result<(), EncodeError> {
-        self.0.send(item).await
+    pub async fn flush(&mut self) -> Result<(), EncodeError> {
+        self.0.flush().await
     }
 }

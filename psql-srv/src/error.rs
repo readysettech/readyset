@@ -1,5 +1,6 @@
 use crate::codec::{DecodeError, EncodeError};
 use crate::message::FrontendMessage;
+use crate::r#type::ColType;
 use std::num::TryFromIntError;
 use thiserror::Error;
 
@@ -10,6 +11,9 @@ pub enum Error {
 
     #[error("encode error: {0}")]
     EncodeError(#[from] EncodeError),
+
+    #[error("incorrect format count: {0}")]
+    IncorrectFormatCount(usize),
 
     #[error("internal error: {0}")]
     InternalError(String),
@@ -40,4 +44,7 @@ pub enum Error {
 
     #[error("unsupported message: {0}")]
     UnsupportedMessage(FrontendMessage),
+
+    #[error("unsupported type: {0}")]
+    UnsupportedType(ColType),
 }
