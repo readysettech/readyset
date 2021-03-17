@@ -316,7 +316,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .context("failed to fetch view builder")?;
 
             match serde_json::from_slice::<Option<ViewBuilder>>(&body) {
-                Ok(Some(vb)) => Ok(vb.build(views)?),
+                Ok(Some(vb)) => Ok(vb.build(views)),
                 Ok(None) => Err(anyhow!("view does not exist")),
                 Err(e) => Err(anyhow::Error::from(e)),
             }
@@ -347,7 +347,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .context("failed to fetch table builder")?;
 
             match serde_json::from_slice::<Option<TableBuilder>>(&body) {
-                Ok(Some(tb)) => Ok(tb.build(domains)?),
+                Ok(Some(tb)) => Ok(tb.build(domains)),
                 Ok(None) => Err(anyhow!("view table not exist")),
                 Err(e) => Err(anyhow::Error::from(e)),
             }

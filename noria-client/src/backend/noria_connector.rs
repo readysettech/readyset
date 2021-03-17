@@ -23,8 +23,8 @@ use crate::utils;
 
 use crate::backend::error::Error;
 use crate::backend::error::Error::{
-    MissingPreparedStatement, NoriaRecipeError, NoriaWriteError, UnimplementedError,
-    UnsupportedError,
+    MissingPreparedStatement, NoriaReadError, NoriaRecipeError, NoriaWriteError,
+    UnimplementedError, UnsupportedError,
 };
 use crate::backend::SelectSchema;
 use itertools::Itertools;
@@ -311,7 +311,7 @@ impl NoriaConnector {
                 for key in flattened {
                     if let Err(e) = mutator.delete(key).await {
                         error!(error = %e, "failed");
-                        return Err(NoriaWriteError(e));
+                        return Err(NoriaWriteError(e.into()));
                     };
                 }
                 trace!("delete::done");
@@ -596,7 +596,7 @@ impl NoriaConnector {
         };
         match result {
             Ok(_) => Ok((data.len() as u64, first_inserted_id.unwrap_or(0) as u64)),
-            Err(e) => Err(NoriaWriteError(e)),
+            Err(e) => Err(NoriaWriteError(e.into())),
         }
     }
 
@@ -736,7 +736,10 @@ impl NoriaConnector {
             timestamp: ticket,
         };
 
-        let data = getter.raw_lookup(vq).await?;
+        let data = getter
+            .raw_lookup(vq)
+            .await
+            .map_err(|e| NoriaReadError(e.into()))?;
         trace!("select::complete");
         let schema = schema.to_vec();
         Ok((
@@ -770,7 +773,10 @@ impl NoriaConnector {
         };
 
         trace!("update::update");
-        mutator.update(key, updates).await?;
+        mutator
+            .update(key, updates)
+            .await
+            .map_err(|e| NoriaWriteError(e.into()))?;
         trace!("update::complete");
         // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than hardcoded (1,0)
         Ok((1, 0))

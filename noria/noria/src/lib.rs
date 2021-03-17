@@ -251,12 +251,6 @@ pub mod results {
     pub use super::view::results::{ResultRow, Results, Row};
 }
 
-/// Noria errors.
-pub mod error {
-    pub use crate::table::TableError;
-    pub use crate::view::ViewError;
-}
-
 task_local! {
     static TRACE_NEXT: ();
 }

@@ -2,7 +2,7 @@ use std::process;
 use std::thread::{self, Thread};
 use std::time::Duration;
 
-use anyhow::{Context as AnyhowContext, Error};
+use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
@@ -10,6 +10,7 @@ use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkErr
 use super::Authority;
 use super::Epoch;
 use super::CONTROLLER_KEY;
+use crate::{ReadySetError, ReadySetResult};
 
 struct EventWatcher;
 impl Watcher for EventWatcher {
@@ -42,13 +43,12 @@ pub struct ZookeeperAuthority {
 
 impl ZookeeperAuthority {
     /// Create a new instance.
-    pub fn new(connect_string: &str) -> Result<Self, Error> {
-        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).context(
-            format!(
-                "Failed to connect to ZooKeeper at {}. Do you have \"maxClientCnxns\" set \
-                 correctly in /etc/zookeeper/conf/zoo.conf?",
-                connect_string
-            ),
+    pub fn new(connect_string: &str) -> ReadySetResult<Self> {
+        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).map_err(
+            |e| ReadySetError::ZookeeperConnectionFailed {
+                connect_string: connect_string.into(),
+                reason: e.to_string(),
+            },
         )?;
         let _ = zk.create(
             "/",

@@ -1,8 +1,8 @@
 use crate::consistency::Timestamp;
 use crate::data::*;
-use crate::errors::wrap_boxed_error;
+use crate::errors::{view_err, ReadySetError, ReadySetResult};
 use crate::util::like::CaseSensitivityMode;
-use crate::{Tagged, Tagger};
+use crate::{rpc_err, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
@@ -16,13 +16,11 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
-use std::io;
 use std::iter::FromIterator;
 use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use thiserror::Error;
 use tokio_tower::multiplex;
 use tower_balance::p2c::Balance;
 use tower_buffer::Buffer;
@@ -104,26 +102,6 @@ type Discover = crate::doc_mock::Discover<InnerService>;
 
 pub(crate) type ViewRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>, Tagged<ReadQuery>>;
-
-/// A failed [`View`] operation.
-#[derive(Debug, Error)]
-pub enum ViewError {
-    /// The given view is not yet available.
-    #[error("the view is not yet available")]
-    NotYetAvailable,
-    /// The query specified an empty lookup key.
-    #[error("the query specified an empty lookup key")]
-    EmptyKey,
-    /// A lower-level error occurred while communicating with Soup.
-    #[error("{0}")]
-    TransportError(#[source] anyhow::Error),
-}
-
-impl From<Box<dyn std::error::Error + Send + Sync>> for ViewError {
-    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
-        ViewError::TransportError(wrap_boxed_error(e))
-    }
-}
 
 pub(crate) type BoundPair<T> = (Bound<T>, Bound<T>);
 
@@ -409,10 +387,7 @@ pub struct ViewBuilder {
 impl ViewBuilder {
     /// Build a `View` out of a `ViewBuilder`
     #[doc(hidden)]
-    pub fn build(
-        &self,
-        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
-    ) -> Result<View, io::Error> {
+    pub fn build(&self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>) -> View {
         let node = self.node;
         let columns = self.columns.clone();
         let shards = self.shards.clone();
@@ -454,14 +429,14 @@ impl ViewBuilder {
         }
 
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
-        Ok(View {
+        View {
             node,
             schema,
             columns,
             shard_addrs: addrs,
             shards: conns,
             tracer,
-        })
+        }
     }
 }
 
@@ -589,7 +564,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
 
 impl Service<ViewQuery> for View {
     type Response = Vec<Results>;
-    type Error = ViewError;
+    type Error = ReadySetError;
 
     #[cfg(not(doc))]
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -598,12 +573,16 @@ impl Service<ViewQuery> for View {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         for s in &mut self.shards {
-            ready!(s.poll_ready(cx)).map_err(ViewError::from)?;
+            let ni = self.node;
+            ready!(s.poll_ready(cx))
+                .map_err(rpc_err!("<View as Service<ViewQuery>>::poll_ready"))
+                .map_err(|e| view_err(ni, e))?
         }
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
+        let ni = self.node.clone();
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "view-request",
@@ -627,17 +606,18 @@ impl Service<ViewQuery> for View {
             return future::Either::Left(
                 self.shards[0]
                     .call(request)
-                    .map_err(ViewError::from)
+                    .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                     .and_then(move |reply| async move {
                         match reply.v {
                             ReadReply::Normal(Ok(rows)) => Ok(rows
                                 .into_iter()
                                 .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
                                 .collect()),
-                            ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                            ReadReply::Normal(Err(())) => Err(ReadySetError::ViewNotYetAvailable),
                             _ => unreachable!(),
                         }
-                    }),
+                    })
+                    .map_err(move |e| view_err(ni.clone(), e)),
             );
         }
 
@@ -694,14 +674,17 @@ impl Service<ViewQuery> for View {
 
                     shard
                         .call(request)
-                        .map_err(ViewError::from)
+                        .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                         .and_then(|reply| async move {
                             match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok(rows),
-                                ReadReply::Normal(Err(())) => Err(ViewError::NotYetAvailable),
+                                ReadReply::Normal(Err(())) => {
+                                    Err(ReadySetError::ViewNotYetAvailable)
+                                }
                                 _ => unreachable!(),
                             }
                         })
+                        .map_err(move |e| view_err(ni.clone(), e))
                 })
                 .collect::<FuturesUnordered<_>>()
                 .try_concat()
@@ -729,7 +712,7 @@ impl View {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
-    pub async fn len(&mut self) -> Result<usize, ViewError> {
+    pub async fn len(&mut self) -> ReadySetResult<usize> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         let node = self.node;
@@ -745,7 +728,12 @@ impl View {
             .collect::<FuturesUnordered<_>>();
 
         let mut nrows = 0;
-        while let Some(reply) = rsps.next().await.transpose()? {
+        while let Some(reply) = rsps
+            .next()
+            .await
+            .transpose()
+            .map_err(rpc_err!("View::len"))?
+        {
             if let ReadReply::Size(rows) = reply.v {
                 nrows += rows;
             } else {
@@ -757,7 +745,7 @@ impl View {
     }
 
     /// Get the current keys of this view. For debugging only.
-    pub async fn keys(&mut self) -> Result<Vec<Vec<DataType>>, ViewError> {
+    pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DataType>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         let node = self.node;
@@ -773,7 +761,12 @@ impl View {
             .collect::<FuturesUnordered<_>>();
 
         let mut vec = vec![];
-        while let Some(reply) = rsps.next().await.transpose()? {
+        while let Some(reply) = rsps
+            .next()
+            .await
+            .transpose()
+            .map_err(rpc_err!("View::keys"))?
+        {
             if let ReadReply::Keys(mut keys) = reply.v {
                 vec.append(&mut keys);
             } else {
@@ -793,7 +786,7 @@ impl View {
     /// The method will block if the results are not yet available only when `block` is `true`.
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn raw_lookup(&mut self, query: ViewQuery) -> Result<Vec<Results>, ViewError> {
+    pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<Vec<Results>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
         self.call(query).await
     }
@@ -801,7 +794,7 @@ impl View {
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> Result<Results, ViewError> {
+    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> ReadySetResult<Results> {
         self.lookup_ryw(key, block, None).await
     }
 
@@ -814,7 +807,7 @@ impl View {
         &mut self,
         key_comparisons: Vec<KeyComparison>,
         block: bool,
-    ) -> Result<Vec<Results>, ViewError> {
+    ) -> ReadySetResult<Vec<Results>> {
         self.raw_lookup((key_comparisons, block, None).into()).await
     }
 
@@ -825,7 +818,7 @@ impl View {
         &mut self,
         key: &[DataType],
         block: bool,
-    ) -> Result<Option<Row>, ViewError> {
+    ) -> ReadySetResult<Option<Row>> {
         // TODO: Optimized version of this function?
         self.lookup_first_ryw(key, block, None).await
     }
@@ -841,9 +834,10 @@ impl View {
         key: &[DataType],
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> Result<Results, ViewError> {
+    ) -> ReadySetResult<Results> {
         // TODO: Optimized version of this function?
-        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
+        let key = Vec1::try_from_vec(key.into())
+            .map_err(|_| view_err(self.node.clone(), ReadySetError::EmptyKey))?;
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
@@ -861,7 +855,7 @@ impl View {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> Result<Vec<Results>, ViewError> {
+    ) -> ReadySetResult<Vec<Results>> {
         self.raw_lookup((key_comparisons, block, ticket).into())
             .await
     }
@@ -877,9 +871,10 @@ impl View {
         key: &[DataType],
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> Result<Option<Row>, ViewError> {
+    ) -> ReadySetResult<Option<Row>> {
         // TODO: Optimized version of this function?
-        let key = Vec1::try_from_vec(key.into()).map_err(|_| ViewError::EmptyKey)?;
+        let key = Vec1::try_from_vec(key.into())
+            .map_err(|_| view_err(self.node.clone(), ReadySetError::EmptyKey))?;
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
