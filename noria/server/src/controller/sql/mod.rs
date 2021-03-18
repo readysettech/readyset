@@ -405,7 +405,9 @@ impl SqlIncorporator {
         let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
         // Find a promising set of query graphs
-        let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
+        let reuse_candidates = reuse_config
+            .reuse_candidates(&mut qg, &self.query_graphs)
+            .unwrap();
 
         if !reuse_candidates.is_empty() {
             info!(
