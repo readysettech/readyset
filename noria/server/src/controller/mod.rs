@@ -136,7 +136,7 @@ pub(super) async fn main<A: Authority + 'static>(
                 if let Some(ref mut ctrl) = controller {
                     if !ctrl.workers.is_empty() {
                         tokio::task::block_in_place(|| {
-                            ctrl.migrate(move |m| f(m));
+                            ctrl.migrate(move |m| f(m)).unwrap();
                             done.send(()).unwrap();
                         });
                     }

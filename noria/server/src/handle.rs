@@ -1,7 +1,9 @@
 use crate::controller::migrate::Migration;
+use crate::errors::bad_request_err;
 use crate::startup::Event;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
+use noria::internal;
 use noria::prelude::*;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -71,9 +73,10 @@ impl<A: Authority + 'static> Handle<A> {
         let (ret_tx, ret_rx) = tokio::sync::oneshot::channel();
         let (fin_tx, fin_rx) = tokio::sync::oneshot::channel();
         let b = Box::new(move |m: &mut Migration| {
-            if ret_tx.send(f(m)).is_err() {
-                unreachable!("could not return migration result");
+            if let Err(_) = ret_tx.send(f(m)) {
+                internal!("could not return migration result")
             }
+            Ok(())
         });
 
         self.event_tx
@@ -89,9 +92,8 @@ impl<A: Authority + 'static> Handle<A> {
     /// Install a new set of policies on the controller.
     #[must_use]
     pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
-        self.rpc("set_security_config", p)
-            .await
-            .map_err(|e| e.into())
+        self.rpc("set_security_config", p).await?;
+        Ok(())
     }
 
     /// Install a new set of policies on the controller.
@@ -104,12 +106,9 @@ impl<A: Authority + 'static> Handle<A> {
 
         let uid = context
             .get("id")
-            .expect("Universe context must have id")
+            .ok_or_else(|| bad_request_err("Universe context must have id"))?
             .clone();
-        let _ = self
-            .rpc::<_, ()>("create_universe", &context)
-            .await
-            .map_err(|e| anyhow::Error::from(e))?;
+        let _ = self.rpc::<_, ()>("create_universe", &context).await?;
 
         // Write to Context table
         let bname = match context.get("group") {

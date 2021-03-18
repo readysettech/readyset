@@ -23,7 +23,7 @@ use stream_cancel::Valve;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::handle::Handle;
-use crate::Config;
+use crate::{Config, ReadySetResult};
 
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Event {
@@ -41,7 +41,11 @@ pub(crate) enum Event {
     #[cfg(test)]
     IsReady(tokio::sync::oneshot::Sender<bool>),
     ManualMigration {
-        f: Box<dyn FnOnce(&mut crate::controller::migrate::Migration) + Send + 'static>,
+        f: Box<
+            dyn FnOnce(&mut crate::controller::migrate::Migration) -> ReadySetResult<()>
+                + Send
+                + 'static,
+        >,
         done: tokio::sync::oneshot::Sender<()>,
     },
 }
