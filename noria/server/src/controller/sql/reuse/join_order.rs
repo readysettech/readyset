@@ -1,6 +1,7 @@
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::predicate_is_equivalent;
 use super::ReuseType;
+use crate::ReadySetResult;
 use nom_sql::ConditionTree;
 use std::collections::HashSet;
 use std::vec::Vec;
@@ -124,7 +125,7 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
 pub(super) fn reorder_joins(
     qg: &mut QueryGraph,
     reuse_candidates: &[(ReuseType, (u64, &QueryGraph))],
-) {
+) -> ReadySetResult<()> {
     let mut join_chains = Vec::new();
     // For each reuse candidate, let's find the common join
     // chains it has with the new query graph.
@@ -152,7 +153,7 @@ pub(super) fn reorder_joins(
             for new_jref in qg.join_order.iter() {
                 let njp = from_join_ref(&new_jref, qg);
                 // if we find an equivalent join, add it to the new query's join chains
-                if predicate_is_equivalent(njp, ejp) {
+                if predicate_is_equivalent(njp, ejp)? {
                     extend_chains(&mut shared_join_chains, new_jref);
                     found = true;
                     break;
@@ -175,4 +176,5 @@ pub(super) fn reorder_joins(
     }
 
     chains_to_order(join_chains, &mut qg.join_order);
+    Ok(())
 }

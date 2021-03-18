@@ -2,6 +2,7 @@ use super::super::query_graph::{QueryGraph, QueryGraphEdge};
 use super::super::query_signature::Signature;
 use super::helpers::predicate_implication::complex_predicate_implies;
 use super::{ReuseConfiguration, ReuseType};
+use noria::ReadySetError;
 
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -17,14 +18,14 @@ impl ReuseConfiguration for Finkelstein {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
+    ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         let mut reuse_candidates = Vec::new();
         for (sig, existing_qg) in query_graphs {
             if existing_qg
                 .signature()
                 .is_generalization_of(&qg.signature())
             {
-                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg)? {
                     // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
                     reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
@@ -32,9 +33,9 @@ impl ReuseConfiguration for Finkelstein {
         }
 
         if !reuse_candidates.is_empty() {
-            vec![Self::choose_best_option(reuse_candidates)]
+            Ok(vec![Self::choose_best_option(reuse_candidates)])
         } else {
-            reuse_candidates
+            Ok(reuse_candidates)
         }
     }
 }
@@ -73,7 +74,10 @@ impl Finkelstein {
         best_choice.unwrap()
     }
 
-    fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
+    fn check_compatibility(
+        new_qg: &QueryGraph,
+        existing_qg: &QueryGraph,
+    ) -> Result<Option<ReuseType>, ReadySetError> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
         // 2. NQG's attributes is subset of NQG's edges
@@ -87,7 +91,7 @@ impl Finkelstein {
         //    below in the next step.)
         for e in &existing_qg.edges {
             if !new_qg.edges.contains_key(e.0) {
-                return None;
+                return Ok(None);
             }
         }
 
@@ -102,7 +106,7 @@ impl Finkelstein {
                 let mut matched = false;
 
                 for np in &new_qgn.predicates {
-                    if complex_predicate_implies(np, ep) {
+                    if complex_predicate_implies(np, ep)? {
                         matched = true;
                         break;
                     }
@@ -110,7 +114,7 @@ impl Finkelstein {
                 if !matched {
                     // We found no matching predicate for np, so we give up now.
                     // trace!(log, "Failed: no matching predicate for {:#?}", ep);
-                    return None;
+                    return Ok(None);
                 }
             }
         }
@@ -127,38 +131,38 @@ impl Finkelstein {
                             // grouped operatinos on top of earlier ones)
                             if new_columns.len() < ex_columns.len() {
                                 // more columns in existing QG's GroupBy, so we're done
-                                return None;
+                                return Ok(None);
                             }
                             for ex_col in ex_columns {
                                 // EQG groups by a column that we don't group by, so we can't reuse
                                 if !new_columns.contains(ex_col) {
-                                    return None;
+                                    return Ok(None);
                                 }
                             }
                         }
                         // If there is no matching GroupBy edge, we cannot reuse
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
                 QueryGraphEdge::Join(_) => {
                     match *new_qge {
                         QueryGraphEdge::Join(_) => {}
                         // If there is no matching Join edge, we cannot reuse
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
                 QueryGraphEdge::LeftJoin(_) => {
                     match *new_qge {
                         QueryGraphEdge::LeftJoin(_) => {}
                         // If there is no matching LeftJoin edge, we cannot reuse
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
             }
         }
 
         // we don't need to check projected columns to reuse a prefix of the query
-        Some(ReuseType::DirectExtension)
+        Ok(Some(ReuseType::DirectExtension))
 
         // 5. Consider projected columns
         //   5a. NQG projects a subset of EQG's edges --> can use directly

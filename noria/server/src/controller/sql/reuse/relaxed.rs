@@ -3,6 +3,7 @@ use super::super::query_signature::Signature;
 use super::helpers::predicate_implication::complex_predicate_implies;
 use super::{ReuseConfiguration, ReuseType};
 
+use noria::ReadySetError;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -32,26 +33,29 @@ impl ReuseConfiguration for Relaxed {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
+    ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         let mut reuse_candidates = Vec::new();
         for (sig, existing_qg) in query_graphs {
             if existing_qg
                 .signature()
                 .is_weak_generalization_of(&qg.signature())
             {
-                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg) {
+                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg)? {
                     // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
                     reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }
             }
         }
 
-        reuse_candidates
+        Ok(reuse_candidates)
     }
 }
 
 impl Relaxed {
-    fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
+    fn check_compatibility(
+        new_qg: &QueryGraph,
+        existing_qg: &QueryGraph,
+    ) -> Result<Option<ReuseType>, ReadySetError> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
         assert!(existing_qg
@@ -73,24 +77,24 @@ impl Relaxed {
             match *ex_qge {
                 QueryGraphEdge::Join(_) => {
                     if !new_qg.edges.contains_key(srcdst) {
-                        return None;
+                        return Ok(None);
                     }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
                         QueryGraphEdge::Join(_) => {}
                         // If there is no matching Join edge, we cannot reuse
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
                 QueryGraphEdge::LeftJoin(_) => {
                     if !new_qg.edges.contains_key(srcdst) {
-                        return None;
+                        return Ok(None);
                     }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
                         QueryGraphEdge::LeftJoin(_) => {}
                         // If there is no matching LeftJoin edge, we cannot reuse
-                        _ => return None,
+                        _ => return Ok(None),
                     }
                 }
                 _ => continue,
@@ -102,7 +106,7 @@ impl Relaxed {
             match *ex_qge {
                 QueryGraphEdge::GroupBy(ref ex_columns) => {
                     if !new_qg.edges.contains_key(srcdst) {
-                        return Some(ReuseType::PrefixReuse);
+                        return Ok(Some(ReuseType::PrefixReuse));
                     }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
@@ -113,18 +117,18 @@ impl Relaxed {
                             if new_columns.len() < ex_columns.len() {
                                 // more columns in existing QG's GroupBy, so we're done
                                 // however, we can still reuse joins and predicates.
-                                return Some(ReuseType::PrefixReuse);
+                                return Ok(Some(ReuseType::PrefixReuse));
                             }
                             for ex_col in ex_columns {
                                 // EQG groups by a column that we don't group by, so we can't reuse
                                 // the group by nodes, but we can still reuse joins and predicates.
                                 if !new_columns.contains(ex_col) {
-                                    return Some(ReuseType::PrefixReuse);
+                                    return Ok(Some(ReuseType::PrefixReuse));
                                 }
                             }
                         }
                         // If there is no matching GroupBy edge, we cannot reuse the group by clause
-                        _ => return Some(ReuseType::PrefixReuse),
+                        _ => return Ok(Some(ReuseType::PrefixReuse)),
                     }
                 }
                 _ => continue,
@@ -134,7 +138,7 @@ impl Relaxed {
         // Check that the new query's predicates imply the existing query's predicate.
         for (name, ex_qgn) in &existing_qg.relations {
             if !new_qg.relations.contains_key(name) {
-                return Some(ReuseType::PrefixReuse);
+                return Ok(Some(ReuseType::PrefixReuse));
             }
             let new_qgn = &new_qg.relations[name];
 
@@ -144,7 +148,7 @@ impl Relaxed {
                 let mut matched = false;
 
                 for np in &new_qgn.predicates {
-                    if complex_predicate_implies(np, ep) {
+                    if complex_predicate_implies(np, ep)? {
                         matched = true;
                         break;
                     }
@@ -152,7 +156,7 @@ impl Relaxed {
                 if !matched {
                     // We found no matching predicate for np, so we give up now.
                     // However, we can still reuse the join nodes from the existing query.
-                    return Some(ReuseType::PrefixReuse);
+                    return Ok(Some(ReuseType::PrefixReuse));
                 }
             }
         }
@@ -160,6 +164,6 @@ impl Relaxed {
         // projected columns don't influence the reuse opportunities in this case, since
         // we are only trying to reuse the query partially, not completely extending it.
 
-        Some(ReuseType::DirectExtension)
+        Ok(Some(ReuseType::DirectExtension))
     }
 }

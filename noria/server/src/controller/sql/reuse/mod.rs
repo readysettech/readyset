@@ -1,9 +1,10 @@
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::reuse::join_order::reorder_joins;
 use crate::controller::sql::UniverseId;
-use crate::ReuseConfigType;
+use crate::{ReadySetResult, ReuseConfigType};
 use dataflow::prelude::DataType;
 use nom_sql::Table;
+use noria::ReadySetError;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -30,7 +31,7 @@ impl ReuseConfig {
         &self,
         qg: &mut QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
+    ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         let reuse_candidates = match self.config {
             ReuseConfigType::Finkelstein => {
                 finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)
@@ -39,17 +40,23 @@ impl ReuseConfig {
             ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
             _ => unreachable!(),
         };
-        self.reorder_joins(qg, &reuse_candidates);
 
-        reuse_candidates
+        match reuse_candidates {
+            Err(e) => return Err(e),
+            Ok(cands) => {
+                self.reorder_joins(qg, &cands)?;
+                Ok(cands)
+            }
+        }
     }
 
     fn reorder_joins(
         &self,
         qg: &mut QueryGraph,
         reuse_candidates: &[(ReuseType, (u64, &QueryGraph))],
-    ) {
-        reorder_joins(qg, reuse_candidates);
+    ) -> ReadySetResult<()> {
+        reorder_joins(qg, reuse_candidates)?;
+        Ok(())
     }
 
     // Return which universes are available for reuse opportunities
@@ -103,5 +110,5 @@ trait ReuseConfiguration {
     fn reuse_candidates<'a>(
         qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))>;
+    ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError>;
 }

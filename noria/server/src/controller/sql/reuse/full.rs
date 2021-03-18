@@ -1,6 +1,7 @@
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
+use noria::ReadySetError;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -13,13 +14,13 @@ impl ReuseConfiguration for Full {
     fn reuse_candidates<'a>(
         _qg: &QueryGraph,
         query_graphs: &'a HashMap<u64, QueryGraph>,
-    ) -> Vec<(ReuseType, (u64, &'a QueryGraph))> {
+    ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         // sort keys to make reuse deterministic
         let mut sorted_keys: Vec<u64> = query_graphs.keys().cloned().collect();
         sorted_keys.sort();
-        sorted_keys
+        Ok(sorted_keys
             .iter()
             .map(|k| (ReuseType::DirectExtension, (*k, &query_graphs[k])))
-            .collect()
+            .collect())
     }
 }
