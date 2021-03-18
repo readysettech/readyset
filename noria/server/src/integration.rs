@@ -1233,7 +1233,7 @@ async fn mutator_churn() {
             let vc = mig.add_ingredient(
                 "votecount",
                 &["id", "votes"],
-                Aggregation::COUNT.over(vote, 0, &[1]),
+                Aggregation::COUNT.over(vote, 0, &[1]).unwrap(),
             );
 
             mig.maintain_anonymous(vc, &[0]);
@@ -1572,7 +1572,7 @@ async fn votes() {
             let vc = mig.add_ingredient(
                 "vc",
                 &["id", "votes"],
-                Aggregation::COUNT.over(vote, 0, &[1]),
+                Aggregation::COUNT.over(vote, 0, &[1]).unwrap(),
             );
             mig.maintain_anonymous(vc, &[0]);
 
@@ -2092,7 +2092,7 @@ async fn cascading_replays_with_sharding() {
             let j = mig.add_ingredient("j", &["u", "s", "f2"], jb);
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
-            let a = Aggregation::COUNT.over(j, 0, &[2]);
+            let a = Aggregation::COUNT.over(j, 0, &[2]).unwrap();
             let end = mig.add_ingredient("end", &["u", "c"], a);
             mig.maintain_anonymous(end, &[0]);
             (j, end)
@@ -2152,7 +2152,7 @@ async fn full_aggregation_with_bogokey() {
             let agg = mig.add_ingredient(
                 "agg",
                 &["bogo", "count"],
-                Aggregation::COUNT.over(bogo, 0, &[1]),
+                Aggregation::COUNT.over(bogo, 0, &[1]).unwrap(),
             );
             mig.maintain_anonymous(agg, &[0]);
             agg
@@ -2248,7 +2248,7 @@ async fn materialization_frontier() {
         let vc = mig.add_ingredient(
             "votecount",
             &["id", "votes"],
-            Aggregation::COUNT.over(vote, 0, &[1]),
+            Aggregation::COUNT.over(vote, 0, &[1]).unwrap(),
         );
         mig.mark_shallow(vc);
 
@@ -2524,7 +2524,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let vc = mig.add_ingredient(
                 "votecount",
                 &["id", "votes"],
-                Aggregation::COUNT.over(vote, 0, &[1]),
+                Aggregation::COUNT.over(vote, 0, &[1]).unwrap(),
             );
 
             // add final join using first field from article and first from vc
@@ -2575,7 +2575,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let rs = mig.add_ingredient(
                 "rsum",
                 &["id", "total"],
-                Aggregation::SUM.over(rating, 2, &[1]),
+                Aggregation::SUM.over(rating, 2, &[1]).unwrap(),
             );
 
             // join vote count and rsum (and in theory, sum them)
@@ -2656,7 +2656,7 @@ async fn live_writes() {
             let vc = mig.add_ingredient(
                 "votecount",
                 &["id", "votes"],
-                Aggregation::COUNT.over(vote, 0, &[1]),
+                Aggregation::COUNT.over(vote, 0, &[1]).unwrap(),
             );
 
             mig.maintain_anonymous(vc, &[0]);
@@ -2688,7 +2688,7 @@ async fn live_writes() {
             let vc2 = mig.add_ingredient(
                 "votecount2",
                 &["id", "votes"],
-                Aggregation::SUM.over(vc, 1, &[0]),
+                Aggregation::SUM.over(vc, 1, &[0]).unwrap(),
             );
             mig.maintain_anonymous(vc2, &[0]);
             vc2

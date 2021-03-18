@@ -589,7 +589,8 @@ fn make_grouped_node(
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
             String::from(name),
             column_names.as_slice(),
-            agg.over(parent_na, over_col_indx, group_col_indx.as_slice()),
+            agg.over(parent_na, over_col_indx, group_col_indx.as_slice())
+                .unwrap(),
         ),
         GroupedNodeType::Extremum(extr) => mig.add_ingredient(
             String::from(name),
@@ -607,12 +608,14 @@ fn make_grouped_node(
                     group_col_indx.as_slice(),
                     FilterVec::from(Vec::from(cond)),
                     else_on,
-                ),
+                )
+                .unwrap(),
             )
         }
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep);
+            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)
+                .unwrap();
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
         }
     };

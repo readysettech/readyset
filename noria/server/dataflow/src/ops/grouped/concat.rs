@@ -4,6 +4,7 @@ use crate::ops::grouped::GroupedOperator;
 use std::collections::HashSet;
 
 use crate::prelude::*;
+use noria::{invariant, ReadySetResult};
 
 /// Designator for what a given position in a group concat output should contain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,13 +68,13 @@ impl GroupConcat {
         src: NodeIndex,
         components: Vec<TextComponent>,
         separator: String,
-    ) -> GroupedOperator<GroupConcat> {
-        assert!(
+    ) -> ReadySetResult<GroupedOperator<GroupConcat>> {
+        invariant!(
             !separator.is_empty(),
             "group concat separator cannot be empty"
         );
 
-        GroupedOperator::new(
+        Ok(GroupedOperator::new(
             src,
             GroupConcat {
                 components,
@@ -81,7 +82,7 @@ impl GroupConcat {
                 group: Vec::new(),
                 slen: 0,
             },
-        )
+        ))
     }
 
     fn build(&self, rec: &[DataType]) -> String {
@@ -115,7 +116,7 @@ impl GroupConcat {
 impl GroupedOperation for GroupConcat {
     type Diff = Modify;
 
-    fn setup(&mut self, parent: &Node) {
+    fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
         // group by all columns
         let cols = parent.fields().len();
         let mut group = HashSet::new();
@@ -123,7 +124,7 @@ impl GroupedOperation for GroupConcat {
         // except the ones that are used in output
         for tc in &self.components {
             if let TextComponent::Column(col) = *tc {
-                assert!(col < cols, "group concat emits fields parent doesn't have");
+                invariant!(col < cols, "group concat emits fields parent doesn't have");
                 group.remove(&col);
             }
         }
@@ -139,6 +140,7 @@ impl GroupedOperation for GroupConcat {
         }
         // plus some fixed size per value
         self.slen += 10 * (cols - self.group.len());
+        Ok(())
     }
 
     fn group_by(&self) -> &[usize] {
@@ -267,7 +269,9 @@ mod tests {
                 TextComponent::Literal(";".to_owned()),
             ],
             String::from("#"),
-        );
+        )
+        .unwrap();
+
         g.set_op("concat", &["x", "ys"], c, mat);
         g
     }
