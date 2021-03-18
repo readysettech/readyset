@@ -2,10 +2,10 @@ use mysql_async::params::Params;
 use mysql_async::prelude::Queryable;
 use mysql_async::*;
 
-use msql_srv::{self, *};
 use timestamp_service::client::TransactionId;
 
 use crate::backend::error::Error;
+use noria::DataType;
 use std::collections::HashMap;
 
 type StatementID = u32;
@@ -51,7 +51,7 @@ impl MySqlConnector {
     pub async fn on_execute(
         &mut self,
         id: u32,
-        _params: ParamParser<'_>,
+        _params: Vec<DataType>,
     ) -> std::result::Result<(u64, u64), Error> {
         let conn = self.pool.get_conn().await?;
         let stmt = self.prepared_statements.get(&id).unwrap();

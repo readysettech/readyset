@@ -255,7 +255,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_insert(
         &mut self,
         q_id: u32,
-        params: ParamParser<'_>,
+        params: Vec<DataType>,
     ) -> std::result::Result<(u64, u64), Error> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -265,11 +265,7 @@ impl NoriaConnector {
         trace!("delegate");
         match prep {
             PreparedStatement::Insert(ref q) => {
-                let values: Vec<DataType> = params
-                    .into_iter()
-                    .map(|pv| pv.value.to_datatype())
-                    .collect();
-                return self.do_insert(&q, vec![values]).await;
+                return self.do_insert(&q, vec![params]).await;
             }
             _ => {
                 unreachable!(
@@ -372,7 +368,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_update(
         &mut self,
         q_id: u32,
-        params: ParamParser<'_>,
+        params: Vec<DataType>,
     ) -> std::result::Result<(u64, u64), Error> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -580,7 +576,11 @@ impl NoriaConnector {
                     fields: update_fields.clone(),
                     where_clause: None,
                 };
-                utils::extract_update_params_and_fields(&mut uq, &mut None, schema)
+                utils::extract_update_params_and_fields(
+                    &mut uq,
+                    &mut None::<std::iter::Empty<DataType>>,
+                    schema,
+                )
             };
 
             // TODO(malte): why can't I consume buf here?
@@ -752,7 +752,7 @@ impl NoriaConnector {
     async fn do_update(
         &mut self,
         q: Cow<'_, UpdateStatement>,
-        params: Option<ParamParser<'_>>,
+        params: Option<Vec<DataType>>,
     ) -> std::result::Result<(u64, u64), Error> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name).await;
@@ -766,7 +766,7 @@ impl NoriaConnector {
                 // no update on views
                 unimplemented!();
             };
-            utils::extract_update(q, params, schema)
+            utils::extract_update(q, params.map(|p| p.into_iter()), schema)
         };
 
         trace!("update::update");
@@ -907,7 +907,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_select(
         &mut self,
         q_id: u32,
-        params: ParamParser<'_>,
+        params: Vec<DataType>,
         ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
         let prep: PreparedStatement = {
@@ -936,10 +936,6 @@ impl NoriaConnector {
                         // that we rewrote to WHERE x = ? AND y = ? AND z = ?
                         // so we need to turn that into the keys:
                         // [[a, b, d], [a, c, d]]
-                        let params: Vec<_> = params
-                            .into_iter()
-                            .map(|pv| pv.value.to_datatype())
-                            .collect::<Vec<_>>();
                         assert_ne!(
                             params.len(),
                             0,
@@ -958,12 +954,8 @@ impl NoriaConnector {
                             .collect()
                     }
                     None => {
-                        let keys = params
-                            .into_iter()
-                            .map(|pv| pv.value.to_datatype())
-                            .collect::<Vec<_>>();
-                        if keys.len() > 0 {
-                            vec![keys]
+                        if params.len() > 0 {
+                            vec![params]
                         } else {
                             vec![]
                         }

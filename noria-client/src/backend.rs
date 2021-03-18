@@ -14,6 +14,7 @@ use std::time;
 use tokio::io::AsyncWrite;
 use tracing::Level;
 
+use crate::convert::ToDataType;
 use crate::rewrite;
 use crate::utils;
 
@@ -375,11 +376,7 @@ impl Backend {
     /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
     /// belonging to the calling `Backend` struct.
     // TODO(andrew, justin): add RYW support for executing prepared queries
-    pub async fn execute(
-        &mut self,
-        id: u32,
-        params: ParamParser<'_>,
-    ) -> Result<QueryResult, Error> {
+    pub async fn execute(&mut self, id: u32, params: Vec<DataType>) -> Result<QueryResult, Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
@@ -730,7 +727,10 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        let res = match self.execute(id, params).await {
+        let datatype_params: Vec<DataType> =
+            params.into_iter().map(|p| p.value.to_datatype()).collect();
+
+        let res = match self.execute(id, datatype_params).await {
             Ok(QueryResult::NoriaSelect {
                 data,
                 select_schema,
