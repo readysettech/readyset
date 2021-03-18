@@ -9,6 +9,7 @@ use crate::ops::{
 };
 use crate::prelude::*;
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
+use noria::{invariant, ReadySetResult};
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,12 +33,12 @@ impl Aggregation {
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
-    ) -> GroupedOperator<Aggregator> {
-        assert!(
+    ) -> ReadySetResult<GroupedOperator<Aggregator>> {
+        invariant!(
             !group_by.iter().any(|&i| i == over),
             "cannot group by aggregation column"
         );
-        GroupedOperator::new(
+        Ok(GroupedOperator::new(
             src,
             Aggregator {
                 op: self,
@@ -47,7 +48,7 @@ impl Aggregation {
                 filter: None,
                 over_else: None,
             },
-        )
+        ))
     }
 
     /// Construct a new `Aggregator` that performs this operation.
@@ -68,12 +69,12 @@ impl Aggregation {
         group_by: &[usize],
         filter: FilterVec,
         over_else: Option<Literal>,
-    ) -> GroupedOperator<Aggregator> {
-        assert!(
+    ) -> ReadySetResult<GroupedOperator<Aggregator>> {
+        invariant!(
             !group_by.iter().any(|&i| i == over),
             "cannot group by aggregation column"
         );
-        GroupedOperator::new(
+        Ok(GroupedOperator::new(
             src,
             Aggregator {
                 op: self,
@@ -83,7 +84,7 @@ impl Aggregation {
                 filter: Some(sync::Arc::new(filter)),
                 over_else,
             },
-        )
+        ))
     }
 }
 
@@ -164,11 +165,12 @@ impl Aggregator {
 impl GroupedOperation for Aggregator {
     type Diff = NumericalDiff;
 
-    fn setup(&mut self, parent: &Node) {
-        assert!(
+    fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
+        invariant!(
             self.over < parent.fields().len(),
             "cannot aggregate over non-existing column"
         );
+        Ok(())
     }
 
     fn group_by(&self) -> &[usize] {
@@ -309,7 +311,7 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "ys"],
-            aggregation.over(s.as_global(), 1, &[0]),
+            aggregation.over(s.as_global(), 1, &[0]).unwrap(),
             mat,
         );
         g
@@ -321,7 +323,7 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "z", "ys"],
-            aggregation.over(s.as_global(), 1, &[0, 2]),
+            aggregation.over(s.as_global(), 1, &[0, 2]).unwrap(),
             mat,
         );
         g
@@ -331,22 +333,28 @@ mod tests {
     fn it_describes() {
         let src = 0.into();
 
-        let c = Aggregation::COUNT.over(src, 1, &[0, 2]);
+        let c = Aggregation::COUNT.over(src, 1, &[0, 2]).unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
-        let s = Aggregation::SUM.over(src, 1, &[2, 0]);
+        let s = Aggregation::SUM.over(src, 1, &[2, 0]).unwrap();
         assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
 
-        let a = Aggregation::AVG.over(src, 1, &[2, 0]);
+        let a = Aggregation::AVG.over(src, 1, &[2, 0]).unwrap();
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
 
-        let cf = Aggregation::COUNT.over_filtered(src, 1, &[0, 2], FilterVec::from(vec![]), None);
+        let cf = Aggregation::COUNT
+            .over_filtered(src, 1, &[0, 2], FilterVec::from(vec![]), None)
+            .unwrap();
         assert_eq!(cf.description(true), "|σ(1)| γ[0, 2]");
 
-        let sf = Aggregation::SUM.over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None);
+        let sf = Aggregation::SUM
+            .over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None)
+            .unwrap();
         assert_eq!(sf.description(true), "𝛴(σ(1)) γ[2, 0]");
 
-        let af = Aggregation::AVG.over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None);
+        let af = Aggregation::AVG
+            .over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None)
+            .unwrap();
         assert_eq!(af.description(true), "Avg(σ(1)) γ[2, 0]");
     }
 
@@ -1045,7 +1053,9 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "ys"],
-            Aggregation::COUNT.over_filtered(s.as_global(), 1, &[0], filter, None),
+            Aggregation::COUNT
+                .over_filtered(s.as_global(), 1, &[0], filter, None)
+                .unwrap(),
             mat,
         );
         g
@@ -1062,7 +1072,9 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "z", "ys"],
-            Aggregation::COUNT.over_filtered(s.as_global(), 1, &[0, 2], filter, None),
+            Aggregation::COUNT
+                .over_filtered(s.as_global(), 1, &[0, 2], filter, None)
+                .unwrap(),
             mat,
         );
         g
@@ -1085,7 +1097,9 @@ mod tests {
         g.set_op(
             "identity",
             &["y", "zsum"],
-            Aggregation::SUM.over_filtered(s.as_global(), 2, &[1], filter, None),
+            Aggregation::SUM
+                .over_filtered(s.as_global(), 2, &[1], filter, None)
+                .unwrap(),
             mat,
         );
         g
@@ -1103,13 +1117,9 @@ mod tests {
         g.set_op(
             "identity",
             &["g", "zsum"],
-            Aggregation::SUM.over_filtered(
-                s.as_global(),
-                2,
-                &[3],
-                filter,
-                Some(Literal::Integer(6)),
-            ),
+            Aggregation::SUM
+                .over_filtered(s.as_global(), 2, &[3], filter, Some(Literal::Integer(6)))
+                .unwrap(),
             mat,
         );
         g

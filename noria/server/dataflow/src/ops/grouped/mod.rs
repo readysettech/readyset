@@ -46,7 +46,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// optimized configuration structures to quickly execute the other trait methods.
     ///
     /// `parent` is a reference to the single ancestor node of this node in the flow graph.
-    fn setup(&mut self, parent: &Node);
+    fn setup(&mut self, parent: &Node) -> ReadySetResult<()>;
 
     /// List the columns used to group records.
     ///
@@ -145,7 +145,8 @@ where
         let srcn = &g[self.src.as_global()];
 
         // give our inner operation a chance to initialize
-        self.inner.setup(srcn);
+        // FIXME(eta): this error should be properly propagated!
+        self.inner.setup(srcn).unwrap();
 
         // group by all columns
         self.cols = srcn.fields().len();

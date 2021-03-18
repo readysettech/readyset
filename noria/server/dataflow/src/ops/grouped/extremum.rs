@@ -2,6 +2,7 @@ use crate::ops::grouped::GroupedOperation;
 use crate::ops::grouped::GroupedOperator;
 
 use crate::prelude::*;
+use noria::{invariant, ReadySetResult};
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -69,11 +70,12 @@ pub enum DiffType {
 impl GroupedOperation for ExtremumOperator {
     type Diff = DiffType;
 
-    fn setup(&mut self, parent: &Node) {
-        assert!(
+    fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
+        invariant!(
             self.over < parent.fields().len(),
             "cannot aggregate over non-existing column"
         );
+        Ok(())
     }
 
     fn group_by(&self) -> &[usize] {
