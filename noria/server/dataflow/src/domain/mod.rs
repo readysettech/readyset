@@ -3370,21 +3370,21 @@ impl Domain {
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {
-                    if let Some(packet) = self.group_commit_queues.append(packet) {
+                    if let Some(packet) = self.group_commit_queues.append(packet)? {
                         self.handle(packet, executor, true)?;
                     }
                 } else {
                     self.handle(packet, executor, true)?;
                 }
 
-                while let Some(m) = self.group_commit_queues.flush_if_necessary() {
+                while let Some(m) = self.group_commit_queues.flush_if_necessary()? {
                     self.handle(m, executor, true)?;
                 }
 
                 Ok(ProcessResult::Processed)
             }
             PollEvent::Timeout => {
-                while let Some(m) = self.group_commit_queues.flush_if_necessary() {
+                while let Some(m) = self.group_commit_queues.flush_if_necessary()? {
                     self.handle(m, executor, true)?;
                 }
 
