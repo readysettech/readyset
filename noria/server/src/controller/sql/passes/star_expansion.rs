@@ -12,6 +12,7 @@ impl StarExpansion for SqlQuery {
         let expand_table = |table_name: String| {
             write_schemas
                 .get(&table_name)
+                // TODO(eta): check that this panic can never fire
                 .unwrap_or_else(|| panic!("table name `{}` does not exist", table_name))
                 .clone()
                 .into_iter()

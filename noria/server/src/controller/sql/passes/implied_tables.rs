@@ -4,10 +4,15 @@ use nom_sql::{
     FunctionArgument, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
+use crate::errors::ReadySetResult;
+use crate::internal;
 use std::collections::HashMap;
 
 pub trait ImpliedTableExpansion {
-    fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
+    fn expand_implied_tables(
+        self,
+        write_schemas: &HashMap<String, Vec<String>>,
+    ) -> ReadySetResult<SqlQuery>;
 }
 
 fn rewrite_conditional<F>(
@@ -58,24 +63,25 @@ where
 // and INSERT queries and deliberately leaves function specifications unaffected, since
 // they can refer to remote tables and `set_table` should not be used for queries that have
 // computed columns.
-fn set_table(mut f: Column, table: &Table) -> Column {
+fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
     f.table = match f.table {
         None => match f.function {
-            Some(ref mut f) => panic!(
+            Some(ref mut f) => internal!(
                 "set_table({}) invoked on computed column {:?}",
-                table.name, f
+                table.name,
+                f
             ),
             None => Some(table.name.clone()),
         },
         Some(x) => Some(x),
     };
-    f
+    Ok(f)
 }
 
 fn rewrite_selection(
     mut sq: SelectStatement,
     write_schemas: &HashMap<String, Vec<String>>,
-) -> SelectStatement {
+) -> ReadySetResult<SelectStatement> {
     use nom_sql::FunctionExpression::*;
     use nom_sql::{GroupByClause, OrderClause};
 
@@ -125,8 +131,6 @@ fn rewrite_selection(
             Some(matches.pop().unwrap())
         }
     };
-
-    let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
 
     // Traverses a query and calls `find_table` on any column that has no explicit table set,
     // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
@@ -189,8 +193,9 @@ fn rewrite_selection(
     // Expand within field list
     for field in sq.fields.iter_mut() {
         match *field {
-            FieldDefinitionExpression::All => panic!(err),
-            FieldDefinitionExpression::AllInTable(_) => panic!(err),
+            FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
+                internal!("Must apply StarExpansion pass before ImpliedTableExpansion")
+            }
             FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
             FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
                 if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = e.ari.left {
@@ -262,32 +267,36 @@ fn rewrite_selection(
         }),
     };
 
-    sq
+    Ok(sq)
 }
 
 impl ImpliedTableExpansion for SqlQuery {
-    fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
-        match self {
+    fn expand_implied_tables(
+        self,
+        write_schemas: &HashMap<String, Vec<String>>,
+    ) -> ReadySetResult<SqlQuery> {
+        Ok(match self {
             SqlQuery::CreateTable(..) => self,
             SqlQuery::CompoundSelect(mut csq) => {
                 csq.selects = csq
                     .selects
                     .into_iter()
-                    .map(|(op, sq)| (op, rewrite_selection(sq, write_schemas)))
-                    .collect();
+                    .map(|(op, sq)| Ok((op, rewrite_selection(sq, write_schemas)?)))
+                    .collect::<ReadySetResult<Vec<_>>>()?;
                 SqlQuery::CompoundSelect(csq)
             }
-            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)),
+            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)?),
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
                 iq.fields = iq
                     .fields
-                    .map(|fields| fields.into_iter().map(|c| set_table(c, &table)).collect());
+                    .map(|fields| fields.into_iter().map(|c| set_table(c, &table)).collect())
+                    .transpose()?;
                 SqlQuery::Insert(iq)
             }
-            _ => unreachable!(),
-        }
+            _ => internal!(),
+        })
     }
 }
 
@@ -331,7 +340,7 @@ mod tests {
             vec!["id".into(), "title".into(), "text".into(), "author".into()],
         );
 
-        let res = SqlQuery::Select(q).expand_implied_tables(&schema);
+        let res = SqlQuery::Select(q).expand_implied_tables(&schema).unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(

@@ -3,21 +3,26 @@ use nom_sql::{
     FunctionArgument, SqlQuery, Table,
 };
 
+use crate::errors::{internal_err, ReadySetResult};
+use crate::{internal, invariant, unsupported};
 use std::collections::{HashMap, HashSet};
 
 pub trait CountStarRewrite {
-    fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
+    fn rewrite_count_star(
+        self,
+        write_schemas: &HashMap<String, Vec<String>>,
+    ) -> ReadySetResult<SqlQuery>;
 }
 
-fn extract_condition_columns(ce: &ConditionExpression) -> HashSet<Column> {
-    match *ce {
+fn extract_condition_columns(ce: &ConditionExpression) -> ReadySetResult<HashSet<Column>> {
+    Ok(match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
             ref left,
             ref right,
             ..
-        }) => extract_condition_columns(left)
+        }) => extract_condition_columns(left)?
             .into_iter()
-            .chain(extract_condition_columns(right).into_iter())
+            .chain(extract_condition_columns(right)?.into_iter())
             .collect(),
         ConditionExpression::ComparisonOp(ConditionTree {
             ref left,
@@ -34,59 +39,64 @@ fn extract_condition_columns(ce: &ConditionExpression) -> HashSet<Column> {
 
             cols
         }
-        ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner),
-        ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner),
-        ConditionExpression::Base(_) => unreachable!(),
-        ConditionExpression::Arithmetic(_) => unimplemented!(),
-        ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner)?,
+        ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner)?,
+        ConditionExpression::Base(_) => internal!(),
+        ConditionExpression::Arithmetic(_) => unsupported!(),
+        ConditionExpression::ExistsOp(_) => unsupported!(),
         ConditionExpression::Between {
             ref operand,
             ref min,
             ref max,
         } => {
-            let mut res = extract_condition_columns(operand);
-            res.extend(extract_condition_columns(min));
-            res.extend(extract_condition_columns(max));
+            let mut res = extract_condition_columns(operand)?;
+            res.extend(extract_condition_columns(min)?);
+            res.extend(extract_condition_columns(max)?);
             res
         }
-    }
+    })
 }
 
 impl CountStarRewrite for SqlQuery {
-    fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
+    fn rewrite_count_star(
+        self,
+        write_schemas: &HashMap<String, Vec<String>>,
+    ) -> ReadySetResult<SqlQuery> {
         use nom_sql::FunctionExpression::*;
 
-        let rewrite_count_star =
-            |c: &mut Column, tables: &Vec<Table>, avoid_columns: &Vec<Column>| {
-                assert!(!tables.is_empty());
-                if c.function
-                    .as_ref()
-                    .map(|v| **v == CountStar)
-                    .unwrap_or(false)
-                {
-                    let bogo_table = &tables[0];
-                    let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
-                    let mut bogo_column = schema_iter.next().unwrap();
-                    while avoid_columns.iter().any(|c| c.name == *bogo_column) {
-                        bogo_column = schema_iter
-                            .next()
-                            .expect("ran out of columns trying to pick a bogo column for COUNT(*)");
-                    }
-
-                    c.function = Some(Box::new(Count(
-                        FunctionArgument::Column(Column {
-                            name: bogo_column.clone(),
-                            alias: None,
-                            table: Some(bogo_table.name.clone()),
-                            function: None,
-                        }),
-                        false,
-                    )));
+        let rewrite_count_star = |c: &mut Column,
+                                  tables: &Vec<Table>,
+                                  avoid_columns: &Vec<Column>|
+         -> ReadySetResult<_> {
+            invariant!(!tables.is_empty());
+            if c.function
+                .as_ref()
+                .map(|v| **v == CountStar)
+                .unwrap_or(false)
+            {
+                let bogo_table = &tables[0];
+                let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
+                let mut bogo_column = schema_iter.next().unwrap();
+                while avoid_columns.iter().any(|c| c.name == *bogo_column) {
+                    bogo_column = schema_iter.next().ok_or_else(|| {
+                        internal_err("ran out of columns trying to pick a bogo column for COUNT(*)")
+                    })?;
                 }
-            };
 
-        let err = "Must apply StarExpansion pass before CountStarRewrite"; // for wrapping
-        match self {
+                c.function = Some(Box::new(Count(
+                    FunctionArgument::Column(Column {
+                        name: bogo_column.clone(),
+                        alias: None,
+                        table: Some(bogo_table.name.clone()),
+                        function: None,
+                    }),
+                    false,
+                )));
+            }
+            Ok(())
+        };
+
+        Ok(match self {
             SqlQuery::Select(mut sq) => {
                 // Expand within field list
                 let tables = sq.tables.clone();
@@ -95,15 +105,17 @@ impl CountStarRewrite for SqlQuery {
                     avoid_cols.extend(gbc.columns.clone());
                 }
                 if let Some(ref w) = sq.where_clause {
-                    avoid_cols.extend(extract_condition_columns(w));
+                    avoid_cols.extend(extract_condition_columns(w)?);
                 }
                 for field in sq.fields.iter_mut() {
                     match *field {
-                        FieldDefinitionExpression::All => panic!(err),
-                        FieldDefinitionExpression::AllInTable(_) => panic!(err),
+                        FieldDefinitionExpression::All
+                        | FieldDefinitionExpression::AllInTable(_) => {
+                            internal!("Must apply StarExpansion pass before CountStarRewrite")
+                        }
                         FieldDefinitionExpression::Value(_) => (),
                         FieldDefinitionExpression::Col(ref mut c) => {
-                            rewrite_count_star(c, &tables, &avoid_cols)
+                            rewrite_count_star(c, &tables, &avoid_cols)?
                         }
                     }
                 }
@@ -112,7 +124,7 @@ impl CountStarRewrite for SqlQuery {
             }
             // nothing to do for other query types, as they cannot have aliases
             x => x,
-        }
+        })
     }
 }
 
@@ -137,7 +149,7 @@ mod tests {
             vec!["id".into(), "name".into(), "age".into()],
         );
 
-        let res = q.rewrite_count_star(&schema);
+        let res = q.rewrite_count_star(&schema).unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -173,7 +185,7 @@ mod tests {
             vec!["id".into(), "name".into(), "age".into()],
         );
 
-        let res = q.rewrite_count_star(&schema);
+        let res = q.rewrite_count_star(&schema).unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(

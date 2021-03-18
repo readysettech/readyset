@@ -127,7 +127,9 @@ impl Multiverse for SqlIncorporator {
             }
 
             trace!(self.log, "Adding row policy {:?}", policy.name());
-            let predicate = self.rewrite_query(policy.predicate(), &policy.name(), mig)?;
+            let predicate = self
+                .rewrite_query(policy.predicate(), &policy.name(), mig)
+                .map_err(|e| e.to_string())?;
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
                 _ => unreachable!(),

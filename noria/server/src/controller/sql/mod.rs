@@ -13,7 +13,8 @@ use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
 use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
-use crate::ReuseConfigType;
+use crate::errors::internal_err;
+use crate::{invariant, ReadySetResult, ReuseConfigType};
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
@@ -23,8 +24,8 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
+use noria::{internal, ReadySetError};
 use petgraph::graph::NodeIndex;
-
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
@@ -129,7 +130,7 @@ impl SqlIncorporator {
         query: &str,
         name: Option<String>,
         mut mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         query.to_flow_parts(self, name, &mut mig)
     }
 
@@ -146,7 +147,7 @@ impl SqlIncorporator {
         name: Option<String>,
         is_leaf: bool,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         match name {
             None => self.nodes_for_query(query, is_leaf, mig),
             Some(n) => self.nodes_for_named_query(query, n, false, is_leaf, mig),
@@ -193,11 +194,11 @@ impl SqlIncorporator {
         universe: UniverseId,
         st: &SelectStatement,
         is_leaf: bool,
-    ) -> Result<(QueryGraph, QueryGraphReuse), String> {
+    ) -> Result<(QueryGraph, QueryGraphReuse), ReadySetError> {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
-        let mut qg = to_query_graph(st)?;
+        let mut qg = to_query_graph(st).map_err(|e| internal_err(e))?;
 
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
@@ -215,7 +216,8 @@ impl SqlIncorporator {
                 let existing_qg = self
                     .query_graphs
                     .get(&qg_hash)
-                    .expect("query graph should be present");
+                    .ok_or_else(|| internal_err("query graph should be present"))?;
+
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature()
@@ -405,9 +407,7 @@ impl SqlIncorporator {
         let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
         // Find a promising set of query graphs
-        let reuse_candidates = reuse_config
-            .reuse_candidates(&mut qg, &self.query_graphs)
-            .unwrap();
+        let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs)?;
 
         if !reuse_candidates.is_empty() {
             info!(
@@ -450,7 +450,7 @@ impl SqlIncorporator {
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
         mut mig: &mut Migration,
-    ) -> QueryFlowParts {
+    ) -> ReadySetResult<QueryFlowParts> {
         trace!(self.log, "Adding a new leaf below: {:?}", final_query_node);
 
         let mut mir = self.mir_converter.add_leaf_below(
@@ -468,7 +468,7 @@ impl SqlIncorporator {
 
         self.register_query(query_name, None, &mir, mig.universe());
 
-        qfp
+        Ok(qfp)
     }
 
     fn add_base_via_mir(
@@ -476,12 +476,9 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SqlQuery,
         mut mig: &mut Migration,
-    ) -> QueryFlowParts {
+    ) -> ReadySetResult<QueryFlowParts> {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self
-            .mir_converter
-            .named_base_to_mir(query_name, query)
-            .unwrap();
+        let mut mir = self.mir_converter.named_base_to_mir(query_name, query)?;
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -502,7 +499,7 @@ impl SqlIncorporator {
 
         self.register_query(query_name, None, &mir, mig.universe());
 
-        qfp
+        Ok(qfp)
     }
 
     fn add_compound_query(
@@ -512,8 +509,8 @@ impl SqlIncorporator {
         query: &CompoundSelectStatement,
         is_leaf: bool,
         mut mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
-        let subqueries: Result<Vec<_>, String> = query
+    ) -> Result<QueryFlowParts, ReadySetError> {
+        let subqueries: Result<Vec<_>, ReadySetError> = query
             .selects
             .iter()
             .enumerate()
@@ -531,17 +528,14 @@ impl SqlIncorporator {
             })
             .collect();
 
-        let mut combined_mir_query = self
-            .mir_converter
-            .compound_query_to_mir(
-                query_name,
-                subqueries?.iter().collect(),
-                CompoundSelectOperator::Union,
-                &query.order,
-                &query.limit,
-                is_leaf,
-            )
-            .unwrap();
+        let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
+            query_name,
+            subqueries?.iter().collect(),
+            CompoundSelectOperator::Union,
+            &query.order,
+            &query.limit,
+            is_leaf,
+        )?;
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig, None);
 
@@ -559,9 +553,14 @@ impl SqlIncorporator {
         sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration,
-    ) -> Result<(QueryFlowParts, Option<MirQuery>), String> {
-        let (qg, reuse) =
-            self.consider_query_graph(&query_name, is_name_required, mig.universe(), sq, is_leaf)?;
+    ) -> Result<(QueryFlowParts, Option<MirQuery>), ReadySetError> {
+        let on_err = |e| ReadySetError::SelectQueryCreationFailed {
+            qname: query_name.into(),
+            source: Box::new(e),
+        };
+        let (qg, reuse) = self
+            .consider_query_graph(&query_name, is_name_required, mig.universe(), sq, is_leaf)
+            .map_err(on_err)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(name, mn) => {
                 let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
@@ -574,16 +573,21 @@ impl SqlIncorporator {
                 (qfp, None)
             }
             QueryGraphReuse::ExtendExisting(mqs) => {
-                let qfp = self.extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig)?;
+                let qfp = self
+                    .extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig)
+                    .map_err(on_err)?;
                 (qfp, None)
             }
             QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
-                let qfp =
-                    self.add_leaf_to_existing_query(&query_name, &params, mn, project_columns, mig);
+                let qfp = self
+                    .add_leaf_to_existing_query(&query_name, &params, mn, project_columns, mig)
+                    .map_err(on_err)?;
                 (qfp, None)
             }
             QueryGraphReuse::None => {
-                let (qfp, mir) = self.add_query_via_mir(&query_name, sq, qg, is_leaf, mig)?;
+                let (qfp, mir) = self
+                    .add_query_via_mir(&query_name, sq, qg, is_leaf, mig)
+                    .map_err(on_err)?;
                 (qfp, Some(mir))
             }
         })
@@ -596,15 +600,18 @@ impl SqlIncorporator {
         qg: QueryGraph,
         is_leaf: bool,
         mut mig: &mut Migration,
-    ) -> Result<(QueryFlowParts, MirQuery), String> {
+    ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         use ::mir::visualize::GraphViz;
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let (sec, og_mir, table_mapping, base_name) = self
-            .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())
-            .unwrap();
+        let (sec, og_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+            is_leaf,
+            universe.clone(),
+        )?;
 
         trace!(
             self.log,
@@ -641,57 +648,65 @@ impl SqlIncorporator {
         Ok((qfp, mir))
     }
 
-    pub(super) fn remove_query(&mut self, query_name: &str, mig: &Migration) -> Option<NodeIndex> {
+    pub(super) fn remove_query(
+        &mut self,
+        query_name: &str,
+        mig: &Migration,
+    ) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
-            .expect("tried to remove unknown query");
+            .ok_or_else(|| internal_err("tried to remove unknown query"))?;
 
-        let qg_hash = self
-            .named_queries
-            .remove(query_name)
-            .unwrap_or_else(|| panic!("missing query hash for named query \"{}\"", query_name));
+        let qg_hash = self.named_queries.remove(query_name).ok_or_else(|| {
+            internal_err(format!(
+                "missing query hash for named query \"{}\"",
+                query_name
+            ))
+        })?;
         let mir = &self.mir_queries[&(qg_hash, mig.universe())];
 
         // traverse self.leaf__addresses
-        if self
-            .leaf_addresses
-            .values()
-            .find(|&id| *id == nodeid)
-            .is_none()
-        {
-            // ok to remove
+        Ok(
+            if self
+                .leaf_addresses
+                .values()
+                .find(|&id| *id == nodeid)
+                .is_none()
+            {
+                // ok to remove
 
-            // remove local state for query
+                // remove local state for query
 
-            // traverse and remove MIR nodes
-            // TODO(malte): implement this
-            self.mir_converter.remove_query(query_name, mir).unwrap();
+                // traverse and remove MIR nodes
+                // TODO(malte): implement this
+                self.mir_converter.remove_query(query_name, mir)?;
 
-            // clean up local state
-            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
-            self.query_graphs.remove(&qg_hash).unwrap();
-            self.view_schemas.remove(query_name).unwrap();
+                // clean up local state
+                self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+                self.query_graphs.remove(&qg_hash).unwrap();
+                self.view_schemas.remove(query_name).unwrap();
 
-            // trigger reader node removal
-            Some(nodeid)
-        } else {
-            // more than one query uses this leaf
-            // don't remove node yet!
+                // trigger reader node removal
+                Some(nodeid)
+            } else {
+                // more than one query uses this leaf
+                // don't remove node yet!
 
-            // TODO(malte): implement this
-            self.mir_converter.remove_query(query_name, mir).unwrap();
+                // TODO(malte): implement this
+                self.mir_converter.remove_query(query_name, mir)?;
 
-            // clean up state for this query
-            self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
-            self.query_graphs.remove(&qg_hash).unwrap();
-            self.view_schemas.remove(query_name).unwrap();
+                // clean up state for this query
+                self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+                self.query_graphs.remove(&qg_hash).unwrap();
+                self.view_schemas.remove(query_name).unwrap();
 
-            None
-        }
+                None
+            },
+        )
     }
 
-    pub(super) fn remove_base(&mut self, name: &str) {
+    pub(super) fn remove_base(&mut self, name: &str) -> ReadySetResult<()> {
         info!(self.log, "Removing base {} from SqlIncorporator", name);
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -703,8 +718,8 @@ impl SqlIncorporator {
         let mir = self
             .base_mir_queries
             .get(name)
-            .unwrap_or_else(|| panic!("tried to remove unknown base {}", name));
-        self.mir_converter.remove_base(name, mir).unwrap()
+            .ok_or_else(|| internal_err(format!("tried to remove unknown base {}", name)))?;
+        self.mir_converter.remove_base(name, mir)
     }
 
     fn register_query(
@@ -753,7 +768,7 @@ impl SqlIncorporator {
         reuse_mirs: Vec<(u64, UniverseId)>,
         is_leaf: bool,
         mut mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         use ::mir::reuse::merge_mir_for_queries;
         use ::mir::visualize::GraphViz;
         let universe = mig.universe();
@@ -762,8 +777,7 @@ impl SqlIncorporator {
         // first, compute the MIR representation of the SQL query
         let (sec, new_query_mir, table_mapping, base_name) = self
             .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())
-            .unwrap();
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())?;
 
         trace!(
             self.log,
@@ -836,12 +850,12 @@ impl SqlIncorporator {
         q: SqlQuery,
         is_leaf: bool,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::CreateView(ref cvq) => cvq.name.clone(),
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
-            _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
+            _ => internal!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
         self.nodes_for_named_query(q, name, false, is_leaf, mig)
     }
@@ -852,7 +866,7 @@ impl SqlIncorporator {
         q: SqlQuery,
         query_name: &str,
         mig: &mut Migration,
-    ) -> Result<SqlQuery, String> {
+    ) -> Result<SqlQuery, ReadySetError> {
         // TODO: make this not take &mut self
 
         use passes::alias_removal::TableAliasRewrite;
@@ -956,7 +970,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
-                        return Err(format!("query refers to unknown table \"{}\"", t.name));
+                        Err(ReadySetError::TableNotFound(t.name.clone()))?
                     }
                 }
             }
@@ -970,8 +984,8 @@ impl SqlIncorporator {
             .strip_post_filters()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
-            .expand_implied_tables(&self.view_schemas)
-            .rewrite_count_star(&self.view_schemas))
+            .expand_implied_tables(&self.view_schemas)?
+            .rewrite_count_star(&self.view_schemas)?)
     }
 
     fn nodes_for_named_query(
@@ -981,7 +995,7 @@ impl SqlIncorporator {
         is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         // short-circuit if we're dealing with a CreateView query; this avoids having to deal with
         // CreateView in all of our rewrite passes.
         if let SqlQuery::CreateView(cvq) = q {
@@ -1019,15 +1033,14 @@ impl SqlIncorporator {
                 // NOTE(malte): We can't currently reuse complete compound select queries, since
                 // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
                 // reused, however.
-                self.add_compound_query(&query_name, is_name_required, &csq, is_leaf, mig)
-                    .unwrap()
+                self.add_compound_query(&query_name, is_name_required, &csq, is_leaf, mig)?
             }
             SqlQuery::Select(sq) => {
                 self.add_select_query(&query_name, is_name_required, &sq, is_leaf, mig)?
                     .0
             }
-            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig),
-            q => panic!("unhandled query type in recipe: {:?}", q),
+            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig)?,
+            q => internal!("unhandled query type in recipe: {:?}", q),
         };
 
         // record info about query
@@ -1039,14 +1052,15 @@ impl SqlIncorporator {
 
     /// Upgrades the schema version that any nodes created for queries will be tagged with.
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
-    pub(super) fn upgrade_schema(&mut self, new_version: usize) {
-        assert!(new_version > self.schema_version);
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
+        invariant!(new_version > self.schema_version);
         info!(
             self.log,
             "Schema version advanced from {} to {}", self.schema_version, new_version
         );
         self.schema_version = new_version;
-        self.mir_converter.upgrade_schema(new_version).unwrap();
+        self.mir_converter.upgrade_schema(new_version)?;
+        Ok(())
     }
 }
 
@@ -1060,7 +1074,7 @@ trait ToFlowParts {
         inc: &mut SqlIncorporator,
         name: Option<String>,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String>;
+    ) -> Result<QueryFlowParts, ReadySetError>;
 }
 
 impl<'a> ToFlowParts for &'a String {
@@ -1069,7 +1083,7 @@ impl<'a> ToFlowParts for &'a String {
         inc: &mut SqlIncorporator,
         name: Option<String>,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         self.as_str().to_flow_parts(inc, name, mig)
     }
 }
@@ -1080,14 +1094,16 @@ impl<'a> ToFlowParts for &'a str {
         inc: &mut SqlIncorporator,
         name: Option<String>,
         mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
+    ) -> Result<QueryFlowParts, ReadySetError> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
             Ok(q) => inc.add_parsed_query(q, name, true, mig),
-            Err(e) => Err(String::from(e)),
+            Err(_) => Err(ReadySetError::UnparseableQuery {
+                query: String::from(*self),
+            })?,
         }
     }
 }
