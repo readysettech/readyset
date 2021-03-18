@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use crate::convert::ToDataType;
-use msql_srv::ParamParser;
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
     BinaryOperator, Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
@@ -362,11 +360,13 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     }
 }
 
-fn walk_update_where(
+fn walk_update_where<I>(
     col2v: &mut HashMap<String, DataType>,
-    params: &mut Option<<ParamParser as IntoIterator>::IntoIter>,
+    params: &mut Option<I>,
     expr: ConditionExpression,
-) {
+) where
+    I: Iterator<Item = DataType>,
+{
     match expr {
         ConditionExpression::ComparisonOp(ConditionTree {
             operator: BinaryOperator::Equal,
@@ -378,7 +378,6 @@ fn walk_update_where(
                     .as_mut()
                     .expect("Found placeholder in ad-hoc query")
                     .next()
-                    .map(|pv| pv.value.to_datatype())
                     .expect("Not enough parameter values given in EXECUTE"),
                 v => DataType::from(v),
             };
@@ -398,11 +397,14 @@ fn walk_update_where(
     }
 }
 
-pub(crate) fn extract_update_params_and_fields(
+pub(crate) fn extract_update_params_and_fields<I>(
     q: &mut UpdateStatement,
-    params: &mut Option<<ParamParser as IntoIterator>::IntoIter>,
+    params: &mut Option<I>,
     schema: &CreateTableStatement,
-) -> Vec<(usize, Modification)> {
+) -> Vec<(usize, Modification)>
+where
+    I: Iterator<Item = DataType>,
+{
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
         if let Some(sets) = q
@@ -419,7 +421,6 @@ pub(crate) fn extract_update_params_and_fields(
                         .as_mut()
                         .expect("Found placeholder in ad-hoc query")
                         .next()
-                        .map(|pv| pv.value.to_datatype())
                         .expect("Not enough parameter values given in EXECUTE");
                     updates.push((i, Modification::Set(v)));
                 }
@@ -472,12 +473,14 @@ pub(crate) fn extract_update_params_and_fields(
     updates
 }
 
-pub(crate) fn extract_update(
+pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
-    params: Option<ParamParser>,
+    mut params: Option<I>,
     schema: &CreateTableStatement,
-) -> (Vec<DataType>, Vec<(usize, Modification)>) {
-    let mut params = params.map(|p| p.into_iter());
+) -> (Vec<DataType>, Vec<(usize, Modification)>)
+where
+    I: Iterator<Item = DataType>,
+{
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
 
     let pkey = get_primary_key(schema);
