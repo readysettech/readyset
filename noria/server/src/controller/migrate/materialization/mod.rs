@@ -11,7 +11,10 @@ use crate::controller::{
     keys,
 };
 use crate::controller::{Worker, WorkerIdentifier};
+use crate::errors::internal_err;
+use crate::ReadySetResult;
 use dataflow::prelude::*;
+use noria::{internal, invariant, ReadySetError};
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -99,7 +102,7 @@ impl Materializations {
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
-    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) {
+    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) -> Result<(), ReadySetError> {
         // this code used to be a mess, and will likely be a mess this time around too.
         // but, let's try to start out in a principled way...
         //
@@ -189,7 +192,11 @@ impl Materializations {
         }
 
         // map all the indices to the corresponding columns in the parent
-        fn map_indices(n: &Node, parent: NodeIndex, indices: &Indices) -> Result<Indices, String> {
+        fn map_indices(
+            n: &Node,
+            parent: NodeIndex,
+            indices: &Indices,
+        ) -> Result<Indices, ReadySetError> {
             indices
                 .iter()
                 .map(|index| {
@@ -206,23 +213,23 @@ impl Materializations {
                                     return Ok(col);
                                 }
 
-                                let really = n.parent_columns(col).unwrap();
+                                let really = n.parent_columns(col)?;
                                 let really = really
                                     .into_iter()
                                     .find(|&(anc, _)| anc == parent)
                                     .and_then(|(_, col)| col);
 
                                 really.ok_or_else(|| {
-                                    format!(
+                                    internal_err(format!(
                                         "could not resolve obligation past operator;\
                                      node => {}, ancestor => {}, column => {}",
                                         n.global_addr().index(),
                                         parent.index(),
                                         col
-                                    )
+                                    ))
                                 })
                             })
-                            .collect::<Result<Vec<usize>, String>>()?,
+                            .collect::<Result<Vec<usize>, ReadySetError>>()?,
                     ))
                 })
                 .collect()
@@ -385,7 +392,7 @@ impl Materializations {
                 }
 
                 let paths =
-                    keys::provenance_of(graph, ni, &index.columns[..], plan::Plan::on_join(graph));
+                    keys::provenance_of(graph, ni, &index.columns[..], plan::Plan::on_join(graph))?;
 
                 for path in paths {
                     for (pni, cols) in path.into_iter().skip(1) {
@@ -454,6 +461,7 @@ impl Materializations {
             }
         }
         assert!(replay_obligations.is_empty());
+        Ok(())
     }
 
     /// Retrieves the materialization status of a given node, or None
@@ -489,8 +497,8 @@ impl Materializations {
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
         replies: &mut DomainReplies,
-    ) {
-        self.extend(graph, new);
+    ) -> Result<(), ReadySetError> {
+        self.extend(graph, new)?;
 
         // check that we don't have fully materialized nodes downstream of partially materialized
         // nodes.
@@ -521,7 +529,11 @@ impl Materializations {
                     crit!(self.log, "partial materializations above full materialization";
                               "full" => ni.index(),
                               "partial" => pi.index());
-                    unimplemented!();
+                    internal!(
+                        "partial materializations ({:?}) above full materialization ({:?})",
+                        pi.index(),
+                        ni.index()
+                    );
                 }
             }
         }
@@ -573,7 +585,7 @@ impl Materializations {
                         ni,
                         &index.columns[..],
                         plan::Plan::on_join(graph),
-                    );
+                    )?;
 
                     for path in paths {
                         for (pni, columns) in path {
@@ -612,7 +624,10 @@ impl Materializations {
                                                   "cols" => ?columns,
                                                   "conflict" => not_shared,
                                         );
-                                        unimplemented!();
+                                        internal!(
+                                        "partially overlapping partial indices (parent {:?} cols {:?}, child {:?} cols {:?})",
+                                        pni.index(), index, ni.index(), columns
+                                        );
                                     }
                                 }
                             } else if self.have.contains_key(&ni) {
@@ -645,22 +660,26 @@ impl Materializations {
                 let parent = graph
                     .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                     .next()
-                    .expect("shard mergers must have a parent");
+                    .ok_or_else(|| internal_err("shard mergers must have a parent"))?;
                 let psharding = graph[parent].sharded_by();
 
                 if let Sharding::ByColumn(col, _) = psharding {
                     // we want to resolve col all the way to its nearest materialized ancestor.
                     // and then check whether any other cols of the parent alias that source column
                     let columns: Vec<_> = (0..n.fields().len()).collect();
-                    for path in keys::provenance_of(graph, parent, &columns[..], |_, _, _| None) {
+                    for path in
+                        keys::provenance_of(graph, parent, &columns[..], |_, _, _| Ok(None))?
+                    {
                         let (mat_anc, cols) = path
                             .into_iter()
                             .skip_while(|&(n, _)| !self.have.contains_key(&n))
                             .next()
-                            .expect(
-                                "since bases are materialized, \
+                            .ok_or_else(|| {
+                                internal_err(
+                                    "since bases are materialized, \
                                  every path must eventually have a materialized node",
-                            );
+                                )
+                            })?;
                         let src = cols[col];
                         if src.is_none() {
                             continue;
@@ -680,7 +699,7 @@ impl Materializations {
                                       "alias" => c,
                                       "shard" => col,
                             );
-                            unimplemented!();
+                            internal!("attempting to merge sharding by aliased column (parent {:?}, aliased {:?}, sharded {:?}, alias {:?}, shard {:?})", mat_anc.index(), res, parent.index(), c, col)
                         }
                     }
                 }
@@ -705,7 +724,7 @@ impl Materializations {
                               "node" => ni.index());
                         continue;
                     }
-                    assert!(
+                    invariant!(
                         self.partial.contains(&pi),
                         "attempting to place full materialization beyond materialization frontier"
                     );
@@ -726,11 +745,7 @@ impl Materializations {
         while let Some(ni) = non_purge.pop() {
             if graph[ni].purge {
                 println!("{}", graphviz(graph, true, &self));
-                assert!(
-                    !graph[ni].purge,
-                    "found purge node {} above non-purge node",
-                    ni.index()
-                );
+                internal!("found purge node {} above non-purge node", ni.index())
             }
             if self.have.contains_key(&ni) {
                 // already shceduled to be checked
@@ -794,7 +809,7 @@ impl Materializations {
                                 "node" => node.index(),
                                 "child" => child.index(),
                             );
-                            unimplemented!();
+                            internal!("attempting to make old non-materialized node ({:?}) with child ({:?}) partial", node.index(), child.index());
                         }
 
                         stack.extend(
@@ -815,22 +830,18 @@ impl Materializations {
                       "cols" => ?index_on);
                 let log = self.log.new(o!("node" => node.index()));
                 let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, domains, workers, replies);
+                self.setup(node, &mut index_on, graph, domains, workers, replies)?;
                 self.log = log;
                 index_on.clear();
             } else {
                 use dataflow::payload::InitialState;
-                domains
-                    .get_mut(&n.domain())
-                    .unwrap()
-                    .send_to_healthy(
-                        Box::new(Packet::PrepareState {
-                            node: n.local_addr(),
-                            state: InitialState::IndexedLocal(index_on),
-                        }),
-                        workers,
-                    )
-                    .unwrap();
+                domains.get_mut(&n.domain()).unwrap().send_to_healthy(
+                    Box::new(Packet::PrepareState {
+                        node: n.local_addr(),
+                        state: InitialState::IndexedLocal(index_on),
+                    }),
+                    workers,
+                )?;
             }
         }
 
@@ -840,14 +851,15 @@ impl Materializations {
             let mut index_on = self
                 .added
                 .remove(&ni)
-                .map(|idxs| {
-                    assert!(!idxs.is_empty());
-                    idxs
+                .map(|idxs| -> ReadySetResult<_> {
+                    invariant!(!idxs.is_empty());
+                    Ok(idxs)
                 })
+                .transpose()?
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains, workers, replies);
+            self.ready_one(ni, &mut index_on, graph, domains, workers, replies)?;
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -857,16 +869,14 @@ impl Materializations {
             // returning before the graph is actually fully operational.
             trace!(self.log, "readying node"; "node" => ni.index());
             let domain = domains.get_mut(&n.domain()).unwrap();
-            domain
-                .send_to_healthy(
-                    Box::new(Packet::Ready {
-                        node: n.local_addr(),
-                        purge: n.purge,
-                        index: index_on,
-                    }),
-                    workers,
-                )
-                .unwrap();
+            domain.send_to_healthy(
+                Box::new(Packet::Ready {
+                    node: n.local_addr(),
+                    purge: n.purge,
+                    index: index_on,
+                }),
+                workers,
+            )?;
             futures_executor::block_on(replies.wait_for_acks(&domain));
             trace!(self.log, "node ready"; "node" => ni.index());
 
@@ -879,6 +889,8 @@ impl Materializations {
         }
 
         self.added.clear();
+
+        Ok(())
     }
 
     /// Perform all operations necessary to bring any materializations for the given node up, and
@@ -891,7 +903,7 @@ impl Materializations {
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
         replies: &mut DomainReplies,
-    ) {
+    ) -> Result<(), ReadySetError> {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
 
@@ -909,7 +921,7 @@ impl Materializations {
             // a new base must be empty, so we can materialize it immediately
             info!(self.log, "no need to replay empty new base"; "node" => ni.index());
             assert!(!self.partial.contains(&ni));
-            return;
+            return Ok(());
         }
 
         // if this node doesn't need to be materialized, then we're done.
@@ -923,21 +935,21 @@ impl Materializations {
 
         if !has_state {
             debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());
-            return;
+            return Ok(());
         }
 
         // we have a parent that has data, so we need to replay and reconstruct
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains, workers, replies);
+        self.setup(ni, index_on, graph, domains, workers, replies)?;
         self.log = log;
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
         // wait for the domain to finish replay, which the ready executed by the outer commit()
         // loop does.
         index_on.clear();
-        return;
+        return Ok(());
     }
 
     /// Reconstruct the materialized state required by the given (new) node through replay.
@@ -949,7 +961,7 @@ impl Materializations {
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
         replies: &mut DomainReplies,
-    ) {
+    ) -> Result<(), ReadySetError> {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
             // figure out what key that Reader is using
@@ -969,7 +981,7 @@ impl Materializations {
         let pending = {
             let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
-                plan.add(index, replies);
+                plan.add(index, replies)?;
             }
             plan.finalize()
         };
@@ -1005,5 +1017,6 @@ impl Materializations {
 
             futures_executor::block_on(replies.wait_for_acks(&domains[&target]));
         }
+        Ok(())
     }
 }

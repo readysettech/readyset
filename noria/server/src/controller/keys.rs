@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-
+use noria::ReadySetError;
 use petgraph;
 
 use std::collections::HashMap;
@@ -10,9 +10,9 @@ pub fn provenance_of<F>(
     node: NodeIndex,
     columns: &[usize],
     mut on_join: F,
-) -> Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>
+) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError>
 where
-    F: FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex>,
+    F: FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Result<Option<NodeIndex>, ReadySetError>,
 {
     let path = vec![(node, columns.iter().map(|&v| Some(v)).collect())];
     trace(graph, &mut on_join, path)
@@ -22,9 +22,9 @@ fn trace<F>(
     graph: &Graph,
     on_join: &mut F,
     mut path: Vec<(NodeIndex, Vec<Option<usize>>)>,
-) -> Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>
+) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError>
 where
-    F: FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex>,
+    F: FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Result<Option<NodeIndex>, ReadySetError>,
 {
     // figure out what node/column we're looking up
     let (node, columns) = path.last().cloned().unwrap();
@@ -44,7 +44,7 @@ where
 
     // have we reached a base node?
     if n.is_base() {
-        return vec![path];
+        return Ok(vec![path]);
     }
 
     // we know all non-internal nodes use an identity mapping
@@ -60,7 +60,7 @@ where
         // except if we're a join and on_join says to only walk through one...
         if n.is_internal() && n.is_join() {
             let idk = vec![None; cols];
-            if let Some(parent) = on_join(node, &idk[..], &parents[..]) {
+            if let Some(parent) = on_join(node, &idk[..], &parents[..])? {
                 path.push((parent, idk));
                 return trace(graph, on_join, path);
             }
@@ -70,9 +70,9 @@ where
         for p in parents {
             let mut path = path.clone();
             path.push((p, vec![None; cols]));
-            paths.extend(trace(graph, on_join, path));
+            paths.extend(trace(graph, on_join, path)?);
         }
-        return paths;
+        return Ok(paths);
     }
 
     // try to resolve the currently selected columns
@@ -80,8 +80,10 @@ where
         .iter()
         .enumerate()
         .filter_map(|(i, &c)| c.map(|c| (i, c)))
-        .flat_map(|(i, c)| {
-            let origins = n.parent_columns(c).unwrap();
+        .map(|(i, c)| Ok((i, n.parent_columns(c)?)))
+        .collect::<Result<Vec<(usize, Vec<(NodeIndex, Option<usize>)>)>, ReadySetError>>()?
+        .iter()
+        .flat_map(|(i, origins)| {
             assert!(!origins.is_empty());
             origins.into_iter().map(move |o| (i, o))
         })
@@ -90,9 +92,9 @@ where
             |mut by_ancestor, (coli, (ancestor, column))| {
                 {
                     let resolved = by_ancestor
-                        .entry(ancestor)
+                        .entry(*ancestor)
                         .or_insert_with(|| vec![None; cols]);
-                    resolved[coli] = column;
+                    resolved[*coli] = *column;
                 }
                 by_ancestor
             },
@@ -117,9 +119,9 @@ where
         for p in parents {
             let mut path = path.clone();
             path.push((p, resolved.remove(&p).unwrap_or_else(|| vec![None; cols])));
-            paths.extend(trace(graph, on_join, path));
+            paths.extend(trace(graph, on_join, path)?);
         }
-        return paths;
+        return Ok(paths);
     }
 
     // no, it resolves to at least one parent column
@@ -143,15 +145,15 @@ where
         for (parent, columns) in resolved {
             let mut path = path.clone();
             path.push((parent, columns));
-            paths.extend(trace(graph, on_join, path));
+            paths.extend(trace(graph, on_join, path)?);
         }
-        return paths;
+        return Ok(paths);
     }
 
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
     // TODO: provide an early-termination mechanism?
-    match on_join(node, &columns[..], &parents[..]) {
+    match on_join(node, &columns[..], &parents[..])? {
         None => {
             // our caller wants information about all our parents.
             // since the column we're chasing only follows a single path through a join (unless it
@@ -164,9 +166,9 @@ where
                     parent,
                     resolved.remove(&parent).unwrap_or_else(|| vec![None; cols]),
                 ));
-                paths.extend(trace(graph, on_join, path));
+                paths.extend(trace(graph, on_join, path)?);
             }
-            paths
+            Ok(paths)
         }
         Some(parent) => {
             // our caller only cares about *one* parent.
@@ -185,6 +187,12 @@ mod tests {
     use super::*;
     use dataflow::node;
     use dataflow::ops;
+
+    static EMPTY_ON_JOIN: fn(
+        NodeIndex,
+        &[Option<usize>],
+        &[NodeIndex],
+    ) -> Result<Option<NodeIndex>, ReadySetError> = |_, _, _| Ok(None);
 
     fn bases() -> (Graph, NodeIndex, NodeIndex) {
         let mut g = petgraph::Graph::new();
@@ -215,21 +223,21 @@ mod tests {
     fn base_trace() {
         let (g, a, b) = bases();
         assert_eq!(
-            provenance_of(&g, a, &[0], |_, _, _| None),
+            provenance_of(&g, a, &[0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(a, vec![Some(0)])]]
         );
         assert_eq!(
-            provenance_of(&g, b, &[0], |_, _, _| None),
+            provenance_of(&g, b, &[0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(b, vec![Some(0)])]]
         );
 
         // multicol
         assert_eq!(
-            provenance_of(&g, a, &[0, 1], |_, _, _| None),
+            provenance_of(&g, a, &[0, 1], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(a, vec![Some(0), Some(1)])]]
         );
         assert_eq!(
-            provenance_of(&g, a, &[1, 0], |_, _, _| None),
+            provenance_of(&g, a, &[1, 0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(a, vec![Some(1), Some(0)])]]
         );
     }
@@ -242,11 +250,11 @@ mod tests {
         g.add_edge(a, x, ());
 
         assert_eq!(
-            provenance_of(&g, x, &[0], |_, _, _| None),
+            provenance_of(&g, x, &[0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(x, vec![Some(0)]), (a, vec![Some(0)])]]
         );
         assert_eq!(
-            provenance_of(&g, x, &[0, 1], |_, _, _| None),
+            provenance_of(&g, x, &[0, 1], EMPTY_ON_JOIN).unwrap(),
             vec![vec![
                 (x, vec![Some(0), Some(1)]),
                 (a, vec![Some(0), Some(1)]),
@@ -266,11 +274,11 @@ mod tests {
         g.add_edge(a, x, ());
 
         assert_eq!(
-            provenance_of(&g, x, &[0], |_, _, _| None),
+            provenance_of(&g, x, &[0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(x, vec![Some(0)]), (a, vec![Some(1)])]]
         );
         assert_eq!(
-            provenance_of(&g, x, &[0, 1], |_, _, _| None),
+            provenance_of(&g, x, &[0, 1], EMPTY_ON_JOIN).unwrap(),
             vec![vec![
                 (x, vec![Some(0), Some(1)]),
                 (a, vec![Some(1), Some(0)]),
@@ -295,15 +303,15 @@ mod tests {
         g.add_edge(a, x, ());
 
         assert_eq!(
-            provenance_of(&g, x, &[0], |_, _, _| None),
+            provenance_of(&g, x, &[0], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(x, vec![Some(0)]), (a, vec![Some(0)])]]
         );
         assert_eq!(
-            provenance_of(&g, x, &[1], |_, _, _| None),
+            provenance_of(&g, x, &[1], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(x, vec![Some(1)]), (a, vec![None])]]
         );
         assert_eq!(
-            provenance_of(&g, x, &[0, 1], |_, _, _| None),
+            provenance_of(&g, x, &[0, 1], EMPTY_ON_JOIN).unwrap(),
             vec![vec![(x, vec![Some(0), Some(1)]), (a, vec![Some(0), None])]]
         );
     }
@@ -322,7 +330,7 @@ mod tests {
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
 
-        let mut paths = provenance_of(&g, x, &[0], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[0], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -331,7 +339,7 @@ mod tests {
                 vec![(x, vec![Some(0)]), (b, vec![Some(0)])],
             ]
         );
-        let mut paths = provenance_of(&g, x, &[0, 1], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[0, 1], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -363,7 +371,7 @@ mod tests {
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
 
-        let mut paths = provenance_of(&g, x, &[0], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[0], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -372,7 +380,7 @@ mod tests {
                 vec![(x, vec![Some(0)]), (b, vec![None])],
             ]
         );
-        let mut paths = provenance_of(&g, x, &[1], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[1], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -381,7 +389,7 @@ mod tests {
                 vec![(x, vec![Some(1)]), (b, vec![Some(0)])],
             ]
         );
-        let mut paths = provenance_of(&g, x, &[2], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[2], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -390,7 +398,7 @@ mod tests {
                 vec![(x, vec![Some(2)]), (b, vec![Some(1)])],
             ]
         );
-        let mut paths = provenance_of(&g, x, &[0, 1], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[0, 1], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
@@ -399,7 +407,7 @@ mod tests {
                 vec![(x, vec![Some(0), Some(1)]), (b, vec![None, Some(0)])],
             ]
         );
-        let mut paths = provenance_of(&g, x, &[1, 2], |_, _, _| None);
+        let mut paths = provenance_of(&g, x, &[1, 2], EMPTY_ON_JOIN).unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
