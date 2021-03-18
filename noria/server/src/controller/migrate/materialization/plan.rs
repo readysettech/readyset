@@ -4,6 +4,7 @@ use crate::controller::keys;
 use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
+use noria::ReadySetError;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub(super) struct Plan<'a> {
@@ -51,10 +52,13 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(&mut self, columns: &[usize]) -> Vec<Vec<(NodeIndex, Vec<Option<usize>>)>> {
+    fn paths(
+        &mut self,
+        columns: &[usize],
+    ) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
-        let paths = keys::provenance_of(graph, ni, &columns[..], Self::on_join(&self.graph));
+        let paths = keys::provenance_of(graph, ni, &columns[..], Self::on_join(&self.graph))?;
 
         // cut paths so they only reach to the the closest materialized node
         let mut paths: Vec<_> = paths
@@ -99,23 +103,27 @@ impl<'a> Plan<'a> {
         // all columns better resolve if we're doing partial
         assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(Option::is_some)));
 
-        paths
+        Ok(paths)
     }
 
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn add(&mut self, index_on: Index, replies: &mut DomainReplies) {
+    pub(super) fn add(
+        &mut self,
+        index_on: Index,
+        replies: &mut DomainReplies,
+    ) -> Result<(), ReadySetError> {
         if !self.partial && !self.paths.is_empty() {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
             // we do need to keep track of the fact that there should be an index here though.
             self.tags.entry(index_on).or_default();
-            return;
+            return Ok(());
         }
 
-        let paths = self.paths(&index_on.columns[..]);
+        let paths = self.paths(&index_on.columns[..])?;
 
         // all right, story time!
         //
@@ -518,6 +526,8 @@ impl<'a> Plan<'a> {
         }
 
         self.tags.entry(index_on).or_default().extend(tags);
+
+        Ok(())
     }
 
     /// Instructs the target node to set up appropriate state for any new indices that have been
@@ -609,7 +619,12 @@ impl<'a> Plan<'a> {
 
     pub(super) fn on_join<'b>(
         graph: &'b Graph,
-    ) -> impl FnMut(NodeIndex, &[Option<usize>], &[NodeIndex]) -> Option<NodeIndex> + 'b {
+    ) -> impl FnMut(
+        NodeIndex,
+        &[Option<usize>],
+        &[NodeIndex],
+    ) -> Result<Option<NodeIndex>, ReadySetError>
+           + 'b {
         move |node, cols, parents| {
             // this function should only be called when there's a choice
             assert!(parents.len() > 1);
@@ -634,7 +649,7 @@ impl<'a> Plan<'a> {
                 let first = cols[0].unwrap();
 
                 let mut universal_src = Vec::new();
-                for (src, col) in n.parent_columns(first).unwrap() {
+                for (src, col) in n.parent_columns(first)? {
                     if src == node || col.is_none() {
                         continue;
                     }
@@ -646,12 +661,14 @@ impl<'a> Plan<'a> {
                     // if all other columns resolve into this src, then only keep those srcs
                     // XXX: this is pretty inefficient, but meh...
                     let also_to_src = cols.iter().skip(1).map(|c| c.unwrap()).all(|c| {
-                        n.parent_columns(c)
-                            .unwrap()
-                            .into_iter()
-                            .find(|&(this_src, _)| this_src == src)
-                            .and_then(|(_, c)| c)
-                            .is_some()
+                        match n.parent_columns(c) {
+                            Err(_) => false,
+                            Ok(c) => c
+                                .into_iter()
+                                .find(|&(this_src, _)| this_src == src)
+                                .and_then(|(_, c)| c)
+                                .is_some(),
+                        }
                     });
 
                     if also_to_src {
@@ -669,7 +686,7 @@ impl<'a> Plan<'a> {
             // if there is only one left, we don't really have a choice
             if parents.len() == 1 {
                 // no need to pick
-                return parents.pop();
+                return Ok(parents.pop());
             }
 
             // ensure that our choice of multiple possible parents is deterministic
@@ -681,7 +698,7 @@ impl<'a> Plan<'a> {
             // we can just pick that parent and get a free full materialization.
 
             // any choice is fine
-            Some(parents[0])
+            Ok(Some(parents[0]))
         }
     }
 }

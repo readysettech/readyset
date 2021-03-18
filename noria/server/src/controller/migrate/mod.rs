@@ -590,13 +590,16 @@ impl<'a> Migration<'a> {
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        mainline.materializations.commit(
-            &mut mainline.ingredients,
-            &new,
-            &mut mainline.domains,
-            &mainline.workers,
-            &mut mainline.replies,
-        );
+        mainline
+            .materializations
+            .commit(
+                &mut mainline.ingredients,
+                &new,
+                &mut mainline.domains,
+                &mainline.workers,
+                &mut mainline.replies,
+            )
+            .unwrap();
 
         counter!(
             "controller.migration_time_us",

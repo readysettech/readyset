@@ -150,7 +150,7 @@ pub(super) fn column_schema(
         column_index,
         view.index()
     );
-    let paths = provenance_of(graph, view, &[column_index], |_, _, _| None);
+    let paths = provenance_of(graph, view, &[column_index], |_, _, _| Ok(None)).unwrap();
     let vn = &graph[view];
 
     let mut col_type = None;
