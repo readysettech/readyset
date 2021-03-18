@@ -1,14 +1,15 @@
 use crate::controller::ControllerState;
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::errors::internal_err;
 use crate::startup::Event;
 use async_bincode::AsyncBincodeWriter;
 use dataflow::{DomainBuilder, Packet};
-use futures_util::{future::FutureExt, future::TryFutureExt, sink::SinkExt, stream::StreamExt};
+use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use metrics::{counter, gauge};
-use noria::channel;
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
 use noria::ControllerDescriptor;
+use noria::{channel, internal, ReadySetError};
 use replica::ReplicaAddr;
 use slog;
 use std::collections::HashMap;
@@ -52,7 +53,7 @@ pub(super) async fn main(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
-) {
+) -> Result<(), ReadySetError> {
     // shared df state
     let coord = Arc::new(ChannelCoordinator::new());
 
@@ -62,7 +63,7 @@ pub(super) async fn main(
         match e {
             Event::InternalMessage(msg) => match msg.payload {
                 CoordinationPayload::RemoveDomain => {
-                    unimplemented!();
+                    internal!();
                 }
                 CoordinationPayload::AssignDomain(d) => {
                     if let InstanceState::Active {
@@ -72,12 +73,13 @@ pub(super) async fn main(
                     } = worker_state
                     {
                         if epoch == msg.epoch {
-                            add_domain.send(d).unwrap_or_else(|d| {
-                                panic!("could not add new domain {:?}", d);
-                            });
+                            let res = add_domain.send(d.clone());
+                            if let Err(e) = res {
+                                internal!("could not add new domain {:?}: {}", d, e);
+                            }
                         }
                     } else {
-                        unreachable!();
+                        internal!();
                     }
                 }
                 CoordinationPayload::DomainBooted(dd) => {
@@ -97,7 +99,9 @@ pub(super) async fn main(
                         }
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    internal!();
+                }
             },
             Event::LeaderChange(state, descriptor) => {
                 if let InstanceState::Active {
@@ -150,8 +154,7 @@ pub(super) async fn main(
                 .await;
 
                 if let Err(e) = ctrl {
-                    error!(log, "failed to connect to controller");
-                    eprintln!("{:?}", e);
+                    error!(log, "failed to connect to controller: {}", e);
                 } else {
                     // now we can start accepting dataflow messages
                     worker_state = InstanceState::Active {
@@ -162,10 +165,12 @@ pub(super) async fn main(
                     warn!(log, "Connected to new leader");
                 }
             }
-            e => unreachable!("{:?} is not a worker event", e),
+            e => {
+                internal!("{:?} is not a worker event", e);
+            }
         }
     }
-
+    Ok(())
     // shutting down...
     //
     // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
@@ -371,8 +376,9 @@ async fn listen_df<'a>(
 
             Ok(())
         }
-        .map_err(|e: io::Error| panic!("{:?}", e))
-        .map(|_| ()),
+        // FIXME(eta): fix atrocious conversion
+        .map_err(|e: io::Error| internal_err(format!("{:?}", e)))
+        .map_err(|e| eprintln!("domain task failed: {:?}", e)),
     );
 
     Ok(())
