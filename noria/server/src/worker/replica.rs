@@ -23,7 +23,7 @@ use noria::{
     channel::{DualTcpStream, CONNECTION_FROM_BASE},
     PacketPayload,
 };
-use noria::{PacketData, Tagged};
+use noria::{PacketData, ReadySetError, Tagged};
 use pin_project::pin_project;
 use slog;
 use std::collections::{HashMap, VecDeque};
@@ -429,7 +429,7 @@ impl Replica {
     }
 
     // returns true if on_event(Timeout) was called
-    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> bool {
+    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, ReadySetError> {
         let mut processed = false;
         let mut this = self.project();
 
@@ -441,11 +441,11 @@ impl Replica {
 
         if *this.timed_out {
             *this.timed_out = false;
-            this.domain.on_event(this.out, PollEvent::Timeout).unwrap();
+            this.domain.on_event(this.out, PollEvent::Timeout)?;
             processed = true;
         }
 
-        processed
+        Ok(processed)
     }
 }
 
@@ -572,7 +572,9 @@ impl Future for Replica {
             }
 
             // have any of our timers expired?
-            self.as_mut().try_timeout(cx);
+            if let Err(e) = self.as_mut().try_timeout(cx) {
+                return Poll::Ready(Err(e.into()));
+            };
 
             // we have three logical input sources: receives from local domains, receives from
             // remote domains, and remote mutators. we want to achieve some kind of fairness among
@@ -621,7 +623,7 @@ impl Future for Replica {
                             } => $outbox.saw_input(token, epoch),
                             _ => {}
                         }
-                        $pp(packet).unwrap()
+                        $pp(packet)?
                     } {
                         // domain got a message to quit
                         // TODO: should we finish up remaining work?
@@ -719,12 +721,8 @@ impl Future for Replica {
             self.out.dirty = false;
             loop {
                 let mut this = self.as_mut().project();
-                match this
-                    .domain
-                    .on_event(this.out, PollEvent::ResumePolling)
-                    .unwrap()
-                {
-                    ProcessResult::KeepPolling(timeout) => {
+                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
+                    Ok(ProcessResult::KeepPolling(timeout)) => {
                         if let Some(timeout) = timeout {
                             if timeout == time::Duration::new(0, 0) {
                                 *this.timed_out = true;
@@ -733,13 +731,20 @@ impl Future for Replica {
                             }
 
                             // we need to poll the timer to ensure we'll get woken up
-                            if self.as_mut().try_timeout(cx) {
-                                // a timeout occurred, so we may have to set a new timer
-                                if self.out.dirty {
-                                    // if we're already dirty, we'll re-do processing anyway
-                                } else {
-                                    // try to resume polling again
-                                    continue;
+                            match self.as_mut().try_timeout(cx) {
+                                Ok(timed_out) => {
+                                    if timed_out {
+                                        // a timeout occurred, so we may have to set a new timer
+                                        if self.out.dirty {
+                                            // if we're already dirty, we'll re-do processing anyway
+                                        } else {
+                                            // try to resume polling again
+                                            continue;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    return Poll::Ready(Err(e.into()));
                                 }
                             }
                         }

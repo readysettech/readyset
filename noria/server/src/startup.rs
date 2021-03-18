@@ -108,6 +108,8 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         wport,
     ));
     let ext_log = log.clone();
+    let ext_log2 = log.clone();
+    let ext_log3 = log.clone();
     tokio::spawn(
         listen_external(
             alive.clone(),
@@ -148,7 +150,10 @@ pub(super) async fn start_instance<A: Authority + 'static>(
                 Event::IsReady(..) => ctx.send(e),
             };
             // needed for https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
-            snd.unwrap();
+            if let Err(e) = snd {
+                warn!(ext_log2, "Forwarding loop failed (!!): {:?}", e);
+                break;
+            }
         }
     });
 
@@ -173,16 +178,22 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         authority.clone(),
         tx.clone(),
     ));
-    tokio::spawn(crate::worker::main(
-        alive.clone(),
-        worker_rx,
-        listen_addr,
-        external_addr,
-        waddr,
-        memory_limit,
-        memory_check_frequency,
-        log.clone(),
-    ));
+    tokio::spawn(
+        crate::worker::main(
+            alive.clone(),
+            worker_rx,
+            listen_addr,
+            external_addr,
+            waddr,
+            memory_limit,
+            memory_check_frequency,
+            log.clone(),
+        )
+        .map_err(move |e| {
+            warn!(ext_log3, "worker domain failed: {:?}", e);
+            e
+        }),
+    );
 
     let h = Handle::new(authority, tx, trigger).await?;
     Ok((h, done.into_future().map(|_| {})))
