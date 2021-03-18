@@ -1,15 +1,16 @@
 use crate::controller::security::SecurityConfig;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
-use crate::ReuseConfigType;
+use crate::{ReadySetResult, ReuseConfigType};
 use dataflow::ops::trigger::Trigger;
 use dataflow::ops::trigger::TriggerEvent;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use noria::ActivationResult;
+use noria::{internal, ActivationResult, ReadySetError};
 use petgraph::graph::NodeIndex;
 
+use crate::errors::internal_err;
 use nom_sql::CreateTableStatement;
 use std::collections::HashMap;
 use std::str;
@@ -316,7 +317,7 @@ impl Recipe {
         &mut self,
         mig: &mut Migration,
         universe_groups: HashMap<String, Vec<DataType>>,
-    ) -> Result<ActivationResult, String> {
+    ) -> Result<ActivationResult, ReadySetError> {
         use crate::controller::sql::security::Multiverse;
 
         let mut result = ActivationResult {
@@ -327,11 +328,12 @@ impl Recipe {
         };
 
         if self.security_config.is_some() {
-            let qfps = self.inc.as_mut().unwrap().prepare_universe(
-                &self.security_config.clone().unwrap(),
-                universe_groups,
-                mig,
-            )?;
+            let qfps = self
+                .inc
+                .as_mut()
+                .unwrap()
+                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig)
+                .map_err(|e| internal_err(e))?;
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -372,7 +374,10 @@ impl Recipe {
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
     // crate viz for tests
-    pub(crate) fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
+    pub(crate) fn activate(
+        &mut self,
+        mig: &mut Migration,
+    ) -> Result<ActivationResult, ReadySetError> {
         debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
@@ -396,7 +401,7 @@ impl Recipe {
         // tagged with the new version. If this recipe was just created, there is no need to
         // upgrade the schema version, as the SqlIncorporator's version will still be at zero.
         if self.version > 0 {
-            self.inc.as_mut().unwrap().upgrade_schema(self.version);
+            self.inc.as_mut().unwrap().upgrade_schema(self.version)?;
         }
 
         // create nodes to enforce security configuration
@@ -451,8 +456,11 @@ impl Recipe {
 
             if qfp.reused_nodes.get(0) == Some(&qfp.query_leaf) && qfp.reused_nodes.len() == 1 {
                 if let Some(ref name) = n {
-                    self.alias_query(&qfp.name, name.clone())
-                        .expect("SqlIncorporator told recipe about a query it doesn't know about!");
+                    self.alias_query(&qfp.name, name.clone()).map_err(|_| {
+                        internal_err(
+                            "SqlIncorporator told recipe about a query it doesn't know about!",
+                        )
+                    })?;
                 }
             }
 
@@ -464,24 +472,27 @@ impl Recipe {
 
         result.removed_leaves = removed
             .iter()
-            .filter_map(|qid| {
+            .map(|qid| {
                 let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
-                match q {
+                Ok(match q {
                     SqlQuery::CreateTable(ref ctq) => {
                         // a base may have many dependent queries, including ones that also lost
                         // nodes; the code handling `removed_leaves` therefore needs to take care
                         // not to remove bases while they still have children, or to try removing
                         // them twice.
-                        self.inc.as_mut().unwrap().remove_base(&ctq.table.name);
+                        self.inc.as_mut().unwrap().remove_base(&ctq.table.name)?;
                         match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {
                                 crit!(
                                     self.log,
-                                    "failed to remove base {} whose  address could not be resolved",
+                                    "failed to remove base {} whose address could not be resolved",
                                     ctq.table.name
                                 );
-                                unimplemented!()
+                                internal!(
+                                    "failed to remove base {} whose address could not be resolved",
+                                    ctq.table.name
+                                );
                             }
                         }
                     }
@@ -489,9 +500,13 @@ impl Recipe {
                         .inc
                         .as_mut()
                         .unwrap()
-                        .remove_query(n.as_ref().unwrap(), mig),
-                }
+                        .remove_query(n.as_ref().unwrap(), mig)?,
+                })
             })
+            // FIXME(eta): error handling impl overhead
+            .collect::<ReadySetResult<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|x| x)
             .collect();
 
         Ok(result)
