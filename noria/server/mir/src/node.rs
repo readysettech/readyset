@@ -187,11 +187,16 @@ impl MirNode {
     }
 
     pub fn add_column(&mut self, c: Column) {
-        match self.inner {
-            // the aggregation column must always be the last column
+        match &self.inner {
             MirNodeType::Aggregation { .. } | MirNodeType::FilterAggregation { .. } => {
+                // the aggregation column must always be the last column
                 let pos = self.columns.len() - 1;
                 self.columns.insert(pos, c.clone());
+            }
+            MirNodeType::Project { emit, .. } => {
+                // New projected columns go before all literals and expressions
+                let pos = emit.len();
+                self.columns.insert(pos, c.clone())
             }
             _ => self.columns.push(c.clone()),
         }

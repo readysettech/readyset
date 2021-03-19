@@ -4159,3 +4159,26 @@ async fn cast_projection() {
         vec![DataType::from(1), NaiveDate::from_ymd(2020, 3, 16).into()]
     );
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn aggregate_expression() {
+    let mut g = start_simple_unsharded("aggregate_expression").await;
+
+    g.install_recipe(
+        "CREATE TABLE t (string_num text);
+         QUERY q: SELECT max(cast(t.string_num as int)) as max_num from t;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    t.insert_many(vec![vec![DataType::from("100")], vec![DataType::from("5")]])
+        .await
+        .unwrap();
+
+    let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
+
+    assert_eq!(&res["max_num"], &DataType::from(100));
+}
