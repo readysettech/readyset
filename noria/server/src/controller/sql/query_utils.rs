@@ -1,5 +1,11 @@
+use std::borrow::Cow;
+use std::iter;
+
+use itertools::Either;
 use nom_sql::{
-    ConditionBase, ConditionExpression, Expression, FunctionExpression, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
+    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FunctionArgument, FunctionArguments, FunctionExpression, SqlQuery, Table,
 };
 
 pub trait ReferredTables {
@@ -80,5 +86,302 @@ pub(crate) fn contains_aggregate(expr: &Expression) -> bool {
         Expression::Call(f) => is_aggregate(f),
         Expression::Literal(_) => false,
         Expression::Column { .. } => false,
+    }
+}
+
+/// Returns an iterator over all the direct arguments passed to the given function call expression
+pub(crate) fn function_arguments<'a>(
+    func: &'a FunctionExpression,
+) -> impl Iterator<Item = &'a FunctionArgument> {
+    match func {
+        FunctionExpression::Avg(arg, _)
+        | FunctionExpression::Count(arg, _)
+        | FunctionExpression::Sum(arg, _)
+        | FunctionExpression::Max(arg)
+        | FunctionExpression::Min(arg)
+        | FunctionExpression::GroupConcat(arg, _)
+        | FunctionExpression::Cast(arg, _) => Either::Left(iter::once(arg)),
+        FunctionExpression::CountStar => Either::Right(Either::Left(iter::empty())),
+        FunctionExpression::Generic(_, FunctionArguments { arguments }) => {
+            Either::Right(Either::Right(arguments.iter()))
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ReferredColumnsIter<'a> {
+    exprs_to_visit: Vec<&'a Expression>,
+    // TODO(grfn): Once FunctionArgument and Arithmetic go away and are replaced with Expression
+    // these next two fields can go away too
+    function_arguments_to_visit: Vec<&'a FunctionArgument>,
+    arithmetic_to_visit: Vec<&'a Arithmetic>,
+    condition_expressions_to_visit: Vec<&'a ConditionExpression>,
+    columns_to_visit: Vec<&'a Column>,
+}
+
+impl<'a> ReferredColumnsIter<'a> {
+    fn visit_expr(&mut self, expr: &'a Expression) -> Option<Cow<'a, Column>> {
+        match expr {
+            Expression::Arithmetic(ArithmeticExpression { ari, .. }) => {
+                self.visit_arithmetic(ari).map(Cow::Borrowed)
+            }
+            Expression::Call(fexpr) => self.visit_function_expression(fexpr),
+            Expression::Literal(_) => None,
+            Expression::Column { name, table } => Some(Cow::Owned(Column {
+                name: name.to_string(),
+                table: table.clone(),
+                alias: None,
+                function: None,
+            })),
+        }
+    }
+
+    fn visit_function_expression(
+        &mut self,
+        fexpr: &'a FunctionExpression,
+    ) -> Option<Cow<'a, Column>> {
+        use FunctionExpression::*;
+
+        match fexpr {
+            Avg(arg, _) => self.visit_function_argument(arg),
+            Count(arg, _) => self.visit_function_argument(arg),
+            CountStar => None,
+            Sum(arg, _) => self.visit_function_argument(arg),
+            Max(arg) => self.visit_function_argument(arg),
+            Min(arg) => self.visit_function_argument(arg),
+            GroupConcat(arg, _) => self.visit_function_argument(arg),
+            Cast(arg, _) => self.visit_function_argument(arg),
+            Generic(_, FunctionArguments { arguments }) => {
+                arguments.first().and_then(|first_arg| {
+                    if arguments.len() >= 2 {
+                        self.function_arguments_to_visit
+                            .extend(arguments.iter().skip(1));
+                    }
+                    self.visit_function_argument(first_arg)
+                })
+            }
+        }
+    }
+
+    fn visit_function_argument(&mut self, farg: &'a FunctionArgument) -> Option<Cow<'a, Column>> {
+        match farg {
+            FunctionArgument::Column(Column {
+                function: Some(f), ..
+            }) => self.visit_function_expression(f),
+            FunctionArgument::Column(col) => Some(Cow::Borrowed(col)),
+            FunctionArgument::Conditional(CaseWhenExpression {
+                condition,
+                then_expr,
+                else_expr,
+            }) => {
+                self.condition_expressions_to_visit.push(condition);
+                if let ColumnOrLiteral::Column(col) = then_expr {
+                    self.columns_to_visit.push(col)
+                }
+                match else_expr {
+                    Some(ColumnOrLiteral::Column(col)) => Some(Cow::Borrowed(col)),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    fn visit_condition_expression(
+        &mut self,
+        ce: &'a ConditionExpression,
+    ) -> Option<Cow<'a, Column>> {
+        match ce {
+            ConditionExpression::ComparisonOp(ConditionTree { left, right, .. })
+            | ConditionExpression::LogicalOp(ConditionTree { left, right, .. }) => {
+                self.condition_expressions_to_visit.push(left);
+                self.visit_condition_expression(right)
+            }
+            ConditionExpression::NegationOp(ce) => self.visit_condition_expression(ce),
+            ConditionExpression::ExistsOp(_) => unimplemented!("EXISTS is not implemented yet"),
+            ConditionExpression::Base(ConditionBase::Field(col)) => Some(Cow::Borrowed(col)),
+            ConditionExpression::Base(
+                ConditionBase::Literal(_) | ConditionBase::LiteralList(_),
+            ) => None,
+            ConditionExpression::Base(ConditionBase::NestedSelect(_)) => {
+                unimplemented!("Nested selects are not implemented yet")
+            }
+            ConditionExpression::Arithmetic(ae) => {
+                self.visit_arithmetic(&ae.ari).map(Cow::Borrowed)
+            }
+            ConditionExpression::Bracketed(ce) => self.visit_condition_expression(ce),
+            ConditionExpression::Between { operand, min, max } => {
+                self.condition_expressions_to_visit.push(operand);
+                self.condition_expressions_to_visit.push(min);
+                self.visit_condition_expression(max)
+            }
+        }
+    }
+
+    fn visit_arithmetic_item(&mut self, ai: &'a ArithmeticItem) -> Option<&'a Column> {
+        match ai {
+            ArithmeticItem::Base(ArithmeticBase::Column(col)) => Some(col),
+            ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => None,
+            ArithmeticItem::Base(ArithmeticBase::Bracketed(ari)) | ArithmeticItem::Expr(ari) => {
+                self.visit_arithmetic(ari)
+            }
+        }
+    }
+
+    fn visit_arithmetic(&mut self, ari: &'a Arithmetic) -> Option<&'a Column> {
+        if let Some(col) = self.visit_arithmetic_item(&ari.left) {
+            self.columns_to_visit.push(col)
+        }
+
+        self.visit_arithmetic_item(&ari.right)
+    }
+}
+
+impl<'a> Iterator for ReferredColumnsIter<'a> {
+    type Item = Cow<'a, Column>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.exprs_to_visit
+            .pop()
+            .and_then(|expr| self.visit_expr(expr))
+            .or_else(|| {
+                self.function_arguments_to_visit
+                    .pop()
+                    .and_then(|farg| self.visit_function_argument(farg))
+            })
+            .or_else(|| {
+                self.arithmetic_to_visit
+                    .pop()
+                    .and_then(|ari| self.visit_arithmetic(ari).map(Cow::Borrowed))
+            })
+            .or_else(|| {
+                self.condition_expressions_to_visit
+                    .pop()
+                    .and_then(|ce| self.visit_condition_expression(ce))
+            })
+    }
+}
+
+pub(crate) trait ReferredColumns {
+    fn referred_columns(&self) -> ReferredColumnsIter;
+}
+
+impl ReferredColumns for Expression {
+    fn referred_columns(&self) -> ReferredColumnsIter {
+        ReferredColumnsIter {
+            exprs_to_visit: vec![self],
+            function_arguments_to_visit: vec![],
+            arithmetic_to_visit: vec![],
+            condition_expressions_to_visit: vec![],
+            columns_to_visit: vec![],
+        }
+    }
+}
+
+impl ReferredColumns for FunctionArgument {
+    fn referred_columns(&self) -> ReferredColumnsIter {
+        ReferredColumnsIter {
+            exprs_to_visit: vec![],
+            function_arguments_to_visit: vec![&self],
+            arithmetic_to_visit: vec![],
+            condition_expressions_to_visit: vec![],
+            columns_to_visit: vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod referred_columns {
+        use super::*;
+        use nom_sql::Literal;
+        use Expression::{Call, Column as ColExpr, Literal as LitExpr};
+
+        #[test]
+        fn literal() {
+            assert_eq!(
+                LitExpr(Literal::Integer(1))
+                    .referred_columns()
+                    .collect::<Vec<_>>(),
+                vec![]
+            );
+        }
+
+        #[test]
+        fn column() {
+            assert_eq!(
+                ColExpr {
+                    name: "test".to_owned(),
+                    table: None
+                }
+                .referred_columns()
+                .collect::<Vec<_>>(),
+                vec![Cow::Owned(Column::from("test"))],
+            )
+        }
+
+        #[test]
+        fn aggregate_with_column() {
+            assert_eq!(
+                Call(FunctionExpression::Sum(
+                    FunctionArgument::Column(Column::from("test")),
+                    false
+                ))
+                .referred_columns()
+                .collect::<Vec<_>>(),
+                vec![Cow::Owned(Column::from("test"))]
+            )
+        }
+
+        #[test]
+        fn generic_with_multiple_columns() {
+            assert_eq!(
+                Call(FunctionExpression::Generic(
+                    "ifnull".to_owned(),
+                    FunctionArguments {
+                        arguments: vec![
+                            FunctionArgument::Column(Column::from("col1")),
+                            FunctionArgument::Column(Column::from("col2")),
+                        ]
+                    }
+                ))
+                .referred_columns()
+                .collect::<Vec<_>>(),
+                vec![
+                    Cow::Owned(Column::from("col1")),
+                    Cow::Owned(Column::from("col2"))
+                ]
+            )
+        }
+
+        #[test]
+        fn nested_function_call() {
+            assert_eq!(
+                Call(FunctionExpression::Count(
+                    FunctionArgument::Column(Column {
+                        name: "".to_owned(),
+                        table: None,
+                        alias: None,
+                        function: Some(Box::new(FunctionExpression::Generic(
+                            "ifnull".to_owned(),
+                            FunctionArguments {
+                                arguments: vec![
+                                    FunctionArgument::Column(Column::from("col1")),
+                                    FunctionArgument::Column(Column::from("col2")),
+                                ]
+                            }
+                        )))
+                    }),
+                    false
+                ))
+                .referred_columns()
+                .collect::<Vec<_>>(),
+                vec![
+                    Cow::Owned(Column::from("col1")),
+                    Cow::Owned(Column::from("col2")),
+                ]
+            );
+        }
     }
 }

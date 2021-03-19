@@ -982,7 +982,7 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_function_node(
+    fn make_aggregate_node(
         &self,
         name: &str,
         func_col: &Column,
@@ -1190,7 +1190,7 @@ impl SqlToMirConverter {
         let over_col = over.1;
         let else_val = over.2;
 
-        // The function node's set of output columns is the group columns plus the function
+        // The aggregate node's set of output columns is the group columns plus the function
         // column
         let mut combined_columns = group_by
             .iter()
@@ -1361,12 +1361,12 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         parent: MirNodeRef,
-        fn_col: &Column,
+        fn_cols: Vec<&Column>,
     ) -> MirNodeRef {
         self.make_project_node(
             name,
             parent,
-            vec![fn_col],
+            fn_cols,
             vec![],
             vec![(String::from("grp"), DataType::from(0 as i32))],
             false,
@@ -1696,7 +1696,9 @@ impl SqlToMirConverter {
     > {
         // TODO: make this take &self!
         use crate::controller::sql::mir::grouped::make_grouped;
-        use crate::controller::sql::mir::grouped::make_predicates_above_grouped;
+        use crate::controller::sql::mir::grouped::{
+            make_expressions_above_grouped, make_predicates_above_grouped,
+        };
         use crate::controller::sql::mir::join::make_joins;
 
         let mut nodes_added: Vec<MirNodeRef>;
@@ -1752,7 +1754,21 @@ impl SqlToMirConverter {
                 }
             };
 
-            // 2. Get columns used by each predicate. This will be used to check
+            // 2. If we're aggregating on expressions rather than directly on columns, project out
+            // those expressions before the aggregate itself
+            let expressions_above_grouped = make_expressions_above_grouped(
+                self,
+                &format!("q_{:x}{}", qg.signature().hash, uformat),
+                &qg,
+                new_node_count,
+                &mut prev_node,
+            );
+
+            if expressions_above_grouped.is_some() {
+                new_node_count += 1;
+            }
+
+            // 3. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
             let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
                 HashMap::new();
@@ -1780,7 +1796,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 2a. Reorder some predicates before group by nodes
+            // 3a. Reorder some predicates before group by nodes
             // FIXME(malte): This doesn't currently work correctly with arithmetic and literal
             // projections that form input to these filters -- these need to be lifted above them
             // (and above the aggregations).
@@ -1797,7 +1813,7 @@ impl SqlToMirConverter {
 
             new_node_count += predicates_above_group_by_nodes.len();
 
-            // 3. Create security boundary
+            // 4. Create security boundary
             use crate::controller::sql::mir::security::SecurityBoundary;
             let (last_policy_nodes, policy_nodes) = self.make_security_boundary(
                 universe.clone(),
@@ -1864,7 +1880,7 @@ impl SqlToMirConverter {
                 new_node_count += func_nodes.len();
 
                 let mut predicate_nodes = Vec::new();
-                // 4. Generate the necessary filter nodes for local predicates associated with each
+                // 5. Generate the necessary filter nodes for local predicates associated with each
                 // relation node in the query graph.
                 //
                 // Need to iterate over relations in a deterministic order, as otherwise nodes will be
@@ -1914,7 +1930,7 @@ impl SqlToMirConverter {
 
                 let num_local_predicates = predicate_nodes.len();
 
-                // 5. Determine literals and expressions that global predicates depend
+                // 6. Determine literals and expressions that global predicates depend
                 //    on and add them here; remembering that we've already added them-
                 if let Some(projected) =
                     self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
@@ -1924,7 +1940,7 @@ impl SqlToMirConverter {
                     prev_node = Some(projected);
                 }
 
-                // 5. Global predicates
+                // 7. Global predicates
                 for (i, ref p) in qg.global_predicates.iter().enumerate() {
                     if created_predicates.contains(p) {
                         continue;
@@ -1954,7 +1970,7 @@ impl SqlToMirConverter {
                     predicate_nodes.extend(fns);
                 }
 
-                // 6. Get the final node
+                // 8. Get the final node
                 let mut final_node: MirNodeRef = if prev_node.is_some() {
                     prev_node.unwrap().clone()
                 } else {
@@ -1963,7 +1979,7 @@ impl SqlToMirConverter {
                     node_for_rel[sorted_rels.last().unwrap()].clone()
                 };
 
-                // 7. Potentially insert TopK node below the final node
+                // 9. Potentially insert TopK node below the final node
                 // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
                 // over, but we could end up in a stick place if we reconcile/combine multiple
                 // queries (due to security universes or due to compound select queries) that do
@@ -2042,7 +2058,7 @@ impl SqlToMirConverter {
             };
 
             let final_node_cols: Vec<Column> = final_node.borrow().columns().to_vec();
-            // 8. Generate leaf views that expose the query result
+            // 10. Generate leaf views that expose the query result
             let mut projected_columns: Vec<Column> = if universe.1.is_none() {
                 qg.columns
                     .iter()

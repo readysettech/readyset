@@ -101,8 +101,8 @@ fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Co
     Column {
         name: col.name.clone(),
         alias: col.alias.clone(),
-        table: table,
-        function: function,
+        table,
+        function,
     }
 }
 
@@ -371,6 +371,14 @@ impl AliasRemoval for SqlQuery {
                     jc
                 })
                 .collect();
+
+            if let Some(group_by) = &mut sq.group_by {
+                group_by.columns = group_by
+                    .columns
+                    .iter()
+                    .map(|col| rewrite_column(&col_table_remap, col))
+                    .collect();
+            }
 
             table_alias_rewrites
         } else {
