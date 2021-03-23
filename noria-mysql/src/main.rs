@@ -245,7 +245,7 @@ fn main() {
                 .require_authentication(require_authentication)
                 .build();
 
-            if let Err(noria_client::backend::error::Error::IOError(e)) =
+            if let Err(noria_client::backend::error::Error::Io(e)) =
                 MysqlIntermediary::run_on_tcp(b, s).await
             {
                 match e.kind() {

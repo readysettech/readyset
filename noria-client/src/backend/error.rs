@@ -1,27 +1,40 @@
-use crate::backend::error::Error::*;
 use msql_srv::ErrorKind;
-use std::{fmt, io};
+use noria::ReadySetError;
+use std::io;
+use thiserror::Error;
 
 /// An enum of the common error types experiences when reading and writing from the data store.
 /// Connectors should all use this error enum in their results.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
-    MySqlError(mysql::error::Error),
-    MySqlAsyncError(mysql_async::error::Error),
-    NoriaReadError(anyhow::Error),
-    NoriaWriteError(anyhow::Error),
-    NoriaRecipeError(anyhow::Error),
-    ParseError(String),
-    IOError(io::Error),
-    UnimplementedError(String),
-    UnsupportedError(String),
-    MissingPreparedStatement,
+    #[error("MySQL error: {0}")]
+    MySql(#[from] mysql::error::Error),
+    #[error("MySQL error: {0}")]
+    MySqlAsync(#[from] mysql_async::error::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    ReadySet(ReadySetError),
+}
+
+/// Everything in `noria-client` involves doing a Noria RPC call, so this `From` implementation
+/// discards a top-level `ReadySetError::RpcFailed`, if there is one.
+impl From<ReadySetError> for Error {
+    fn from(rse: ReadySetError) -> Error {
+        Error::ReadySet(match rse {
+            ReadySetError::RpcFailed { source, .. } => *source,
+            x => x,
+        })
+    }
 }
 
 impl Error {
     /// Transforms each error to the closest mysql error.
     /// Sometimes, there is not a good one and UNKNOWN is used.
     pub fn error_kind(&self) -> ErrorKind {
+        // TODO FIXME TODO FIXME FIXME
+        ErrorKind::ER_UNKNOWN_ERROR
+        /*
         match self {
             MySqlError(_) => ErrorKind::ER_UNKNOWN_ERROR,
             MySqlAsyncError(_) => ErrorKind::ER_UNKNOWN_ERROR,
@@ -32,81 +45,9 @@ impl Error {
             IOError(_) => ErrorKind::ER_IO_WRITE_ERROR,
             UnimplementedError(_) => ErrorKind::ER_NOT_SUPPORTED_YET,
             UnsupportedError(_) => ErrorKind::ER_NOT_SUPPORTED_YET,
+            Internal(_) => ErrorKind::ER_INTERNAL_ERROR,
             MissingPreparedStatement => ErrorKind::ER_NEED_REPREPARE,
         }
-    }
-
-    pub fn message(&self) -> String {
-        match self {
-            MySqlError(e) => format!(
-                "There was an error executing this query in the mysql connector : {:?}",
-                e
-            ),
-            MySqlAsyncError(e) => format!(
-                "There was an error executing this query in the mysql connector : {:?}",
-                e
-            ),
-            NoriaReadError(e) => format!("There was an error trying to read from Noria : {:?}", e),
-            NoriaWriteError(e) => format!("There was an error trying to write to Noria : {:?}", e),
-            NoriaRecipeError(e) => format!(
-                "There was an error when trying to install a noria recipe : {:?}",
-                e
-            ),
-            ParseError(e) => format!("There was an error parsing this query : {:?}", e),
-            IOError(e) => format!("{:?}", e),
-            UnimplementedError(e) => format!("This operation is not supported yet. {:?}", e),
-            UnsupportedError(e) => format!(
-                "This operation is not currently supported in Noria. {:?}",
-                e
-            ),
-            MissingPreparedStatement => "Could not find this prepared statement.".to_string(),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            MySqlError(e) => Some(e),
-            MySqlAsyncError(e) => Some(e),
-            NoriaReadError(_) => None,
-            NoriaWriteError(_) => None,
-            NoriaRecipeError(_) => None,
-            ParseError(_) => None,
-            IOError(e) => Some(e),
-            UnimplementedError(_) => None,
-            UnsupportedError(_) => None,
-            MissingPreparedStatement => None,
-        }
-    }
-}
-
-impl From<mysql::error::Error> for Error {
-    fn from(e: mysql::error::Error) -> Self {
-        MySqlError(e)
-    }
-}
-
-impl From<mysql_async::error::Error> for Error {
-    fn from(e: mysql_async::error::Error) -> Self {
-        MySqlAsyncError(e)
-    }
-}
-
-impl Into<io::Error> for Error {
-    fn into(self) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, self.message())
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        IOError(e)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message())
+         */
     }
 }
