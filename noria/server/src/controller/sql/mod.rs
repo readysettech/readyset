@@ -476,7 +476,10 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(query_name, query);
+        let mut mir = self
+            .mir_converter
+            .named_base_to_mir(query_name, query)
+            .unwrap();
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -526,14 +529,17 @@ impl SqlIncorporator {
             })
             .collect();
 
-        let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
-            query_name,
-            subqueries?.iter().collect(),
-            CompoundSelectOperator::Union,
-            &query.order,
-            &query.limit,
-            is_leaf,
-        );
+        let mut combined_mir_query = self
+            .mir_converter
+            .compound_query_to_mir(
+                query_name,
+                subqueries?.iter().collect(),
+                CompoundSelectOperator::Union,
+                &query.order,
+                &query.limit,
+                is_leaf,
+            )
+            .unwrap();
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig, None);
 
@@ -593,13 +599,10 @@ impl SqlIncorporator {
         let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let (sec, og_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
-            query_name,
-            query,
-            &qg,
-            is_leaf,
-            universe.clone(),
-        )?;
+        let (sec, og_mir, table_mapping, base_name) = self
+            .mir_converter
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())
+            .unwrap();
 
         trace!(
             self.log,
@@ -661,7 +664,7 @@ impl SqlIncorporator {
 
             // traverse and remove MIR nodes
             // TODO(malte): implement this
-            self.mir_converter.remove_query(query_name, mir);
+            self.mir_converter.remove_query(query_name, mir).unwrap();
 
             // clean up local state
             self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
@@ -675,7 +678,7 @@ impl SqlIncorporator {
             // don't remove node yet!
 
             // TODO(malte): implement this
-            self.mir_converter.remove_query(query_name, mir);
+            self.mir_converter.remove_query(query_name, mir).unwrap();
 
             // clean up state for this query
             self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
@@ -699,7 +702,7 @@ impl SqlIncorporator {
             .base_mir_queries
             .get(name)
             .unwrap_or_else(|| panic!("tried to remove unknown base {}", name));
-        self.mir_converter.remove_base(name, mir)
+        self.mir_converter.remove_base(name, mir).unwrap()
     }
 
     fn register_query(
@@ -757,7 +760,8 @@ impl SqlIncorporator {
         // first, compute the MIR representation of the SQL query
         let (sec, new_query_mir, table_mapping, base_name) = self
             .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())?;
+            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())
+            .unwrap();
 
         trace!(
             self.log,
@@ -1040,7 +1044,7 @@ impl SqlIncorporator {
             "Schema version advanced from {} to {}", self.schema_version, new_version
         );
         self.schema_version = new_version;
-        self.mir_converter.upgrade_schema(new_version);
+        self.mir_converter.upgrade_schema(new_version).unwrap();
     }
 }
 

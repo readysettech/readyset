@@ -3,7 +3,10 @@ use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::query_signature::Signature;
 use crate::controller::sql::UniverseId;
+use crate::errors::internal_err;
+use crate::ReadySetResult;
 use mir::MirNodeRef;
+use noria::{internal, invariant, ReadySetError};
 use std::collections::HashMap;
 
 pub trait SecurityBoundary {
@@ -14,18 +17,18 @@ pub trait SecurityBoundary {
         ancestors: &[MirNodeRef],
         node_count: usize,
         sec: bool,
-    ) -> (
+    ) -> ReadySetResult<(
         Vec<MirNodeRef>,
         Option<HashMap<(String, Option<String>), String>>,
         String,
-    );
+    )>;
 
     fn make_security_boundary(
         &self,
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
-    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String>;
+    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), ReadySetError>;
 }
 
 impl SecurityBoundary for SqlToMirConverter {
@@ -36,11 +39,11 @@ impl SecurityBoundary for SqlToMirConverter {
         ancestors: &[MirNodeRef],
         node_count: usize,
         sec: bool,
-    ) -> (
+    ) -> ReadySetResult<(
         Vec<MirNodeRef>,
         Option<HashMap<(String, Option<String>), String>>,
         String,
-    ) {
+    )> {
         use crate::controller::sql::mir::grouped::make_grouped;
 
         let mut nodes_added = Vec::new();
@@ -54,15 +57,16 @@ impl SecurityBoundary for SqlToMirConverter {
         // First, union the results from all ancestors
         let (union, mapping) = if !sec {
             (
-                Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors)),
+                Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors)?),
                 None,
             )
         } else {
-            let (u, m) = self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors);
+            let (u, m) =
+                self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors)?;
             (Some(u), m)
         };
 
-        match union {
+        Ok(match union {
             Some(node) => {
                 let n = node.borrow().name.clone();
                 nodes_added.push(node.clone());
@@ -79,15 +83,15 @@ impl SecurityBoundary for SqlToMirConverter {
                     node_count,
                     &mut Some(node.clone()),
                     true,
-                );
+                )?;
 
                 nodes_added.extend(grouped);
                 (nodes_added, mapping, n)
             }
             None => {
-                panic!("union not computed correctly");
+                internal!("union not computed correctly");
             }
-        }
+        })
     }
 
     // TODO(larat): this is basically make_selection_nodes
@@ -96,7 +100,7 @@ impl SecurityBoundary for SqlToMirConverter {
         universe: UniverseId,
         node_for_rel: &mut HashMap<&str, MirNodeRef>,
         prev_node: Option<MirNodeRef>,
-    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String> {
+    ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), ReadySetError> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut last_security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut prev_node = prev_node.unwrap().clone();
@@ -141,7 +145,7 @@ fn make_security_nodes(
     table: &str,
     prev_node: &MirNodeRef,
     node_for_rel: HashMap<&str, MirNodeRef>,
-) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), String> {
+) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), ReadySetError> {
     let policies = match mir_converter
         .universe
         .row_policies
@@ -203,8 +207,8 @@ fn make_security_nodes(
             let qgn = qg
                 .relations
                 .get(*rel)
-                .expect("relation should have a query graph node.");
-            assert!(*rel != "computed_collumns");
+                .ok_or_else(|| internal_err("relation should have a query graph node."))?;
+            invariant!(*rel != "computed_collumns");
 
             // Skip empty predicates
             if qgn.predicates.is_empty() {
@@ -214,16 +218,16 @@ fn make_security_nodes(
             for pred in &qgn.predicates {
                 let new_nodes = mir_converter.make_predicate_nodes(
                     &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                    prev_node.expect("empty previous node"),
+                    prev_node.ok_or_else(|| internal_err("empty previous node"))?,
                     pred,
                     0,
-                );
+                )?;
 
                 prev_node = Some(
                     new_nodes
                         .iter()
                         .last()
-                        .expect("no new nodes were created")
+                        .ok_or_else(|| internal_err("no new nodes were created"))?
                         .clone(),
                 );
                 filter_nodes.extend(new_nodes);
@@ -239,7 +243,7 @@ fn make_security_nodes(
             qg,
             &local_node_for_rel,
             node_count,
-        );
+        )?;
 
         node_count += join_nodes.len();
 

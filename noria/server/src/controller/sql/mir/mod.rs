@@ -1,7 +1,6 @@
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
-use noria::DataType;
 use petgraph::graph::NodeIndex;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
@@ -23,6 +22,9 @@ use std::vec::Vec;
 
 use crate::controller::sql::security::Universe;
 use crate::controller::sql::UniverseId;
+use crate::errors::internal_err;
+use crate::ReadySetResult;
+use noria::{internal, invariant, invariant_eq, unsupported, DataType, ReadySetError};
 
 mod grouped;
 mod join;
@@ -140,15 +142,12 @@ impl SqlToMirConverter {
         self.universe = Universe::default();
     }
 
-    fn get_view(&self, view_name: &str) -> Result<MirNodeRef, String> {
+    fn get_view(&self, view_name: &str) -> Result<MirNodeRef, ReadySetError> {
         self.current
             .get(view_name)
-            .ok_or_else(|| format!("Query refers to unknown view \"{}\"", view_name))
+            .ok_or_else(|| ReadySetError::ViewNotFound(view_name.into()))
             .and_then(|v| match self.nodes.get(&(String::from(view_name), *v)) {
-                None => Err(format!(
-                    "Inconsistency: view \"{}\" does not exist at v{}",
-                    view_name, v
-                )),
+                None => internal!("Inconsistency: view {} does not exist at v{}", view_name, v),
                 Some(bmn) => Ok(MirNode::reuse(bmn.clone(), self.schema_version)),
             })
     }
@@ -361,7 +360,7 @@ impl SqlToMirConverter {
         order: &Option<OrderClause>,
         limit: &Option<LimitClause>,
         has_leaf: bool,
-    ) -> MirQuery {
+    ) -> ReadySetResult<MirQuery> {
         let union_name = if !has_leaf && limit.is_none() {
             String::from(name)
         } else {
@@ -371,8 +370,8 @@ impl SqlToMirConverter {
             CompoundSelectOperator::Union => self.make_union_node(
                 &union_name,
                 &sqs.iter().map(|mq| mq.leaf.clone()).collect::<Vec<_>>()[..],
-            ),
-            _ => unimplemented!(),
+            )?,
+            _ => internal!(),
         };
         let node_id = (union_name, self.schema_version);
         self.nodes
@@ -403,7 +402,7 @@ impl SqlToMirConverter {
                 topk_columns,
                 order,
                 limit.as_ref().unwrap(),
-            );
+            )?;
             let node_id = (topk_name, self.schema_version);
             self.nodes
                 .entry(node_id)
@@ -436,14 +435,14 @@ impl SqlToMirConverter {
             .entry(node_id)
             .or_insert_with(|| leaf_node.clone());
 
-        MirQuery {
+        Ok(MirQuery {
             name: String::from(name),
             roots: sqs.iter().fold(Vec::new(), |mut acc, mq| {
                 acc.extend(mq.roots.iter().cloned());
                 acc
             }),
             leaf: leaf_node,
-        }
+        })
     }
 
     // pub(super) viz for tests
@@ -464,35 +463,39 @@ impl SqlToMirConverter {
         }
     }
 
-    pub(super) fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
+    pub(super) fn named_base_to_mir(
+        &mut self,
+        name: &str,
+        query: &SqlQuery,
+    ) -> ReadySetResult<MirQuery> {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
-                assert_eq!(name, ctq.table.name);
-                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref());
+                invariant_eq!(name, ctq.table.name);
+                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref())?;
                 let node_id = (String::from(name), self.schema_version);
                 use std::collections::hash_map::Entry;
                 if let Entry::Vacant(e) = self.nodes.entry(node_id) {
                     self.current.insert(String::from(name), self.schema_version);
                     e.insert(n.clone());
                 }
-                MirQuery::singleton(name, n)
+                Ok(MirQuery::singleton(name, n))
             }
-            _ => panic!("expected CREATE TABLE query!"),
+            _ => internal!("expected CREATE TABLE query!"),
         }
     }
 
-    pub(super) fn remove_query(&mut self, name: &str, mq: &MirQuery) {
+    pub(super) fn remove_query(&mut self, name: &str, mq: &MirQuery) -> ReadySetResult<()> {
         use std::collections::VecDeque;
 
         let v = self
             .current
             .remove(name)
-            .unwrap_or_else(|| panic!("no query named \"{}\"?", name));
+            .ok_or_else(|| internal_err(format!("no query named \"{}\"?", name)))?;
 
         let nodeid = (name.to_owned(), v);
         let leaf_mn = self.nodes.remove(&nodeid).unwrap();
 
-        assert_eq!(leaf_mn.borrow().name, mq.leaf.borrow().name);
+        invariant_eq!(leaf_mn.borrow().name, mq.leaf.borrow().name);
 
         // traverse the MIR query backwards, removing any nodes that we still have registered.
         let mut q = VecDeque::new();
@@ -510,17 +513,19 @@ impl SqlToMirConverter {
                 }
             }
         }
+        Ok(())
     }
 
-    pub(super) fn remove_base(&mut self, name: &str, mq: &MirQuery) {
+    pub(super) fn remove_base(&mut self, name: &str, mq: &MirQuery) -> ReadySetResult<()> {
         info!(self.log, "Removing base {} from SqlTomirconverter", name);
-        self.remove_query(name, mq);
+        self.remove_query(name, mq)?;
         if self.base_schemas.remove(name).is_none() {
             warn!(
                 self.log,
                 "Attempted to remove non-existant base node {} from SqlToMirconverter", name
             );
         }
+        Ok(())
     }
 
     pub(super) fn named_query_to_mir(
@@ -537,7 +542,7 @@ impl SqlToMirConverter {
             Option<HashMap<(String, Option<String>), String>>,
             String,
         ),
-        String,
+        ReadySetError,
     > {
         let (sec, nodes, table_mapping, base_name) =
             self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe)?;
@@ -559,12 +564,9 @@ impl SqlToMirConverter {
                 leaves.push(mn);
             }
         }
-        assert_eq!(
-            leaves.len(),
-            1,
-            "expected just one leaf! leaves: {:?}",
-            leaves
-        );
+        if leaves.len() != 1 {
+            internal!("expected just one leaf! leaves: {:?}", leaves);
+        }
         let leaf = leaves.into_iter().next().unwrap();
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
@@ -581,9 +583,10 @@ impl SqlToMirConverter {
         ))
     }
 
-    pub(super) fn upgrade_schema(&mut self, new_version: usize) {
-        assert!(new_version > self.schema_version);
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
+        invariant!(new_version > self.schema_version);
         self.schema_version = new_version;
+        Ok(())
     }
 
     fn make_base_node(
@@ -591,7 +594,7 @@ impl SqlToMirConverter {
         name: &str,
         cols: &[ColumnSpecification],
         keys: Option<&Vec<TableKey>>,
-    ) -> MirNodeRef {
+    ) -> ReadySetResult<MirNodeRef> {
         // have we seen a base of this name before?
         if self.base_schemas.contains_key(name) {
             let mut existing_schemas: Vec<(usize, Vec<ColumnSpecification>)> =
@@ -613,7 +616,7 @@ impl SqlToMirConverter {
                         existing_sv
                     );
                     let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
-                    return MirNode::reuse(existing_node, self.schema_version);
+                    return Ok(MirNode::reuse(existing_node, self.schema_version));
                 } else {
                     // match, but schema is different, so we'll need to either:
                     //  1) reuse the existing node, but add an upgrader for any changes in the
@@ -682,7 +685,7 @@ impl SqlToMirConverter {
                                     });
                             columns.remove(pos);
                         }
-                        assert_eq!(
+                        invariant_eq!(
                             columns.len(),
                             existing_node.borrow().columns().len() + columns_added.len()
                                 - columns_removed.len()
@@ -692,7 +695,11 @@ impl SqlToMirConverter {
                         let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
                         base_schemas.push((self.schema_version, columns.clone()));
 
-                        return MirNode::adapt_base(existing_node, columns_added, columns_removed);
+                        return Ok(MirNode::adapt_base(
+                            existing_node,
+                            columns_added,
+                            columns_removed,
+                        ));
                     } else {
                         info!(self.log, "base table has complex schema change");
                         break;
@@ -702,7 +709,7 @@ impl SqlToMirConverter {
         }
 
         // all columns on a base must have the base as their table
-        assert!(cols
+        invariant!(cols
             .iter()
             .all(|c| c.column.table == Some(String::from(name))));
 
@@ -720,14 +727,14 @@ impl SqlToMirConverter {
                 })
                 .collect(),
         };
-        assert!(primary_keys.len() <= 1);
+        invariant!(primary_keys.len() <= 1);
 
         // remember the schema for this version
         let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
         base_schemas.push((self.schema_version, cols.to_vec()));
 
         // make node
-        if !primary_keys.is_empty() {
+        Ok(if !primary_keys.is_empty() {
             match **primary_keys.iter().next().unwrap() {
                 TableKey::PrimaryKey(ref key_cols) => {
                     debug!(
@@ -753,7 +760,7 @@ impl SqlToMirConverter {
                         vec![],
                     )
                 }
-                _ => unreachable!(),
+                _ => internal!(),
             }
         } else {
             MirNode::new(
@@ -768,12 +775,12 @@ impl SqlToMirConverter {
                 vec![],
                 vec![],
             )
-        }
+        })
     }
 
-    fn make_union_node(&self, name: &str, ancestors: &[MirNodeRef]) -> MirNodeRef {
+    fn make_union_node(&self, name: &str, ancestors: &[MirNodeRef]) -> ReadySetResult<MirNodeRef> {
         let mut emit: Vec<Vec<Column>> = Vec::new();
-        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+        invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
         let ucols: Vec<Column> = ancestors.first().unwrap().borrow().columns().to_vec();
         let num_ucols = ucols.len();
@@ -791,14 +798,14 @@ impl SqlToMirConverter {
             {
                 selected_cols.insert(c.name.clone());
             } else {
-                panic!(
+                internal!(
                     "column with name '{}' not found all union ancestors: all ancestors' \
                      output columns must have the same names",
                     c.name
                 );
             }
         }
-        assert_eq!(
+        invariant_eq!(
             num_ucols,
             selected_cols.len(),
             "union drops ancestor columns"
@@ -816,21 +823,21 @@ impl SqlToMirConverter {
             emit.push(acols.clone());
         }
 
-        assert!(
+        invariant!(
             emit.iter().all(|e| e.len() == selected_cols.len()),
             "all ancestors columns must have the same size, but got emit: {:?}, selected: {:?}",
             emit,
             selected_cols
         );
 
-        MirNode::new(
+        Ok(MirNode::new(
             name,
             self.schema_version,
             emit.first().unwrap().clone(),
             MirNodeType::Union { emit },
             ancestors.to_vec(),
             vec![],
-        )
+        ))
     }
 
     // Creates union node for universe creation - returns the resulting node ref and a universe table mapping
@@ -838,12 +845,12 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         ancestors: &[MirNodeRef],
-    ) -> (
+    ) -> ReadySetResult<(
         MirNodeRef,
         Option<HashMap<(String, Option<String>), String>>,
-    ) {
+    )> {
         let mut emit: Vec<Vec<Column>> = Vec::new();
-        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+        invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
         let ucols: Vec<Column> = ancestors.first().unwrap().borrow().columns().to_vec();
         let num_ucols = ucols.len();
@@ -880,7 +887,7 @@ impl SqlToMirConverter {
             }
         }
 
-        assert_eq!(
+        invariant_eq!(
             num_ucols,
             selected_cols.len(),
             "union drops ancestor columns"
@@ -922,14 +929,14 @@ impl SqlToMirConverter {
             emit.push(acols.clone());
         }
 
-        assert!(
+        invariant!(
             emit.iter().all(|e| e.len() == selected_cols.len()),
             "all ancestors columns must have the same size, but got emit: {:?}, selected: {:?}",
             emit,
             selected_cols
         );
 
-        (
+        Ok((
             MirNode::new(
                 name,
                 self.schema_version,
@@ -939,7 +946,7 @@ impl SqlToMirConverter {
                 vec![],
             ),
             Some(table_mapping),
-        )
+        ))
     }
 
     fn make_union_from_same_base(
@@ -947,19 +954,19 @@ impl SqlToMirConverter {
         name: &str,
         ancestors: Vec<MirNodeRef>,
         columns: Vec<Column>,
-    ) -> MirNodeRef {
-        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
+    ) -> ReadySetResult<MirNodeRef> {
+        invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
         trace!(self.log, "Added union node wiht columns {:?}", columns);
         let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
-        MirNode::new(
+        Ok(MirNode::new(
             name,
             self.schema_version,
             columns,
             MirNodeType::Union { emit },
             ancestors.clone(),
             vec![],
-        )
+        ))
     }
 
     fn make_filter_node(&self, name: &str, parent: MirNodeRef, cond: &ConditionTree) -> MirNodeRef {
@@ -1277,7 +1284,7 @@ impl SqlToMirConverter {
         left_node: MirNodeRef,
         right_node: MirNodeRef,
         kind: JoinType,
-    ) -> MirNodeRef {
+    ) -> ReadySetResult<MirNodeRef> {
         // TODO(malte): this is where we overproject join columns in order to increase reuse
         // opportunities. Technically, we need to only project those columns here that the query
         // actually needs; at a minimum, we could start with just the join colums, relying on the
@@ -1295,14 +1302,14 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
 
         // equi-join only
-        assert!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
+        invariant!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
         let mut l_col = match *jp.left {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
-            _ => unimplemented!(),
+            _ => unsupported!("no multi-level joins yet"),
         };
         let r_col = match *jp.right {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
-            _ => unimplemented!(),
+            _ => unsupported!("no multi-level joins yet"),
         };
 
         // don't duplicate the join column in the output, but instead add aliases to the columns
@@ -1333,7 +1340,7 @@ impl SqlToMirConverter {
         left_join_columns.push(l_col);
         right_join_columns.push(r_col);
 
-        assert_eq!(left_join_columns.len(), right_join_columns.len());
+        invariant_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
             JoinType::Inner => MirNodeType::Join {
                 on_left: left_join_columns,
@@ -1347,14 +1354,14 @@ impl SqlToMirConverter {
             },
         };
         trace!(self.log, "Added join node {:?}", inner);
-        MirNode::new(
+        Ok(MirNode::new(
             name,
             self.schema_version,
             fields,
             inner,
             vec![left_node.clone(), right_node.clone()],
             vec![],
-        )
+        ))
     }
 
     fn make_projection_helper(
@@ -1382,6 +1389,7 @@ impl SqlToMirConverter {
         literals: Vec<(String, DataType)>,
         is_leaf: bool,
     ) -> MirNodeRef {
+        // TODO(eta): why was this commented out?
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
         let names: Vec<String> = expressions
@@ -1486,7 +1494,7 @@ impl SqlToMirConverter {
         group_by: Vec<&Column>,
         order: &Option<OrderClause>,
         limit: &LimitClause,
-    ) -> MirNodeRef {
+    ) -> ReadySetResult<MirNodeRef> {
         let combined_columns = parent.borrow().columns().to_vec();
 
         let order = match *order {
@@ -1499,10 +1507,15 @@ impl SqlToMirConverter {
             None => None,
         };
 
-        assert_eq!(limit.offset, 0); // Non-zero offset not supported
+        if limit.offset != 0 {
+            unsupported!(
+                "TopK nodes don't support OFFSET yet ({} supplied)",
+                limit.offset
+            )
+        }
 
         // make the new operator and record its metadata
-        MirNode::new(
+        Ok(MirNode::new(
             name,
             self.schema_version,
             combined_columns,
@@ -1514,7 +1527,7 @@ impl SqlToMirConverter {
             },
             vec![parent.clone()],
             vec![],
-        )
+        ))
     }
 
     fn make_predicate_nodes(
@@ -1523,7 +1536,7 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
         ce: &ConditionExpression,
         nc: usize,
-    ) -> Vec<MirNodeRef> {
+    ) -> ReadySetResult<Vec<MirNodeRef>> {
         use nom_sql::ConditionExpression::*;
 
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
@@ -1533,27 +1546,27 @@ impl SqlToMirConverter {
                 let (left, right);
                 match ct.operator {
                     BinaryOperator::And => {
-                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
+                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc)?;
 
                         right = self.make_predicate_nodes(
                             name,
                             left.last().unwrap().clone(),
                             &*ct.right,
                             nc + left.len(),
-                        );
+                        )?;
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
                     }
                     BinaryOperator::Or => {
-                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
+                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc)?;
 
                         right = self.make_predicate_nodes(
                             name,
                             parent.clone(),
                             &*ct.right,
                             nc + left.len(),
-                        );
+                        )?;
 
                         debug!(self.log, "Creating union node for Symbol’s value as variable is void: or predicate");
 
@@ -1563,13 +1576,13 @@ impl SqlToMirConverter {
                             &format!("{}_un", name),
                             vec![last_left, last_right],
                             output_cols,
-                        );
+                        )?;
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
                         pred_nodes.push(union);
                     }
-                    _ => unreachable!("LogicalOp operator is {:?}", ct.operator),
+                    _ => unsupported!("LogicalOp operator is {:?}", ct.operator),
                 }
             }
             ComparisonOp(ref ct) => {
@@ -1580,16 +1593,16 @@ impl SqlToMirConverter {
                 pred_nodes.push(f);
             }
             Bracketed(ref inner) => {
-                pred_nodes.extend(self.make_predicate_nodes(name, parent, &*inner, nc));
+                pred_nodes.extend(self.make_predicate_nodes(name, parent, &*inner, nc)?);
             }
-            NegationOp(_) => unreachable!("negation should have been removed earlier"),
-            Base(_) => unreachable!("dangling base predicate"),
-            Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
-            Arithmetic(_) => unimplemented!(),
-            ExistsOp(_) => unimplemented!(),
+            NegationOp(_) => internal!("negation should have been removed earlier"),
+            Base(_) => internal!("dangling base predicate"),
+            Between { .. } => internal!("BETWEEN should have been removed earlier"),
+            Arithmetic(_) => unsupported!("arithmetic unsupported"),
+            ExistsOp(_) => unsupported!("exists unsupported"),
         }
 
-        pred_nodes
+        Ok(pred_nodes)
     }
 
     fn predicates_above_group_by<'a>(
@@ -1599,7 +1612,7 @@ impl SqlToMirConverter {
         over_col: Column,
         parent: MirNodeRef,
         created_predicates: &mut Vec<&'a ConditionExpression>,
-    ) -> Vec<MirNodeRef> {
+    ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut predicates_above_group_by_nodes = Vec::new();
         let mut prev_node = parent.clone();
 
@@ -1611,15 +1624,15 @@ impl SqlToMirConverter {
                     prev_node.clone(),
                     ce,
                     0,
-                );
-                assert!(!mpns.is_empty());
+                )?;
+                invariant!(!mpns.is_empty());
                 prev_node = mpns.last().unwrap().clone();
                 predicates_above_group_by_nodes.extend(mpns);
                 created_predicates.push(ce);
             }
         }
 
-        predicates_above_group_by_nodes
+        Ok(predicates_above_group_by_nodes)
     }
 
     fn make_value_project_node(
@@ -1628,11 +1641,11 @@ impl SqlToMirConverter {
         prev_node: Option<MirNodeRef>,
         node_count: usize,
         universe: &str,
-    ) -> Option<MirNodeRef> {
+    ) -> ReadySetResult<Option<MirNodeRef>> {
         let arith_and_lit_columns_needed =
             value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
 
-        if !arith_and_lit_columns_needed.is_empty() {
+        Ok(if !arith_and_lit_columns_needed.is_empty() {
             let projected_expressions: Vec<(String, Expression)> = arith_and_lit_columns_needed
                 .iter()
                 .filter_map(|&(_, ref oc)| match oc {
@@ -1656,7 +1669,7 @@ impl SqlToMirConverter {
 
             // prev_node must be set at this point
             let parent = match prev_node {
-                None => unreachable!(),
+                None => internal!(),
                 Some(pn) => pn,
             };
 
@@ -1673,7 +1686,7 @@ impl SqlToMirConverter {
             Some(projected)
         } else {
             None
-        }
+        })
     }
 
     /// Returns list of nodes added
@@ -1692,7 +1705,7 @@ impl SqlToMirConverter {
             Option<HashMap<(String, Option<String>), String>>,
             String,
         ),
-        String,
+        ReadySetError,
     > {
         // TODO: make this take &self!
         use crate::controller::sql::mir::grouped::make_grouped;
@@ -1742,14 +1755,14 @@ impl SqlToMirConverter {
                 qg,
                 &node_for_rel,
                 new_node_count,
-            );
+            )?;
 
             new_node_count += join_nodes.len();
 
             let mut prev_node = match join_nodes.last() {
                 Some(n) => Some(n.clone()),
                 None => {
-                    assert_eq!(base_nodes.len(), 1);
+                    invariant_eq!(base_nodes.len(), 1);
                     Some(base_nodes.last().unwrap().clone())
                 }
             };
@@ -1809,7 +1822,7 @@ impl SqlToMirConverter {
                     new_node_count,
                     &column_to_predicates,
                     &mut prev_node,
-                );
+                )?;
 
             new_node_count += predicates_above_group_by_nodes.len();
 
@@ -1823,9 +1836,9 @@ impl SqlToMirConverter {
 
             let mut ancestors = self.universe.member_of.iter().fold(
                 Ok(vec![]),
-                |acc: Result<_, String>, (gname, gids)| {
+                |acc: Result<_, ReadySetError>, (gname, gids)| {
                     acc.and_then(|mut acc| {
-                        let group_views: Result<Vec<_>, String> = gids
+                        let group_views: Result<Vec<_>, ReadySetError> = gids
                             .iter()
                             .filter_map(|gid| {
                                 // This is a little annoying, but because of the way we name universe queries,
@@ -1875,7 +1888,7 @@ impl SqlToMirConverter {
                     new_node_count,
                     &mut prev_node,
                     false,
-                );
+                )?;
 
                 new_node_count += func_nodes.len();
 
@@ -1918,9 +1931,9 @@ impl SqlToMirConverter {
                                 parent,
                                 p,
                                 0,
-                            );
+                            )?;
 
-                            assert!(!fns.is_empty());
+                            invariant!(!fns.is_empty());
                             new_node_count += fns.len();
                             prev_node = Some(fns.iter().last().unwrap().clone());
                             predicate_nodes.extend(fns);
@@ -1933,7 +1946,7 @@ impl SqlToMirConverter {
                 // 6. Determine literals and expressions that global predicates depend
                 //    on and add them here; remembering that we've already added them-
                 if let Some(projected) =
-                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)
+                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)?
                 {
                     new_node_count += 1;
                     nodes_added.push(projected.clone());
@@ -1947,7 +1960,7 @@ impl SqlToMirConverter {
                     }
 
                     let parent = match prev_node {
-                        None => unimplemented!(),
+                        None => internal!(),
                         Some(pn) => pn,
                     };
 
@@ -1962,9 +1975,9 @@ impl SqlToMirConverter {
                         parent,
                         p,
                         0,
-                    );
+                    )?;
 
-                    assert!(!fns.is_empty());
+                    invariant!(!fns.is_empty());
                     new_node_count += fns.len();
                     prev_node = Some(fns.iter().last().unwrap().clone());
                     predicate_nodes.extend(fns);
@@ -1975,7 +1988,7 @@ impl SqlToMirConverter {
                     prev_node.unwrap().clone()
                 } else {
                     // no join, filter, or function node --> base node is parent
-                    assert_eq!(sorted_rels.len(), 1);
+                    invariant_eq!(sorted_rels.len(), 1);
                     node_for_rel[sorted_rels.last().unwrap()].clone()
                 };
 
@@ -2016,7 +2029,7 @@ impl SqlToMirConverter {
                         group_by.iter().collect(),
                         &st.order,
                         limit,
-                    );
+                    )?;
                     func_nodes.push(topk_node.clone());
                     final_node = topk_node;
                     new_node_count += 1;
@@ -2043,7 +2056,7 @@ impl SqlToMirConverter {
                     &ancestors,
                     new_node_count,
                     sec_round,
-                );
+                )?;
 
                 if sec_round {
                     table_mapping = tables;

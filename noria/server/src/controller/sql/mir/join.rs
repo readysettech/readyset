@@ -1,5 +1,6 @@
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
+use crate::ReadySetResult;
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
 use nom_sql::ConditionTree;
@@ -36,7 +37,7 @@ pub(super) fn make_joins(
     qg: &QueryGraph,
     node_for_rel: &HashMap<&str, MirNodeRef>,
     node_count: usize,
-) -> Vec<MirNodeRef> {
+) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes: Vec<MirNodeRef> = Vec::new();
     let mut join_chains = Vec::new();
     let mut node_count = node_count;
@@ -52,7 +53,7 @@ pub(super) fn make_joins(
             left_chain.last_node.clone(),
             right_chain.last_node.clone(),
             join_type,
-        );
+        )?;
 
         // merge node chains
         let new_chain = left_chain.merge_chain(right_chain, jn.clone());
@@ -63,7 +64,7 @@ pub(super) fn make_joins(
         join_nodes.push(jn);
     }
 
-    join_nodes
+    Ok(join_nodes)
 }
 
 fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a ConditionTree) {
