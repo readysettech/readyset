@@ -1,6 +1,8 @@
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use crate::controller::sql::query_utils::{function_arguments, is_aggregate, ReferredColumns};
+use crate::ReadySetResult;
+use crate::{internal, invariant, unsupported};
 use mir::{Column, MirNodeRef};
 use nom_sql::{self, ConditionExpression, FunctionArgument, FunctionExpression};
 use nom_sql::{Expression, FunctionExpression::*};
@@ -16,7 +18,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
     node_count: usize,
     column_to_predicates: &HashMap<Column, Vec<&'a ConditionExpression>>,
     prev_node: &mut Option<MirNodeRef>,
-) -> (Vec<&'a ConditionExpression>, Vec<MirNodeRef>) {
+) -> ReadySetResult<(Vec<&'a ConditionExpression>, Vec<MirNodeRef>)> {
     let mut created_predicates = Vec::new();
     let mut predicates_above_group_by_nodes = Vec::new();
     let mut node_count = node_count;
@@ -44,7 +46,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
                         col,
                         parent,
                         &mut created_predicates,
-                    );
+                    )?;
 
                     node_count += predicates_above_group_by_nodes.len();
                     *prev_node = Some(new_mpns.last().unwrap().clone());
@@ -54,7 +56,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
         }
     }
 
-    (created_predicates, predicates_above_group_by_nodes)
+    Ok((created_predicates, predicates_above_group_by_nodes))
 }
 
 /// Normally, projection happens after grouped nodes - however, if aggregates used in grouped
@@ -107,7 +109,7 @@ pub(super) fn make_grouped(
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
     is_reconcile: bool,
-) -> Vec<MirNodeRef> {
+) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut func_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
 
@@ -151,7 +153,7 @@ pub(super) fn make_grouped(
                             colname.as_ref(),
                         )))
                     }
-                    _ => unimplemented!(),
+                    ref x => unsupported!("unknown function expression: {:?}", x),
                 };
 
                 nom_sql::Column {
@@ -192,10 +194,10 @@ pub(super) fn make_grouped(
                     match **e {
                         QueryGraphEdge::GroupBy(ref gbc) => {
                             let table = gbc.first().unwrap().table.as_ref().unwrap();
-                            assert!(gbc.iter().all(|c| c.table.as_ref().unwrap() == table));
+                            invariant!(gbc.iter().all(|c| c.table.as_ref().unwrap() == table));
                             gb_cols.extend(gbc);
                         }
-                        _ => unreachable!(),
+                        _ => internal!(),
                     }
                 }
 
@@ -297,5 +299,5 @@ pub(super) fn make_grouped(
         }
     }
 
-    func_nodes
+    Ok(func_nodes)
 }

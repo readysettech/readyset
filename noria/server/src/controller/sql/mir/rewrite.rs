@@ -1,6 +1,7 @@
 use crate::controller::sql::mir::SqlToMirConverter;
 use mir::node::{MirNode, MirNodeType};
 use mir::MirNodeRef;
+use noria::ReadySetError;
 
 pub(super) fn make_rewrite_nodes(
     mir_converter: &SqlToMirConverter,
@@ -8,7 +9,7 @@ pub(super) fn make_rewrite_nodes(
     prev_node: MirNodeRef,
     table: &str,
     node_count: usize,
-) -> Result<Vec<MirNodeRef>, String> {
+) -> Result<Vec<MirNodeRef>, ReadySetError> {
     let mut nodes = Vec::new();
     let rewrite_policies = match mir_converter
         .universe
