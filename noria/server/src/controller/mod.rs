@@ -4,7 +4,7 @@ use crate::controller::recipe::Recipe;
 use crate::coordination::CoordinationMessage;
 use crate::coordination::CoordinationPayload;
 use crate::startup::Event;
-use crate::Config;
+use crate::{Config, ReadySetResult};
 use async_bincode::AsyncBincodeReader;
 use dataflow::payload::ControlReplyPacket;
 use futures_util::{
@@ -17,6 +17,7 @@ use hyper::{self, StatusCode};
 use noria::channel::TcpSender;
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::ControllerDescriptor;
+use noria::{internal, ReadySetError};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -71,7 +72,7 @@ pub(super) async fn main<A: Authority + 'static>(
     log: slog::Logger,
     authority: Arc<A>,
     tx: tokio::sync::mpsc::UnboundedSender<Event>,
-) {
+) -> Result<(), ReadySetError> {
     let (dtx, drx) = tokio::sync::mpsc::unbounded_channel();
 
     tokio::spawn(listen_domain_replies(
@@ -95,7 +96,7 @@ pub(super) async fn main<A: Authority + 'static>(
         match e {
             Event::InternalMessage(msg) => match msg.payload {
                 CoordinationPayload::Deregister => {
-                    unimplemented!();
+                    internal!();
                 }
                 CoordinationPayload::CreateUniverse(universe) => {
                     if let Some(ref mut ctrl) = controller {
@@ -116,13 +117,14 @@ pub(super) async fn main<A: Authority + 'static>(
                         tokio::task::block_in_place(|| ctrl.handle_heartbeat(msg).unwrap());
                     }
                 }
-                _ => unreachable!(),
+                _ => internal!(),
             },
             Event::ExternalRequest(method, path, query, body, reply_tx) => {
                 if let Some(ref mut ctrl) = controller {
                     let authority = &authority;
                     let reply = tokio::task::block_in_place(|| {
                         ctrl.external_request(method, path, query, body, &authority)
+                            .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
                     });
 
                     if reply_tx.send(reply).is_err() {
@@ -135,13 +137,14 @@ pub(super) async fn main<A: Authority + 'static>(
             Event::ManualMigration { f, done } => {
                 if let Some(ref mut ctrl) = controller {
                     if !ctrl.workers.is_empty() {
-                        tokio::task::block_in_place(|| {
-                            ctrl.migrate(move |m| f(m)).unwrap();
+                        tokio::task::block_in_place(|| -> ReadySetResult<()> {
+                            ctrl.migrate(move |m| f(m))??;
                             done.send(()).unwrap();
-                        });
+                            Ok(())
+                        })?
                     }
                 } else {
-                    unreachable!("got migration closure before becoming leader");
+                    internal!("got migration closure before becoming leader");
                 }
             }
             #[cfg(test)]
@@ -162,9 +165,9 @@ pub(super) async fn main<A: Authority + 'static>(
                 controller = Some(ControllerInner::new(log.clone(), state, drx));
             }
             Event::CampaignError(e) => {
-                panic!("{:?}", e);
+                internal!("{:?}", e);
             }
-            e => unreachable!("{:?} is not a controller event", e),
+            e => internal!("{:?} is not a controller event", e),
         }
     }
 
@@ -172,9 +175,11 @@ pub(super) async fn main<A: Authority + 'static>(
     if controller.is_some() {
         if let Err(e) = authority.surrender_leadership() {
             error!(log, "failed to surrender leadership");
-            eprintln!("{:?}", e);
+            internal!("failed to surrender leadership: {}", e)
         }
     }
+
+    Ok(())
 }
 
 async fn listen_domain_replies(
