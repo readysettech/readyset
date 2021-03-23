@@ -595,6 +595,7 @@ pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], FunctionArgument> {
         map(case_when_column, FunctionArgument::Conditional),
         map(column_identifier_no_alias, FunctionArgument::Column),
         map(literal, FunctionArgument::Literal),
+        map(column_function, |f| FunctionArgument::Call(Box::new(f))),
     ))(i)
 }
 
