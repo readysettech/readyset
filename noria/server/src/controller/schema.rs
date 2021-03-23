@@ -3,6 +3,7 @@ use super::recipe::{Recipe, Schema};
 use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
+use noria::ReadySetError;
 
 use slog;
 
@@ -18,7 +19,7 @@ fn type_for_internal_column(
     recipe: &Recipe,
     graph: &Graph,
     log: &slog::Logger,
-) -> Option<SqlType> {
+) -> Result<Option<SqlType>, ReadySetError> {
     // column originates at internal view: literal, aggregation output
     // FIXME(malte): return correct type depending on what column does
     match *(*node) {
@@ -29,24 +30,28 @@ fn type_for_internal_column(
                 // computed expression
                 // TODO(malte): trace the actual column types, since this could be a
                 // real-valued arithmetic operation
-                Some(SqlType::Bigint(64))
+                Ok(Some(SqlType::Bigint(64)))
             } else {
                 // literal
                 let off = column_index - (emits.0.len() + emits.2.len());
-                emits.1[off].sql_type()
+                Ok(emits.1[off].sql_type())
             }
         }
         ops::NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
             if column_index == node.fields().len() - 1 {
-                grouped_op.output_col_type().or({
+                if let Some(res) = grouped_op.output_col_type() {
+                    Ok(Some(res))
+                } else {
                     // if none, output column type is same as over column type
                     let over_columns = grouped_op.over_columns();
                     assert_eq!(over_columns.len(), 1);
                     // use type of the "over" column
-                    column_schema(graph, next_node_on_path, recipe, over_columns[0], log)
-                        .map(|cs| cs.sql_type)
-                })
+                    Ok(
+                        column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
+                            .map(|cs| cs.sql_type),
+                    )
+                }
             } else {
                 unreachable!("non aggregation result column traced back to aggregation");
             }
@@ -55,13 +60,15 @@ fn type_for_internal_column(
             let over_columns = o.over_columns();
             assert_eq!(over_columns.len(), 1);
             // use type of the "over" column
-            column_schema(graph, next_node_on_path, recipe, over_columns[0], log)
-                .map(|cs| cs.sql_type)
+            Ok(
+                column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
+                    .map(|cs| cs.sql_type),
+            )
         }
         ops::NodeOperator::Concat(_) => {
             // group_concat always outputs a string as the last column
             if column_index == node.fields().len() - 1 {
-                Some(SqlType::Text)
+                Ok(Some(SqlType::Text))
             } else {
                 // no column that isn't the concat result column should ever trace
                 // back to a group_concat.
@@ -71,7 +78,7 @@ fn type_for_internal_column(
         ops::NodeOperator::Join(_) => {
             // join doesn't "generate" columns, but they may come from one of the other
             // ancestors; so keep iterating to try the other paths
-            None
+            Ok(None)
         }
         // no other operators should every generate columns
         _ => unreachable!(),
@@ -83,16 +90,16 @@ fn type_for_base_column(
     base: &str,
     column_index: usize,
     log: &slog::Logger,
-) -> Option<SqlType> {
+) -> Result<Option<SqlType>, ReadySetError> {
     if let Some(schema) = recipe.schema_for(base) {
         // projected base table column
         match schema {
-            Schema::Table(ref s) => Some(s.fields[column_index].sql_type.clone()),
+            Schema::Table(ref s) => Ok(Some(s.fields[column_index].sql_type.clone())),
             _ => unreachable!(),
         }
     } else {
         error!(log, "no schema for base '{}'", base);
-        None
+        Ok(None)
     }
 }
 
@@ -101,7 +108,7 @@ fn trace_column_type_on_path(
     graph: &Graph,
     recipe: &Recipe,
     log: &slog::Logger,
-) -> Option<SqlType> {
+) -> Result<Option<SqlType>, ReadySetError> {
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
@@ -133,7 +140,7 @@ fn trace_column_type_on_path(
             )
         }
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -143,34 +150,38 @@ pub(super) fn column_schema(
     recipe: &Recipe,
     column_index: usize,
     log: &slog::Logger,
-) -> Option<ColumnSpecification> {
+) -> Result<Option<ColumnSpecification>, ReadySetError> {
     trace!(
         log,
         "tracing provenance of {} on {} for schema",
         column_index,
         view.index()
     );
-    let paths = provenance_of(graph, view, &[column_index], |_, _, _| Ok(None)).unwrap();
+    let paths = provenance_of(graph, view, &[column_index], |_, _, _| Ok(None))?;
     let vn = &graph[view];
 
     let mut col_type = None;
     for p in paths {
         trace!(log, "considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log) {
+        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log)? {
             col_type = t;
         }
     }
 
-    // found something, so return a ColumnSpecification
-    let cs = ColumnSpecification::new(
-        Column {
-            name: vn.fields()[column_index].to_owned(),
-            table: Some(vn.name().to_owned()),
-            alias: None,
-            function: None,
-        },
-        // ? in case we found no schema for this column
-        col_type?,
-    );
-    Some(cs)
+    if let Some(col_type) = col_type {
+        // found something, so return a ColumnSpecification
+        let cs = ColumnSpecification::new(
+            Column {
+                name: vn.fields()[column_index].to_owned(),
+                table: Some(vn.name().to_owned()),
+                alias: None,
+                function: None,
+            },
+            // ? in case we found no schema for this column
+            col_type,
+        );
+        Ok(Some(cs))
+    } else {
+        Ok(None)
+    }
 }

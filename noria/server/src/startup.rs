@@ -114,6 +114,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let ext_log = log.clone();
     let ext_log2 = log.clone();
     let ext_log3 = log.clone();
+    let ext_log4 = log.clone();
     tokio::spawn(
         listen_external(
             alive.clone(),
@@ -171,17 +172,23 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         domain_addr: caddr,
         nonce: rand::random(),
     };
-    tokio::spawn(crate::controller::main(
-        alive.clone(),
-        valve,
-        config,
-        descriptor,
-        ctrl_rx,
-        cport,
-        log.clone(),
-        authority.clone(),
-        tx.clone(),
-    ));
+    tokio::spawn(
+        crate::controller::main(
+            alive.clone(),
+            valve,
+            config,
+            descriptor,
+            ctrl_rx,
+            cport,
+            log.clone(),
+            authority.clone(),
+            tx.clone(),
+        )
+        .map_err(move |e| {
+            warn!(ext_log4, "controller failed: {:?}", e);
+            e
+        }),
+    );
     tokio::spawn(
         crate::worker::main(
             alive.clone(),

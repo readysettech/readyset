@@ -5,7 +5,7 @@ use crate::controller::schema;
 use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
-use crate::errors::{internal_err, ReadySetResult};
+use crate::errors::{bad_request_err, internal_err, ReadySetResult};
 use crate::metrics::MetricsDump;
 use crate::NoriaMetricsRecorder;
 use dataflow::prelude::*;
@@ -17,7 +17,7 @@ use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::{internal, ActivationResult};
+use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -196,7 +196,7 @@ impl ControllerInner {
         query: Option<String>,
         body: hyper::body::Bytes,
         authority: &Arc<A>,
-    ) -> Result<Result<String, String>, StatusCode> {
+    ) -> Result<Result<String, ReadySetError>, StatusCode> {
         metrics::increment_counter!("server.external_requests");
         use serde_json as json;
 
@@ -274,7 +274,8 @@ impl ControllerInner {
                 .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
             (Method::POST, "/view_builder") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| Ok(json::to_string(&self.view_builder(args)).unwrap())),
+                .map(|args| self.view_builder(args))
+                .map(|view| Ok(json::to_string(&view).unwrap())),
             (Method::POST, "/extend_recipe") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
@@ -295,16 +296,12 @@ impl ControllerInner {
                 }),
             (Method::POST, "/create_universe") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.create_universe(args)
-                        .map(|r| json::to_string(&r).unwrap())
-                }),
+                .map(|args| self.create_universe(args))
+                .map(|universe| Ok(json::to_string(&universe).unwrap())),
             (Method::POST, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.remove_nodes(vec![args].as_slice())
-                        .map(|r| json::to_string(&r).unwrap())
-                }),
+                .map(|args| self.remove_nodes(vec![args].as_slice()))
+                .map(|r| Ok(json::to_string(&r).unwrap())),
             _ => Err(StatusCode::NOT_FOUND),
         }
     }
@@ -332,10 +329,19 @@ impl ControllerInner {
         self.read_addrs.insert(msg.source, read_listen_addr);
 
         if self.workers.len() >= self.quorum {
-            if let Some((recipes, recipe_version)) = self.pending_recovery.take() {
+            if let Some((recipes, mut recipe_version)) = self.pending_recovery.take() {
                 assert_eq!(self.workers.len(), self.quorum);
                 assert_eq!(self.recipe.version(), 0);
-                assert!(recipe_version + 1 >= recipes.len());
+                if recipes.len() > recipe_version + 1 {
+                    // TODO(eta): this is a terrible stopgap hack
+                    crit!(
+                        self.log,
+                        "{} recipes but recipe version is at {}",
+                        recipes.len(),
+                        recipe_version
+                    );
+                    recipe_version = recipes.len() + 1;
+                }
 
                 info!(self.log, "Restoring graph configuration");
                 self.recipe = Recipe::with_version(
@@ -343,8 +349,10 @@ impl ControllerInner {
                     Some(self.log.clone()),
                 );
                 for r in recipes {
-                    self.apply_recipe(self.recipe.clone().extend(&r).unwrap())
-                        .unwrap();
+                    if let Err(e) = self.apply_recipe(self.recipe.clone().extend(&r).unwrap()) {
+                        // TODO(eta): is this the best thing to do?
+                        crit!(self.log, "Failed to restore recipe: {}", e);
+                    }
                 }
             }
         }
@@ -352,7 +360,7 @@ impl ControllerInner {
         Ok(())
     }
 
-    fn check_worker_liveness(&mut self) {
+    fn check_worker_liveness(&mut self) -> ReadySetResult<()> {
         let mut any_failed = false;
 
         // check if there are any newly failed workers
@@ -377,11 +385,12 @@ impl ControllerInner {
                     failed.push(addr.clone());
                 }
             }
-            self.handle_failed_workers(failed);
+            self.handle_failed_workers(failed)?;
         }
+        Ok(())
     }
 
-    fn handle_failed_workers(&mut self, failed: Vec<WorkerIdentifier>) {
+    fn handle_failed_workers(&mut self, failed: Vec<WorkerIdentifier>) -> ReadySetResult<()> {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = Vec::new();
         for wi in failed {
@@ -395,8 +404,7 @@ impl ControllerInner {
         let (recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        self.apply_recipe(recovery.clone())
-            .expect("failed to apply recovery recipe");
+        self.apply_recipe(recovery.clone())?;
 
         // we must do this *after* the migration, since the migration itself modifies the recipe in
         // `recovery`, and we currently need to clone it here.
@@ -406,11 +414,11 @@ impl ControllerInner {
         original.set_sql_inc(tmp.sql_inc().clone());
 
         // back to original recipe, which should add the query again
-        self.apply_recipe(original)
-            .expect("failed to activate original recipe");
+        self.apply_recipe(original)?;
+        Ok(())
     }
 
-    pub(super) fn handle_heartbeat(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
+    pub(super) fn handle_heartbeat(&mut self, msg: CoordinationMessage) -> ReadySetResult<()> {
         match self.workers.get_mut(&msg.source) {
             None => crit!(
                 self.log,
@@ -422,7 +430,7 @@ impl ControllerInner {
             }
         }
 
-        self.check_worker_liveness();
+        self.check_worker_liveness()?;
         Ok(())
     }
 
@@ -655,9 +663,13 @@ impl ControllerInner {
 
     /// Adds a new user universe.
     /// User universes automatically enforce security policies.
-    fn add_universe<F, T>(&mut self, context: HashMap<String, DataType>, f: F) -> T
+    fn add_universe<F, T>(
+        &mut self,
+        context: HashMap<String, DataType>,
+        f: F,
+    ) -> Result<T, ReadySetError>
     where
-        F: FnOnce(&mut Migration) -> T,
+        F: FnOnce(&mut Migration) -> ReadySetResult<T>,
     {
         info!(self.log, "starting migration: new soup universe");
         let miglog = self.log.new(o!());
@@ -670,14 +682,14 @@ impl ControllerInner {
             start: time::Instant::now(),
             log: miglog,
         };
-        let r = f(&mut m);
-        m.commit().unwrap();
-        r
+        let r = f(&mut m)?;
+        m.commit()?;
+        Ok(r)
     }
 
     /// Perform a new query schema migration.
     // crate viz for tests
-    pub(crate) fn migrate<F, T>(&mut self, f: F) -> T
+    pub(crate) fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
     where
         F: FnOnce(&mut Migration) -> T,
     {
@@ -693,8 +705,8 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m);
-        m.commit().unwrap();
-        r
+        m.commit()?;
+        Ok(r)
     }
 
     #[cfg(test)]
@@ -758,7 +770,7 @@ impl ControllerInner {
 
     /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    fn view_builder(&self, name: &str) -> Option<ViewBuilder> {
+    fn view_builder(&self, name: &str) -> Result<Option<ViewBuilder>, ReadySetError> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let node = match self.recipe.node_addr_for(name) {
@@ -766,7 +778,11 @@ impl ControllerInner {
             Err(_) => {
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
-                *self.outputs().get(name)?
+                if let Some(res) = self.outputs().get(name) {
+                    *res
+                } else {
+                    return Ok(None);
+                }
             }
         };
 
@@ -774,42 +790,58 @@ impl ControllerInner {
             None => name,
             Some(alias) => alias,
         };
-        self.find_view_for(node, name).map(|r| {
+        if let Some(r) = self.find_view_for(node, name) {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
-            let schema = self.view_schema(r);
+            let schema = self.view_schema(r)?;
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)])
                 .collect();
 
-            ViewBuilder {
+            Ok(Some(ViewBuilder {
                 node: r,
                 columns,
                 schema,
                 shards,
-            }
-        })
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
-    fn view_schema(&self, view_ni: NodeIndex) -> Option<Vec<ColumnSpecification>> {
+    fn view_schema(
+        &self,
+        view_ni: NodeIndex,
+    ) -> Result<Option<Vec<ColumnSpecification>>, ReadySetError> {
         let n = &self.ingredients[view_ni];
         let schema: Vec<_> = (0..n.fields().len())
-            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
-            .collect();
+            .map(|i| {
+                Ok(schema::column_schema(
+                    &self.ingredients,
+                    view_ni,
+                    &self.recipe,
+                    i,
+                    &self.log,
+                )?)
+            })
+            .collect::<Result<Vec<_>, ReadySetError>>()?;
 
         if schema.iter().any(Option::is_none) {
-            None
+            Ok(None)
         } else {
-            Some(schema.into_iter().map(Option::unwrap).collect())
+            Ok(Some(schema.into_iter().map(Option::unwrap).collect()))
         }
     }
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    fn table_builder(&self, base: &str) -> Option<TableBuilder> {
+    fn table_builder(&self, base: &str) -> ReadySetResult<Option<TableBuilder>> {
         let ni = match self.recipe.node_addr_for(base) {
             Ok(ni) => ni,
-            Err(_) => *self.inputs().get(base)?,
+            Err(_) => *self
+                .inputs()
+                .get(base)
+                .ok_or_else(|| ReadySetError::TableNotFound(base.into()))?,
         };
         let node = &self.ingredients[ni];
 
@@ -833,13 +865,19 @@ impl ControllerInner {
             .map(|i| {
                 self.channel_coordinator
                     .get_addr(&(node.domain(), i))
-                    .unwrap()
+                    .ok_or_else(|| {
+                        internal_err(format!(
+                            "failed to get channel coordinator for {}.{}",
+                            node.domain().index(),
+                            i
+                        ))
+                    })
             })
-            .collect();
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         let base_operator = node
             .get_base()
-            .expect("asked to get table for non-base node");
+            .ok_or_else(|| internal_err("asked to get table for non-base node"))?;
         let columns: Vec<String> = node
             .fields()
             .iter()
@@ -847,16 +885,22 @@ impl ControllerInner {
             .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
             .map(|(_, s)| s.clone())
             .collect();
-        assert_eq!(
+        invariant_eq!(
             columns.len(),
             node.fields().len() - base_operator.get_dropped().len()
         );
-        let schema = self.recipe.schema_for(base).map(|s| match s {
-            Schema::Table(s) => s,
-            _ => panic!("non-base schema {:?} returned for table '{}'", s, base),
-        });
+        let schema = self
+            .recipe
+            .schema_for(base)
+            .map(|s| -> ReadySetResult<_> {
+                match s {
+                    Schema::Table(s) => Ok(s),
+                    _ => internal!("non-base schema {:?} returned for table '{}'", s, base),
+                }
+            })
+            .transpose()?;
 
-        Some(TableBuilder {
+        Ok(Some(TableBuilder {
             txs,
             ni: node.global_addr(),
             addr: node.local_addr(),
@@ -866,7 +910,7 @@ impl ControllerInner {
             table_name: node.name().to_owned(),
             columns,
             schema,
-        })
+        }))
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
@@ -959,7 +1003,7 @@ impl ControllerInner {
     pub(super) fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ReadySetError> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -968,7 +1012,7 @@ impl ControllerInner {
 
         let uid = context
             .get("id")
-            .expect("Universe context must have id")
+            .ok_or_else(|| bad_request_err("Universe context must have id"))?
             .clone();
         let uid = &[uid];
         if context.get("group").is_none() {
@@ -976,7 +1020,7 @@ impl ControllerInner {
             for g in groups {
                 // TODO: this should use external APIs through noria::ControllerHandle
                 // TODO: can this move to the client entirely?
-                let rgb: Option<ViewBuilder> = self.view_builder(&g);
+                let rgb: Option<ViewBuilder> = self.view_builder(&g)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
                 let mut view = rgb.map(|rgb| rgb.build(x.clone())).unwrap();
@@ -991,34 +1035,24 @@ impl ControllerInner {
 
         self.add_universe(context.clone(), |mut mig| {
             r.next();
-            match r.create_universe(&mut mig, universe_groups) {
-                Ok(ar) => {
-                    info!(log, "{} expressions added", ar.expressions_added);
-                    info!(log, "{} expressions removed", ar.expressions_removed);
-                    Ok(())
-                }
-                Err(e) => {
-                    crit!(log, "failed to create universe: {:?}", e);
-                    Err("failed to create universe".to_owned())
-                }
-            }
-            .unwrap();
-        });
+            let ar = r.create_universe(&mut mig, universe_groups)?;
+            info!(log, "{} expressions added", ar.expressions_added);
+            info!(log, "{} expressions removed", ar.expressions_removed);
+            Ok(())
+        })?;
 
         self.recipe = r;
         Ok(())
     }
 
-    fn set_security_config(&mut self, p: String) -> Result<(), String> {
+    fn set_security_config(&mut self, p: String) -> Result<(), ReadySetError> {
         self.recipe.set_security_config(&p);
         Ok(())
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, String> {
-        let r = self.migrate(|mig| {
-            new.activate(mig)
-                .map_err(|e| format!("failed to activate recipe: {}", e))
-        });
+    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, ReadySetError> {
+        // TODO(eta): if this fails, apply the old one?
+        let r = self.migrate(|mig| new.activate(mig))?;
 
         match r {
             Ok(ref ra) => {
@@ -1059,7 +1093,7 @@ impl ControllerInner {
                         "node" => base.index(),
                     );
                     // now drop the (orphaned) base
-                    self.remove_nodes(vec![base].as_slice()).unwrap();
+                    self.remove_nodes(vec![base].as_slice())?;
                 }
 
                 self.recipe = new;
@@ -1079,34 +1113,42 @@ impl ControllerInner {
         &mut self,
         authority: &Arc<A>,
         add_txt: String,
-    ) -> Result<ActivationResult, String> {
+    ) -> Result<ActivationResult, ReadySetError> {
+        let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         match new.extend(&add_txt) {
-            Ok(new) => {
-                let activation_result = self.apply_recipe(new);
-                if authority
-                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
-                        None => unreachable!(),
-                        Some(ref state) if state.epoch > self.epoch => Err(()),
-                        Some(mut state) => {
-                            state.recipe_version = self.recipe.version();
-                            state.recipes.push(add_txt.clone());
-                            Ok(state)
-                        }
-                    })
-                    .is_err()
-                {
-                    return Err("Failed to persist recipe extension".to_owned());
+            Ok(new) => match self.apply_recipe(new) {
+                Ok(x) => {
+                    if authority
+                        .read_modify_write(
+                            STATE_KEY,
+                            |state: Option<ControllerState>| match state {
+                                None => unreachable!(),
+                                Some(ref state) if state.epoch > self.epoch => Err(()),
+                                Some(mut state) => {
+                                    state.recipe_version = self.recipe.version();
+                                    state.recipes.push(add_txt.clone());
+                                    Ok(state)
+                                }
+                            },
+                        )
+                        .is_err()
+                    {
+                        noria::internal!("failed to persist recipe extension");
+                    }
+                    Ok(x)
                 }
-
-                activation_result
-            }
+                Err(e) => {
+                    self.recipe = old;
+                    Err(e)
+                }
+            },
             Err((old, e)) => {
                 // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 self.recipe = old;
-                Err("failed to extend recipe".to_owned())
+                noria::internal!("failed to extend recipe: {:?}", e);
             }
         }
     }
@@ -1115,31 +1157,41 @@ impl ControllerInner {
         &mut self,
         authority: &Arc<A>,
         r_txt: String,
-    ) -> Result<ActivationResult, String> {
+    ) -> Result<ActivationResult, ReadySetError> {
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
+                let _old = self.recipe.clone();
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
                 let new = old.replace(r).unwrap();
-                let activation_result = self.apply_recipe(new);
-                if authority
-                    .read_modify_write(STATE_KEY, |state: Option<ControllerState>| match state {
-                        None => unreachable!(),
-                        Some(ref state) if state.epoch > self.epoch => Err(()),
-                        Some(mut state) => {
-                            state.recipe_version = self.recipe.version();
-                            state.recipes = vec![r_txt.clone()];
-                            Ok(state)
+                match self.apply_recipe(new) {
+                    Ok(x) => {
+                        if authority
+                            .read_modify_write(STATE_KEY, |state: Option<ControllerState>| {
+                                match state {
+                                    None => unreachable!(),
+                                    Some(ref state) if state.epoch > self.epoch => Err(()),
+                                    Some(mut state) => {
+                                        state.recipe_version = self.recipe.version();
+                                        state.recipes = vec![r_txt.clone()];
+                                        Ok(state)
+                                    }
+                                }
+                            })
+                            .is_err()
+                        {
+                            noria::internal!("failed to persist recipe installation")
                         }
-                    })
-                    .is_err()
-                {
-                    return Err("Failed to persist recipe installation".to_owned());
+                        Ok(x)
+                    }
+                    Err(e) => {
+                        self.recipe = _old;
+                        Err(e)
+                    }
                 }
-                activation_result
             }
             Err(e) => {
                 crit!(self.log, "failed to parse recipe: {:?}", e);
-                Err("failed to parse recipe".to_owned())
+                noria::internal!("failed to parse recipe: {:?}", e);
             }
         }
     }
@@ -1148,7 +1200,7 @@ impl ControllerInner {
         graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
-    fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), String> {
+    fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), ReadySetError> {
         let mut removals = vec![];
         let start = leaf;
         assert!(!self.ingredients[leaf].is_source());
@@ -1235,7 +1287,7 @@ impl ControllerInner {
         self.remove_nodes(removals.as_slice())
     }
 
-    fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), String> {
+    fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), ReadySetError> {
         // Remove node from controller local state
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
         for ni in removals {
@@ -1269,11 +1321,11 @@ impl ControllerInner {
                         {
                             // message would have gone to a failed worker, so ignore error
                         } else {
-                            panic!("failed to remove nodes: {:?}", e);
+                            internal!("failed to remove nodes: {:?}", e);
                         }
                     }
                     _ => {
-                        panic!("failed to remove nodes: {:?}", e);
+                        internal!("failed to remove nodes: {:?}", e);
                     }
                 },
             }
