@@ -4,6 +4,7 @@ members = [
     "nom-sql",
     "noria-client",
     "noria-mysql",
+    "noria-psql",
     "noria/noria",
     "noria/server",
     "noria/applications",
