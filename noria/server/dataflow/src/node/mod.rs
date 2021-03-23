@@ -228,9 +228,9 @@ impl Node {
 
 // derefs
 impl Node {
-    pub(crate) fn with_sharder_mut<F>(&mut self, f: F)
+    pub(crate) fn with_sharder_mut<F>(&mut self, f: F) -> Result<(), ReadySetError>
     where
-        F: FnOnce(&mut special::Sharder),
+        F: FnOnce(&mut special::Sharder) -> Result<(), ReadySetError>,
     {
         match self.inner {
             NodeType::Sharder(ref mut s) => f(s),
@@ -238,14 +238,14 @@ impl Node {
         }
     }
 
-    pub fn with_sharder<'a, F, R>(&'a self, f: F) -> Option<R>
+    pub fn with_sharder<'a, F, R>(&'a self, f: F) -> Result<Option<R>, ReadySetError>
     where
-        F: FnOnce(&'a special::Sharder) -> R,
+        F: FnOnce(&'a special::Sharder) -> Result<R, ReadySetError>,
         R: 'a,
     {
         match self.inner {
-            NodeType::Sharder(ref s) => Some(f(s)),
-            _ => None,
+            NodeType::Sharder(ref s) => Ok(Some(f(s)?)),
+            _ => Ok(None),
         }
     }
 

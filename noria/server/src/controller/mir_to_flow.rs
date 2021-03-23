@@ -391,7 +391,7 @@ fn adapt_base_node(
                 _ => None,
             })
             .unwrap_or(DataType::None);
-        let column_id = mig.add_column(na, &a.column.name, default_value);
+        let column_id = mig.add_column(na, &a.column.name, default_value).unwrap();
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -411,7 +411,7 @@ fn adapt_base_node(
         let cid = over_node.column_specifications()[pos]
             .1
             .expect("base column ID must be set to remove column");
-        mig.drop_column(na, cid);
+        mig.drop_column(na, cid).unwrap();
     }
 
     FlowNode::Existing(na)

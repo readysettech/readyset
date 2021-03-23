@@ -994,7 +994,8 @@ impl Domain {
                         let mut n = self.nodes[node].borrow_mut();
                         n.with_sharder_mut(move |s| {
                             s.add_sharded_child(new_txs.0, new_txs.1);
-                        });
+                            Ok(())
+                        })?;
                     }
                     Packet::StateSizeProbe { node } => {
                         let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);

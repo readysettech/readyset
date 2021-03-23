@@ -1,6 +1,7 @@
 use dataflow::node;
 use dataflow::ops;
 use dataflow::prelude::*;
+use noria::ReadySetError;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
@@ -13,7 +14,7 @@ pub fn shard(
     new: &mut HashSet<NodeIndex>,
     topo_list: &[NodeIndex],
     sharding_factor: usize,
-) -> (Vec<NodeIndex>, HashMap<(NodeIndex, NodeIndex), NodeIndex>) {
+) -> Result<(Vec<NodeIndex>, HashMap<(NodeIndex, NodeIndex), NodeIndex>), ReadySetError> {
     // we must keep track of changes we make to the parent of a node, since this remapping must be
     // communicated to the nodes so they know the true identifier of their parent in the graph.
     let mut swaps = HashMap::new();
@@ -92,13 +93,14 @@ pub fn shard(
                 if let Sharding::ByColumn(c, shards) = s {
                     // remap c according to node's semantics
                     let n = &graph[node];
-                    let src = (0..n.fields().len()).find(|&col| {
-                        if let Some(src) = n.parent_columns(col).unwrap()[0].1 {
+
+                    let src = (0..n.fields().len()).try_find(|&col| -> ReadySetResult<bool> {
+                        Ok(if let Some(src) = n.parent_columns(col)?[0].1 {
                             src == c
                         } else {
                             false
-                        }
-                    });
+                        })
+                    })?;
 
                     if let Some(src) = src {
                         s = Sharding::ByColumn(src, shards);
@@ -149,7 +151,7 @@ pub fn shard(
             }
 
             let resolved = if graph[node].is_internal() {
-                graph[node].resolve(want_sharding).unwrap()
+                graph[node].resolve(want_sharding)?
             } else if graph[node].is_base() {
                 // nothing resolves through a base
                 None
@@ -257,7 +259,7 @@ pub fn shard(
                 let srcs = if graph[node].is_base() {
                     vec![(node, None)]
                 } else {
-                    graph[node].parent_columns(col).unwrap()
+                    graph[node].parent_columns(col)?
                 };
                 let srcs: Vec<_> = srcs
                     .into_iter()
@@ -411,7 +413,7 @@ pub fn shard(
             assert!(!graph[p].is_source());
 
             // and that its children must be sharded somehow (otherwise what is the sharder doing?)
-            let col = graph[n].with_sharder(|s| s.sharded_by()).unwrap();
+            let col = graph[n].with_sharder(|s| Ok(s.sharded_by()))?.unwrap();
             let by = Sharding::ByColumn(col, sharding_factor);
 
             // we can only push sharding above newly created nodes that are not already sharded.
@@ -470,7 +472,7 @@ pub fn shard(
                 continue;
             }
 
-            let src_cols = graph[p].parent_columns(col).unwrap();
+            let src_cols = graph[p].parent_columns(col)?;
             if src_cols.len() != 1 {
                 // TODO: technically we could push the sharder to all parents here
                 continue;
@@ -502,7 +504,7 @@ pub fn shard(
             let mut remove = Vec::new();
             for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
                 // what does c shard by?
-                let col = graph[c].with_sharder(|s| s.sharded_by());
+                let col = graph[c].with_sharder(|s| Ok(s.sharded_by()))?;
                 if col.is_none() {
                     // lifting n would shard a node that isn't expecting to be sharded
                     // TODO: we *could* insert a de-shard here
@@ -618,9 +620,9 @@ pub fn shard(
         }
         topo_list.push(node);
     }
-    validate(log, graph, &topo_list, sharding_factor);
+    validate(log, graph, &topo_list, sharding_factor)?;
 
-    (topo_list, swaps)
+    Ok((topo_list, swaps))
 }
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
@@ -686,7 +688,12 @@ fn reshard(
     );
 }
 
-pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_factor: usize) {
+pub fn validate(
+    log: &Logger,
+    graph: &Graph,
+    topo_list: &[NodeIndex],
+    sharding_factor: usize,
+) -> Result<(), ReadySetError> {
     // ensure that each node matches the sharding of each of its ancestors, unless the ancestor is
     // a sharder or a shard merger
     for &node in topo_list {
@@ -701,17 +708,21 @@ pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_f
             .filter(|ni| !graph[*ni].is_source())
             .collect();
 
-        let remap = |nd: &Node, pni: NodeIndex, ps: Sharding| -> Sharding {
+        let remap = |nd: &Node, pni: NodeIndex, ps: Sharding| -> Result<Sharding, ReadySetError> {
             if nd.is_internal() || nd.is_base() {
                 if let Sharding::ByColumn(c, shards) = ps {
                     // remap c according to node's semantics
-                    let src = (0..nd.fields().len()).find(|&col| {
-                        for pc in nd.parent_columns(col).unwrap() {
-                            if let (p, Some(src)) = pc {
+
+                    // TODO(alex): this should be try_find, but the feature flag isn't yet enabled
+                    let mut src = None;
+                    for col in 0..nd.fields().len() {
+                        for pc in nd.parent_columns(col)? {
+                            if let (p, Some(isrc)) = pc {
                                 // found column c in parent pni
-                                if p == pni && src == c {
+                                if p == pni && isrc == c {
                                     // extract *child* column ID that we found a match for
-                                    return true;
+                                    src = Some(col);
+                                    break;
                                 } else if !graph[pni].is_internal() {
                                     // need to look transitively for an indirect parent, since
                                     // `parent_columns`'s return values does not take sharder
@@ -721,25 +732,25 @@ pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_f
                                     // NOTE(malte): just checking connectivity here is perhaps a
                                     // bit too lax (i.e., may miss some incorrect shardings)
                                     if petgraph::algo::has_path_connecting(graph, p, pni, None)
-                                        && src == c
+                                        && isrc == c
                                     {
-                                        return true;
+                                        src = Some(col);
+                                        break;
                                     }
                                 }
                             }
                         }
-                        false
-                    });
+                    }
 
                     if let Some(src) = src {
-                        return Sharding::ByColumn(src, shards);
+                        return Ok(Sharding::ByColumn(src, shards));
                     } else {
-                        return Sharding::Random(shards);
+                        return Ok(Sharding::Random(shards));
                     }
                 }
             }
             // in all other cases, the sharding matches the parent's
-            ps
+            Ok(ps)
         };
 
         for in_ni in inputs {
@@ -751,7 +762,7 @@ pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_f
                         n,
                         in_ni,
                         Sharding::ByColumn(s.sharded_by(), sharding_factor),
-                    );
+                    )?;
                     if in_sharding != n.sharded_by() {
                         crit!(
                             log,
@@ -763,10 +774,12 @@ pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_f
                         );
                     }
                     assert_eq!(in_sharding, n.sharded_by());
-                });
+
+                    Ok(())
+                })?;
             } else {
                 // ancestor is an ordinary node, so it must have the same sharding
-                let in_sharding = remap(n, in_ni, in_node.sharded_by());
+                let in_sharding = remap(n, in_ni, in_node.sharded_by())?;
                 let out_sharding = n.sharded_by();
                 let equal = match in_sharding {
                     // ForcedNone and None are different enum variants, but correspond to the same
@@ -792,4 +805,6 @@ pub fn validate(log: &Logger, graph: &Graph, topo_list: &[NodeIndex], sharding_f
             }
         }
     }
+
+    Ok(())
 }

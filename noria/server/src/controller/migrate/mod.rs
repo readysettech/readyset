@@ -25,6 +25,7 @@ use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
 use metrics::counter;
 use nom_sql::BinaryOperator;
+use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -186,49 +187,46 @@ impl<'a> Migration<'a> {
         node: NodeIndex,
         field: S,
         default: DataType,
-    ) -> usize {
+    ) -> ReadySetResult<usize> {
         // not allowed to add columns to new nodes
-        assert!(!self.added.contains(&node));
+        invariant!(!self.added.contains(&node));
 
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_base());
+        invariant!(base.is_base());
 
         // we need to tell the base about its new column and its default, so that old writes that
         // do not have it get the additional value added to them.
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
-            let col_i2 = base
-                .get_base_mut()
-                .unwrap()
-                .add_column(default.clone())
-                .unwrap();
-            assert_eq!(col_i1, col_i2);
+            let col_i2 = base.get_base_mut().unwrap().add_column(default.clone())?;
+            invariant_eq!(col_i1, col_i2);
         }
 
         // also eventually propagate to domain clone
         self.columns.push((node, ColumnChange::Add(field, default)));
 
-        col_i1
+        Ok(col_i1)
     }
 
     /// Drop a column from a base node.
     // crate viz for tests
-    pub fn drop_column(&mut self, node: NodeIndex, column: usize) {
+    pub fn drop_column(&mut self, node: NodeIndex, column: usize) -> ReadySetResult<()> {
         // not allowed to drop columns from new nodes
-        assert!(!self.added.contains(&node));
+        invariant!(!self.added.contains(&node));
 
         let base = &mut self.mainline.ingredients[node];
-        assert!(base.is_base());
+        invariant!(base.is_base());
 
         // we need to tell the base about the dropped column, so that old writes that contain that
         // column will have it filled in with default values (this is done in Mutator).
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
-        base.get_base_mut().unwrap().drop_column(column).unwrap();
+        base.get_base_mut().unwrap().drop_column(column)?;
 
         // also eventually propagate to domain clone
         self.columns.push((node, ColumnChange::Drop(column)));
+        Ok(())
     }
 
     #[cfg(test)]
@@ -300,7 +298,7 @@ impl<'a> Migration<'a> {
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn commit(self) {
+    pub(super) fn commit(self) -> Result<(), ReadySetError> {
         info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
 
         let log = self.log;
@@ -312,7 +310,7 @@ impl<'a> Migration<'a> {
         // Shard the graph as desired
         let mut swapped0 = if let Some(shards) = mainline.sharding {
             let (t, swapped) =
-                sharding::shard(&log, &mut mainline.ingredients, &mut new, &topo, shards);
+                sharding::shard(&log, &mut mainline.ingredients, &mut new, &topo, shards)?;
             topo = t;
 
             swapped
@@ -326,7 +324,7 @@ impl<'a> Migration<'a> {
             &mut mainline.ingredients,
             &topo,
             &mut mainline.ndomains,
-        );
+        )?;
 
         // Set up ingress and egress nodes
         let swapped1 = routing::add(
@@ -335,7 +333,7 @@ impl<'a> Migration<'a> {
             mainline.source,
             &mut new,
             &topo,
-        );
+        )?;
         topo = mainline.topo_order(&new);
 
         // Merge the swap lists
@@ -464,7 +462,7 @@ impl<'a> Migration<'a> {
         }
 
         if let Some(shards) = mainline.sharding {
-            sharding::validate(&log, &mainline.ingredients, &topo, shards)
+            sharding::validate(&log, &mainline.ingredients, &topo, shards)?
         };
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -525,13 +523,13 @@ impl<'a> Migration<'a> {
                 mainline.ingredients[nodes[0].0].sharded_by().shards(),
                 &log,
                 nodes,
-            );
+            )?;
             mainline.domains.insert(domain, d);
         }
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");
-        augmentation::inform(&log, &mut mainline, uninformed_domain_nodes);
+        augmentation::inform(&log, &mut mainline, uninformed_domain_nodes)?;
 
         // Tell all base nodes and base ingress children about newly added columns
         for (ni, change) in self.columns {
@@ -586,25 +584,24 @@ impl<'a> Migration<'a> {
             &mut mainline.domains,
             &mainline.workers,
             &new,
-        );
+        )?;
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        mainline
-            .materializations
-            .commit(
-                &mut mainline.ingredients,
-                &new,
-                &mut mainline.domains,
-                &mainline.workers,
-                &mut mainline.replies,
-            )
-            .unwrap();
+        mainline.materializations.commit(
+            &mut mainline.ingredients,
+            &new,
+            &mut mainline.domains,
+            &mainline.workers,
+            &mut mainline.replies,
+        )?;
 
         counter!(
             "controller.migration_time_us",
             start.elapsed().as_micros() as _
         );
         warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
+
+        Ok(())
     }
 }

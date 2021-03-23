@@ -1783,7 +1783,7 @@ async fn add_columns() {
 
     // add a third column to a
     g.migrate(move |mig| {
-        mig.add_column(a, "c", 3.into());
+        mig.add_column(a, "c", 3.into()).unwrap();
     })
     .await;
     sleep().await;
@@ -1831,7 +1831,7 @@ async fn migrate_added_columns() {
     // add a third column to a, and a view that uses it
     let _ = g
         .migrate(move |mig| {
-            mig.add_column(a, "c", 3.into());
+            mig.add_column(a, "c", 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
             mig.maintain_anonymous(b, &[1]);
             b
@@ -1892,7 +1892,7 @@ async fn migrate_drop_columns() {
 
     // drop a column
     g.migrate(move |mig| {
-        mig.drop_column(a, 1);
+        mig.drop_column(a, 1).unwrap();
         mig.maintain_anonymous(a, &[0]);
     })
     .await;
@@ -1911,7 +1911,7 @@ async fn migrate_drop_columns() {
 
     // add a new column
     g.migrate(move |mig| {
-        mig.add_column(a, "c", "c".into());
+        mig.add_column(a, "c", "c".into()).unwrap();
     })
     .await;
 
@@ -1951,7 +1951,7 @@ async fn key_on_added() {
     // add a maintained view keyed on newly added column
     let _ = g
         .migrate(move |mig| {
-            mig.add_column(a, "c", 3.into());
+            mig.add_column(a, "c", 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
             mig.maintain_anonymous(b, &[0]);
             b
