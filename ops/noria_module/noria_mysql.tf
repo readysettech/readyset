@@ -38,7 +38,7 @@ resource "aws_instance" "noria_mysql" {
   instance_type = var.noria_mysql_instance_type
   key_name      = var.key_name
 
-  user_data = templatefile("${path.module}/noria_mysql_init.sh", {
+  user_data = templatefile("${path.module}/files/noria_mysql_init.sh", {
     deployment   = var.deployment
     zookeeper_ip = aws_instance.zookeeper.private_ip
   })

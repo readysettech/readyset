@@ -49,7 +49,7 @@ resource "aws_instance" "kafka" {
   instance_type = var.kafka_instance_type
   key_name      = var.key_name
 
-  user_data = templatefile("${path.module}/kafka_init.sh", {
+  user_data = templatefile("${path.module}/files/kafka_init.sh", {
     zookeeper_ip = aws_instance.zookeeper.private_ip
   })
 
@@ -111,7 +111,7 @@ resource "aws_instance" "debezium" {
   instance_type = var.debezium_instance_type
   key_name      = var.key_name
 
-  user_data = templatefile("${path.module}/debezium_init.sh", {
+  user_data = templatefile("${path.module}/files/debezium_init.sh", {
     kafka_ip         = aws_instance.kafka[0].private_ip,
     db_name          = var.db_name,
     db_user          = var.db_user,
@@ -170,7 +170,7 @@ resource "aws_instance" "debezium-connector" {
   instance_type = var.debezium_connector_instance_type
   key_name      = var.key_name
 
-  user_data = templatefile("${path.module}/debezium_connector_init.sh", {
+  user_data = templatefile("${path.module}/files/debezium_connector_init.sh", {
     tables       = join(",", var.tables)
     kafka_ip     = aws_instance.kafka[0].private_ip,
     zookeeper_ip = aws_instance.zookeeper.private_ip

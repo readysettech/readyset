@@ -59,7 +59,7 @@ resource "aws_instance" "noria_server" {
   instance_type = var.noria_server_instance_type
   key_name      = var.key_name
 
-  user_data = templatefile("${path.module}/noria_server_init.sh", {
+  user_data = templatefile("${path.module}/files/noria_server_init.sh", {
     deployment         = var.deployment
     zookeeper_ip       = aws_instance.zookeeper.private_ip
     noria_memory_bytes = var.noria_memory_bytes

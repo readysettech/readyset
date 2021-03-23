@@ -71,7 +71,7 @@ resource "aws_instance" "zookeeper" {
     Name = "zookeeper"
   }
 
-  user_data = file("${path.module}/zookeeper_init.sh")
+  user_data = file("${path.module}/files/zookeeper_init.sh")
 
   ebs_block_device {
     delete_on_termination = false
