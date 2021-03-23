@@ -1,7 +1,7 @@
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator,
-    ColumnConstraint, ColumnSpecification, Expression, FunctionArgument, FunctionArguments,
-    FunctionExpression, Literal, OrderType,
+    ColumnConstraint, ColumnSpecification, Expression, FunctionArguments, FunctionExpression,
+    Literal, OrderType,
 };
 use std::collections::HashMap;
 

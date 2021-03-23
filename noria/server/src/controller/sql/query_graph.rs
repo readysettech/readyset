@@ -595,7 +595,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                 let join_pred = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
-                        use crate::controller::sql::query_utils::ReferredTables;
+                        use nom_sql::analysis::ReferredTables;
 
                         // find all distinct tables mentioned in the condition
                         // conditions for now.
