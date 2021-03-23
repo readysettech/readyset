@@ -48,6 +48,43 @@ pub enum BuiltinFunction {
     DayOfWeek(Box<ProjectExpression>),
 }
 
+#[derive(Debug, Error)]
+pub enum BuiltinFunctionConvertError {
+    #[error("Function {0} does not exist")]
+    NoSuchFunction(String),
+
+    #[error("Incorrect parameter count in the call to native function '{0}'")]
+    ArityError(String),
+}
+
+impl BuiltinFunction {
+    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<Self, BuiltinFunctionConvertError>
+    where
+        A: IntoIterator<Item = ProjectExpression>,
+    {
+        let mut args = args.into_iter();
+        match name {
+            "convert_tz" => {
+                let arity_error =
+                    || BuiltinFunctionConvertError::ArityError("convert_tz".to_owned());
+                Ok(Self::ConvertTZ(
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                ))
+            }
+            "dayofweek" => {
+                let arity_error =
+                    || BuiltinFunctionConvertError::ArityError("dayofweek".to_owned());
+                Ok(Self::DayOfWeek(Box::new(
+                    args.next().ok_or_else(arity_error)?,
+                )))
+            }
+            _ => Err(BuiltinFunctionConvertError::NoSuchFunction(name.to_owned())),
+        }
+    }
+}
+
 /// Expression AST for projection
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectExpression {

@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::{ArithmeticExpression, FunctionExpression, Literal};
+use crate::{ArithmeticExpression, Column, FunctionArgument, FunctionExpression, Literal};
 
 /// SQL Expression AST
 ///
@@ -39,6 +39,25 @@ impl Display for Expression {
                 }
                 name.fmt(f)
             }
+        }
+    }
+}
+
+impl From<FunctionArgument> for Expression {
+    fn from(arg: FunctionArgument) -> Self {
+        match arg {
+            FunctionArgument::Column(Column {
+                name,
+                table,
+                function: None,
+                ..
+            }) => Expression::Column { name, table },
+            FunctionArgument::Column(Column {
+                function: Some(f), ..
+            }) => Expression::Call(*f),
+            FunctionArgument::Literal(lit) => Expression::Literal(lit),
+            FunctionArgument::Conditional(cond) => todo!(),
+            FunctionArgument::Call(fun) => Expression::Call(*fun),
         }
     }
 }
