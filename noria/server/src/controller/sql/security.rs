@@ -5,6 +5,7 @@ use crate::controller::Migration;
 use dataflow::prelude::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
+use noria::ReadySetError;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -45,7 +46,7 @@ pub(in crate::controller) trait Multiverse {
         config: &SecurityConfig,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
-    ) -> Result<Vec<QueryFlowParts>, String>;
+    ) -> Result<Vec<QueryFlowParts>, ReadySetError>;
 
     fn add_base(
         &mut self,
@@ -61,7 +62,7 @@ impl Multiverse for SqlIncorporator {
         config: &SecurityConfig,
         universe_groups: HashMap<String, Vec<DataType>>,
         mig: &mut Migration,
-    ) -> Result<Vec<QueryFlowParts>, String> {
+    ) -> Result<Vec<QueryFlowParts>, ReadySetError> {
         let mut qfps = Vec::new();
 
         self.mir_converter.clear_universe();
@@ -127,9 +128,7 @@ impl Multiverse for SqlIncorporator {
             }
 
             trace!(self.log, "Adding row policy {:?}", policy.name());
-            let predicate = self
-                .rewrite_query(policy.predicate(), &policy.name(), mig)
-                .map_err(|e| e.to_string())?;
+            let predicate = self.rewrite_query(policy.predicate(), &policy.name(), mig)?;
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
                 _ => unreachable!(),

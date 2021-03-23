@@ -5,6 +5,8 @@ use nom_sql::{
 };
 use nom_sql::{OrderType, SelectStatement};
 
+use crate::ReadySetResult;
+use noria::{internal, invariant, invariant_eq, unsupported};
 use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
@@ -276,7 +278,7 @@ fn classify_conditionals(
     join: &mut Vec<ConditionTree>,
     global: &mut Vec<ConditionExpression>,
     params: &mut Vec<(Column, nom_sql::BinaryOperator)>,
-) {
+) -> ReadySetResult<()> {
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
     //       because these expressions are meaningless in the Soup context.
@@ -307,7 +309,7 @@ fn classify_conditionals(
                 &mut new_join,
                 &mut new_global,
                 &mut new_params,
-            );
+            )?;
             classify_conditionals(
                 ct.right.as_ref(),
                 tables,
@@ -315,14 +317,14 @@ fn classify_conditionals(
                 &mut new_join,
                 &mut new_global,
                 &mut new_params,
-            );
+            )?;
 
             match ct.operator {
                 BinaryOperator::And => {
                     //
                     for (t, ces) in new_local {
                         // conjunction, check if either side had a local predicate
-                        assert!(
+                        invariant!(
                             ces.len() <= 2,
                             "can only combine two or fewer ConditionExpression's"
                         );
@@ -346,18 +348,20 @@ fn classify_conditionals(
                     global.extend(new_global);
                 }
                 BinaryOperator::Or => {
-                    assert!(
-                        new_join.is_empty(),
-                        "can't handle OR expressions between join predicates"
-                    );
-                    assert!(
-                        new_params.is_empty(),
-                        "can't handle OR expressions between query parameter predicates"
-                    );
+                    if !new_join.is_empty() {
+                        unsupported!("can't handle OR expressions between JOIN predicates")
+                    }
+                    if !new_params.is_empty() {
+                        unsupported!(
+                            "can't handle OR expressions between query parameter predicates"
+                        );
+                    }
                     if new_local.keys().len() == 1 && new_global.is_empty() {
                         // OR over a single table => local predicate
                         let (t, ces) = new_local.into_iter().next().unwrap();
-                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpressions");
+                        if ces.len() != 2 {
+                            unsupported!("should combine only 2 ConditionExpressions");
+                        }
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
                             operator: BinaryOperator::Or,
                             left: Box::new(ces.first().unwrap().clone()),
@@ -371,7 +375,7 @@ fn classify_conditionals(
                         global.push(ce.clone())
                     }
                 }
-                _ => unreachable!(),
+                x => unsupported!("binary operator unsupported: {:?}", x),
             }
 
             join.extend(new_join);
@@ -411,7 +415,7 @@ fn classify_conditionals(
                                         join.push(join_ct);
                                     } else {
                                         // non-equi-join?
-                                        unimplemented!();
+                                        unsupported!("non-equi-join?");
                                     }
                                 } else {
                                     // not a comma join, just an ordinary comparison with a
@@ -421,7 +425,7 @@ fn classify_conditionals(
                                     global.push(ce.clone());
                                 }
                             } else {
-                                panic!("left hand side of comparison must be field");
+                                unsupported!("left hand side of comparison must be field");
                             }
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
@@ -446,7 +450,9 @@ fn classify_conditionals(
                             }
                         }
                         ConditionBase::LiteralList(_) => (),
-                        ConditionBase::NestedSelect(_) => unimplemented!(),
+                        ConditionBase::NestedSelect(_) => {
+                            unsupported!("nested SELECTs are unsupported")
+                        }
                     }
                 };
             };
@@ -462,46 +468,54 @@ fn classify_conditionals(
                 &mut new_join,
                 global,
                 &mut new_params,
-            );
+            )?;
             join.extend(new_join);
             params.extend(new_params);
         }
         ConditionExpression::Base(_) => {
             // don't expect to see a base here: we ought to exit when classifying its
             // parent selection predicate
-            unreachable!("encountered unexpected standalone base of condition expression");
+            internal!("encountered unexpected standalone base of condition expression");
         }
         ConditionExpression::NegationOp(_) => {
-            unreachable!("negation should have been removed earlier");
+            internal!("negation should have been removed earlier");
         }
-        ConditionExpression::Arithmetic(_) => unimplemented!(),
-        ConditionExpression::ExistsOp(_) => unimplemented!(),
+        ConditionExpression::Arithmetic(_) => unsupported!("arithmetic not supported here"),
+        ConditionExpression::ExistsOp(_) => unsupported!("EXISTS not supported yet"),
         ConditionExpression::Between { .. } => {
-            unreachable!("Between should have been removed earlier")
+            internal!("Between should have been removed earlier")
         }
     }
+    Ok(())
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
+pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     let mut qg = QueryGraph::new();
 
+    if st.tables.is_empty() {
+        unsupported!("SELECT statements with no tables are unsupported")
+    }
+
     // a handy closure for making new relation nodes
-    let new_node =
-        |rel: String, preds: Vec<ConditionExpression>, st: &SelectStatement| -> QueryGraphNode {
-            QueryGraphNode {
-                rel_name: rel.clone(),
-                predicates: preds,
-                columns: st
-                    .fields
-                    .iter()
-                    .filter_map(|field| match *field {
+    let new_node = |rel: String,
+                    preds: Vec<ConditionExpression>,
+                    st: &SelectStatement|
+     -> ReadySetResult<QueryGraphNode> {
+        Ok(QueryGraphNode {
+            rel_name: rel.clone(),
+            predicates: preds,
+            columns: st
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(match *field {
                         // unreachable because SQL rewrite passes will have expanded these already
                         FieldDefinitionExpression::All => {
-                            unreachable!("* should have been expanded already")
+                            internal!("* should have been expanded already")
                         }
                         FieldDefinitionExpression::AllInTable(_) => {
-                            unreachable!("<table>.* should have been expanded already")
+                            internal!("<table>.* should have been expanded already")
                         }
                         // No need to do anything for literals and arithmetic expressions here, as they
                         // aren't associated with a relation (and thus have no QGN)
@@ -512,9 +526,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     match c.function {
                                         // XXX(malte): don't drop aggregation columns
                                         Some(_) => None,
-                                        None => panic!(
+                                        None => internal!(
                                             "No table name set for column {} on {}",
-                                            c.name, rel
+                                            c.name,
+                                            rel
                                         ),
                                     }
                                 }
@@ -528,10 +543,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             }
                         }
                     })
-                    .collect(),
-                parameters: Vec::new(),
-            }
-        };
+                })
+                // FIXME(eta): error handling overhead
+                .collect::<ReadySetResult<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect(),
+            parameters: Vec::new(),
+        })
+    };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
@@ -539,7 +559,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     for table in &st.tables {
         qg.relations.insert(
             table.name.clone(),
-            new_node(table.name.clone(), Vec::new(), st),
+            new_node(table.name.clone(), Vec::new(), st)?,
         );
     }
     for jc in &st.join {
@@ -548,11 +568,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 if !qg.relations.contains_key(&table.name) {
                     qg.relations.insert(
                         table.name.clone(),
-                        new_node(table.name.clone(), Vec::new(), st),
+                        new_node(table.name.clone(), Vec::new(), st)?,
                     );
                 }
             }
-            _ => unimplemented!(),
+            _ => unsupported!("only tables are supported on the RHS of a JOIN"),
         }
     }
 
@@ -591,7 +611,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     if tables_mentioned[1] != table.name {
                                         // tables are in the wrong order in join predicate, swap
                                         tables_mentioned.swap(0, 1);
-                                        assert_eq!(tables_mentioned[1], table.name);
+                                        invariant_eq!(tables_mentioned[1], table.name);
                                     }
                                     left_table = tables_mentioned.remove(0);
                                     right_table = tables_mentioned.remove(0);
@@ -600,7 +620,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     left_table = tables_mentioned.remove(0);
                                     right_table = left_table.clone();
                                 } else {
-                                    unreachable!("more than 2 tables mentioned in join condition!");
+                                    unsupported!("more than 2 tables mentioned in join condition!");
                                 };
 
                                 // the condition tree might specify tables in opposite order to
@@ -609,11 +629,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                 // conditions for now.
                                 let l = match *ct.left.as_ref() {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                    _ => unimplemented!(),
+                                    ref x => unsupported!("join condition not supported: {:?}", x),
                                 };
                                 let r = match *ct.right.as_ref() {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                    _ => unimplemented!(),
+                                    ref x => unsupported!("join condition not supported: {:?}", x),
                                 };
                                 if *l.table.as_ref().unwrap() == right_table
                                     && *r.table.as_ref().unwrap() == left_table
@@ -627,11 +647,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     ct.clone()
                                 }
                             }
-                            _ => panic!("join condition is not a comparison!"),
+                            _ => unsupported!("join condition is not a comparison!"),
                         }
                     }
                     JoinConstraint::Using(ref cols) => {
-                        assert_eq!(cols.len(), 1);
+                        invariant_eq!(cols.len(), 1);
                         let col = cols.iter().next().unwrap();
 
                         left_table = prev_table.as_ref().unwrap().clone();
@@ -646,20 +666,26 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 };
 
                 // add edge for join
-                let mut _e = qg
+                // FIXME(eta): inefficient cloning!
+                if !qg
                     .edges
-                    .entry((left_table.clone(), right_table.clone()))
-                    .or_insert_with(|| match jc.operator {
-                        JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                            QueryGraphEdge::LeftJoin(vec![join_pred])
-                        }
-                        JoinOperator::Join | JoinOperator::InnerJoin => {
-                            QueryGraphEdge::Join(vec![join_pred])
-                        }
-                        _ => unimplemented!(),
-                    });
+                    .contains_key(&(left_table.clone(), right_table.clone()))
+                {
+                    qg.edges.insert(
+                        (left_table.clone(), right_table.clone()),
+                        match jc.operator {
+                            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
+                                QueryGraphEdge::LeftJoin(vec![join_pred])
+                            }
+                            JoinOperator::Join | JoinOperator::InnerJoin => {
+                                QueryGraphEdge::Join(vec![join_pred])
+                            }
+                            _ => unsupported!("join operator not supported"),
+                        },
+                    );
+                }
             }
-            _ => unimplemented!(),
+            _ => internal!(),
         }
     }
 
@@ -675,7 +701,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             &mut join_predicates,
             &mut global_predicates,
             &mut query_parameters,
-        );
+        )?;
 
         for (_, ces) in local_predicates.iter_mut() {
             *ces = split_conjunctions(ces.clone());
@@ -686,9 +712,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             if !qg.relations.contains_key(&rel) {
                 // can't have predicates on tables that do not appear in the FROM part of the
                 // statement
-                panic!(
+                internal!(
                     "predicate(s) {:?} on relation {} that is not in query graph",
-                    preds, rel
+                    preds,
+                    rel
                 );
             } else {
                 qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
@@ -700,14 +727,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
+                    let nn = new_node(l.table.clone().unwrap(), Vec::new(), st)?;
                     // If tables aren't already in the relations, add them.
                     qg.relations
                         .entry(l.table.clone().unwrap())
-                        .or_insert_with(|| new_node(l.table.clone().unwrap(), Vec::new(), st));
+                        .or_insert_with(|| nn.clone());
 
                     qg.relations
                         .entry(r.table.clone().unwrap())
-                        .or_insert_with(|| new_node(r.table.clone().unwrap(), Vec::new(), st));
+                        .or_insert_with(|| nn.clone());
 
                     let e = qg
                         .edges
@@ -715,7 +743,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
                         QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
-                        _ => panic!("Expected join edge for join condition {:#?}", jp),
+                        _ => internal!("Expected join edge for join condition {:#?}", jp),
                     };
                 }
             }
@@ -728,7 +756,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         for (column, operator) in query_parameters.into_iter() {
             match column.table {
                 None => {
-                    return Err(format!("each parameter's column must have an associated table! (no such column \"{}\")", column).to_string());
+                    unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", column);
                 }
                 Some(ref table) => {
                     let rel = qg.relations.get_mut(table).unwrap();
@@ -748,28 +776,31 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     }
 
     // Adds a computed column to the query graph if the given column has a function:
-    let add_computed_column = |query_graph: &mut QueryGraph, column: &Column| {
-        match &column.function {
-            Some(f) if is_aggregate(f) => {
-                // add a special node representing the computed columns; if it already
-                // exists, add another computed column to it
-                let n = query_graph
-                    .relations
-                    .entry(String::from("computed_columns"))
-                    .or_insert_with(|| new_node(String::from("computed_columns"), vec![], st));
+    let add_computed_column =
+        |query_graph: &mut QueryGraph, column: &Column| -> ReadySetResult<()> {
+            match &column.function {
+                Some(f) if is_aggregate(f) => {
+                    let nn = new_node(String::from("computed_columns"), vec![], st)?;
+                    // add a special node representing the computed columns; if it already
+                    // exists, add another computed column to it
+                    let n = query_graph
+                        .relations
+                        .entry(String::from("computed_columns"))
+                        .or_insert(nn);
 
-                n.columns.push(column.clone());
+                    n.columns.push(column.clone());
+                }
+                _ => (), // we've already dealt with this column as part of some relation
             }
-            _ => (), // we've already dealt with this column as part of some relation
-        }
-    };
+            Ok(())
+        };
 
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
         match *field {
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
-                panic!("Stars should have been expanded by now!")
+                internal!("Stars should have been expanded by now!")
             }
             FieldDefinitionExpression::Value(FieldValueExpression::Literal(ref l)) => {
                 qg.columns.push(OutputColumn::Literal(LiteralColumn {
@@ -783,11 +814,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             }
             FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref a)) => {
                 if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.left {
-                    add_computed_column(&mut qg, c);
+                    add_computed_column(&mut qg, c)?;
                 }
 
                 if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.right {
-                    add_computed_column(&mut qg, c);
+                    add_computed_column(&mut qg, c)?;
                 }
 
                 qg.columns.push(OutputColumn::Expression(ExpressionColumn {
@@ -797,7 +828,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }));
             }
             FieldDefinitionExpression::Col(ref c) => {
-                add_computed_column(&mut qg, c);
+                add_computed_column(&mut qg, c)?;
                 qg.columns.push(if let Some(function) = &c.function {
                     if is_aggregate(function) {
                         OutputColumn::Data(c.clone())
@@ -829,7 +860,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
-                    _ => unreachable!(),
+                    _ => internal!(),
                 }
             }
         }
