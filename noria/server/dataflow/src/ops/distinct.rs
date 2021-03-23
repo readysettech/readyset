@@ -1,9 +1,12 @@
+use noria::ReadySetError;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use maplit::hashmap;
 
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
+use noria::unsupported;
 
 /// This will get distinct records from a set of records compared over a given set of columns
 #[derive(Clone, Serialize, Deserialize)]
@@ -46,21 +49,21 @@ impl Ingredient for Distinct {
         _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
         // Check that the records aren't empty
         if rs.is_empty() {
-            return ProcessingResult {
+            return Ok(ProcessingResult {
                 results: rs,
                 ..Default::default()
-            };
+            });
         }
 
         let us = self.us.unwrap();
         let db = state
             .get(*us)
-            .expect("Distinct must have its own state initialized");
+            .ok_or(internal_err("Distinct must have its own state initialized"))?;
 
         let pos_comp = |a: &Record, b: &Record| a.is_positive().cmp(&b.is_positive());
 
@@ -125,14 +128,14 @@ impl Ingredient for Distinct {
                         output.push(rec.clone());
                     }
                 }
-                LookupResult::Missing => unimplemented!("Distinct does not yet support partial"),
+                LookupResult::Missing => unsupported!("Distinct does not yet support partial"),
             }
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: output.into(),
             ..Default::default()
-        }
+        })
     }
 
     fn description(&self, _: bool) -> String {
@@ -146,12 +149,15 @@ impl Ingredient for Distinct {
         self.us = Some(remap[&us]);
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn requires_full_materialization(&self) -> bool {

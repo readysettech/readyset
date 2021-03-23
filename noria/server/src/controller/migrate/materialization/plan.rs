@@ -634,7 +634,7 @@ impl<'a> Plan<'a> {
                 let first = cols[0].unwrap();
 
                 let mut universal_src = Vec::new();
-                for (src, col) in n.parent_columns(first) {
+                for (src, col) in n.parent_columns(first).unwrap() {
                     if src == node || col.is_none() {
                         continue;
                     }
@@ -647,6 +647,7 @@ impl<'a> Plan<'a> {
                     // XXX: this is pretty inefficient, but meh...
                     let also_to_src = cols.iter().skip(1).map(|c| c.unwrap()).all(|c| {
                         n.parent_columns(c)
+                            .unwrap()
                             .into_iter()
                             .find(|&(this_src, _)| this_src == src)
                             .and_then(|(_, c)| c)

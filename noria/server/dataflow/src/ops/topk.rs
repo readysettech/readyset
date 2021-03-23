@@ -1,5 +1,6 @@
 use launchpad::hash::hash;
 use maplit::hashmap;
+use noria::{internal, invariant, ReadySetError};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -7,11 +8,12 @@ use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::ops;
+use std::ops::Index;
 
 use crate::prelude::*;
 
 use nom_sql::OrderType;
+use noria::errors::{internal_err, ReadySetResult};
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Order(Vec<(usize, OrderType)>);
@@ -102,7 +104,7 @@ impl TopK {
     /// Project the columns we are grouping by out of the given record
     fn project_group<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DataType>
     where
-        R: ops::Index<usize, Output = DataType> + ?Sized,
+        R: Index<usize, Output = DataType> + ?Sized,
     {
         self.group_by
             .iter()
@@ -114,7 +116,7 @@ impl TopK {
     /// `self.extra_records`
     fn group_hash<'rec, R>(&self, rec: &'rec R) -> GroupHash
     where
-        R: ops::Index<usize, Output = DataType> + ?Sized,
+        R: Index<usize, Output = DataType> + ?Sized,
     {
         let mut hasher = DefaultHasher::new();
         self.project_group(rec).hash(&mut hasher);
@@ -159,14 +161,14 @@ impl Ingredient for TopK {
         replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
-            return ProcessingResult {
+            return Ok(ProcessingResult {
                 results: rs,
                 ..Default::default()
-            };
+            });
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -178,7 +180,7 @@ impl Ingredient for TopK {
         let us = self.us.unwrap();
         let db: &Box<dyn State> = state
             .get(*us)
-            .expect("topk operators must have their own state materialized");
+            .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?;
 
         let mut out = Vec::new();
         let mut grp = Vec::new();
@@ -193,7 +195,8 @@ impl Ingredient for TopK {
         let post_group = |out: &mut Vec<Record>,
                           current: &mut Vec<(Cow<[DataType]>, bool)>,
                           grp: &mut Vec<DataType>,
-                          grpk: usize| {
+                          grpk: usize|
+         -> ReadySetResult<_> {
             current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
 
             let start = current.len().saturating_sub(self.k);
@@ -203,7 +206,7 @@ impl Ingredient for TopK {
                     // there used to be k things in the group, now there are fewer than k.
                     if is_partial {
                         // If we're partially materialized, we can't (currently) do anything
-                        unimplemented!()
+                        internal!("partially materialized TopK has fewer than k")
                     } else {
                         // If we're fully materialized, that means we've been keeping track of
                         // records *out of* our topk group in `self.current_records` - let's
@@ -281,6 +284,7 @@ impl Ingredient for TopK {
                     }
                 }
             }
+            Ok(())
         };
 
         // records are now chunked by group
@@ -290,9 +294,9 @@ impl Ingredient for TopK {
 
                 // first, tidy up the old one
                 if !grp.is_empty() {
-                    post_group(&mut out, &mut current, &mut grp, grpk);
+                    post_group(&mut out, &mut current, &mut grp, grpk)?;
                 }
-                assert!(current.is_empty());
+                invariant!(current.is_empty());
 
                 // make ready for the new one
                 // NOTE(grfn): Is this the most optimal way of doing this?
@@ -346,24 +350,24 @@ impl Ingredient for TopK {
         }
 
         if !grp.is_empty() {
-            post_group(&mut out, &mut current, &mut grp, grpk);
+            post_group(&mut out, &mut current, &mut grp, grpk)?;
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: out.into(),
             lookups,
             misses,
-        }
+        })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, noria::internal::Index> {
         hashmap! {
-            this => Index::hash_map(self.group_by.clone())
+            this => noria::internal::Index::hash_map(self.group_by.clone())
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -380,8 +384,8 @@ impl Ingredient for TopK {
         format!("TopK γ[{}]", group_cols)
     }
 
-    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(col))]
+    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(col))])
     }
 
     fn is_selective(&self) -> bool {
@@ -567,22 +571,25 @@ mod tests {
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 1);
-        assert_eq!(*idx.iter().next().unwrap().1, Index::hash_map(vec![1]));
+        assert_eq!(
+            *idx.iter().next().unwrap().1,
+            noria::internal::Index::hash_map(vec![1])
+        );
     }
 
     #[test]
     fn it_resolves() {
         let (g, _) = setup(false);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            g.node().resolve(2),
+            g.node().resolve(2).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 2)])
         );
     }
@@ -591,15 +598,15 @@ mod tests {
     fn it_parent_columns() {
         let (g, _) = setup(false);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            g.node().resolve(2),
+            g.node().resolve(2).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 2)])
         );
     }

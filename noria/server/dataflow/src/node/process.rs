@@ -3,7 +3,9 @@ use crate::payload;
 use crate::prelude::*;
 use core::convert::TryInto;
 use launchpad::hash::hash;
-use noria::{consistency::Timestamp, KeyComparison, PacketData};
+use noria::consistency::Timestamp;
+use noria::errors::ReadySetResult;
+use noria::{internal, KeyComparison, PacketData, ReadySetError};
 use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
@@ -57,7 +59,7 @@ impl Node {
         replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
         log: &Logger,
-    ) -> NodeProcessingResult {
+    ) -> Result<NodeProcessingResult, ReadySetError> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
         match self.inner {
@@ -78,7 +80,7 @@ impl Node {
                         let data = data
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
-                        let mut rs = b.process(addr, data, &*state);
+                        let mut rs = b.process(addr, data, &*state)?;
 
                         // When a replay originates at a base node, we replay the data *through* that
                         // same base node because its column set may have changed. However, this replay
@@ -112,7 +114,7 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard.unwrap_or(0), ex);
+                e.process(m, on_shard.unwrap_or(0), ex)?;
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(
@@ -172,7 +174,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(ex, from, old_data, replay, nodes, state, log) {
+                    match i.on_input_raw(ex, from, old_data, replay, nodes, state, log)? {
                         RawProcessingResult::Regular(m) => {
                             *data = m.results;
                             lookups = m.lookups;
@@ -259,7 +261,7 @@ impl Node {
 
                 if captured_full {
                     *m = None;
-                    return Default::default();
+                    return Ok(Default::default());
                 }
 
                 let m = m.as_mut().unwrap();
@@ -284,22 +286,22 @@ impl Node {
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
-                        self.reroute_miss(nodes, miss);
+                        self.reroute_miss(nodes, miss)?;
                     }
                 }
 
-                return NodeProcessingResult {
+                return Ok(NodeProcessingResult {
                     misses,
                     lookups,
                     captured,
-                };
+                });
             }
             NodeType::Dropped => {
                 *m = None;
             }
             NodeType::Source => unreachable!(),
         }
-        Default::default()
+        Ok(Default::default())
     }
 
     pub(crate) fn process_eviction(
@@ -310,7 +312,7 @@ impl Node {
         tag: Tag,
         on_shard: Option<usize>,
         ex: &mut dyn Executor,
-    ) {
+    ) -> ReadySetResult<()> {
         let addr = self.local_addr();
         match self.inner {
             NodeType::Base(..) => {}
@@ -326,7 +328,7 @@ impl Node {
                     })),
                     on_shard.unwrap_or(0),
                     ex,
-                );
+                )?;
             }
             NodeType::Sharder(ref mut s) => {
                 s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
@@ -339,19 +341,20 @@ impl Node {
             }
             NodeType::Ingress => {}
             NodeType::Dropped => {}
-            NodeType::Egress(None) | NodeType::Source => unreachable!(),
+            NodeType::Egress(None) | NodeType::Source => internal!(),
         }
+        Ok(())
     }
 
     // When we miss in can_query_through, that miss is *really* in the can_query_through node's
     // ancestor. We need to ensure that a replay is done to there, not the query_through node
     // itself, by translating the Miss into the right parent.
-    fn reroute_miss(&self, nodes: &DomainNodes, miss: &mut Miss) {
+    fn reroute_miss(&self, nodes: &DomainNodes, miss: &mut Miss) -> Result<(), ReadySetError> {
         let node = nodes[miss.on].borrow();
         if node.is_internal() && node.can_query_through() {
             let mut new_parent: Option<IndexPair> = None;
             for col in miss.lookup_idx.iter_mut() {
-                let parents = node.resolve(*col).unwrap();
+                let parents = node.resolve(*col)?.unwrap();
                 assert_eq!(parents.len(), 1, "query_through with more than one parent");
 
                 let (parent_global, parent_col) = parents[0];
@@ -392,8 +395,9 @@ impl Node {
 
             miss.on = *new_parent.unwrap();
             // Recurse in case the parent we landed at also is a query_through node:
-            self.reroute_miss(nodes, miss);
+            self.reroute_miss(nodes, miss)?;
         }
+        Ok(())
     }
 
     pub(crate) fn process_timestamp(
@@ -401,6 +405,7 @@ impl Node {
         m: Box<Packet>,
         executor: &mut dyn Executor,
     ) -> Option<Box<Packet>> {
+        // TODO: not error handling compliant!
         let src_node = m.src();
         match *m {
             Packet::Timestamp {
@@ -477,7 +482,7 @@ impl Node {
                     NodeType::Egress(Some(ref mut e)) => {
                         // TODO(justin): Should this use on_shard like process.
                         let p = &mut Some(p);
-                        e.process(p, 0, executor);
+                        e.process(p, 0, executor).unwrap();
                         None
                     }
                     NodeType::Base(_) => {

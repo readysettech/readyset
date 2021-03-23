@@ -1,6 +1,8 @@
 use maplit::hashmap;
 
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
+use noria::ReadySetError;
 use std::collections::HashMap;
 
 /// A Trigger data-flow operator.
@@ -90,13 +92,13 @@ impl Ingredient for Trigger {
         _: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
         let us = self.us.unwrap();
         let db = state
             .get(*us)
-            .expect("trigger must have its own state materialized");
+            .ok_or_else(|| internal_err("trigger must have its own state materialized"))?;
 
         let mut trigger_keys: Vec<DataType> = rs.iter().map(|r| r[self.key].clone()).collect();
 
@@ -114,17 +116,17 @@ impl Ingredient for Trigger {
                         None
                     }
                 }
-                LookupResult::Missing => unimplemented!(),
+                LookupResult::Missing => None, // FIXME(eta): should return internal!()
             })
             .cloned()
             .collect();
 
         self.trigger(executor, keys);
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: rs,
             ..Default::default()
-        }
+        })
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -134,16 +136,19 @@ impl Ingredient for Trigger {
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn description(&self, _: bool) -> String {
         "T".into()
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 
     // Trigger nodes require full materialization because we want group universes
@@ -197,15 +202,15 @@ mod tests {
     fn it_resolves() {
         let g = setup(false);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            g.node().resolve(2),
+            g.node().resolve(2).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 2)])
         );
     }

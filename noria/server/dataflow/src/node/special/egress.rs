@@ -1,4 +1,6 @@
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
+use noria::invariant;
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
@@ -52,24 +54,29 @@ impl Egress {
         m: &mut Option<Box<Packet>>,
         shard: usize,
         output: &mut dyn Executor,
-    ) {
+    ) -> ReadySetResult<()> {
         let &mut Self {
             ref mut txs,
             ref tags,
         } = self;
 
         // send any queued updates to all external children
-        assert!(!txs.is_empty());
+        invariant!(!txs.is_empty());
         let txn = txs.len() - 1;
 
         // we need to find the ingress node following this egress according to the path
         // with replay.tag, and then forward this message only on the channel corresponding
         // to that ingress node.
-        let replay_to = m.as_ref().unwrap().tag().map(|tag| {
-            tags.get(&tag)
-                .cloned()
-                .expect("egress node told about replay message, but not on replay path")
-        });
+        let replay_to = m
+            .as_ref()
+            .unwrap()
+            .tag()
+            .map(|tag| {
+                tags.get(&tag).cloned().ok_or_else(|| {
+                    internal_err("egress node told about replay message, but not on replay path")
+                })
+            })
+            .transpose()?;
 
         for (txi, ref mut tx) in txs.iter_mut().enumerate() {
             let mut take = txi == txn;
@@ -101,5 +108,6 @@ impl Egress {
                 break;
             }
         }
+        Ok(())
     }
 }

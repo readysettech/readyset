@@ -37,6 +37,8 @@ pub use petgraph::graph::NodeIndex;
 pub type Graph = petgraph::Graph<Node, Edge>;
 pub use crate::DurabilityMode;
 pub use crate::PersistenceParameters;
+pub use noria::errors::*;
+pub use noria::{internal, invariant, invariant_eq, unsupported};
 
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;

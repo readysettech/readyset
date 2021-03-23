@@ -1,5 +1,7 @@
 use crate::prelude::*;
 use maplit::hashmap;
+use noria::errors::ReadySetResult;
+use noria::internal;
 use noria::{Modification, Operation, TableOperation};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -39,31 +41,32 @@ impl Base {
     }
 
     /// Add a new column to this base node.
-    pub fn add_column(&mut self, default: DataType) -> usize {
-        assert!(
+    pub fn add_column(&mut self, default: DataType) -> ReadySetResult<usize> {
+        invariant!(
             !self.defaults.is_empty(),
             "cannot add columns to base nodes without\
              setting default values for initial columns"
         );
         self.defaults.push(default);
         self.unmodified = false;
-        self.defaults.len() - 1
+        Ok(self.defaults.len() - 1)
     }
 
     /// Drop a column from this base node.
-    pub fn drop_column(&mut self, column: usize) {
-        assert!(
+    pub fn drop_column(&mut self, column: usize) -> ReadySetResult<()> {
+        invariant!(
             !self.defaults.is_empty(),
             "cannot add columns to base nodes without\
              setting default values for initial columns"
         );
-        assert!(column < self.defaults.len());
+        invariant!(column < self.defaults.len());
         self.unmodified = false;
 
         // note that we don't need to *do* anything for dropped columns when we receive records.
         // the only thing that matters is that new Mutators remember to inject default values for
         // dropped columns.
         self.dropped.push(column);
+        Ok(())
     }
 
     pub fn get_dropped(&self) -> VecMap<DataType> {
@@ -138,16 +141,16 @@ impl Base {
         us: LocalNodeIndex,
         mut ops: Vec<TableOperation>,
         state: &StateMap,
-    ) -> Records {
+    ) -> ReadySetResult<Records> {
         if self.primary_key.is_none() || ops.is_empty() {
             return ops
                 .into_iter()
                 .map(|r| {
                     if let TableOperation::Insert(mut r) = r {
                         self.fix(&mut r);
-                        Record::Positive(r)
+                        Ok(Record::Positive(r))
                     } else {
-                        unreachable!("unkeyed base got non-insert operation {:?}", r);
+                        internal!("unkeyed base got non-insert operation {:?}", r);
                     }
                 })
                 .collect();
@@ -160,27 +163,30 @@ impl Base {
         let mut this_key: Vec<_> = key_of(key_cols, &ops[0]).cloned().collect();
 
         // starting record state
-        let db = state
-            .get(us)
-            .expect("base with primary key must be materialized");
+        let db = match state.get(us) {
+            Some(x) => x,
+            None => internal!("base with primary key must be materialized"),
+        };
 
-        let get_current = |current_key: &'_ _| {
+        let get_current = |current_key: &'_ _| -> ReadySetResult<_> {
             match db.lookup(key_cols, &KeyType::from(current_key)) {
                 LookupResult::Some(rows) => {
                     match rows.len() {
-                        0 => None,
-                        1 => rows.into_iter().next(),
+                        0 => Ok(None),
+                        1 => Ok(rows.into_iter().next()),
                         n => {
                             // primary key, so better be unique!
-                            assert_eq!(n, 1, "key {:?} not unique (n = {})!", current_key, n);
-                            unreachable!();
+                            if n != 1 {
+                                internal!("key {:?} not unique (n = {})!", current_key, n);
+                            }
+                            internal!();
                         }
                     }
                 }
-                LookupResult::Missing => unreachable!(),
+                LookupResult::Missing => internal!(),
             }
         };
-        let mut current = get_current(&this_key);
+        let mut current = get_current(&this_key)?;
         let mut was = current.clone();
 
         let mut results = Vec::with_capacity(ops.len());
@@ -196,7 +202,7 @@ impl Base {
                 }
 
                 this_key = key_of(key_cols, &op).cloned().collect();
-                current = get_current(&this_key);
+                current = get_current(&this_key)?;
                 was = current.clone();
             }
 
@@ -268,7 +274,7 @@ impl Base {
             self.fix(r);
         }
 
-        results.into()
+        Ok(results.into())
     }
 
     pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -346,7 +352,11 @@ mod tests {
         let mut n = n.finalize(&graph);
 
         let mut one = move |u: Vec<TableOperation>| {
-            let mut m = n.get_base_mut().unwrap().process(local, u, &states);
+            let mut m = n
+                .get_base_mut()
+                .unwrap()
+                .process(local, u, &states)
+                .unwrap();
             node::materialize(&mut m, None, states.get_mut(local));
             m
         };

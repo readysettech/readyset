@@ -1,4 +1,5 @@
 use maplit::hashmap;
+use noria::{internal, ReadySetError};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -6,6 +7,7 @@ use std::mem;
 use vec1::vec1;
 
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -237,15 +239,15 @@ impl Ingredient for Join {
         replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
 
         if rs.is_empty() {
-            return ProcessingResult {
+            return Ok(ProcessingResult {
                 results: rs,
                 ..Default::default()
-            };
+            });
         }
 
         let (other, from_key, other_key) = if from == *self.left {
@@ -254,30 +256,32 @@ impl Ingredient for Join {
             (*self.left, self.on.1, self.on.0)
         };
 
-        let replay_key_cols = replay_key_cols.map(|cols| {
-            cols.iter()
-                .map(|&col| {
-                    match self.emit[col] {
-                        (true, l) if from == *self.left => l,
-                        (false, r) if from == *self.right => r,
-                        (true, l) if l == self.on.0 => {
-                            // since we didn't hit the case above, we know that the message
-                            // *isn't* from left.
-                            self.on.1
-                        }
-                        (false, r) if r == self.on.1 => {
-                            // same
-                            self.on.0
-                        }
-                        _ => {
-                            // we're getting a partial replay, but the replay key doesn't exist
-                            // in the parent we're getting the replay from?!
-                            unreachable!()
-                        }
-                    }
-                })
-                .collect()
-        });
+        let replay_key_cols = replay_key_cols
+            .map(|cols| {
+                cols.iter()
+                    .map(|&col| -> ReadySetResult<_> {
+                        Ok(match self.emit[col] {
+                            (true, l) if from == *self.left => l,
+                            (false, r) if from == *self.right => r,
+                            (true, l) if l == self.on.0 => {
+                                // since we didn't hit the case above, we know that the message
+                                // *isn't* from left.
+                                self.on.1
+                            }
+                            (false, r) if r == self.on.1 => {
+                                // same
+                                self.on.0
+                            }
+                            _ => {
+                                internal!(
+                                    "we're getting a partial replay, but the replay key doesn't exist in the parent we're getting the replay from?!"
+                                )
+                            }
+                        })
+                    })
+                    .collect()
+            })
+            .transpose()?;
 
         // First, we want to be smart about multiple added/removed rows with the same join key
         // value. For example, if we get a -, then a +, for the same key, we don't want to execute
@@ -356,13 +360,23 @@ impl Ingredient for Join {
                     .position(|r| r[from_key] != prev_join_key)
                     .map(|p| at + p)
                     .unwrap_or_else(|| rs.len());
-                misses.extend((from..at).map(|i| Miss {
+
+                // NOTE: we're stealing data here!
+                let mut records = (from..at)
+                    .map(|i| {
+                        mem::take(&mut *rs[i])
+                            .try_into()
+                            .map_err(|_| internal_err("empty record"))
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?
+                    .into_iter();
+
+                misses.extend((from..at).map(|_| Miss {
                     on: other,
                     lookup_idx: vec![other_key],
                     lookup_cols: vec![from_key],
                     replay_cols: replay_key_cols.clone(),
-                    // NOTE: we're stealing data here!
-                    record: mem::take(&mut *rs[i]).try_into().expect("Empty record"),
+                    record: records.next().unwrap(),
                 }));
                 continue;
             }
@@ -408,13 +422,23 @@ impl Ingredient for Join {
                         .position(|r| r[from_key] != prev_join_key)
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
-                    misses.extend((start..at).map(|i| Miss {
+
+                    // NOTE: we're stealing data here!
+                    let mut records = (start..at)
+                        .map(|i| {
+                            mem::take(&mut *rs[i])
+                                .try_into()
+                                .map_err(|_| internal_err("empty record"))
+                        })
+                        .collect::<ReadySetResult<Vec<_>>>()?
+                        .into_iter();
+
+                    misses.extend((start..at).map(|_| Miss {
                         on: from,
                         lookup_idx: vec![self.on.1],
                         lookup_cols: vec![from_key],
                         replay_cols: replay_key_cols.clone(),
-                        // NOTE: we're stealing data here!
-                        record: mem::take(&mut *rs[i]).try_into().expect("Empty record"),
+                        record: records.next().unwrap(),
                     }));
                     continue;
                 }
@@ -534,11 +558,11 @@ impl Ingredient for Join {
             }
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: ret.into(),
             lookups,
             misses,
-        }
+        })
     }
 
     fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -548,12 +572,12 @@ impl Ingredient for Join {
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         let e = self.emit[col];
         if e.0 {
-            Some(vec![(self.left.as_global(), e.1)])
+            Ok(Some(vec![(self.left.as_global(), e.1)]))
         } else {
-            Some(vec![(self.right.as_global(), e.1)])
+            Ok(Some(vec![(self.right.as_global(), e.1)]))
         }
     }
 
@@ -591,19 +615,19 @@ impl Ingredient for Join {
         )
     }
 
-    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         let pcol = self.emit[col];
         if (pcol.0 && pcol.1 == self.on.0) || (!pcol.0 && pcol.1 == self.on.1) {
             // Join column comes from both parents
-            vec![
+            Ok(vec![
                 (self.left.as_global(), Some(self.on.0)),
                 (self.right.as_global(), Some(self.on.1)),
-            ]
+            ])
         } else {
-            vec![(
+            Ok(vec![(
                 if pcol.0 { &self.left } else { &self.right }.as_global(),
                 Some(pcol.1),
-            )]
+            )])
         }
     }
 }
@@ -752,8 +776,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (g, l, r) = setup();
-        assert_eq!(g.node().resolve(0), Some(vec![(l.as_global(), 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(l.as_global(), 1)]));
-        assert_eq!(g.node().resolve(2), Some(vec![(r.as_global(), 1)]));
+        assert_eq!(g.node().resolve(0).unwrap(), Some(vec![(l.as_global(), 0)]));
+        assert_eq!(g.node().resolve(1).unwrap(), Some(vec![(l.as_global(), 1)]));
+        assert_eq!(g.node().resolve(2).unwrap(), Some(vec![(r.as_global(), 1)]));
     }
 }

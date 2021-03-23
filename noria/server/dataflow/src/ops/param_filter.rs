@@ -1,8 +1,10 @@
+use noria::ReadySetError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::prelude::*;
+use noria::errors::ReadySetResult;
 
 /// The operator we're comparing on for a [`ParamFilter`]
 ///
@@ -69,11 +71,11 @@ impl Ingredient for ParamFilter {
         HashMap::new()
     }
 
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         if i == self.emit_key {
-            None
+            Ok(None)
         } else {
-            Some(vec![(self.src.as_global(), i)])
+            Ok(Some(vec![(self.src.as_global(), i)]))
         }
     }
 
@@ -97,19 +99,22 @@ impl Ingredient for ParamFilter {
         _replay_key_cols: Option<&[usize]>,
         _domain: &DomainNodes,
         _states: &StateMap,
-    ) -> ProcessingResult {
-        ProcessingResult::default()
+    ) -> ReadySetResult<ProcessingResult> {
+        Ok(ProcessingResult::default())
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(
             self.src.as_global(),
             if column == self.emit_key {
                 None
             } else {
                 Some(column)
             },
-        )]
+        )])
     }
 
     fn can_query_through(&self) -> bool {
@@ -151,14 +156,14 @@ mod tests {
     fn resolve() {
         let g = setup(Like);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
-        assert_eq!(g.node().resolve(2), None);
+        assert_eq!(g.node().resolve(2).unwrap(), None);
     }
 
     #[test]

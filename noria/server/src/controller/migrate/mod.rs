@@ -199,7 +199,11 @@ impl<'a> Migration<'a> {
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
-            let col_i2 = base.get_base_mut().unwrap().add_column(default.clone());
+            let col_i2 = base
+                .get_base_mut()
+                .unwrap()
+                .add_column(default.clone())
+                .unwrap();
             assert_eq!(col_i1, col_i2);
         }
 
@@ -221,7 +225,7 @@ impl<'a> Migration<'a> {
         // we need to tell the base about the dropped column, so that old writes that contain that
         // column will have it filled in with default values (this is done in Mutator).
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
-        base.get_base_mut().unwrap().drop_column(column);
+        base.get_base_mut().unwrap().drop_column(column).unwrap();
 
         // also eventually propagate to domain clone
         self.columns.push((node, ColumnChange::Drop(column)));

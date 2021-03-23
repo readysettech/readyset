@@ -81,7 +81,7 @@ where
         .enumerate()
         .filter_map(|(i, &c)| c.map(|c| (i, c)))
         .flat_map(|(i, c)| {
-            let origins = n.parent_columns(c);
+            let origins = n.parent_columns(c).unwrap();
             assert!(!origins.is_empty());
             origins.into_iter().map(move |o| (i, o))
         })

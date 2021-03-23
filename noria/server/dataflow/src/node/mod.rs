@@ -2,6 +2,7 @@ use crate::domain;
 use crate::ops;
 use crate::prelude::*;
 use noria::consistency::Timestamp;
+use noria::ReadySetError;
 use petgraph;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -131,13 +132,16 @@ impl Node {
     /// parent ingredients. None for the column means that the parent doesn't
     /// have an associated column. Similar to resolve, but does not depend on
     /// materialization, and returns results even for computed columns.
-    pub fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    pub fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         Ingredient::parent_columns(&**self, column)
     }
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
-    pub fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    pub fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         Ingredient::resolve(&**self, i)
     }
 

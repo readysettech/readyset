@@ -1,10 +1,12 @@
 mod expression;
 
+use noria::{internal, ReadySetError};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
 pub use expression::ProjectExpression;
+use noria::errors::ReadySetResult;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
@@ -36,14 +38,14 @@ impl Project {
         }
     }
 
-    fn resolve_col(&self, col: usize) -> usize {
+    fn resolve_col(&self, col: usize) -> Result<usize, ReadySetError> {
         if self.emit.is_some() && col >= self.emit.as_ref().unwrap().len() {
-            panic!(
-                "can't resolve literal column {} that doesn't come from parent node!",
+            internal!(
+                "can't resolve literal col {} that doesn't come from parent node!",
                 col
-            );
+            )
         } else {
-            self.emit.as_ref().map_or(col, |emit| emit[col])
+            Ok(self.emit.as_ref().map_or(col, |emit| emit[col]))
         }
     }
 
@@ -167,7 +169,7 @@ impl Ingredient for Project {
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
         if let Some(ref emit) = self.emit {
             for r in &mut *rs {
@@ -189,18 +191,18 @@ impl Ingredient for Project {
             }
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: rs,
             ..Default::default()
-        }
+        })
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), self.resolve_col(col))])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), self.resolve_col(col)?)]))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -235,13 +237,16 @@ impl Ingredient for Project {
         format!("π[{}]", emit_cols.join(", "))
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         let result = if self.emit.is_some() && column >= self.emit.as_ref().unwrap().len() {
             None
         } else {
-            Some(self.resolve_col(column))
+            Some(self.resolve_col(column)?)
         };
-        vec![(self.src.as_global(), result)]
+        Ok(vec![(self.src.as_global(), result)])
     }
 }
 
@@ -625,11 +630,11 @@ mod tests {
     fn it_resolves() {
         let p = setup(false, false, true);
         assert_eq!(
-            p.node().resolve(0),
+            p.node().resolve(0).unwrap(),
             Some(vec![(p.narrow_base_id().as_global(), 2)])
         );
         assert_eq!(
-            p.node().resolve(1),
+            p.node().resolve(1).unwrap(),
             Some(vec![(p.narrow_base_id().as_global(), 0)])
         );
     }
@@ -638,15 +643,15 @@ mod tests {
     fn it_resolves_all() {
         let p = setup(false, true, true);
         assert_eq!(
-            p.node().resolve(0),
+            p.node().resolve(0).unwrap(),
             Some(vec![(p.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            p.node().resolve(1),
+            p.node().resolve(1).unwrap(),
             Some(vec![(p.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            p.node().resolve(2),
+            p.node().resolve(2).unwrap(),
             Some(vec![(p.narrow_base_id().as_global(), 2)])
         );
     }
@@ -655,6 +660,6 @@ mod tests {
     #[should_panic(expected = "can't resolve literal column")]
     fn it_fails_to_resolve_literal() {
         let p = setup(false, false, true);
-        p.node().resolve(2);
+        p.node().resolve(2).unwrap();
     }
 }
