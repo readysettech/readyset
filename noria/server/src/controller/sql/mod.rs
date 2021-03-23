@@ -198,7 +198,7 @@ impl SqlIncorporator {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
-        let mut qg = to_query_graph(st).map_err(|e| internal_err(e))?;
+        let mut qg = to_query_graph(st)?;
 
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 

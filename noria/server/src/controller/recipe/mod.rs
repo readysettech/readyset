@@ -328,12 +328,11 @@ impl Recipe {
         };
 
         if self.security_config.is_some() {
-            let qfps = self
-                .inc
-                .as_mut()
-                .unwrap()
-                .prepare_universe(&self.security_config.clone().unwrap(), universe_groups, mig)
-                .map_err(|e| internal_err(e))?;
+            let qfps = self.inc.as_mut().unwrap().prepare_universe(
+                &self.security_config.clone().unwrap(),
+                universe_groups,
+                mig,
+            )?;
 
             for qfp in qfps {
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
