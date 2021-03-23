@@ -1,5 +1,6 @@
-use noria::DataType;
-use noria::{consistency::Timestamp, results::Results};
+use noria::consistency::Timestamp;
+use noria::results::Results;
+use noria::{internal, unsupported, DataType, ReadySetError};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use derive_more::From;
@@ -25,13 +26,15 @@ pub mod error;
 
 use crate::backend::error::Error;
 use mysql_connector::MySqlConnector;
+use noria::errors::internal_err;
+use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria_connector::NoriaConnector;
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
     c: &DataType,
     cs: &msql_srv::Column,
-) {
+) -> Result<(), Error> {
     let written = match *c {
         DataType::None => rw.write_col(None::<i32>).await,
         // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
@@ -76,15 +79,12 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 let f: f64 = dt.into();
                 rw.write_col(f).await
             }
-            _ => unreachable!(),
+            _ => internal!(),
         },
         DataType::Timestamp(ts) => rw.write_col(ts).await,
         DataType::Time(t) => rw.write_col(t).await,
     };
-    match written {
-        Ok(_) => (),
-        Err(e) => panic!("failed to write column: {:?}", e),
-    }
+    Ok(written?)
 }
 
 #[derive(From)]
@@ -363,7 +363,7 @@ impl Backend {
             }
             _ => {
                 error!("unsupported query");
-                Err(Error::UnsupportedError("Unsupported query".to_string()))
+                unsupported!("query type unsupported");
             }
         };
 
@@ -386,7 +386,7 @@ impl Backend {
             .prepared_queries
             .get(&id)
             .cloned()
-            .ok_or(Error::MissingPreparedStatement)?;
+            .ok_or(PreparedStatementMissing)?;
 
         let res = match prep {
             SqlQuery::Select(_) => {
@@ -435,7 +435,7 @@ impl Backend {
                     })
                 }
             },
-            _ => unreachable!(),
+            _ => internal!(),
         };
 
         if self.slowlog {
@@ -445,7 +445,7 @@ impl Backend {
                     SqlQuery::Select(ref q) => q,
                     SqlQuery::Insert(ref q) => q,
                     SqlQuery::Update(ref q) => q,
-                    _ => unreachable!(),
+                    _ => internal!(),
                 };
                 warn!(
                     %query,
@@ -521,7 +521,7 @@ impl Backend {
                 }
                 _ => {
                     error!("unsupported query");
-                    Err(Error::UnsupportedError("Unsupported query".to_string()))
+                    unsupported!("query type unsupported");
                 }
             },
             Writer::MySqlConnector(connector) => match parsed_query {
@@ -636,16 +636,19 @@ impl Backend {
                         let mut use_params = Vec::new();
                         if collapse_where_ins {
                             if let Some((_, p)) =
-                                rewrite::collapse_where_in(&mut parsed_query, true)
+                                rewrite::collapse_where_in(&mut parsed_query, true)?
                             {
                                 use_params = p;
                             }
                         }
                         Ok(entry.insert((parsed_query, use_params)).clone())
                     }
-                    Err(e) => {
+                    Err(_) => {
+                        // error is useless anyway
                         error!(%query, "query can't be parsed: \"{}\"", query);
-                        Err(Error::ParseError(e.to_string()))
+                        Err(ReadySetError::UnparseableQuery {
+                            query: query.to_string(),
+                        })?
                     }
                 }
             }
@@ -676,7 +679,11 @@ impl Backend {
     ) -> io::Result<()> {
         match r {
             Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
-            Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
+            Err(e) => {
+                results
+                    .error(e.error_kind(), e.to_string().as_bytes())
+                    .await
+            }
         }
     }
 }
@@ -715,7 +722,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
             Ok(PrepareResult::MySqlPrepareWrite { statement_id: _ }) => {
                 info.reply(self.prepared_count, &[], &[]).await
             } // TODO : handle params correctly. dont just leave them blank.
-            Err(e) => info.error(e.error_kind(), e.message().as_bytes()).await,
+            Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
         };
 
         Ok(res?)
@@ -735,7 +742,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 data,
                 select_schema,
             }) => {
-                let mut rw = results.start(&select_schema.schema).await.unwrap();
+                let mut rw = results.start(&select_schema.schema).await?;
                 for resultsets in data {
                     for r in resultsets {
                         let mut r: Vec<_> = r.into();
@@ -749,13 +756,13 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                                 .columns
                                 .iter()
                                 .position(|f| f == &c.column)
-                                .unwrap_or_else(|| {
-                                    panic!(
+                                .ok_or_else(|| {
+                                    internal_err(format!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
                                         c.column, select_schema.columns
-                                    );
-                                });
-                            write_column(&mut rw, &r[coli], &c).await;
+                                    ))
+                                })?;
+                            write_column(&mut rw, &r[coli], &c).await?;
                         }
                         rw.end_row().await?;
                     }
@@ -780,17 +787,17 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 )
                 .await
             }
-            Err(Error::MissingPreparedStatement) => {
+            e @ Err(Error::ReadySet(ReadySetError::PreparedStatementMissing)) => {
                 return results
                     .error(
-                        Error::MissingPreparedStatement.error_kind(),
+                        e.unwrap_err().error_kind(),
                         "non-existent statement".as_bytes(),
                     )
                     .await
-                    .map_err(|e| Error::IOError(e));
+                    .map_err(Error::from)
             }
             Err(e) => return Err(e),
-            _ => unreachable!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
+            _ => internal!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
         };
 
         Ok(res?)
@@ -853,13 +860,13 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                                 .columns
                                 .iter()
                                 .position(|f| f == &c.column)
-                                .unwrap_or_else(|| {
-                                    panic!(
+                                .ok_or_else(|| {
+                                    internal_err(format!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, &select_schema.columns
-                                    );
-                                });
-                            write_column(&mut rw, &r[coli], &c).await;
+                                        c.column, select_schema.columns
+                                    ))
+                                })?;
+                            write_column(&mut rw, &r[coli], &c).await?;
                         }
                         rw.end_row().await?;
                     }
@@ -883,7 +890,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 Backend::write_query_results(Ok((num_rows_affected, last_inserted_id)), results)
                     .await
             }
-            Err(Error::ParseError(e)) => {
+            e @ Err(Error::ReadySet(ReadySetError::UnparseableQuery { .. })) => {
                 if self.permissive {
                     warn!(
                         "permissive flag enabled, so returning success despite query parse failure"
@@ -891,12 +898,16 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                     return Ok(results.completed(0, 0).await?);
                 } else {
                     return self
-                        .handle_failure(&query, results, e.to_string())
+                        .handle_failure(&query, results, e.unwrap_err().to_string())
                         .await
-                        .map_err(|e| Error::IOError(e));
+                        .map_err(|e| Error::Io(e));
                 }
             }
-            Err(e) => results.error(e.error_kind(), e.message().as_bytes()).await,
+            Err(e) => {
+                results
+                    .error(e.error_kind(), e.to_string().as_bytes())
+                    .await
+            }
         };
 
         Ok(res?)

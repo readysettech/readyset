@@ -2,6 +2,7 @@ use mysql_async::params::Params;
 use mysql_async::prelude::Queryable;
 use mysql_async::*;
 
+use noria::unsupported;
 use timestamp_service::client::TransactionId;
 
 use crate::backend::error::Error;
@@ -99,9 +100,7 @@ impl MySqlConnector {
                 })
                 .await?;
             if trxids.len() < 1 {
-                return Err(Error::UnsupportedError(String::from(
-                    "RYW Write cannot proceed if no trxids found",
-                )));
+                unsupported!("RYW write cannot proceed if no trxids found");
             };
             let trxid = &trxids[0];
             debug!(

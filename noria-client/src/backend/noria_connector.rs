@@ -1,5 +1,6 @@
+use noria::consistency::Timestamp;
 use noria::{
-    consistency::Timestamp, ControllerHandle, DataType, Table, TableOperation, View, ViewQuery,
+    ControllerHandle, DataType, ReadySetResult, Table, TableOperation, View, ViewQuery,
     ViewQueryFilter, ViewQueryOperator, ZookeeperAuthority,
 };
 
@@ -22,13 +23,11 @@ use crate::schema::{self, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
-use crate::backend::error::Error::{
-    MissingPreparedStatement, NoriaReadError, NoriaRecipeError, NoriaWriteError,
-    UnimplementedError, UnsupportedError,
-};
 use crate::backend::SelectSchema;
 use itertools::Itertools;
+use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::results::Results;
+use noria::{internal, unsupported};
 use std::fmt;
 
 type StatementID = u32;
@@ -68,10 +67,8 @@ macro_rules! noria_await {
     ($self:expr, $fut:expr) => {{
         let noria = &mut $self.noria;
 
-        futures_util::future::poll_fn(|cx| noria.poll_ready(cx))
-            .await
-            .map_err(|e| NoriaRecipeError(e.into()))?;
-        $fut.await.map_err(|e| NoriaRecipeError(e.into()))
+        futures_util::future::poll_fn(|cx| noria.poll_ready(cx)).await?;
+        $fut.await
     }};
 }
 
@@ -100,22 +97,15 @@ impl NoriaBackendInner {
         }
     }
 
-    async fn ensure_mutator<'a, 'b>(&'a mut self, table: &'b str) -> &'a mut Table {
-        self.get_or_make_mutator(table)
-            .await
-            .expect(&format!("no table named '{}'!", table))
+    async fn ensure_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
+        self.get_or_make_mutator(table).await
     }
 
-    async fn ensure_getter<'a, 'b>(&'a mut self, view: &'b str) -> &'a mut View {
-        self.get_or_make_getter(view)
-            .await
-            .expect(&format!("no view named '{}'!", view))
+    async fn ensure_getter(&mut self, view: &str) -> ReadySetResult<&mut View> {
+        self.get_or_make_getter(view).await
     }
 
-    async fn get_or_make_mutator<'a, 'b>(
-        &'a mut self,
-        table: &'b str,
-    ) -> Result<&'a mut Table, anyhow::Error> {
+    async fn get_or_make_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
         if !self.inputs.contains_key(table) {
             let t = noria_await!(self, self.noria.table(table))?;
             self.inputs.insert(table.to_owned(), t);
@@ -123,10 +113,7 @@ impl NoriaBackendInner {
         Ok(self.inputs.get_mut(table).unwrap())
     }
 
-    async fn get_or_make_getter<'a, 'b>(
-        &'a mut self,
-        view: &'b str,
-    ) -> Result<&'a mut View, anyhow::Error> {
+    async fn get_or_make_getter(&mut self, view: &str) -> ReadySetResult<&mut View> {
         if !self.outputs.contains_key(view) {
             let vh = noria_await!(self, self.noria.view(view))?;
             self.outputs.insert(view.to_owned(), vh);
@@ -168,7 +155,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "query::insert::access mutator");
-        let putter = self.inner.ensure_mutator(table).await;
+        let putter = self.inner.ensure_mutator(table).await?;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
@@ -196,11 +183,11 @@ impl NoriaConnector {
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
-            unreachable!()
+            internal!()
         };
 
         trace!(table = %q.table.name, "insert::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await;
+        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
         trace!("insert::extract schema");
         let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
@@ -246,7 +233,7 @@ impl NoriaConnector {
         let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
             q
         } else {
-            unreachable!()
+            internal!()
         };
         trace!(id = statement_id, "insert::registered");
         self.prepared_statement_cache
@@ -262,7 +249,7 @@ impl NoriaConnector {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
-            .ok_or(MissingPreparedStatement)?
+            .ok_or(PreparedStatementMissing)?
             .clone();
         trace!("delegate");
         match prep {
@@ -287,7 +274,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await;
+        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
 
         trace!("delete::extract schema");
         let pkey = if let Some(cts) = mutator.schema() {
@@ -300,20 +287,18 @@ impl NoriaConnector {
         };
 
         trace!("delete::flatten conditionals");
-        match utils::flatten_conditional(&cond, &pkey) {
+        match utils::flatten_conditional(&cond, &pkey)? {
             None => Ok(0 as u64),
-            Some(ref flattened) if flattened.is_empty() => Err(UnimplementedError(
-                "DELETE only supports WHERE-clauses on primary keys"
-                    .parse()
-                    .unwrap(),
-            )),
+            Some(ref flattened) if flattened.is_empty() => {
+                unsupported!("DELETE only supports WHERE-clauses on primary keys")
+            }
             Some(flattened) => {
                 let count = flattened.len() as u64;
                 trace!("delete::execute");
                 for key in flattened {
                     if let Err(e) = mutator.delete(key).await {
                         error!(error = %e, "failed");
-                        return Err(NoriaWriteError(e.into()));
+                        Err(e)?
                     };
                 }
                 trace!("delete::done");
@@ -338,11 +323,11 @@ impl NoriaConnector {
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
         } else {
-            unreachable!()
+            internal!()
         };
 
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await;
+        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
         trace!("update::extract schema");
         let schema = Schema::Table(mutator.schema().unwrap().clone());
 
@@ -358,7 +343,7 @@ impl NoriaConnector {
         let q = if let nom_sql::SqlQuery::Update(q) = sql_q {
             q
         } else {
-            unreachable!();
+            internal!();
         };
 
         trace!(id = statement_id, "update::registered");
@@ -375,7 +360,7 @@ impl NoriaConnector {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
-            .ok_or(MissingPreparedStatement)?
+            .ok_or(PreparedStatementMissing)?
             .clone();
 
         trace!("delegate");
@@ -435,7 +420,7 @@ impl NoriaConnector {
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                         ) {
                             error!(error = %e, "add query failed");
-                            return Err(NoriaRecipeError(e.into()));
+                            Err(e)?
                         }
 
                         let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());
@@ -462,7 +447,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "insert::access mutator");
-        let putter = self.inner.ensure_mutator(table).await;
+        let putter = self.inner.ensure_mutator(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -582,7 +567,7 @@ impl NoriaConnector {
                     &mut uq,
                     &mut None::<std::iter::Empty<DataType>>,
                     schema,
-                )
+                )?
             };
 
             // TODO(malte): why can't I consume buf here?
@@ -596,10 +581,8 @@ impl NoriaConnector {
             trace!("insert::simple::complete");
             r
         };
-        match result {
-            Ok(_) => Ok((data.len() as u64, first_inserted_id.unwrap_or(0) as u64)),
-            Err(e) => Err(NoriaWriteError(e.into())),
-        }
+        result?;
+        Ok((data.len() as u64, first_inserted_id.unwrap_or(0) as u64))
     }
 
     async fn do_read(
@@ -615,7 +598,7 @@ impl NoriaConnector {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         trace!("select::access view");
-        let getter = self.inner.ensure_getter(&qname).await;
+        let getter = self.inner.ensure_getter(&qname).await?;
         let getter_schema = getter.schema().expect("No schema for view");
         let mut key_types = key_column_indices
             .iter()
@@ -678,8 +661,7 @@ impl NoriaConnector {
             let mut binops = binops.into_iter().map(|(_, b)| b).unique();
             let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
             if let Some(other) = binops.next() {
-                let e = format!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
-                return Err(UnsupportedError(e));
+                unsupported!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
             }
 
             keys.drain(..)
@@ -738,10 +720,7 @@ impl NoriaConnector {
             timestamp: ticket,
         };
 
-        let data = getter
-            .raw_lookup(vq)
-            .await
-            .map_err(|e| NoriaReadError(e.into()))?;
+        let data = getter.raw_lookup(vq).await?;
         trace!("select::complete");
         let schema = schema.to_vec();
         Ok((
@@ -760,7 +739,7 @@ impl NoriaConnector {
         params: Option<Vec<DataType>>,
     ) -> std::result::Result<(u64, u64), Error> {
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await;
+        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
 
         let q = q.into_owned();
         let (key, updates) = {
@@ -771,14 +750,11 @@ impl NoriaConnector {
                 // no update on views
                 unimplemented!();
             };
-            utils::extract_update(q, params.map(|p| p.into_iter()), schema)
+            utils::extract_update(q, params.map(|p| p.into_iter()), schema)?
         };
 
         trace!("update::update");
-        mutator
-            .update(key, updates)
-            .await
-            .map_err(|e| NoriaWriteError(e.into()))?;
+        mutator.update(key, updates).await?;
         trace!("update::complete");
         // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than hardcoded (1,0)
         Ok((1, 0))
@@ -803,7 +779,7 @@ impl NoriaConnector {
         let getter_schema = self
             .inner
             .ensure_getter(&qname)
-            .await
+            .await?
             .schema()
             .expect(&format!("no schema for view '{}'", qname));
 
@@ -850,7 +826,7 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let rewritten = rewrite::collapse_where_in(&mut sql_q, false);
+        let rewritten = rewrite::collapse_where_in(&mut sql_q, false)?;
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
         } else {
@@ -866,7 +842,7 @@ impl NoriaConnector {
         let getter_schema = self
             .inner
             .ensure_getter(&qname)
-            .await
+            .await?
             .schema()
             .expect(&format!("no schema for view '{}'", qname));
 
@@ -921,9 +897,7 @@ impl NoriaConnector {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
                 Some(e) => e.clone(),
-                None => {
-                    return Err(MissingPreparedStatement);
-                }
+                None => Err(PreparedStatementMissing)?,
             }
         };
 

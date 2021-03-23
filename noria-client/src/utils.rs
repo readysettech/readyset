@@ -6,7 +6,8 @@ use nom_sql::{
     CreateTableStatement, FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression,
     SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
-use noria::{DataType, Modification, Operation};
+use noria::errors::{bad_request_err, ReadySetResult};
+use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -93,8 +94,8 @@ fn do_flatten_conditional(
     cond: &ConditionExpression,
     pkey: &Vec<&Column>,
     mut flattened: &mut HashSet<Vec<(String, DataType)>>,
-) -> bool {
-    match *cond {
+) -> ReadySetResult<bool> {
+    Ok(match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
@@ -106,10 +107,10 @@ fn do_flatten_conditional(
             operator: BinaryOperator::Equal,
         }) => {
             if !pkey.iter().any(|pk| pk.name == c.name) {
-                panic!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
+                unsupported!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
             }
             if !c.table.iter().all(|n| n == pkey[0].table.as_ref().unwrap()) {
-                panic!("UPDATE/DELETE contains references to another table")
+                unsupported!("UPDATE/DELETE contains references to another table")
             }
 
             let value = DataType::from(l);
@@ -153,9 +154,9 @@ fn do_flatten_conditional(
             // WHERE A.a = AND a.b = 2
             // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
             let pre_count = flattened.len();
-            do_flatten_conditional(&*left, pkey, &mut flattened) && {
+            do_flatten_conditional(&*left, pkey, &mut flattened)? && {
                 let count = flattened.len();
-                let valid = do_flatten_conditional(&*right, pkey, &mut flattened);
+                let valid = do_flatten_conditional(&*right, pkey, &mut flattened)?;
                 valid && (pre_count == flattened.len() || count == flattened.len())
             }
         }
@@ -164,11 +165,11 @@ fn do_flatten_conditional(
             ref left,
             ref right,
         }) => {
-            do_flatten_conditional(&*left, pkey, &mut flattened)
-                && do_flatten_conditional(&*right, pkey, &mut flattened)
+            do_flatten_conditional(&*left, pkey, &mut flattened)?
+                && do_flatten_conditional(&*right, pkey, &mut flattened)?
         }
         _ => false,
-    }
+    })
 }
 
 // Takes a tree of conditional expressions for a DELETE/UPDATE statement and returns a list of all the
@@ -180,26 +181,28 @@ fn do_flatten_conditional(
 pub(crate) fn flatten_conditional(
     cond: &ConditionExpression,
     pkey: &Vec<&Column>,
-) -> Option<Vec<Vec<DataType>>> {
+) -> ReadySetResult<Option<Vec<Vec<DataType>>>> {
     let mut flattened = HashSet::new();
-    if do_flatten_conditional(cond, pkey, &mut flattened) {
+    Ok(if do_flatten_conditional(cond, pkey, &mut flattened)? {
         let keys = flattened
             .into_iter()
             .map(|key| {
                 // This will be the case if we got a cond without any primary keys,
                 // or if we have a multi-column primary key and the cond only covers part of it.
                 if key.len() != pkey.len() {
-                    panic!("UPDATE/DELETE requires all columns of a compound key to be present");
+                    unsupported!(
+                        "UPDATE/DELETE requires all columns of a compound key to be present"
+                    );
                 }
 
-                key.into_iter().map(|(_c, v)| v).collect()
+                Ok(key.into_iter().map(|(_c, v)| v).collect())
             })
-            .collect();
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         Some(keys)
     } else {
         None
-    }
+    })
 }
 
 // Finds the primary for the given table, both by looking at constraints on individual
@@ -364,7 +367,8 @@ fn walk_update_where<I>(
     col2v: &mut HashMap<String, DataType>,
     params: &mut Option<I>,
     expr: ConditionExpression,
-) where
+) -> ReadySetResult<()>
+where
     I: Iterator<Item = DataType>,
 {
     match expr {
@@ -376,13 +380,15 @@ fn walk_update_where<I>(
             let v = match l {
                 Literal::Placeholder(ItemPlaceholder::QuestionMark) => params
                     .as_mut()
-                    .expect("Found placeholder in ad-hoc query")
+                    .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
                     .next()
-                    .expect("Not enough parameter values given in EXECUTE"),
+                    .ok_or_else(|| {
+                        bad_request_err("Not enough parameter values given in EXECUTE")
+                    })?,
                 v => DataType::from(v),
             };
             let oldv = col2v.insert(c.name, v);
-            assert!(oldv.is_none());
+            invariant!(oldv.is_none());
         }
         ConditionExpression::LogicalOp(ConditionTree {
             operator: BinaryOperator::And,
@@ -390,18 +396,19 @@ fn walk_update_where<I>(
             right,
         }) => {
             // recurse
-            walk_update_where(col2v, params, *left);
-            walk_update_where(col2v, params, *right);
+            walk_update_where(col2v, params, *left)?;
+            walk_update_where(col2v, params, *right)?;
         }
-        _ => unimplemented!("Fancy high-brow UPDATEs are not supported"),
+        _ => unsupported!("Fancy high-brow UPDATEs are not supported"),
     }
+    Ok(())
 }
 
 pub(crate) fn extract_update_params_and_fields<I>(
     q: &mut UpdateStatement,
     params: &mut Option<I>,
     schema: &CreateTableStatement,
-) -> Vec<(usize, Modification)>
+) -> ReadySetResult<Vec<(usize, Modification)>>
 where
     I: Iterator<Item = DataType>,
 {
@@ -419,9 +426,11 @@ where
                 }) => {
                     let v = params
                         .as_mut()
-                        .expect("Found placeholder in ad-hoc query")
+                        .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
                         .next()
-                        .expect("Not enough parameter values given in EXECUTE");
+                        .ok_or_else(|| {
+                            bad_request_err("Not enough parameter values given in EXECUTE")
+                        })?;
                     updates.push((i, Modification::Set(v)));
                 }
                 FieldValueExpression::Literal(LiteralExpression {
@@ -452,7 +461,7 @@ where
                                 },
                             alias: None,
                         } => {
-                            assert_eq!(c, &field.column);
+                            invariant_eq!(c, &field.column);
                             match op {
                                 ArithmeticOperator::Add => {
                                     updates.push((i, Modification::Apply(Operation::Add, l.into())))
@@ -460,24 +469,24 @@ where
                                 ArithmeticOperator::Subtract => {
                                     updates.push((i, Modification::Apply(Operation::Sub, l.into())))
                                 }
-                                _ => unimplemented!(),
+                                _ => unsupported!(),
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unsupported!(),
                     }
                 }
-                _ => unreachable!(),
+                _ => unsupported!(),
             }
         }
     }
-    updates
+    Ok(updates)
 }
 
 pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
     mut params: Option<I>,
     schema: &CreateTableStatement,
-) -> (Vec<DataType>, Vec<(usize, Modification)>)
+) -> ReadySetResult<(Vec<DataType>, Vec<(usize, Modification)>)>
 where
     I: Iterator<Item = DataType>,
 {
@@ -488,14 +497,14 @@ where
         .where_clause
         .expect("UPDATE without WHERE is not supported");
     let mut col_to_val: HashMap<_, _> = HashMap::new();
-    walk_update_where(&mut col_to_val, &mut params, where_clause);
+    walk_update_where(&mut col_to_val, &mut params, where_clause)?;
 
     let key: Vec<_> = pkey
         .iter()
         .map(|&(_, c)| col_to_val.remove(&c.name).unwrap())
         .collect();
 
-    (key, updates)
+    Ok((key, updates?))
 }
 
 #[cfg(test)]
@@ -524,7 +533,7 @@ mod tests {
             .collect();
 
         let pkey_ref = pkey.iter().map(|c| c).collect();
-        if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref) {
+        if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref).unwrap() {
             let mut expected: Vec<Vec<DataType>> = expected
                 .unwrap()
                 .into_iter()
