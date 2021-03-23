@@ -82,20 +82,17 @@ pub enum FunctionArgument {
     Column(Column),
     Literal(Literal),
     Conditional(CaseWhenExpression),
+    Call(Box<FunctionExpression>),
 }
 
 impl Display for FunctionArgument {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FunctionArgument::Column(ref col) => write!(f, "{}", col)?,
-            FunctionArgument::Conditional(ref e) => {
-                write!(f, "{}", e)?;
-            }
-            FunctionArgument::Literal(ref l) => {
-                write!(f, "{}", l.to_string())?;
-            }
+            FunctionArgument::Column(ref col) => write!(f, "{}", col),
+            FunctionArgument::Conditional(ref e) => write!(f, "{}", e),
+            FunctionArgument::Literal(ref l) => write!(f, "{}", l.to_string()),
+            FunctionArgument::Call(ref fun) => write!(f, "{}", fun),
         }
-        Ok(())
     }
 }
 
