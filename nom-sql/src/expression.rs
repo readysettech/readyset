@@ -56,7 +56,7 @@ impl From<FunctionArgument> for Expression {
                 function: Some(f), ..
             }) => Expression::Call(*f),
             FunctionArgument::Literal(lit) => Expression::Literal(lit),
-            FunctionArgument::Conditional(cond) => todo!(),
+            FunctionArgument::Conditional(_cond) => todo!(),
             FunctionArgument::Call(fun) => Expression::Call(*fun),
         }
     }

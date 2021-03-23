@@ -1,9 +1,10 @@
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use crate::controller::sql::query_utils::{function_arguments, is_aggregate, ReferredColumns};
+use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
 use crate::{internal, invariant, unsupported};
 use mir::{Column, MirNodeRef};
+use nom_sql::analysis::{function_arguments, ReferredColumns};
 use nom_sql::{self, ConditionExpression, FunctionArgument, FunctionExpression};
 use nom_sql::{Expression, FunctionExpression::*};
 use std::collections::{HashMap, HashSet};
@@ -60,7 +61,8 @@ pub(super) fn make_predicates_above_grouped<'a>(
 }
 
 /// Normally, projection happens after grouped nodes - however, if aggregates used in grouped
-/// expressions reference expressions rather than columns directly, we need to
+/// expressions reference expressions rather than columns directly, we need to project them out
+/// before the grouped nodes
 pub(super) fn make_expressions_above_grouped(
     mir_converter: &SqlToMirConverter,
     name: &str,

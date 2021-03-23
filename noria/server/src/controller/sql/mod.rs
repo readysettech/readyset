@@ -20,6 +20,7 @@ use ::mir::reuse as mir_reuse;
 use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
+use nom_sql::analysis::ReferredTables;
 use nom_sql::parser as sql_parser;
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
@@ -871,7 +872,6 @@ impl SqlIncorporator {
 
         use passes::alias_removal::TableAliasRewrite;
         use passes::*;
-        use query_utils::ReferredTables;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,

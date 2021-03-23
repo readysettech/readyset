@@ -1,3 +1,5 @@
+#![feature(or_patterns)]
+
 extern crate nom;
 
 extern crate serde;
@@ -34,6 +36,7 @@ pub use self::set::SetStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
 
+pub mod analysis;
 pub mod parser;
 
 #[macro_use]
