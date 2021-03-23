@@ -8,8 +8,11 @@
 
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::{Worker, WorkerIdentifier};
+use crate::errors::internal_err;
+use crate::ReadySetResult;
 use dataflow::node;
 use dataflow::prelude::*;
+use noria::{internal, invariant, invariant_eq, ReadySetError};
 use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
@@ -23,7 +26,7 @@ pub fn add(
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
     topo_list: &[NodeIndex],
-) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
+) -> Result<HashMap<(NodeIndex, NodeIndex), NodeIndex>, ReadySetError> {
     // find all new nodes in topological order. we collect first since we'll be mutating the graph
     // below. it's convenient to have the nodes in topological order, because we then know that
     // we'll first add egress nodes, and then the related ingress nodes. if we're ever required to
@@ -70,7 +73,7 @@ pub fn add(
             }
 
             // parent is in other domain! does it already have an egress?
-            let mut ingress = None;
+            let mut ingress: Option<ReadySetResult<NodeIndex>> = None;
             if parent != source {
                 'search: for pchild in
                     graph.neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
@@ -79,10 +82,10 @@ pub fn add(
                         // it does! does `domain` have an ingress already listed there?
                         for i in graph.neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing)
                         {
-                            assert!(graph[i].is_ingress());
+                            invariant!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
-                                ingress = Some(i);
+                                ingress = Some(Ok(i));
                                 // FIXME(malte): this is buggy! it will re-use ingress nodes even if
                                 // they have a different sharding to the one we're about to add
                                 // (whose sharding is only determined below).
@@ -110,7 +113,7 @@ pub fn add(
                 // columns applied
                 let sharding = if graph[parent].is_sharder() {
                     let parent_out_sharding =
-                        graph[parent].with_sharder(|s| s.sharded_by()).unwrap();
+                        graph[parent].with_sharder(|s| Ok(s.sharded_by()))?.unwrap();
                     // TODO(malte): below is ugly, but the only way to get the sharding width at
                     // this point; the sharder parent does not currently have the information.
                     // Change this once we support per-subgraph sharding widths and
@@ -118,7 +121,7 @@ pub fn add(
                     if let Sharding::ByColumn(_, width) = graph[node].sharded_by() {
                         Sharding::ByColumn(parent_out_sharding, width)
                     } else {
-                        unreachable!()
+                        internal!()
                     }
                 } else {
                     graph[parent].sharded_by()
@@ -147,8 +150,8 @@ pub fn add(
                     );
                 }
 
-                ingress
-            });
+                Ok(ingress)
+            })?;
 
             // we need to hook the ingress node in between us and our remote parent
             #[allow(clippy::unit_arg)]
@@ -178,8 +181,12 @@ pub fn add(
             let sender = {
                 let mut senders =
                     graph.neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
-                let sender = senders.next().expect("ingress has no parents");
-                assert_eq!(senders.count(), 0, "ingress had more than one parent");
+                let sender = senders
+                    .next()
+                    .ok_or_else(|| internal_err("ingress has no parents"))?;
+                if senders.count() != 0 {
+                    internal!("ingress had more than one parent");
+                }
                 sender
             };
 
@@ -207,7 +214,9 @@ pub fn add(
                     .neighbors_directed(sender, petgraph::EdgeDirection::Outgoing)
                     .filter(|&ni| graph[ni].is_egress());
                 let egress = es.next();
-                assert_eq!(es.count(), 0, "node has more than one egress");
+                if es.count() != 0 {
+                    internal!("node has more than one egress")
+                }
                 egress
             };
 
@@ -254,7 +263,7 @@ pub fn add(
         }
     }
 
-    swaps
+    Ok(swaps)
 }
 
 pub(super) fn connect(
@@ -263,7 +272,7 @@ pub(super) fn connect(
     domains: &mut HashMap<DomainIndex, DomainHandle>,
     workers: &HashMap<WorkerIdentifier, Worker>,
     new: &HashSet<NodeIndex>,
-) {
+) -> ReadySetResult<()> {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
     for &node in new {
         let n = &graph[node];
@@ -293,34 +302,30 @@ pub(super) fn connect(
                     // because an egress implies that no shuffle was necessary, which again means
                     // that the sharding must be the same.
                     for i in 0..shards {
-                        domain
-                            .send_to_healthy_shard(
-                                i,
-                                Box::new(Packet::UpdateEgress {
-                                    node: sender_node.local_addr(),
-                                    new_tx: Some((node, n.local_addr(), (n.domain(), i))),
-                                    new_tag: None,
-                                }),
-                                workers,
-                            )
-                            .unwrap();
+                        domain.send_to_healthy_shard(
+                            i,
+                            Box::new(Packet::UpdateEgress {
+                                node: sender_node.local_addr(),
+                                new_tx: Some((node, n.local_addr(), (n.domain(), i))),
+                                new_tag: None,
+                            }),
+                            workers,
+                        )?;
                     }
                 } else {
                     // consider the case where len != 1. that must mean that the
                     // sender_node.sharded_by() == Sharding::None. so, we have an unsharded egress
                     // sending to a sharded child. but that shouldn't be allowed -- such a node
                     // *must* be a Sharder.
-                    assert_eq!(shards, 1);
-                    domain
-                        .send_to_healthy(
-                            Box::new(Packet::UpdateEgress {
-                                node: sender_node.local_addr(),
-                                new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
-                                new_tag: None,
-                            }),
-                            workers,
-                        )
-                        .unwrap();
+                    invariant_eq!(shards, 1);
+                    domain.send_to_healthy(
+                        Box::new(Packet::UpdateEgress {
+                            node: sender_node.local_addr(),
+                            new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
+                            new_tag: None,
+                        }),
+                        workers,
+                    )?;
                 }
             } else if sender_node.is_sharder() {
                 trace!(log,
@@ -340,12 +345,12 @@ pub(super) fn connect(
                             new_txs: (n.local_addr(), txs),
                         }),
                         workers,
-                    )
-                    .unwrap();
+                    )?;
             } else if sender_node.is_source() {
             } else {
-                unreachable!("ingress parent is not a sender");
+                internal!("ingress parent is not a sender");
             }
         }
     }
+    Ok(())
 }

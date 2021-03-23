@@ -5,6 +5,7 @@ use crate::controller::schema;
 use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::errors::{internal_err, ReadySetResult};
 use crate::metrics::MetricsDump;
 use crate::NoriaMetricsRecorder;
 use dataflow::prelude::*;
@@ -16,7 +17,7 @@ use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::ActivationResult;
+use noria::{internal, ActivationResult};
 use petgraph::visit::Bfs;
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -515,7 +516,7 @@ impl ControllerInner {
         num_shards: Option<usize>,
         log: &Logger,
         nodes: Vec<(NodeIndex, bool)>,
-    ) -> DomainHandle {
+    ) -> ReadySetResult<DomainHandle> {
         // TODO: can we just redirect all domain traffic through the worker's connection?
         let mut assignments = Vec::new();
         let mut nodes = Some(
@@ -568,13 +569,11 @@ impl ControllerInner {
                 w.sender.peer_addr()
             );
             let src = w.sender.local_addr().unwrap();
-            w.sender
-                .send(CoordinationMessage {
-                    epoch: self.epoch,
-                    source: src,
-                    payload: CoordinationPayload::AssignDomain(domain),
-                })
-                .unwrap();
+            w.sender.send(CoordinationMessage {
+                epoch: self.epoch,
+                source: src,
+                payload: CoordinationPayload::AssignDomain(domain),
+            })?;
 
             assignments.push(identifier);
         }
@@ -593,13 +592,15 @@ impl ControllerInner {
                         shard,
                         self.channel_coordinator
                             .builder_for(&(idx, shard))
-                            .unwrap()
+                            .ok_or_else(|| internal_err("could not get domain connection builder"))?
                             .build_sync()
-                            .unwrap(),
+                            .map_err(|e| {
+                                internal_err(format!("failed to build domain sender: {:?}", e))
+                            })?,
                     );
                 }
                 crp => {
-                    unreachable!("got unexpected control reply packet: {:?}", crp);
+                    internal!("got unexpected control reply packet: {:?}", crp);
                 }
             }
         }
@@ -619,14 +620,11 @@ impl ControllerInner {
         // result of a nasty deadlock.)
         for endpoint in self.workers.values_mut() {
             for &dd in &announce {
-                endpoint
-                    .sender
-                    .send(CoordinationMessage {
-                        epoch: self.epoch,
-                        source: endpoint.sender.local_addr().unwrap(),
-                        payload: CoordinationPayload::DomainBooted(dd),
-                    })
-                    .unwrap();
+                endpoint.sender.send(CoordinationMessage {
+                    epoch: self.epoch,
+                    source: endpoint.sender.local_addr().unwrap(),
+                    payload: CoordinationPayload::DomainBooted(dd),
+                })?;
             }
         }
 
@@ -639,11 +637,11 @@ impl ControllerInner {
             })
             .collect();
 
-        DomainHandle {
+        Ok(DomainHandle {
             idx,
             shards,
             log: log.clone(),
-        }
+        })
     }
 
     /// Set the `Logger` to use for internal log messages.
@@ -673,7 +671,7 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m);
-        m.commit();
+        m.commit().unwrap();
         r
     }
 
@@ -695,7 +693,7 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m);
-        m.commit();
+        m.commit().unwrap();
         r
     }
 

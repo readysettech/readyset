@@ -20,7 +20,7 @@ pub(super) fn inform(
     log: &Logger,
     controller: &mut controller::ControllerInner,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
-) {
+) -> ReadySetResult<()> {
     let source = controller.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
@@ -34,7 +34,7 @@ pub(super) fn inform(
             .map(|&(ni, _)| ni)
             .collect();
 
-        assert_ne!(old_nodes.len(), nodes.len());
+        invariant!(old_nodes.len() != nodes.len());
         for (ni, new) in nodes {
             if !new {
                 continue;
@@ -64,4 +64,5 @@ pub(super) fn inform(
             .unwrap();
         }
     }
+    Ok(())
 }

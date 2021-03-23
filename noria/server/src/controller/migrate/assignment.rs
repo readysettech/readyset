@@ -4,7 +4,12 @@ use dataflow::prelude::*;
 use petgraph;
 use slog::Logger;
 
-pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains: &mut usize) {
+pub fn assign(
+    log: &Logger,
+    graph: &mut Graph,
+    topo_list: &[NodeIndex],
+    ndomains: &mut usize,
+) -> ReadySetResult<()> {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we generally want as few domains as possible, but in *some* cases we must make new ones.
     // specifically:
@@ -12,9 +17,9 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
     //  - the child of a Sharder is always in a different domain from the sharder
     //  - shard merge nodes are never in the same domain as their sharded ancestors
 
-    let mut next_domain = || {
+    let mut next_domain = || -> ReadySetResult<usize> {
         *ndomains += 1;
-        *ndomains - 1
+        Ok(*ndomains - 1)
     };
 
     for &node in topo_list {
@@ -59,7 +64,7 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                         let c = &graph[cni];
                         if c.is_sharder() || c.is_shard_merger() {
                         } else {
-                            assert_eq!(n.sharded_by().is_none(), c.sharded_by().is_none());
+                            invariant_eq!(n.sharded_by().is_none(), c.sharded_by().is_none());
                             children_same_shard.push(cni);
                             frontier.extend(
                                 graph.neighbors_directed(cni, petgraph::EdgeDirection::Outgoing),
@@ -84,7 +89,7 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                                 break 'search;
                             }
                         } else {
-                            assert_eq!(n.sharded_by().is_none(), p.sharded_by().is_none());
+                            invariant_eq!(n.sharded_by().is_none(), p.sharded_by().is_none());
                             frontier.extend(
                                 graph.neighbors_directed(pni, petgraph::EdgeDirection::Incoming),
                             );
@@ -92,12 +97,12 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                     }
                 }
 
-                return if let Some(friendly_base) = friendly_base {
+                return Ok(if let Some(friendly_base) = friendly_base {
                     friendly_base.domain().index()
                 } else {
                     // there are no bases like us, so we need a new domain :'(
-                    next_domain()
-                };
+                    next_domain()?
+                });
             }
 
             if graph[node].name().starts_with("BOUNDARY_") {
@@ -133,13 +138,13 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                     // we're a child of a sharder (which currently has to be unsharded). we
                     // can't be in the same domain as the sharder (because we're starting a new
                     // sharding)
-                    assert!(p.sharded_by().is_none());
+                    invariant!(p.sharded_by().is_none());
                 } else if p.is_source() {
                     // the source isn't a useful source of truth
                 } else if assignment.is_none() {
                     // the key may move to a different column, so we can't actually check for
                     // ByColumn equality. this'll do for now.
-                    assert_eq!(p.sharded_by().is_none(), n.sharded_by().is_none());
+                    invariant_eq!(p.sharded_by().is_none(), n.sharded_by().is_none());
                     if p.has_domain() {
                         assignment = Some(p.domain().index())
                     }
@@ -185,11 +190,11 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
                 }
             }
 
-            assignment.unwrap_or_else(|| {
+            Ok(assignment.unwrap_or_else(|| {
                 // no other options left -- we need a new domain
-                next_domain()
-            })
-        })();
+                next_domain().unwrap()
+            }))
+        })()?;
 
         debug!(log, "node added to domain";
            "node" => node.index(),
@@ -197,4 +202,5 @@ pub fn assign(log: &Logger, graph: &mut Graph, topo_list: &[NodeIndex], ndomains
            "domain" => ?assignment);
         graph[node].add_to(assignment.into());
     }
+    Ok(())
 }
