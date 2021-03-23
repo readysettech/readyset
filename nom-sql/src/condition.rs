@@ -190,6 +190,7 @@ fn parenthetical_expr_helper(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
 
 pub fn parenthetical_expr(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     alt((
+        between_expr,
         parenthetical_expr_helper,
         map(
             delimited(
@@ -353,7 +354,7 @@ mod tests {
 
     use super::*;
     use crate::arithmetic::{ArithmeticBase, ArithmeticOperator};
-    use crate::column::Column;
+    use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
     use crate::common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
     use ConditionBase::*;
     use ConditionExpression::*;
@@ -1004,6 +1005,32 @@ mod tests {
         };
         let (remaining, result) = condition_expr(qs).unwrap();
         assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn between_function_call() {
+        let qs = b"f(foo, bar) between 1 and 2";
+        let expected = Between {
+            operand: Box::new(Base(Field(Column {
+                name: "f(foo,bar)".to_owned(),
+                table: None,
+                function: Some(Box::new(FunctionExpression::Generic(
+                    "f".to_owned(),
+                    FunctionArguments {
+                        arguments: vec![
+                            FunctionArgument::Column(Column::from("foo")),
+                            FunctionArgument::Column(Column::from("bar")),
+                        ],
+                    },
+                ))),
+                alias: None,
+            }))),
+            min: Box::new(Base(Literal(1.into()))),
+            max: Box::new(Base(Literal(2.into()))),
+        };
+        let (remaining, result) = condition_expr(qs).unwrap();
+        assert_eq!(String::from_utf8_lossy(remaining), "");
         assert_eq!(result, expected);
     }
 
