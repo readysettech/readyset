@@ -1,6 +1,7 @@
 use crate::bytes::BytesStr;
 use crate::codec::error::DecodeError as Error;
 use crate::codec::Codec;
+use crate::error::Error as BackendError;
 use crate::message::{
     FrontendMessage::{self, *},
     StatementName::*,
@@ -14,6 +15,7 @@ use chrono::NaiveDateTime;
 use postgres_types::FromSql;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use tokio_util::codec::Decoder;
 
 const ID_BIND: u8 = b'B';
@@ -43,7 +45,7 @@ const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
-impl<R: IntoIterator<Item: Into<Value>>> Decoder for Codec<R> {
+impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Codec<R> {
     type Item = FrontendMessage;
     type Error = Error;
 
@@ -349,8 +351,19 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 mod tests {
 
     use super::*;
+    use crate::value::Value as DataValue;
     use bytes::{BufMut, BytesMut};
     use postgres_types::ToSql;
+
+    struct Value(DataValue);
+
+    impl TryFrom<Value> for DataValue {
+        type Error = BackendError;
+
+        fn try_from(v: Value) -> Result<Self, Self::Error> {
+            Ok(v.0)
+        }
+    }
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();
@@ -521,8 +534,8 @@ mod tests {
             portal_name: bytes_str("portal_name"),
             prepared_statement_name: bytes_str("prepared_statement_name"),
             params: vec![
-                Value::Int(42),
-                Value::Text(ArcCStr::try_from("some text").unwrap()),
+                DataValue::Int(42),
+                DataValue::Text(ArcCStr::try_from("some text").unwrap()),
             ],
             result_transfer_formats: vec![Binary, Binary, Text],
         });
@@ -547,7 +560,7 @@ mod tests {
         let expected = Some(Bind {
             portal_name: bytes_str("portal_name"),
             prepared_statement_name: bytes_str("prepared_statement_name"),
-            params: vec![Value::Null],
+            params: vec![DataValue::Null],
             result_transfer_formats: vec![],
         });
         assert_eq!(codec.decode(&mut buf).unwrap(), expected);
@@ -829,7 +842,7 @@ mod tests {
         buf.put_i32(-1); // size
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            Value::Null
+            DataValue::Null
         );
     }
 
@@ -840,7 +853,7 @@ mod tests {
         buf.put_i32(0x12345678); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            Value::Int(0x12345678)
+            DataValue::Int(0x12345678)
         );
     }
 
@@ -851,7 +864,7 @@ mod tests {
         buf.put_i64(0x1234567890abcdef); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            Value::Bigint(0x1234567890abcdef)
+            DataValue::Bigint(0x1234567890abcdef)
         );
     }
 
@@ -862,7 +875,7 @@ mod tests {
         buf.put_f64(0.123456789); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::FLOAT8).unwrap(),
-            Value::Double(0.123456789)
+            DataValue::Double(0.123456789)
         );
     }
 
@@ -873,7 +886,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
-            Value::Text(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Text(ArcCStr::try_from("mighty").unwrap())
         );
     }
 
@@ -885,7 +898,7 @@ mod tests {
         dt.to_sql(&Type::TIMESTAMP, &mut buf).unwrap(); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
-            Value::Timestamp(dt)
+            DataValue::Timestamp(dt)
         );
     }
 
@@ -896,7 +909,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            Value::Varchar(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Varchar(ArcCStr::try_from("mighty").unwrap())
         );
     }
 }

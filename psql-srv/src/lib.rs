@@ -15,11 +15,12 @@ pub use crate::r#type::ColType;
 pub use crate::value::Value;
 
 use async_trait::async_trait;
+use std::convert::TryInto;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[async_trait]
 pub trait Backend {
-    type Value: Into<Value>;
+    type Value: TryInto<Value, Error = Error>;
     type Row: IntoIterator<Item = Self::Value>;
     type Resultset: IntoIterator<Item = Self::Row>;
 
@@ -47,7 +48,7 @@ pub struct PrepareResponse {
 }
 
 pub enum QueryResponse<S> {
-    Select { schema: Schema, rows: S },
+    Select { schema: Schema, resultset: S },
     Insert(u64),
     Update(u64),
     Delete(u64),

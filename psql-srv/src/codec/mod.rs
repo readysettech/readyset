@@ -4,9 +4,11 @@ mod error;
 
 pub use error::{DecodeError, EncodeError};
 
+use crate::error::Error;
 use crate::r#type::Type;
 use crate::value::Value;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::marker::PhantomData;
 
 /// A [`Decoder`] implementation that deserializes `FrontendMessage` and [`Encoder`] implementation
@@ -20,7 +22,7 @@ pub struct Codec<R> {
     _unused: PhantomData<R>,
 }
 
-impl<R: IntoIterator<Item: Into<Value>>> Codec<R> {
+impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> Codec<R> {
     pub fn new() -> Codec<R> {
         Codec {
             is_starting_up: true,

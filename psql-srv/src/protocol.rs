@@ -221,9 +221,9 @@ impl Protocol {
 
                 let response = backend.on_execute(*prepared_statement_id, params).await?;
 
-                if let Select { rows, .. } = response {
+                if let Select { resultset, .. } = response {
                     let mut n_rows = 0;
-                    for r in rows {
+                    for r in resultset {
                         channel
                             .feed(DataRow {
                                 values: r,
@@ -252,7 +252,7 @@ impl Protocol {
             Query { query } => {
                 let response = backend.on_query(query.borrow()).await?;
 
-                if let Select { schema, rows } = response {
+                if let Select { schema, resultset } = response {
                     channel
                         .feed(RowDescription {
                             field_descriptions: schema
@@ -262,7 +262,7 @@ impl Protocol {
                         })
                         .await?;
                     let mut n_rows = 0;
-                    for r in rows {
+                    for r in resultset {
                         channel
                             .feed(DataRow {
                                 values: r,
@@ -422,37 +422,36 @@ fn make_field_description(
 }
 
 fn to_type(col_type: &ColType) -> Result<Type, Error> {
-    let t = match *col_type {
-        ColType::Bool => Type::BOOL,
-        ColType::Char(_) => Type::CHAR,
-        ColType::Varchar(_) => Type::VARCHAR,
-        ColType::Int(_) => Type::INT4,
+    match *col_type {
+        ColType::Bool => Ok(Type::BOOL),
+        ColType::Char(_) => Ok(Type::CHAR),
+        ColType::Varchar(_) => Ok(Type::VARCHAR),
+        ColType::Int(_) => Ok(Type::INT4),
         ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Bigint(_) => Type::INT8,
+        ColType::Bigint(_) => Ok(Type::INT8),
         ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Smallint(_) => Type::INT2,
+        ColType::Smallint(_) => Ok(Type::INT2),
         ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Blob => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Longblob => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Double => Type::FLOAT8,
+        ColType::Double => Ok(Type::FLOAT8),
         ColType::Float => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Real => Type::FLOAT4,
+        ColType::Real => Ok(Type::FLOAT4),
         ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Longtext => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Text => Type::TEXT,
+        ColType::Text => Ok(Type::TEXT),
         ColType::Date => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Time => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Timestamp => Type::TIMESTAMP,
+        ColType::Timestamp => Ok(Type::TIMESTAMP),
         ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone()))?,
         ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone()))?,
-    };
-    Ok(t)
+    }
 }
