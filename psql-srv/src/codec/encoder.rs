@@ -1,5 +1,6 @@
 use crate::codec::error::EncodeError as Error;
 use crate::codec::Codec;
+use crate::error::Error as BackendError;
 use crate::message::{
     BackendMessage::{self, *},
     CommandCompleteTag::*,
@@ -11,6 +12,7 @@ use crate::value::Value;
 use bytes::{BufMut, BytesMut};
 use postgres_types::ToSql;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use tokio_util::codec::Encoder;
 
 const ID_AUTHENTICATION_OK: u8 = b'R';
@@ -50,7 +52,7 @@ const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
-impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
+impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Encoder for Codec<R> {
     type Item = BackendMessage<R>;
     type Error = Error;
 
@@ -118,9 +120,12 @@ impl<R: IntoIterator<Item: Into<Value>>> Encoder for Codec<R> {
                         })?,
                         None => Text,
                     };
+                    let v = v
+                        .try_into()
+                        .map_err(|e| Error::InternalError(e.to_string()))?;
                     match format {
-                        Binary => put_binary_value(v.into(), dst)?,
-                        Text => put_text_value(v.into(), dst)?,
+                        Binary => put_binary_value(v, dst)?,
+                        Text => put_text_value(v, dst)?,
                     };
                     n_values += 1;
                 }
@@ -367,10 +372,21 @@ mod tests {
 
     use super::*;
     use crate::message::{FieldDescription, SqlState};
+    use crate::value::Value as DataValue;
     use arccstr::ArcCStr;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
     use std::rc::Rc;
+
+    struct Value(DataValue);
+
+    impl TryFrom<Value> for DataValue {
+        type Error = BackendError;
+
+        fn try_from(v: Value) -> Result<Self, Self::Error> {
+            Ok(v.0)
+        }
+    }
 
     #[test]
     fn test_encode_ssl_response() {
@@ -515,7 +531,7 @@ mod tests {
         codec
             .encode(
                 DataRow {
-                    values: vec![Value::Int(42)],
+                    values: vec![Value(DataValue::Int(42))],
                     explicit_transfer_formats: Some(Rc::new(vec![Binary])),
                 },
                 &mut buf,
@@ -538,9 +554,9 @@ mod tests {
             .encode(
                 DataRow {
                     values: vec![
-                        Value::Int(42),
-                        Value::Null,
-                        Value::Text(ArcCStr::try_from("some text").unwrap()),
+                        Value(DataValue::Int(42)),
+                        Value(DataValue::Null),
+                        Value(DataValue::Text(ArcCStr::try_from("some text").unwrap())),
                     ],
                     explicit_transfer_formats: Some(Rc::new(vec![Binary, Binary, Binary])),
                 },
@@ -747,7 +763,7 @@ mod tests {
     #[test]
     fn test_encode_binary_null() {
         let mut buf = BytesMut::new();
-        put_binary_value(Value::Null, &mut buf).unwrap();
+        put_binary_value(DataValue::Null, &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // null sentinel
         assert_eq!(buf, exp);
@@ -756,7 +772,7 @@ mod tests {
     #[test]
     fn test_encode_binary_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(Value::Int(0x1234567), &mut buf).unwrap();
+        put_binary_value(DataValue::Int(0x1234567), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_i32(0x1234567); // value
@@ -766,7 +782,7 @@ mod tests {
     #[test]
     fn test_encode_binary_big_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(Value::Bigint(0x1234567890abcdef), &mut buf).unwrap();
+        put_binary_value(DataValue::Bigint(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_i64(0x1234567890abcdef); // value
@@ -776,7 +792,7 @@ mod tests {
     #[test]
     fn test_encode_binary_double() {
         let mut buf = BytesMut::new();
-        put_binary_value(Value::Double(0.123456789), &mut buf).unwrap();
+        put_binary_value(DataValue::Double(0.123456789), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_f64(0.123456789); // value
@@ -787,7 +803,7 @@ mod tests {
     fn test_encode_binary_text() {
         let mut buf = BytesMut::new();
         put_binary_value(
-            Value::Text(ArcCStr::try_from("some text").unwrap()),
+            DataValue::Text(ArcCStr::try_from("some text").unwrap()),
             &mut buf,
         )
         .unwrap();
@@ -801,7 +817,7 @@ mod tests {
     fn test_encode_binary_timestamp() {
         let dt = NaiveDateTime::from_timestamp(1_000_000_000, 42_000_000);
         let mut buf = BytesMut::new();
-        put_binary_value(Value::Timestamp(dt), &mut buf).unwrap();
+        put_binary_value(DataValue::Timestamp(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         dt.to_sql(&Type::TIMESTAMP, &mut exp).unwrap(); // value
@@ -812,7 +828,7 @@ mod tests {
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
         put_binary_value(
-            Value::Varchar(ArcCStr::try_from("some stuff").unwrap()),
+            DataValue::Varchar(ArcCStr::try_from("some stuff").unwrap()),
             &mut buf,
         )
         .unwrap();

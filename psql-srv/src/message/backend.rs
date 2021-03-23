@@ -1,6 +1,8 @@
+use crate::error::Error;
 use crate::message::TransferFormat;
 use crate::r#type::Type;
 use crate::value::Value;
+use std::convert::TryInto;
 use std::rc::Rc;
 
 pub use postgres::error::SqlState;
@@ -51,7 +53,7 @@ pub enum BackendMessage<R> {
     },
 }
 
-impl<R: IntoIterator<Item: Into<Value>>> BackendMessage<R> {
+impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> BackendMessage<R> {
     pub fn ready_for_query_idle() -> BackendMessage<R> {
         BackendMessage::ReadyForQuery {
             status: READY_FOR_QUERY_IDLE,
