@@ -6,6 +6,8 @@ use nom_sql::{
 use std::collections::HashMap;
 
 use crate::controller::Migration;
+use crate::errors::internal_err;
+use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use common::DataType;
 use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
@@ -22,7 +24,7 @@ pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> QueryFlowParts {
+) -> ReadySetResult<QueryFlowParts> {
     use std::collections::VecDeque;
 
     let mut new_nodes = Vec::new();
@@ -37,8 +39,19 @@ pub(super) fn mir_query_to_flow_parts(
     }
     while !node_queue.is_empty() {
         let n = node_queue.pop_front().unwrap();
-        assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
-        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping);
+        invariant_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+        let (name, from_version) = {
+            let n = n.borrow_mut();
+            (n.name.clone(), n.from_version)
+        };
+        let flow_node =
+            mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping).map_err(|e| {
+                ReadySetError::MirNodeCreationFailed {
+                    name,
+                    from_version,
+                    source: Box::new(e),
+                }
+            })?;
         match flow_node {
             FlowNode::New(na) => new_nodes.push(na),
             FlowNode::Existing(na) => reused_nodes.push(na),
@@ -50,7 +63,7 @@ pub(super) fn mir_query_to_flow_parts(
             } else {
                 child.borrow().ancestors.len()
             };
-            assert!(in_edges >= 1);
+            invariant!(in_edges >= 1);
             if in_edges == 1 {
                 // last edge removed
                 node_queue.push_back(child.clone());
@@ -63,24 +76,24 @@ pub(super) fn mir_query_to_flow_parts(
         .borrow()
         .flow_node
         .as_ref()
-        .expect("Leaf must have FlowNode by now")
+        .ok_or_else(|| internal_err("Leaf must have FlowNode by now"))?
         .address();
 
-    QueryFlowParts {
+    Ok(QueryFlowParts {
         name: mir_query.name.clone(),
         new_nodes,
         reused_nodes,
         query_leaf: leaf_na,
-    }
+    })
 }
 
 fn mir_node_to_flow_parts(
     mir_node: &mut MirNode,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let name = mir_node.name.clone();
-    match mir_node.flow_node {
+    Ok(match mir_node.flow_node {
         None => {
             #[allow(clippy::let_and_return)]
             let flow_node = match mir_node.inner {
@@ -89,7 +102,7 @@ fn mir_node_to_flow_parts(
                     ref group_by,
                     ref kind,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_grouped_node(
                         &name,
@@ -102,7 +115,7 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         None,
-                    )
+                    )?
                 }
                 MirNodeType::Base {
                     ref mut column_specs,
@@ -116,14 +129,14 @@ fn mir_node_to_flow_parts(
                         column_specs.as_mut_slice(),
                         &bna.columns_added,
                         &bna.columns_removed,
-                    ),
+                    )?,
                 },
                 MirNodeType::Extremum {
                     ref on,
                     ref group_by,
                     ref kind,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_grouped_node(
                         &name,
@@ -136,7 +149,7 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         None,
-                    )
+                    )?
                 }
                 MirNodeType::FilterAggregation {
                     ref on,
@@ -145,7 +158,7 @@ fn mir_node_to_flow_parts(
                     ref kind,
                     ref conditions,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_grouped_node(
                         &name,
@@ -158,10 +171,10 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         Some(conditions),
-                    )
+                    )?
                 }
                 MirNodeType::Filter { ref conditions } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_filter_node(&name, parent, mir_node.columns.as_slice(), conditions, mig)
                 }
@@ -169,7 +182,7 @@ fn mir_node_to_flow_parts(
                     ref on,
                     ref separator,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     let group_cols = parent.borrow().columns().to_vec();
                     make_grouped_node(
@@ -183,10 +196,10 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         None,
-                    )
+                    )?
                 }
                 MirNodeType::Identity => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)
                 }
@@ -195,7 +208,7 @@ fn mir_node_to_flow_parts(
                     ref on_right,
                     ref project,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 2);
+                    invariant_eq!(mir_node.ancestors.len(), 2);
                     let left = mir_node.ancestors[0].clone();
                     let right = mir_node.ancestors[1].clone();
                     make_join_node(
@@ -208,14 +221,14 @@ fn mir_node_to_flow_parts(
                         project,
                         JoinType::Inner,
                         mig,
-                    )
+                    )?
                 }
                 MirNodeType::ParamFilter {
                     ref col,
                     ref emit_key,
                     ref operator,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_param_filter_node(
                         &name,
@@ -226,24 +239,25 @@ fn mir_node_to_flow_parts(
                         operator,
                         mig,
                         table_mapping,
-                    )
+                    )?
                 }
                 MirNodeType::Latest { ref group_by } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
-                    make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
+                    make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
                 MirNodeType::Leaf {
                     ref keys,
                     ref operator,
                     ..
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     materialize_leaf_node(&parent, name, keys, mig, *operator);
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
+                    // FIXME(eta): get rid of unwraps
                     let node = match *parent.borrow().flow_node.as_ref().unwrap() {
                         FlowNode::New(na) => FlowNode::Existing(na),
                         ref n @ FlowNode::Existing(..) => n.clone(),
@@ -255,7 +269,7 @@ fn mir_node_to_flow_parts(
                     ref on_right,
                     ref project,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 2);
+                    invariant_eq!(mir_node.ancestors.len(), 2);
                     let left = mir_node.ancestors[0].clone();
                     let right = mir_node.ancestors[1].clone();
                     make_join_node(
@@ -268,14 +282,14 @@ fn mir_node_to_flow_parts(
                         project,
                         JoinType::Left,
                         mig,
-                    )
+                    )?
                 }
                 MirNodeType::Project {
                     ref emit,
                     ref literals,
                     ref expressions,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_project_node(
                         &name,
@@ -292,7 +306,7 @@ fn mir_node_to_flow_parts(
                     match *node.borrow()
                            .flow_node
                            .as_ref()
-                           .expect("Reused MirNode must have FlowNode") {
+                           .ok_or_else(|| internal_err("Reused MirNode must have FlowNode"))? {
                                // "New" => flow node was originally created for the node that we
                                // are reusing
                                FlowNode::New(na) |
@@ -302,7 +316,7 @@ fn mir_node_to_flow_parts(
                         }
                 }
                 MirNodeType::Union { ref emit } => {
-                    assert_eq!(mir_node.ancestors.len(), emit.len());
+                    invariant_eq!(mir_node.ancestors.len(), emit.len());
                     make_union_node(
                         &name,
                         mir_node.columns.as_slice(),
@@ -313,7 +327,7 @@ fn mir_node_to_flow_parts(
                     )
                 }
                 MirNodeType::Distinct { ref group_by } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
                 }
@@ -323,7 +337,7 @@ fn mir_node_to_flow_parts(
                     ref k,
                     ref offset,
                 } => {
-                    assert_eq!(mir_node.ancestors.len(), 1);
+                    invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_topk_node(
                         &name,
@@ -334,7 +348,7 @@ fn mir_node_to_flow_parts(
                         *k,
                         *offset,
                         mig,
-                    )
+                    )?
                 }
                 MirNodeType::Rewrite {
                     ref value,
@@ -367,7 +381,7 @@ fn mir_node_to_flow_parts(
             flow_node
         }
         Some(ref flow_node) => flow_node.clone(),
-    }
+    })
 }
 
 fn adapt_base_node(
@@ -376,9 +390,9 @@ fn adapt_base_node(
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     add: &[ColumnSpecification],
     remove: &[ColumnSpecification],
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let na = match over_node.borrow().flow_node {
-        None => panic!("adapted base node must have a flow node already!"),
+        None => internal!("adapted base node must have a flow node already!"),
         Some(ref flow_node) => flow_node.address(),
     };
 
@@ -391,12 +405,12 @@ fn adapt_base_node(
                 _ => None,
             })
             .unwrap_or(DataType::None);
-        let column_id = mig.add_column(na, &a.column.name, default_value).unwrap();
+        let column_id = mig.add_column(na, &a.column.name, default_value)?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
             if cs == a {
-                assert_eq!(*cid, None);
+                invariant!(cid.is_none()); // FIXME(eta): used to be assert_eq
                 *cid = Some(column_id);
             }
         }
@@ -410,11 +424,11 @@ fn adapt_base_node(
             .unwrap();
         let cid = over_node.column_specifications()[pos]
             .1
-            .expect("base column ID must be set to remove column");
-        mig.drop_column(na, cid).unwrap();
+            .ok_or_else(|| internal_err("base column ID must be set to remove column"))?;
+        mig.drop_column(na, cid)?;
     }
 
-    FlowNode::Existing(na)
+    Ok(FlowNode::Existing(na))
 }
 
 fn column_names(cs: &[Column]) -> Vec<&str> {
@@ -558,17 +572,16 @@ fn make_grouped_node(
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
     conditions: Option<&[(usize, FilterCondition)]>,
-) -> FlowNode {
-    assert!(!group_by.is_empty());
-    assert!(
-        group_by.len() <= 6,
-        format!(
+) -> ReadySetResult<FlowNode> {
+    invariant!(!group_by.is_empty());
+    if group_by.len() >= 6 {
+        unsupported!(
             "can't have >6 group columns due to compound key restrictions, {} needs {}",
             name,
             group_by.len()
-        )
-    );
-    assert!(match kind {
+        );
+    }
+    invariant!(match kind {
         GroupedNodeType::FilterAggregation(_) => true,
         _ => else_on.is_none() && conditions.is_none(),
     });
@@ -583,14 +596,13 @@ fn make_grouped_node(
         .map(|c| parent.borrow().column_id_for_column(c, table_mapping))
         .collect::<Vec<_>>();
 
-    assert!(!group_col_indx.is_empty());
+    invariant!(!group_col_indx.is_empty());
 
     let na = match kind {
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
             String::from(name),
             column_names.as_slice(),
-            agg.over(parent_na, over_col_indx, group_col_indx.as_slice())
-                .unwrap(),
+            agg.over(parent_na, over_col_indx, group_col_indx.as_slice())?,
         ),
         GroupedNodeType::Extremum(extr) => mig.add_ingredient(
             String::from(name),
@@ -598,7 +610,8 @@ fn make_grouped_node(
             extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
         ),
         GroupedNodeType::FilterAggregation(agg) => {
-            let cond = conditions.expect("FilterAggregation must have conditions!");
+            let cond = conditions
+                .ok_or_else(|| internal_err("FilterAggregation must have conditions!"))?;
             mig.add_ingredient(
                 String::from(name),
                 column_names.as_slice(),
@@ -608,18 +621,16 @@ fn make_grouped_node(
                     group_col_indx.as_slice(),
                     FilterVec::from(Vec::from(cond)),
                     else_on,
-                )
-                .unwrap(),
+                )?,
             )
         }
         GroupedNodeType::GroupConcat(sep) => {
             use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)
-                .unwrap();
+            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)?;
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
         }
     };
-    FlowNode::New(na)
+    Ok(FlowNode::New(na))
 }
 
 fn make_identity_node(
@@ -649,10 +660,10 @@ fn make_join_node(
     proj_cols: &[Column],
     kind: JoinType,
     mig: &mut Migration,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
 
-    assert_eq!(on_left.len(), on_right.len());
+    invariant_eq!(on_left.len(), on_right.len());
 
     let column_names = column_names(columns);
 
@@ -663,19 +674,20 @@ fn make_join_node(
     let (projected_cols_right, rest): (Vec<Column>, Vec<Column>) = rest
         .into_iter()
         .partition(|c| right.borrow().columns.contains(c));
-    assert!(
+    invariant!(
         rest.is_empty(),
         "could not resolve output columns projected from join: {:?}",
         rest
     );
 
-    assert_eq!(
+    invariant_eq!(
         projected_cols_left.len() + projected_cols_right.len(),
         proj_cols.len()
     );
 
-    assert_eq!(on_left.len(), 1, "no support for multiple column joins");
-    assert_eq!(on_right.len(), 1, "no support for multiple column joins");
+    if on_left.len() == 1 || on_right.len() == 1 {
+        unsupported!("no support for multiple column joins yet");
+    }
 
     // this assumes the columns we want to join on appear first in the list
     // of projected columns. this is fine for joins against different tables
@@ -691,25 +703,25 @@ fn make_join_node(
         .columns
         .iter()
         .position(|lc| lc == on_left.first().unwrap())
-        .unwrap_or_else(|| {
-            panic!(
+        .ok_or_else(|| {
+            internal_err(format!(
                 "missing left-side join column {:#?} in {:#?}",
                 on_left.first().unwrap(),
                 left.borrow().columns
-            )
-        });
+            ))
+        })?;
     let right_join_col_id = right
         .borrow()
         .columns
         .iter()
         .position(|rc| rc == on_right.first().unwrap())
-        .unwrap_or_else(|| {
-            panic!(
+        .ok_or_else(|| {
+            internal_err(format!(
                 "missing right-side join column {:#?} in {:#?}",
                 on_right.first().unwrap(),
                 right.borrow().columns
-            )
-        });
+            ))
+        })?;
 
     let mut from_left = 0;
     let mut from_right = 0;
@@ -745,8 +757,8 @@ fn make_join_node(
                 }),
         )
         .collect();
-    assert_eq!(from_left, projected_cols_left.len());
-    assert_eq!(from_right, projected_cols_right.len());
+    invariant_eq!(from_left, projected_cols_left.len());
+    invariant_eq!(from_right, projected_cols_right.len());
 
     let left_na = left.borrow().flow_node_addr().unwrap();
     let right_na = right.borrow().flow_node_addr().unwrap();
@@ -757,7 +769,7 @@ fn make_join_node(
     };
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
 
-    FlowNode::New(n)
+    Ok(FlowNode::New(n))
 }
 
 fn make_param_filter_node(
@@ -769,7 +781,7 @@ fn make_param_filter_node(
     operator: &BinaryOperator,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     use nom_sql::BinaryOperator as nom_op;
     use ops::param_filter::Operator as pf_op;
 
@@ -783,14 +795,14 @@ fn make_param_filter_node(
     let operator = match operator {
         nom_op::ILike => pf_op::ILike,
         nom_op::Like => pf_op::Like,
-        _ => unreachable!("Only supported operators are expected in a mir ParamFilter."),
+        _ => internal!("Only supported operators are expected in a mir ParamFilter."),
     };
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
         ParamFilter::new(parent_na, col, emit_key, operator),
     );
-    FlowNode::New(node)
+    Ok(FlowNode::New(node))
 }
 
 fn make_latest_node(
@@ -799,7 +811,7 @@ fn make_latest_node(
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
@@ -809,13 +821,15 @@ fn make_latest_node(
         .collect::<Vec<_>>();
 
     // latest doesn't support compound group by
-    assert_eq!(group_col_indx.len(), 1);
+    if group_col_indx.len() != 1 {
+        unsupported!("latest node doesn't support compound GROUP BY")
+    }
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
         Latest::new(parent_na, group_col_indx[0]),
     );
-    FlowNode::New(na)
+    Ok(FlowNode::New(na))
 }
 
 /// Converts a nom_sql ArithmeticItem into a ProjectExpression
@@ -973,11 +987,11 @@ fn make_topk_node(
     k: usize,
     offset: usize,
     mig: &mut Migration,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
-    assert!(
+    invariant!(
         !group_by.is_empty(),
         "need bogokey for TopK without group columns"
     );
@@ -989,7 +1003,7 @@ fn make_topk_node(
 
     let cmp_rows = match *order {
         Some(ref o) => {
-            assert_eq!(offset, 0); // Non-zero offset not supported
+            invariant_eq!(offset, 0); // Non-zero offset not supported
 
             let columns: Vec<_> = o
                 .iter()
@@ -1018,7 +1032,7 @@ fn make_topk_node(
         column_names.as_slice(),
         ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, k),
     );
-    FlowNode::New(na)
+    Ok(FlowNode::New(na))
 }
 
 fn materialize_leaf_node(
