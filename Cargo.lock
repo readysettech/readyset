@@ -1073,6 +1073,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-mac"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4857fd85a0c34b3c3297875b747c1e02e06b6a0ea32dd892d8192b9ce0813ea6"
+dependencies = [
+ "generic-array 0.14.4",
+ "subtle",
+]
+
+[[package]]
 name = "csv"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1936,6 +1946,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "deae6d9dbb35ec2c502d62b8f7b1c000a0822c3b0794ba36b3149c0a1c840dff"
 dependencies = [
  "crypto-mac 0.9.1",
+ "digest 0.9.0",
+]
+
+[[package]]
+name = "hmac"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1441c6b1e930e2817404b5046f1f989899143a12bf92de603b69f4e0aee1e15"
+dependencies = [
+ "crypto-mac 0.10.0",
  "digest 0.9.0",
 ]
 
@@ -3440,6 +3460,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "noria-psql"
+version = "0.1.0"
+dependencies = [
+ "arccstr",
+ "async-trait",
+ "chrono",
+ "msql-srv",
+ "nom-sql",
+ "noria",
+ "noria-client",
+ "noria-server",
+ "postgres 0.19.0",
+ "psql-srv",
+ "slog",
+ "tokio 0.2.25",
+ "zookeeper",
+]
+
+[[package]]
 name = "noria-server"
 version = "0.7.0"
 dependencies = [
@@ -4017,7 +4056,21 @@ dependencies = [
  "futures 0.3.13",
  "log 0.4.14",
  "tokio 0.2.25",
- "tokio-postgres",
+ "tokio-postgres 0.5.5",
+]
+
+[[package]]
+name = "postgres"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f853fba627ed1f21392d329eeb03caf90dce57a65dfbd24274f4c39452ed3bb"
+dependencies = [
+ "bytes 1.0.1",
+ "fallible-iterator 0.2.0",
+ "futures 0.3.13",
+ "log 0.4.14",
+ "tokio 1.3.0",
+ "tokio-postgres 0.7.0",
 ]
 
 [[package]]
@@ -4058,6 +4111,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres-protocol"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e34ad3dc5c56d036b9418185ee97e14b6766d55c8ccf9dc18302ad4e6371d9"
+dependencies = [
+ "base64 0.13.0",
+ "byteorder",
+ "bytes 1.0.1",
+ "fallible-iterator 0.2.0",
+ "hmac 0.10.1",
+ "md5 0.7.0",
+ "memchr 2.3.4",
+ "rand 0.8.3",
+ "sha2 0.9.3",
+ "stringprep",
+]
+
+[[package]]
 name = "postgres-shared"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4079,6 +4150,18 @@ dependencies = [
  "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol 0.5.3",
+]
+
+[[package]]
+name = "postgres-types"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5493d9d4613b88b12433aa12890e74e74cd93fdc1e08b7c2aed4768aaae8414c"
+dependencies = [
+ "bytes 1.0.1",
+ "chrono",
+ "fallible-iterator 0.2.0",
+ "postgres-protocol 0.6.0",
 ]
 
 [[package]]
@@ -4208,7 +4291,7 @@ dependencies = [
  "futures 0.3.13",
  "nom-sql",
  "postgres 0.17.5",
- "postgres-types",
+ "postgres-types 0.1.3",
  "thiserror",
  "tokio 0.2.25",
  "tokio-util 0.2.0",
@@ -5973,9 +6056,32 @@ dependencies = [
  "phf 0.8.0",
  "pin-project-lite 0.1.12",
  "postgres-protocol 0.5.3",
- "postgres-types",
+ "postgres-types 0.1.3",
  "tokio 0.2.25",
  "tokio-util 0.3.1",
+]
+
+[[package]]
+name = "tokio-postgres"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cc9f82c2bfb06a33dd0dfb44b07ca98fe72df19e681d80c78d05a1bac2138e2"
+dependencies = [
+ "async-trait",
+ "byteorder",
+ "bytes 1.0.1",
+ "fallible-iterator 0.2.0",
+ "futures 0.3.13",
+ "log 0.4.14",
+ "parking_lot 0.11.1",
+ "percent-encoding 2.1.0",
+ "phf 0.8.0",
+ "pin-project-lite 0.2.6",
+ "postgres-protocol 0.6.0",
+ "postgres-types 0.2.0",
+ "socket2",
+ "tokio 1.3.0",
+ "tokio-util 0.6.4",
 ]
 
 [[package]]

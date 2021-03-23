@@ -231,9 +231,9 @@ pub struct Backend {
 
 #[derive(Debug)]
 pub struct SelectSchema {
-    use_bogo: bool,
-    schema: Vec<Column>,
-    columns: Vec<String>,
+    pub use_bogo: bool,
+    pub schema: Vec<Column>,
+    pub columns: Vec<String>,
 }
 
 /// The type returned when a query is prepared by `Backend`

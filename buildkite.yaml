@@ -92,6 +92,14 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':rust: Build noria-psql'
+              exclude:
+                - "ops/**"
+
+            - label: ':rust: Test noria-psql'
+              exclude:
+                - "ops/**"
+
             - label: 'Run logictest'
               exclude:
                 - "ops/**"

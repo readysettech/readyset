@@ -1,0 +1,21 @@
+[package]
+name = "noria-psql"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+arccstr = "1.1.0"
+async-trait = "0.1"
+msql-srv = { version = "0.8.7", path = "../msql-srv" }
+noria = { version = "0.7", path = "../noria/noria/" }
+noria-client = { version = "0.1.0", path = "../noria-client" }
+psql-srv = { version = "0.1.0", path = "../psql-srv" }
+
+[dev-dependencies]
+chrono = "0.4"
+nom-sql = { version =  "0.0.11", path = "../nom-sql" }
+noria-server = { version = "0.7", path = "../noria/server/" }
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+slog = "2.4.0"
+tokio = { version = "0.2.0", features = ["full"] }
+zookeeper = "0.5.4"
