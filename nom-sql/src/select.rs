@@ -5,8 +5,8 @@ use std::str;
 use crate::column::Column;
 use crate::common::FieldDefinitionExpression;
 use crate::common::{
-    as_alias, field_definition_expr, field_list, statement_terminator, table_list, table_reference,
-    unsigned_number,
+    as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
+    table_list, unsigned_number,
 };
 use crate::condition::{condition_expr, ConditionExpression};
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -238,7 +238,11 @@ fn join_clause(i: &[u8]) -> IResult<&[u8], JoinClause> {
 fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
     let nested_select = map(
         tuple((
-            delimited(tag("("), nested_selection, tag(")")),
+            delimited(
+                terminated(tag("("), multispace0),
+                nested_selection,
+                preceded(multispace0, tag(")")),
+            ),
             opt(as_alias),
         )),
         |t| JoinRightSide::NestedSelect(Box::new(t.0), t.1.map(String::from)),
@@ -246,7 +250,7 @@ fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
     let nested_join = map(delimited(tag("("), join_clause, tag(")")), |nj| {
         JoinRightSide::NestedJoin(Box::new(nj))
     });
-    let table = map(table_reference, JoinRightSide::Table);
+    let table = map(schema_table_reference, JoinRightSide::Table);
     let tables = map(delimited(tag("("), table_list, tag(")")), |tables| {
         JoinRightSide::Tables(tables)
     });
