@@ -1,5 +1,7 @@
 use crate::prelude::*;
 use maplit::hashmap;
+use noria::errors::{internal_err, ReadySetResult};
+use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use vec1::vec1;
@@ -82,17 +84,17 @@ impl Ingredient for Rewrite {
         replay_key_cols: Option<&[usize]>,
         nodes: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert!(from == *self.src || from == *self.signal);
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
         let mut emit_rs = Vec::with_capacity(rs.len());
 
         if rs.is_empty() {
-            return ProcessingResult {
+            return Ok(ProcessingResult {
                 results: rs,
                 ..Default::default()
-            };
+            });
         }
 
         // TODO: it would be nice to just use `rs`,
@@ -103,7 +105,7 @@ impl Ingredient for Rewrite {
                 // ask signal if column should be rewritten
                 let rc = self
                     .lookup(*self.signal, &[0], &KeyType::Single(&key), nodes, state)
-                    .unwrap();
+                    .ok_or_else(|| internal_err(format!("could not lookup key {}", key)))?;
 
                 if rc.is_none() {
                     misses.push(Miss {
@@ -111,7 +113,10 @@ impl Ingredient for Rewrite {
                         lookup_idx: vec![0],
                         lookup_cols: vec![self.signal_key],
                         replay_cols: replay_key_cols.map(Vec::from),
-                        record: r.into_row().try_into().expect("Empty record"),
+                        record: r
+                            .into_row()
+                            .try_into()
+                            .map_err(|_| internal_err("Empty record"))?,
                     });
                     continue;
                 }
@@ -153,7 +158,10 @@ impl Ingredient for Rewrite {
                         lookup_idx: vec![self.signal_key],
                         lookup_cols: vec![0],
                         replay_cols: replay_key_cols.map(Vec::from),
-                        record: r.into_row().try_into().expect("Empty record"),
+                        record: r
+                            .into_row()
+                            .try_into()
+                            .map_err(|_| internal_err("Empty record"))?,
                     });
                     continue;
                 }
@@ -172,11 +180,11 @@ impl Ingredient for Rewrite {
             }
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: emit_rs.into(),
             lookups,
             misses,
-        }
+        })
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -186,12 +194,12 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         // We can't resolve the rewritten column
         if col == self.rw_col {
-            None
+            Ok(None)
         } else {
-            Some(vec![(self.src.as_global(), col)])
+            Ok(Some(vec![(self.src.as_global(), col)]))
         }
     }
 
@@ -203,8 +211,11 @@ impl Ingredient for Rewrite {
         format!("Rw[{}]", self.rw_col)
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 

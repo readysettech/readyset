@@ -1,3 +1,4 @@
+use noria::ReadySetError;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -8,6 +9,7 @@ use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
 pub mod aggregate;
@@ -180,14 +182,14 @@ where
         replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
-            return ProcessingResult {
+            return Ok(ProcessingResult {
                 results: rs,
                 ..Default::default()
-            };
+            });
         }
 
         let group_by = &self.group_by;
@@ -206,98 +208,111 @@ where
 
         // find the current value for this group
         let us = self.us.unwrap();
-        let db = state
-            .get(*us)
-            .expect("grouped operators must have their own state materialized");
+        let db = state.get(*us).ok_or(internal_err(
+            "grouped operators must have their own state materialized",
+        ))?;
 
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
         let mut out = Vec::new();
         {
             let out_key = &self.out_key;
-            let mut handle_group =
-                |inner: &mut T,
-                 group_rs: ::std::vec::Drain<Record>,
-                 mut diffs: ::std::vec::Drain<_>| {
-                    let mut group_rs = group_rs.peekable();
+            let mut handle_group = |inner: &mut T,
+                                    group_rs: ::std::vec::Drain<Record>,
+                                    mut diffs: ::std::vec::Drain<_>|
+             -> ReadySetResult<()> {
+                let mut group_rs = group_rs.peekable();
 
-                    let group = get_group_values(group_by, group_rs.peek().unwrap());
+                let group = get_group_values(group_by, group_rs.peek().unwrap());
 
-                    let rs = {
-                        match db.lookup(&out_key[..], &KeyType::from(&group[..])) {
-                            LookupResult::Some(rs) => {
-                                if replay_key_cols.is_some() {
-                                    lookups.push(Lookup {
-                                        on: *us,
-                                        cols: out_key.clone(),
-                                        key: group.clone().try_into().expect("Empty group"),
-                                    });
-                                }
-
-                                debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                                rs
-                            }
-                            LookupResult::Missing => {
-                                misses.extend(group_rs.map(|r| Miss {
+                let rs = {
+                    match db.lookup(&out_key[..], &KeyType::from(&group[..])) {
+                        LookupResult::Some(rs) => {
+                            if replay_key_cols.is_some() {
+                                lookups.push(Lookup {
                                     on: *us,
-                                    lookup_idx: out_key.clone(),
-                                    lookup_cols: group_by.clone(),
-                                    replay_cols: replay_key_cols.map(Vec::from),
-                                    record: r.into_row().try_into().expect("Empty record"),
-                                }));
-                                return;
-                            }
-                        }
-                    };
-
-                    let old = rs.into_iter().next();
-                    // current value is in the last output column
-                    // or "" if there is no current group
-                    let current = old.as_ref().map(|rows| match rows {
-                        Cow::Borrowed(rs) => Cow::Borrowed(&rs[rs.len() - 1]),
-                        Cow::Owned(rs) => Cow::Owned(rs[rs.len() - 1].clone()),
-                    });
-
-                    // new is the result of applying all diffs for the group to the current value
-                    let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
-                    match current {
-                        Some(ref current) if new == **current => {
-                            // no change
-                        }
-                        _ => {
-                            if let Some(old) = old {
-                                // revoke old value
-                                debug_assert!(current.is_some());
-                                out.push(Record::Negative(old.into_owned()));
+                                    cols: out_key.clone(),
+                                    key: group
+                                        .clone()
+                                        .try_into()
+                                        .map_err(|_| internal_err("Empty group"))?,
+                                });
                             }
 
-                            // emit positive, which is group + new.
-                            let mut rec = group;
-                            rec.push(new);
-                            out.push(Record::Positive(rec));
+                            debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                            rs
+                        }
+                        LookupResult::Missing => {
+                            // TODO(eta): error handling impl adds overhead
+                            let rs = group_rs
+                                .map(|r| {
+                                    Ok(Miss {
+                                        on: *us,
+                                        lookup_idx: out_key.clone(),
+                                        lookup_cols: group_by.clone(),
+                                        replay_cols: replay_key_cols.map(Vec::from),
+                                        record: r
+                                            .into_row()
+                                            .try_into()
+                                            .map_err(|_| internal_err("Empty record"))?,
+                                    })
+                                })
+                                .collect::<ReadySetResult<Vec<_>>>()?;
+                            misses.extend(rs.into_iter());
+                            return Ok(());
                         }
                     }
                 };
+
+                let old = rs.into_iter().next();
+                // current value is in the last output column
+                // or "" if there is no current group
+                let current = old.as_ref().map(|rows| match rows {
+                    Cow::Borrowed(rs) => Cow::Borrowed(&rs[rs.len() - 1]),
+                    Cow::Owned(rs) => Cow::Owned(rs[rs.len() - 1].clone()),
+                });
+
+                // new is the result of applying all diffs for the group to the current value
+                let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
+                match current {
+                    Some(ref current) if new == **current => {
+                        // no change
+                    }
+                    _ => {
+                        if let Some(old) = old {
+                            // revoke old value
+                            debug_assert!(current.is_some());
+                            out.push(Record::Negative(old.into_owned()));
+                        }
+
+                        // emit positive, which is group + new.
+                        let mut rec = group;
+                        rec.push(new);
+                        out.push(Record::Positive(rec));
+                    }
+                }
+                Ok(())
+            };
 
             let mut diffs = Vec::new();
             let mut group_rs = Vec::new();
             for r in rs {
                 if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
-                    handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
+                    handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..))?;
                 }
                 if let Some(diff) = self.inner.to_diff(&r[..], r.is_positive()) {
                     diffs.push(diff);
                 }
                 group_rs.push(r);
             }
-            handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..));
+            handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..))?;
         }
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: out.into(),
             lookups,
             misses,
-        }
+        })
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -307,22 +322,25 @@ where
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         if col == self.colfix.len() {
-            return None;
+            return Ok(None);
         }
-        Some(vec![(self.src.as_global(), self.colfix[col])])
+        Ok(Some(vec![(self.src.as_global(), self.colfix[col])]))
     }
 
     fn description(&self, detailed: bool) -> String {
         self.inner.description(detailed)
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         if column == self.colfix.len() {
-            return vec![(self.src.as_global(), None)];
+            return Ok(vec![(self.src.as_global(), None)]);
         }
-        vec![(self.src.as_global(), Some(self.colfix[column]))]
+        Ok(vec![(self.src.as_global(), Some(self.colfix[column]))])
     }
 
     fn is_selective(&self) -> bool {

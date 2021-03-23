@@ -1558,9 +1558,9 @@ mod tests {
     fn it_resolves() {
         let c = setup(Aggregation::AVG, false);
         assert_eq!(
-            c.node().resolve(0),
+            c.node().resolve(0).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 0)])
         );
-        assert_eq!(c.node().resolve(1), None);
+        assert_eq!(c.node().resolve(1).unwrap(), None);
     }
 }

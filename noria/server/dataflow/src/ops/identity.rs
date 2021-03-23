@@ -1,6 +1,8 @@
+use noria::ReadySetError;
 use std::collections::HashMap;
 
 use crate::prelude::*;
+use noria::errors::ReadySetResult;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
@@ -39,27 +41,30 @@ impl Ingredient for Identity {
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
-    ) -> ProcessingResult {
-        ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
+        Ok(ProcessingResult {
             results: rs,
             ..Default::default()
-        }
+        })
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn description(&self, _: bool) -> String {
         "≡".into()
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 
@@ -101,15 +106,15 @@ mod tests {
     fn it_resolves() {
         let g = setup(false);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            g.node().resolve(2),
+            g.node().resolve(2).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 2)])
         );
     }

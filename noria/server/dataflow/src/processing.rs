@@ -1,6 +1,6 @@
 use derive_more::From;
 use launchpad::intervals::{BoundAsRef, BoundFunctor};
-use noria::KeyComparison;
+use noria::{KeyComparison, ReadySetError};
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -10,6 +10,7 @@ use vec1::Vec1;
 
 use crate::ops;
 use crate::prelude::*;
+use noria::errors::ReadySetResult;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
 
@@ -162,7 +163,7 @@ where
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>>;
+    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError>;
 
     fn is_join(&self) -> bool {
         false
@@ -221,7 +222,7 @@ where
         replay_key_cols: Option<&[usize]>,
         domain: &DomainNodes,
         states: &StateMap,
-    ) -> ProcessingResult;
+    ) -> ReadySetResult<ProcessingResult>;
 
     #[allow(clippy::too_many_arguments)]
     fn on_input_raw(
@@ -233,15 +234,15 @@ where
         domain: &DomainNodes,
         states: &StateMap,
         _: &Logger,
-    ) -> RawProcessingResult {
-        RawProcessingResult::Regular(self.on_input(
+    ) -> ReadySetResult<RawProcessingResult> {
+        Ok(RawProcessingResult::Regular(self.on_input(
             executor,
             from,
             data,
             replay.key(),
             domain,
             states,
-        ))
+        )?))
     }
 
     /// Triggered whenever a replay occurs, to allow the operator to react evict from any auxillary
@@ -302,7 +303,10 @@ where
     /// parent ingredients. None for the column means that the parent doesn't
     /// have an associated column. Similar to resolve, but does not depend on
     /// materialization, and returns results even for computed columns.
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)>;
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError>;
 
     /// Performance hint: should return true if this operator reduces the size of its input
     fn is_selective(&self) -> bool {

@@ -1,10 +1,11 @@
 use derive_more::From;
-use noria::KeyComparison;
+use noria::{KeyComparison, ReadySetError};
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use crate::prelude::*;
+use noria::errors::ReadySetResult;
 
 pub mod distinct;
 pub mod filter;
@@ -95,7 +96,7 @@ impl Ingredient for NodeOperator {
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         impl_ingredient_fn_ref!(self, resolve, i)
     }
     fn is_join(&self) -> bool {
@@ -121,7 +122,7 @@ impl Ingredient for NodeOperator {
         replay_key_col: Option<&[usize]>,
         domain: &DomainNodes,
         states: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         impl_ingredient_fn_mut!(
             self,
             on_input,
@@ -142,7 +143,7 @@ impl Ingredient for NodeOperator {
         domain: &DomainNodes,
         states: &StateMap,
         log: &Logger,
-    ) -> RawProcessingResult {
+    ) -> ReadySetResult<RawProcessingResult> {
         impl_ingredient_fn_mut!(
             self,
             on_input_raw,
@@ -182,7 +183,10 @@ impl Ingredient for NodeOperator {
     ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
     }
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         impl_ingredient_fn_ref!(self, parent_columns, column)
     }
     fn is_selective(&self) -> bool {
@@ -414,6 +418,7 @@ pub mod test {
                     &self.states,
                     &self.logger,
                 )
+                .unwrap()
             };
 
             if !remember || !self.states.contains_key(*self.nut.unwrap()) {

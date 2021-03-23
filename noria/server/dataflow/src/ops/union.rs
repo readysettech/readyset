@@ -1,10 +1,11 @@
-use noria::KeyComparison;
+use noria::{invariant, KeyComparison, ReadySetError};
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use vec1::Vec1;
 
 use crate::prelude::*;
+use noria::errors::ReadySetResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
@@ -203,8 +204,8 @@ impl Ingredient for Union {
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
-    ) -> ProcessingResult {
-        match self.emit {
+    ) -> ReadySetResult<ProcessingResult> {
+        Ok(match self.emit {
             Emit::AllFrom(..) => ProcessingResult {
                 results: rs,
                 ..Default::default()
@@ -232,7 +233,7 @@ impl Ingredient for Union {
                     ..Default::default()
                 }
             }
-        }
+        })
     }
 
     fn on_input_raw(
@@ -244,7 +245,7 @@ impl Ingredient for Union {
         n: &DomainNodes,
         s: &StateMap,
         log: &Logger,
-    ) -> RawProcessingResult {
+    ) -> ReadySetResult<RawProcessingResult> {
         use std::mem;
 
         // NOTE: in the special case of us being a shard merge node (i.e., when
@@ -279,10 +280,10 @@ impl Ingredient for Union {
                     // also execute the code below. if you fix that, you should be all good!
                     //
                     // TODO: why is this an || past self?
-                    assert!(self.replay_key.is_empty() || self.replay_pieces.is_empty());
+                    invariant!(self.replay_key.is_empty() || self.replay_pieces.is_empty());
 
                     // process the results (self is okay to have mutably borrowed here)
-                    let rs = self.on_input(ex, from, rs, None, n, s).results;
+                    let rs = self.on_input(ex, from, rs, None, n, s)?.results;
 
                     // *then* borrow self.full_wait_state again
                     if let FullWait::Ongoing {
@@ -292,10 +293,10 @@ impl Ingredient for Union {
                         // absorb into the buffer
                         buffered.extend(rs.iter().cloned());
                         // we clone above so that we can also return the processed results
-                        return RawProcessingResult::Regular(ProcessingResult {
+                        return Ok(RawProcessingResult::Regular(ProcessingResult {
                             results: rs,
                             ..Default::default()
-                        });
+                        }));
                     } else {
                         unreachable!();
                     }
@@ -303,7 +304,9 @@ impl Ingredient for Union {
 
                 if self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(self.on_input(ex, from, rs, None, n, s));
+                    return Ok(RawProcessingResult::Regular(
+                        self.on_input(ex, from, rs, None, n, s)?,
+                    ));
                 }
 
                 // partial replays are flowing through us, and at least one piece is being waited
@@ -335,7 +338,7 @@ impl Ingredient for Union {
                 };
 
                 while let Some((&(tag, ref replaying_key, _), ref mut pieces)) = replays.next() {
-                    assert!(
+                    invariant!(
                         !pieces.buffered.is_empty(),
                         "empty pieces bucket left in replay pieces"
                     );
@@ -390,7 +393,9 @@ impl Ingredient for Union {
                     }
                 }
 
-                RawProcessingResult::Regular(self.on_input(ex, from, rs, None, n, s))
+                Ok(RawProcessingResult::Regular(
+                    self.on_input(ex, from, rs, None, n, s)?,
+                ))
             }
             ReplayContext::Full { last } => {
                 // this part is actually surpringly straightforward, but the *reason* it is
@@ -446,11 +451,11 @@ impl Ingredient for Union {
                 // arm). feel free to go check. interestingly enough, it's also fine for us to
                 // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
                 // domain.
-                let mut rs = self.on_input(ex, from, rs, None, n, s).results;
+                let mut rs = self.on_input(ex, from, rs, None, n, s)?.results;
                 if let FullWait::None = self.full_wait_state {
                     if self.required == 1 {
                         // no need to ever buffer
-                        return RawProcessingResult::FullReplay(rs, last);
+                        return Ok(RawProcessingResult::FullReplay(rs, last));
                     }
 
                     debug!(
@@ -466,7 +471,7 @@ impl Ingredient for Union {
                         finished: if last { 1 } else { 0 },
                         buffered: rs,
                     };
-                    return RawProcessingResult::CapturedFull;
+                    return Ok(RawProcessingResult::CapturedFull);
                 }
 
                 let exit;
@@ -494,16 +499,16 @@ impl Ingredient for Union {
                                     // we can release all buffered replays!
                                     debug!(log, "union releasing full replay");
                                     buffered.append(&mut *rs);
-                                    return RawProcessingResult::FullReplay(
+                                    return Ok(RawProcessingResult::FullReplay(
                                         buffered.split_off(0).into(),
                                         false,
-                                    );
+                                    ));
                                 }
                             } else {
                                 // common case: replay has started, and not yet finished
                                 // no need to buffer, nothing to see here, move along
                                 debug_assert_eq!(buffered.len(), 0);
-                                return RawProcessingResult::FullReplay(rs, false);
+                                return Ok(RawProcessingResult::FullReplay(rs, false));
                             }
 
                             debug!(
@@ -516,7 +521,7 @@ impl Ingredient for Union {
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
                             buffered.append(&mut *rs);
-                            return RawProcessingResult::CapturedFull;
+                            return Ok(RawProcessingResult::CapturedFull);
                         }
                     }
                     _ => unreachable!(),
@@ -525,7 +530,7 @@ impl Ingredient for Union {
                 // we only fall through here if we're done!
                 // and it's only because we can't change self.full_wait_state while matching on it
                 self.full_wait_state = FullWait::None;
-                exit
+                Ok(exit)
             }
             ReplayContext::Partial {
                 key_cols,
@@ -538,12 +543,12 @@ impl Ingredient for Union {
                 if let Emit::AllFrom(_, _) = self.emit {
                     if unishard {
                         // No need to buffer since request should only be for one shard
-                        assert!(self.replay_pieces.is_empty());
-                        return RawProcessingResult::ReplayPiece {
+                        invariant!(self.replay_pieces.is_empty());
+                        return Ok(RawProcessingResult::ReplayPiece {
                             rows: rs,
                             keys: keys.iter().cloned().collect(),
                             captured: HashSet::new(),
-                        };
+                        });
                     }
                     is_shard_merger = true;
                 }
@@ -684,10 +689,15 @@ impl Ingredient for Union {
                             released.insert(KeyComparison::from(key.clone()));
                             pieces.buffered.into_iter()
                         })
-                        .flat_map(|(from, rs)| {
-                            self.on_input(ex, from, rs, Some(&key_cols[..]), n, s)
-                                .results
+                        .map(|(from, rs)| {
+                            Ok(self.on_input(ex, from, rs, Some(&key_cols[..]), n, s)?
+                                .results)
                         })
+                        // FIXME(eta): this iterator / result stuff makes me sad, and is probably
+                        // inefficient...
+                        .collect::<ReadySetResult<Vec<_>>>()?
+                        .into_iter()
+                        .flatten()
                         .collect()
                 };
 
@@ -741,12 +751,14 @@ impl Ingredient for Union {
                 // identifiers: bottom-left:top-left, bottom-left:top-right, bottom-right:top-left,
                 // and bottom-right:top-right. as the top union, we will therefore receive two
                 // NOPE
+                //
+                // FIXME(eta): why does the above comment just suddenly end in NOPE?
 
-                RawProcessingResult::ReplayPiece {
+                Ok(RawProcessingResult::ReplayPiece {
                     rows: rs,
                     keys: released,
                     captured,
-                }
+                })
             }
         }
     }
@@ -787,14 +799,14 @@ impl Ingredient for Union {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
         match self.emit {
-            Emit::AllFrom(p, _) => Some(vec![(p.as_global(), col)]),
-            Emit::Project { ref emit, .. } => Some(
+            Emit::AllFrom(p, _) => Ok(Some(vec![(p.as_global(), col)])),
+            Emit::Project { ref emit, .. } => Ok(Some(
                 emit.iter()
                     .map(|(src, emit)| (src.as_global(), emit[col]))
                     .collect(),
-            ),
+            )),
         }
     }
 
@@ -821,13 +833,13 @@ impl Ingredient for Union {
         }
     }
 
-    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
+    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
         match self.emit {
-            Emit::AllFrom(p, _) => vec![(p.as_global(), Some(col))],
-            Emit::Project { ref emit, .. } => emit
+            Emit::AllFrom(p, _) => Ok(vec![(p.as_global(), Some(col))]),
+            Emit::Project { ref emit, .. } => Ok(emit
                 .iter()
                 .map(|(src, emit)| (src.as_global(), Some(emit[col])))
-                .collect(),
+                .collect()),
         }
     }
 }
@@ -886,7 +898,7 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (u, l, r) = setup();
-        let r0 = u.node().resolve(0);
+        let r0 = u.node().resolve(0).unwrap();
         assert!(r0
             .as_ref()
             .unwrap()
@@ -897,7 +909,7 @@ mod tests {
             .unwrap()
             .iter()
             .any(|&(n, c)| n == r.as_global() && c == 0));
-        let r1 = u.node().resolve(1);
+        let r1 = u.node().resolve(1).unwrap();
         assert!(r1
             .as_ref()
             .unwrap()

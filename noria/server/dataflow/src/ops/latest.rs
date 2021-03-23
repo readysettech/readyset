@@ -1,9 +1,11 @@
 use maplit::hashmap;
+use noria::ReadySetError;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use vec1::vec1;
 
 use crate::prelude::*;
+use noria::errors::{internal_err, ReadySetResult};
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///
@@ -55,14 +57,14 @@ impl Ingredient for Latest {
         replay_key_cols: Option<&[usize]>,
         _: &DomainNodes,
         state: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
         // find the current value for each group
         let us = self.us.unwrap();
         let db = state
             .get(*us)
-            .expect("latest must have its own state materialized");
+            .ok_or(internal_err("latest must have its own state materialized"))?;
 
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
@@ -118,11 +120,11 @@ impl Ingredient for Latest {
 
         // TODO: check that there aren't any standalone negatives
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: out.into(),
             lookups,
             misses,
-        }
+        })
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -132,8 +134,8 @@ impl Ingredient for Latest {
         }
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -144,8 +146,11 @@ impl Ingredient for Latest {
         }
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 
@@ -279,15 +284,15 @@ mod tests {
     fn it_resolves() {
         let c = setup(1, false);
         assert_eq!(
-            c.node().resolve(0),
+            c.node().resolve(0).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            c.node().resolve(1),
+            c.node().resolve(1).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            c.node().resolve(2),
+            c.node().resolve(2).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 2)])
         );
     }

@@ -650,7 +650,7 @@ impl Domain {
                 None,
                 executor,
                 &self.log,
-            );
+            )?;
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
             self.process_times.stop();
@@ -721,7 +721,7 @@ impl Domain {
                                 // forwarded anything related to the write we're now handling.
                                 keys.iter()
                                     .map(|&k| {
-                                        n.parent_columns(k)
+                                        n.parent_columns(k)?
                                             .into_iter()
                                             .find(|&(ni, _)| ni == from)
                                             .ok_or_else(|| {
@@ -950,7 +950,7 @@ impl Domain {
                         let mut n = self.nodes[node].borrow_mut();
                         n.add_column(&field);
                         if let Some(b) = n.get_base_mut() {
-                            b.add_column(default);
+                            b.add_column(default)?;
                         } else if n.is_ingress() {
                             self.ingress_inject
                                 .entry(node)
@@ -967,8 +967,10 @@ impl Domain {
                     Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[node].borrow_mut();
                         n.get_base_mut()
-                            .expect("told to drop base column from non-base node")
-                            .drop_column(column);
+                            .ok_or_else(|| {
+                                internal_err("told to drop base column from non-base node")
+                            })?
+                            .drop_column(column)?;
                         self.control_reply_tx
                             .send(ControlReplyPacket::ack())
                             .unwrap();
@@ -2292,7 +2294,7 @@ impl Domain {
                             Some(rp),
                             ex,
                             &self.log,
-                        );
+                        )?;
 
                         let misses = process_result.unique_misses();
 
@@ -3041,7 +3043,7 @@ impl Domain {
                     tag,
                     shard,
                     executor,
-                );
+                )?;
                 from = segment.node;
             }
             Ok(())

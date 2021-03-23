@@ -1,4 +1,5 @@
 use derive_more::{Deref, From, Into};
+use noria::ReadySetError;
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -7,6 +8,7 @@ use std::sync;
 
 use crate::prelude::*;
 pub use nom_sql::BinaryOperator;
+use noria::errors::ReadySetResult;
 
 /// FilterVec represents set of constraints on columns against which a record can be checked
 /// Used in Filter operators and aggregations with case statements
@@ -146,21 +148,21 @@ impl Ingredient for Filter {
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
-    ) -> ProcessingResult {
+    ) -> ReadySetResult<ProcessingResult> {
         rs.retain(|r| self.filter.matches(r));
 
-        ProcessingResult {
+        Ok(ProcessingResult {
             results: rs,
             ..Default::default()
-        }
+        })
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        Some(vec![(self.src.as_global(), col)])
+    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+        Ok(Some(vec![(self.src.as_global(), col)]))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -198,8 +200,11 @@ impl Ingredient for Filter {
             })
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        vec![(self.src.as_global(), Some(column))]
+    fn parent_columns(
+        &self,
+        column: usize,
+    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
+        Ok(vec![(self.src.as_global(), Some(column))])
     }
 
     fn is_selective(&self) -> bool {
@@ -309,11 +314,11 @@ mod tests {
     fn it_resolves() {
         let g = setup(false, None);
         assert_eq!(
-            g.node().resolve(0),
+            g.node().resolve(0).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1),
+            g.node().resolve(1).unwrap(),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
     }
