@@ -594,6 +594,7 @@ pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], FunctionArgument> {
     alt((
         map(case_when_column, FunctionArgument::Conditional),
         map(column_identifier_no_alias, FunctionArgument::Column),
+        map(literal, FunctionArgument::Literal),
     ))(i)
 }
 
@@ -1184,6 +1185,28 @@ mod tests {
                 "coalesce".to_string(),
                 FunctionArguments::from(vec![
                     FunctionArgument::Column(Column::from("a")),
+                    FunctionArgument::Column(Column::from("b")),
+                    FunctionArgument::Column(Column::from("c")),
+                ]),
+            );
+            assert_eq!(res, Ok((&b""[..], expected)));
+        }
+    }
+
+    #[test]
+    fn simple_generic_function_with_literal() {
+        let qlist = [
+            "coalesce(\"a\",b,c)".as_bytes(),
+            "coalesce (\"a\",b,c)".as_bytes(),
+            "coalesce(\"a\" ,b,c)".as_bytes(),
+            "coalesce(\"a\", b,c)".as_bytes(),
+        ];
+        for q in qlist.iter() {
+            let res = column_function(q);
+            let expected = FunctionExpression::Generic(
+                "coalesce".to_string(),
+                FunctionArguments::from(vec![
+                    FunctionArgument::Literal(Literal::String("a".to_owned())),
                     FunctionArgument::Column(Column::from("b")),
                     FunctionArgument::Column(Column::from("c")),
                 ]),

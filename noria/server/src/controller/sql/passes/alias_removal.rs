@@ -143,6 +143,7 @@ fn rewrite_function_argument(
         FunctionArgument::Conditional(cwe) => {
             FunctionArgument::Conditional(rewrite_case_when_expression(col_table_remap, cwe))
         }
+        FunctionArgument::Literal(l) => FunctionArgument::Literal(l.clone()),
     }
 }
 

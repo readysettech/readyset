@@ -1451,4 +1451,35 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn alias_generic_function() {
+        let qstr = "SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;";
+        let res = selection(qstr.as_bytes());
+        assert!(res.is_ok(), "!{:?}.is_ok()", res);
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec!["users".into()],
+                fields: vec![
+                    FieldDefinitionExpression::Col(Column::from("id")),
+                    FieldDefinitionExpression::Col(Column {
+                        name: "created_day".to_owned(),
+                        table: None,
+                        alias: Some("created_day".to_owned()),
+                        function: Some(Box::new(FunctionExpression::Generic(
+                            "coalesce".to_owned(),
+                            FunctionArguments::from(vec![
+                                FunctionArgument::Column(Column::from("a")),
+                                FunctionArgument::Literal(Literal::String("b".to_owned())),
+                                FunctionArgument::Column(Column::from("c"))
+                            ])
+                        ))),
+                    }),
+                ],
+                where_clause: None,
+                ..Default::default()
+            }
+        )
+    }
 }
