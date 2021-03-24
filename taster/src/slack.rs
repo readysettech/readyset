@@ -47,11 +47,10 @@ impl SlackNotifier {
                 };
                 text.push(Text(format!("), pushed by @{}", alias).into()))
             }
-            None => text.push(Text(format!(")").into())),
+            None => text.push(Text(")".into())),
         }
-        match res.branch {
-            Some(ref b) => text.push(Text(format!("to *{}*", b).into())),
-            None => (),
+        if let Some(ref b) = res.branch {
+            text.push(Text(format!("to *{}*", b).into()))
         }
         let payload = PayloadBuilder::new()
             .text(text.as_slice())
@@ -108,14 +107,10 @@ impl SlackNotifier {
             .unwrap();
         attachments.push(build_att);
 
-        let is_regression = |(_, v): (_, &BenchmarkResult<f64>)| match *v {
-            BenchmarkResult::Regression(_, _) => true,
-            _ => false,
-        };
-        let is_neutral = |(_, v): (_, &BenchmarkResult<f64>)| match *v {
-            BenchmarkResult::Neutral(_, _) => true,
-            _ => false,
-        };
+        let is_regression =
+            |(_, v): (_, &BenchmarkResult<f64>)| matches!(v, BenchmarkResult::Regression(_, _));
+        let is_neutral =
+            |(_, v): (_, &BenchmarkResult<f64>)| matches!(v, BenchmarkResult::Neutral(_, _));
 
         match res.results {
             None => (),
@@ -131,8 +126,9 @@ impl SlackNotifier {
                         continue;
                     }
 
-                    let mut nv = res
+                    let mut fields = res
                         .iter()
+                        .filter(|r| self.verbose || is_regression(*r))
                         .map(|(k, v)| {
                             let val = match *v {
                                 BenchmarkResult::Improvement(ref s, ref p) => (s, p),
@@ -158,7 +154,7 @@ impl SlackNotifier {
                             }
                         })
                         .collect::<Vec<_>>();
-                    nv.sort_by(|a, b| b.title.cmp(&a.title));
+                    fields.sort_unstable_by(|x, y| x.title.cmp(&y.title));
 
                     let col = if res.iter().all(&is_regression) {
                         // red
@@ -177,7 +173,7 @@ impl SlackNotifier {
                     if self.verbose || !res.iter().all(&is_neutral) {
                         let att = AttachmentBuilder::new("")
                             .color(col)
-                            .fields(nv)
+                            .fields(fields)
                             .build()
                             .unwrap();
                         attachments.push(att);
