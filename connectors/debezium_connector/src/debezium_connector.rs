@@ -1,5 +1,4 @@
 extern crate serde_json;
-
 use anyhow::{anyhow, Context};
 use noria::consensus::ZookeeperAuthority;
 use noria::consistency::Timestamp;
@@ -9,6 +8,7 @@ use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::str::FromStr;
 use thiserror::Error;
 use tokio::stream::StreamExt;
 use tracing::{error, info, trace};
@@ -19,7 +19,37 @@ use debezium_message_parser::{
     DataChange, DataChangePayload, EventKey, EventValue, SchemaChange, Transaction,
 };
 
-use self::kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper;
+use self::{
+    debezium_message_parser::DataCollection,
+    kafka_message_consumer_wrapper::KafkaMessageConsumerWrapper,
+};
+
+/// The database that debezium is connected to. This can impact message
+/// structure and topic naming.
+#[derive(Debug, Clone, Copy)]
+pub enum DatabaseType {
+    MySQL,
+    PostgreSQL,
+}
+
+impl Default for DatabaseType {
+    fn default() -> Self {
+        DatabaseType::MySQL
+    }
+}
+
+impl FromStr for DatabaseType {
+    type Err = anyhow::Error;
+    fn from_str(input: &str) -> anyhow::Result<Self> {
+        match input.to_lowercase().as_str() {
+            "mysql" => Ok(DatabaseType::MySQL),
+            "postgres" => Ok(DatabaseType::PostgreSQL),
+            _ => Err(anyhow!(
+                "Invalid database type cannot be converted to DatabaseType"
+            )),
+        }
+    }
+}
 
 /// Kafka topics the debezium connector reads from.
 enum Topic {
@@ -74,6 +104,7 @@ pub struct Builder {
     timeout: Option<String>,
     eof: bool,
     auto_commit: bool,
+    database_type: DatabaseType,
 }
 
 impl Builder {
@@ -152,6 +183,11 @@ impl Builder {
         self
     }
 
+    pub fn set_database_type(&mut self, db: DatabaseType) -> &mut Self {
+        self.database_type = db;
+        self
+    }
+
     pub async fn build(&self) -> anyhow::Result<DebeziumConnector> {
         // for each table, we listen to the topic <dbserver>.<dbname>.<tablename>
         let mut topic_names: Vec<String> = Vec::new();
@@ -205,6 +241,7 @@ impl Builder {
             kafka_consumer,
             topics,
             noria,
+            database_type: self.database_type,
         })
     }
 }
@@ -213,6 +250,7 @@ pub struct DebeziumConnector {
     kafka_consumer: Option<KafkaMessageConsumerWrapper>,
     topics: HashMap<String, Topic>,
     noria: ControllerHandle<ZookeeperAuthority>,
+    database_type: DatabaseType,
 }
 
 impl DebeziumConnector {
@@ -288,6 +326,51 @@ impl DebeziumConnector {
         Ok(())
     }
 
+    /// Parse a transaction id from the transaction marker messages identifier.
+    /// The format of the transaction marker identifier changes based on the type
+    /// of database debezium is connected to.
+    fn parse_transaction_id(&self, id: String) -> anyhow::Result<u64> {
+        let gtid_seq = match self.database_type {
+            DatabaseType::MySQL => {
+                // The GTID is in the form <source_id>:<transaction_id>.
+                let mut gtid_tokens = id.split(':');
+                gtid_tokens
+                    .nth(1)
+                    .ok_or_else(|| anyhow!("Failed to parse GTID from string"))?
+            }
+            DatabaseType::PostgreSQL => id.as_str(),
+        };
+
+        gtid_seq
+            .parse()
+            .map_err(|_| anyhow!("Failed to convert GTID to u64"))
+    }
+
+    /// Parse the readyset table names from the debezium data colleciton names.
+    /// The format of these names may vary based on the type of the database
+    /// debezium is connected to.
+    fn parse_table_names<'a>(
+        &self,
+        collections: &'a [DataCollection],
+    ) -> anyhow::Result<Vec<&'a str>> {
+        match self.database_type {
+            DatabaseType::MySQL => Ok(collections
+                .iter()
+                .map(|c| c.data_collection.as_str())
+                .collect()),
+            DatabaseType::PostgreSQL => collections
+                .iter()
+                .map(|c| {
+                    // PostgreSQL data collections are in the format <schema>.<tablename>.
+                    let mut tokens = c.data_collection.split('.');
+                    tokens.nth(1).ok_or_else(|| {
+                        anyhow!("Data collection did not include a valid table name")
+                    })
+                })
+                .collect(),
+        }
+    }
+
     /// Processes a BEGIN or END transaction message.
     /// When a transaction end message is received, we will increment the
     /// timestamps associated with each changed base table. This new timestamp
@@ -301,51 +384,16 @@ impl DebeziumConnector {
             return Ok(());
         }
 
-        // TODO(justin): Create an error type for debezium connector errors and
-        // refactor error handling.
         let collections = payload
             .data_collections
             .as_ref()
             .ok_or_else(|| anyhow!("Transaction metadata had no data collections"))?;
-        let tables = collections.iter().map(|c| {
-            let mut tokens = c.data_collection.split('.');
-
-            // Postgres and MySql have different data collection naming schemes.
-            // Postgres names tables as: schema.table, while MySql uses: table.
-            // Split the data collection name by the '.' character. If it is postgres,
-            // there will be two tokens and we return the second.
-            // TODO(justin): Wrap parsing different data collection naming schemes.
-            let first = tokens.next();
-            let second = tokens.next();
-
-            match second {
-                Some(t) => Ok(t),
-                None => first
-                    .ok_or_else(|| anyhow!("Data collection did not include a valid table name")),
-            }
-        });
-
-        // Pull the GTID from the transaction message to use as the timestamp for the base table.
-        // The GTID may be in the following forms based on the write and the database in use:
-        //   - Postgres: <integer>
-        //   - MySQL: <source_id>:<transaction_id>
-        // TODO(justin): Abstract away parsing GTIDs based on the database type.
-        let mut gtid_tokens = payload.id.split(':');
-        let first = gtid_tokens.next();
-        let second = gtid_tokens.next();
-
-        let gtid_seq = match second {
-            Some(t) => Ok(t),
-            None => first.ok_or_else(|| anyhow!("GTID does not have a valid sequence number")),
-        }?;
-
-        let gtid_seq: u64 = gtid_seq
-            .parse()
-            .map_err(|_| anyhow!("GTID not a valid number"))?;
+        let tables = self.parse_table_names(collections.as_slice())?;
+        let gtid_seq = self.parse_transaction_id(payload.id.clone())?;
 
         for table in tables {
             // Propagate any collection naming errors
-            let mut table_mutator = self.noria.table(table?).await?;
+            let mut table_mutator = self.noria.table(table).await?;
             let mut timestamp = Timestamp::default();
             timestamp.map.insert(table_mutator.node, gtid_seq);
             table_mutator.update_timestamp(timestamp).await?;
