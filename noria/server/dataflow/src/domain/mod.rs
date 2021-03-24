@@ -1271,7 +1271,7 @@ impl Domain {
                                 })?;
                                 let mut whoopsed = false;
                                 keys.retain(|key| {
-                                    writer.contains(key).unwrap_or_else(|| {
+                                    !writer.contains(key).unwrap_or_else(|| {
                                         whoopsed = true;
                                         true
                                     })

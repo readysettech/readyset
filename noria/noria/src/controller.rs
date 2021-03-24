@@ -199,6 +199,17 @@ where
 {
     let body: hyper::body::Bytes = fut.await.map_err(rpc_err!(path))?;
 
+    /*
+    Pro tip! If you're getting SerializationFailed errors, the following println! could
+    be useful. ~eta
+
+    println!(
+        "{} deserializing as {}",
+        String::from_utf8_lossy(&body),
+        std::any::type_name::<R>()
+    );
+     */
+
     serde_json::from_slice::<R>(&body)
         .map_err(ReadySetError::from)
         .map_err(|e| rpc_err_no_downcast(path, e))

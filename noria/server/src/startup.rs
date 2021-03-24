@@ -124,6 +124,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             authority.clone(),
         )
         .map_err(move |e| {
+            eprintln!("external request failed: {:?}", e);
             warn!(ext_log, "external request failed: {:?}", e);
         })
         .map(|_| ()),
@@ -156,6 +157,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             };
             // needed for https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
             if let Err(e) = snd {
+                eprintln!("forwarding loop failed: {:?}", e);
                 warn!(ext_log2, "Forwarding loop failed (!!): {:?}", e);
                 break;
             }
@@ -185,6 +187,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             tx.clone(),
         )
         .map_err(move |e| {
+            eprintln!("controller failed: {:?}", e);
             warn!(ext_log4, "controller failed: {:?}", e);
             e
         }),
@@ -201,6 +204,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             log.clone(),
         )
         .map_err(move |e| {
+            eprintln!("worker domain failed: {:?}", e);
             warn!(ext_log3, "worker domain failed: {:?}", e);
             e
         }),

@@ -657,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "can't resolve literal column")]
+    #[should_panic(expected = "resolve literal col")]
     fn it_fails_to_resolve_literal() {
         let p = setup(false, false, true);
         p.node().resolve(2).unwrap();
