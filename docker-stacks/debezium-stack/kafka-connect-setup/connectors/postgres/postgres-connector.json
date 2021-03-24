@@ -15,6 +15,7 @@
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "decimal.handling.mode": "double",
     "time.precision.mode": "connect",
-    "snapshot.mode": "exported"
+    "snapshot.mode": "exported",
+    "provide.transaction.metadata": "true"
   }
 }
