@@ -13,7 +13,7 @@ use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
-use dataflow::ops::project::{Project, ProjectExpression};
+use dataflow::ops::project::{BuiltinFunction, Project, ProjectExpression};
 use dataflow::{node, ops};
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::{MirQuery, QueryFlowParts};
@@ -881,16 +881,33 @@ fn generate_project_expression(parent: &MirNodeRef, expr: Expression) -> Project
             arithmetic_to_project_expression(parent, &ari)
         }
         Expression::Call(FunctionExpression::Cast(arg, ty)) => ProjectExpression::Cast(
-            match arg {
-                FunctionArgument::Column(col) => Box::new(ProjectExpression::Column(
-                    parent
-                        .borrow()
-                        .column_id_for_column(&Column::from(col), None),
-                )),
-                _ => unimplemented!(),
-            },
+            Box::new(generate_project_expression_from_function_arg(parent, arg)),
             ty,
         ),
+        Expression::Call(FunctionExpression::Generic(func, args)) => {
+            ProjectExpression::Call(match func.as_str() {
+                "convert_tz" => {
+                    let mut args = args.arguments;
+                    assert_eq!(args.len(), 3);
+                    let mut drain = args.drain(0..3);
+                    BuiltinFunction::ConvertTZ(
+                        Box::new(generate_project_expression_from_function_arg(
+                            parent,
+                            drain.next().unwrap(),
+                        )),
+                        Box::new(generate_project_expression_from_function_arg(
+                            parent,
+                            drain.next().unwrap(),
+                        )),
+                        Box::new(generate_project_expression_from_function_arg(
+                            parent,
+                            drain.next().unwrap(),
+                        )),
+                    )
+                }
+                _ => unimplemented!(),
+            })
+        }
         Expression::Call(call) => unreachable!(
             "Unexpected (aggregate?) call node in project expression: {:?}",
             call
@@ -901,6 +918,21 @@ fn generate_project_expression(parent: &MirNodeRef, expr: Expression) -> Project
                 .borrow()
                 .column_id_for_column(&Column::new(table.as_deref(), &name), None),
         ),
+    }
+}
+
+fn generate_project_expression_from_function_arg(
+    parent: &MirNodeRef,
+    arg: FunctionArgument,
+) -> ProjectExpression {
+    match arg {
+        FunctionArgument::Column(col) => ProjectExpression::Column(
+            parent
+                .borrow()
+                .column_id_for_column(&Column::from(col), None),
+        ),
+        FunctionArgument::Literal(lit) => ProjectExpression::Literal(lit.into()),
+        _ => unimplemented!(),
     }
 }
 
