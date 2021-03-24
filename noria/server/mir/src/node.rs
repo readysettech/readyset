@@ -1,3 +1,4 @@
+use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expression, Literal, OrderType};
 use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
@@ -386,10 +387,21 @@ impl MirNode {
                     columns.push(on.clone());
                 }
             }
-            MirNodeType::Project { ref emit, .. } => {
+            MirNodeType::Project {
+                ref emit,
+                ref expressions,
+                ..
+            } => {
                 for c in emit {
                     if !columns.contains(&c) {
                         columns.push(c.clone());
+                    }
+                }
+                for (_, expr) in expressions {
+                    for c in expr.referred_columns() {
+                        if !columns.iter().any(|col| col == c.as_ref()) {
+                            columns.push(c.into_owned().into());
+                        }
                     }
                 }
             }

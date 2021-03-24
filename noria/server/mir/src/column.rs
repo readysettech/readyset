@@ -99,6 +99,13 @@ impl PartialEq for Column {
     }
 }
 
+impl PartialEq<nom_sql::Column> for Column {
+    fn eq(&self, other: &nom_sql::Column) -> bool {
+        (self.name == other.name && self.table == other.table)
+            || self.aliases.iter().any(|c| c == other)
+    }
+}
+
 impl Eq for Column {}
 
 impl Ord for Column {
