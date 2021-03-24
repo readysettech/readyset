@@ -1,6 +1,7 @@
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
+use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
@@ -1792,19 +1793,12 @@ impl SqlToMirConverter {
                 }
 
                 let qgn = &qg.relations[*rel];
-                for pred in &qgn.predicates {
-                    let cols = predicate_columns(pred);
-
-                    for col in cols {
-                        column_to_predicates.entry(col).or_default().push(pred);
-                    }
-                }
-
-                for pred in &qg.global_predicates {
-                    let cols = predicate_columns(pred);
-
-                    for col in cols {
-                        column_to_predicates.entry(col).or_default().push(pred);
+                for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
+                    for col in pred.referred_columns() {
+                        column_to_predicates
+                            .entry(col.as_ref().into())
+                            .or_default()
+                            .push(pred);
                     }
                 }
             }
