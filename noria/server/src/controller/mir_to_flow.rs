@@ -685,7 +685,7 @@ fn make_join_node(
         proj_cols.len()
     );
 
-    if on_left.len() == 1 || on_right.len() == 1 {
+    if on_left.len() != 1 || on_right.len() != 1 {
         unsupported!("no support for multiple column joins yet");
     }
 

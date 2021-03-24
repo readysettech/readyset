@@ -197,6 +197,8 @@ impl ControllerInner {
         body: hyper::body::Bytes,
         authority: &Arc<A>,
     ) -> Result<Result<String, ReadySetError>, StatusCode> {
+        // TODO(eta): the error handling / general serialization inside this function is really
+        // confusing, and has been the source of at least 1 hard-to-track-down bug
         metrics::increment_counter!("server.external_requests");
         use serde_json as json;
 
@@ -300,8 +302,10 @@ impl ControllerInner {
                 .map(|universe| Ok(json::to_string(&universe).unwrap())),
             (Method::POST, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| self.remove_nodes(vec![args].as_slice()))
-                .map(|r| Ok(json::to_string(&r).unwrap())),
+                .map(|args| {
+                    self.remove_nodes(vec![args].as_slice())
+                        .map(|r| json::to_string(&r).unwrap())
+                }),
             _ => Err(StatusCode::NOT_FOUND),
         }
     }

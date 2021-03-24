@@ -1,7 +1,7 @@
 use dataflow::node;
 use dataflow::ops;
 use dataflow::prelude::*;
-use noria::ReadySetError;
+use noria::{internal, ReadySetError};
 use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
@@ -764,8 +764,7 @@ pub fn validate(
                         Sharding::ByColumn(s.sharded_by(), sharding_factor),
                     )?;
                     if in_sharding != n.sharded_by() {
-                        crit!(
-                            log,
+                        internal!(
                             "invalid sharding: {} shards to {:?} != {}'s {:?}",
                             in_ni.index(),
                             in_sharding,
@@ -773,7 +772,6 @@ pub fn validate(
                             n.sharded_by(),
                         );
                     }
-                    assert_eq!(in_sharding, n.sharded_by());
 
                     Ok(())
                 })?;
@@ -792,8 +790,7 @@ pub fn validate(
                 };
 
                 if !equal {
-                    crit!(
-                        log,
+                    internal!(
                         "invalid sharding: {} sharded by {:?} != {}'s {:?}",
                         in_ni.index(),
                         in_sharding,
@@ -801,7 +798,6 @@ pub fn validate(
                         graph[node].sharded_by(),
                     );
                 }
-                assert!(equal);
             }
         }
     }
