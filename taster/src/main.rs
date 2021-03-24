@@ -83,11 +83,17 @@ impl Notifier {
         push: &Push,
         commit: Option<&Commit>,
     ) -> Result<(), String> {
+        let mut notified = false;
         if let Some(sn) = &self.slack_notifier {
             sn.notify(cfg, result, push)?;
+            notified = true;
         }
         if let (Some(gn), Some(commit)) = (&self.github_notifier, commit) {
             gn.notify(cfg, result, push, commit)?;
+            notified = true;
+        }
+        if !notified {
+            warn!("Skipped notification since no notifiers were configured or no commit was given");
         }
         Ok(())
     }
