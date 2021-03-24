@@ -9,6 +9,7 @@ use crate::Commit;
 use crate::Push;
 
 use std::collections::HashMap;
+use std::f64::{INFINITY, NEG_INFINITY};
 use std::io;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Output};
@@ -20,6 +21,24 @@ pub enum BenchmarkResult<T> {
     Improvement(T, f64),
     Regression(T, f64),
     Neutral(T, f64),
+}
+
+impl<T> BenchmarkResult<T> {
+    pub fn value(&self) -> &T {
+        match self {
+            BenchmarkResult::Improvement(x, _) => x,
+            BenchmarkResult::Regression(x, _) => x,
+            BenchmarkResult::Neutral(x, _) => x,
+        }
+    }
+
+    pub fn change(&self) -> f64 {
+        match self {
+            BenchmarkResult::Improvement(_, x) => *x,
+            BenchmarkResult::Regression(_, x) => *x,
+            BenchmarkResult::Neutral(_, x) => *x,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,28 +112,38 @@ fn parse_output(
             Some(prev_res) => {
                 let old_val = match prev_res.get(bm_name) {
                     None => val,
-                    Some(pv) => match *pv {
-                        BenchmarkResult::Improvement(v, _) => v,
-                        BenchmarkResult::Regression(v, _) => v,
-                        BenchmarkResult::Neutral(v, _) => v,
-                    },
+                    Some(pv) => *pv.value(),
+                };
+
+                let change = |val: f64, old_val: f64| -> f64 {
+                    if old_val == 0f64 {
+                        if val == 0f64 {
+                            0.0
+                        } else if val < old_val {
+                            NEG_INFINITY
+                        } else {
+                            INFINITY
+                        }
+                    } else {
+                        (val / old_val) - 1.0
+                    }
                 };
 
                 if lower_is_better {
                     if val >= old_val * (1.0 + regression_threshold) {
-                        BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Regression(val, change(val, old_val))
                     } else if val < old_val * (1.0 - improvement_threshold) {
-                        BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Improvement(val, change(val, old_val))
                     } else {
-                        BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Neutral(val, change(val, old_val))
                     }
                 } else {
                     if val >= old_val * (1.0 + improvement_threshold) {
-                        BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Improvement(val, change(val, old_val))
                     } else if val < old_val * (1.0 - regression_threshold) {
-                        BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Regression(val, change(val, old_val))
                     } else {
-                        BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                        BenchmarkResult::Neutral(val, change(val, old_val))
                     }
                 }
             }

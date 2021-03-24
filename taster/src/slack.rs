@@ -112,72 +112,64 @@ impl SlackNotifier {
         let is_neutral =
             |(_, v): (_, &BenchmarkResult<f64>)| matches!(v, BenchmarkResult::Neutral(_, _));
 
-        match res.results {
-            None => (),
-            Some(ref r) => {
-                for &(ref bm, ref status, ref res) in r {
-                    if !status.success() {
-                        let att = AttachmentBuilder::new("")
-                            .color("danger")
-                            .title(format!("{} failed!", bm.name))
-                            .build()
-                            .unwrap();
-                        attachments.push(att);
-                        continue;
-                    }
+        if let Some(r) = &res.results {
+            for (bm, status, res) in r {
+                if !status.success() {
+                    let att = AttachmentBuilder::new("")
+                        .color("danger")
+                        .title(format!("{} failed!", bm.name))
+                        .build()
+                        .unwrap();
+                    attachments.push(att);
+                    continue;
+                }
 
-                    let mut fields = res
-                        .iter()
-                        .filter(|r| self.verbose || is_regression(*r))
-                        .map(|(k, v)| {
-                            let val = match *v {
-                                BenchmarkResult::Improvement(ref s, ref p) => (s, p),
-                                BenchmarkResult::Neutral(ref s, ref p) => (s, p),
-                                BenchmarkResult::Regression(ref s, ref p) => (s, p),
-                            };
-                            let icon = if *val.1 > 0.1 {
-                                ":chart_with_upwards_trend:"
-                            } else if *val.1 < -0.1 {
-                                ":chart_with_downwards_trend:"
-                            } else {
-                                ""
-                            };
-                            Field {
-                                title: k.clone(),
-                                value: SlackText::new(format!(
-                                    "{} {} ({:+.2}%)",
-                                    icon,
-                                    val.0,
-                                    val.1 * 100.0
-                                )),
-                                short: Some(true),
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    fields.sort_unstable_by(|x, y| x.title.cmp(&y.title));
+                let mut fields = res
+                    .iter()
+                    .filter(|r| self.verbose || is_regression(*r))
+                    .map(|(k, v)| {
+                        let icon = if v.change() > 0.1 {
+                            ":chart_with_upwards_trend:"
+                        } else if v.change() < -0.1 {
+                            ":chart_with_downwards_trend:"
+                        } else {
+                            ""
+                        };
+                        Field {
+                            title: k.clone(),
+                            value: SlackText::new(format!(
+                                "{} {} ({:+.2}%)",
+                                icon,
+                                v.value(),
+                                v.change() * 100.0
+                            )),
+                            short: Some(true),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                fields.sort_unstable_by(|x, y| x.title.cmp(&y.title));
 
-                    let col = if res.iter().all(&is_regression) {
-                        // red
-                        "danger"
-                    } else if res.iter().any(&is_regression) {
-                        // amber
-                        "warning"
-                    } else if res.iter().all(&is_neutral) {
-                        // default, gray
-                        ""
-                    } else {
-                        // green
-                        "good"
-                    };
+                let color = if res.iter().all(&is_regression) {
+                    // red
+                    "danger"
+                } else if res.iter().any(&is_regression) {
+                    // amber
+                    "warning"
+                } else if res.iter().all(&is_neutral) {
+                    // default, gray
+                    ""
+                } else {
+                    // green
+                    "good"
+                };
 
-                    if self.verbose || !res.iter().all(&is_neutral) {
-                        let att = AttachmentBuilder::new("")
-                            .color(col)
-                            .fields(fields)
-                            .build()
-                            .unwrap();
-                        attachments.push(att);
-                    }
+                if self.verbose || !res.iter().all(&is_neutral) {
+                    let att = AttachmentBuilder::new("")
+                        .color(color)
+                        .fields(fields)
+                        .build()
+                        .unwrap();
+                    attachments.push(att);
                 }
             }
         }
