@@ -325,10 +325,30 @@ impl DebeziumConnector {
             }
         });
 
+        // Pull the GTID from the transaction message to use as the timestamp for the base table.
+        // The GTID may be in the following forms based on the write and the database in use:
+        //   - Postgres: <integer>
+        //   - MySQL: <source_id>:<transaction_id>
+        // TODO(justin): Abstract away parsing GTIDs based on the database type.
+        let mut gtid_tokens = payload.id.split(':');
+        let first = gtid_tokens.next();
+        let second = gtid_tokens.next();
+
+        let gtid_seq = match second {
+            Some(t) => Ok(t),
+            None => first.ok_or_else(|| anyhow!("GTID does not have a valid sequence number")),
+        }?;
+
+        let gtid_seq: u64 = gtid_seq
+            .parse()
+            .map_err(|_| anyhow!("GTID not a valid number"))?;
+
         for table in tables {
             // Propagate any collection naming errors
             let mut table_mutator = self.noria.table(table?).await?;
-            table_mutator.update_timestamp(Timestamp::default()).await?;
+            let mut timestamp = Timestamp::default();
+            timestamp.map.insert(table_mutator.node, gtid_seq);
+            table_mutator.update_timestamp(timestamp).await?;
         }
         Ok(())
     }
@@ -344,13 +364,14 @@ impl DebeziumConnector {
             return Ok(());
         };
 
-        let value_string = std::str::from_utf8(payload).map_err(MessageError::invalid)?;
-        let value_message: EventValue =
-            serde_json::from_str(&value_string).map_err(MessageError::invalid)?;
         let topic = self.topics.get(owned_message.topic()).unwrap();
 
         match topic {
             Topic::SchemaChange => {
+                let value_string = std::str::from_utf8(payload).map_err(MessageError::invalid)?;
+                let value_message: EventValue =
+                    serde_json::from_str(&value_string).map_err(MessageError::invalid)?;
+
                 self.handle_schema_message(value_message.try_into().unwrap())
                     .await?;
             }
@@ -367,6 +388,10 @@ impl DebeziumConnector {
                         Ok(key_message)
                     })
                     .transpose()?;
+                let value_string = std::str::from_utf8(payload).map_err(MessageError::invalid)?;
+                let value_message: EventValue =
+                    serde_json::from_str(&value_string).map_err(MessageError::invalid)?;
+
                 self.handle_change_message(key_message, value_message.try_into().unwrap())
                     .await?;
             }

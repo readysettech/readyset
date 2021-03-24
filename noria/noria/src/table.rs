@@ -416,7 +416,8 @@ impl TableBuilder {
 #[derive(Clone)]
 pub struct Table {
     ni: NodeIndex,
-    node: LocalNodeIndex,
+    /// The LocalNodeIndex assigned to the table.
+    pub node: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
     columns: Vec<String>,
