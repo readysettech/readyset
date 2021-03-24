@@ -183,6 +183,7 @@ impl<'a> ReferredColumnsIter<'a> {
                     _ => None,
                 }
             }
+            FunctionArgument::Literal(_) => None,
         }
     }
 

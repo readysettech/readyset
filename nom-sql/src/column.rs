@@ -80,6 +80,7 @@ impl<'a> From<Vec<FunctionArgument>> for FunctionArguments {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionArgument {
     Column(Column),
+    Literal(Literal),
     Conditional(CaseWhenExpression),
 }
 
@@ -89,6 +90,9 @@ impl Display for FunctionArgument {
             FunctionArgument::Column(ref col) => write!(f, "{}", col)?,
             FunctionArgument::Conditional(ref e) => {
                 write!(f, "{}", e)?;
+            }
+            FunctionArgument::Literal(ref l) => {
+                write!(f, "{}", l.to_string())?;
             }
         }
         Ok(())
