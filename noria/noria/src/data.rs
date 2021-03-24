@@ -462,6 +462,7 @@ impl PartialEq for DataType {
 }
 
 use std::cmp::Ordering;
+
 impl PartialOrd for DataType {
     fn partial_cmp(&self, other: &DataType) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -701,6 +702,15 @@ impl From<NaiveDate> for DataType {
 impl From<NaiveDateTime> for DataType {
     fn from(dt: NaiveDateTime) -> Self {
         DataType::Timestamp(dt)
+    }
+}
+
+impl<'a> From<&'a DataType> for NaiveDateTime {
+    fn from(data: &'a DataType) -> Self {
+        match *data {
+            DataType::Timestamp(ref dt) => *dt,
+            _ => panic!("attempted to convert a {:?} to a NaiveDateTime", data),
+        }
     }
 }
 
@@ -1118,7 +1128,7 @@ impl Arbitrary for DataType {
     type Strategy = proptest::strategy::BoxedStrategy<DataType>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use crate::util::arbitrary::{arbitrary_naive_date_time, arbitrary_naive_time};
+        use launchpad::arbitrary::{arbitrary_naive_date_time, arbitrary_naive_time};
         use proptest::arbitrary::any;
         use proptest::prelude::*;
         use DataType::*;
@@ -1786,7 +1796,7 @@ mod tests {
 
     mod coerce_to {
         use super::*;
-        use crate::util::arbitrary::{
+        use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
         use proptest::sample::select;

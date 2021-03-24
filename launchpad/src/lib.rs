@@ -3,6 +3,7 @@
 #![deny(missing_docs, missing_crate_level_docs)]
 #![feature(or_patterns)]
 
+pub mod arbitrary;
 pub mod hash;
 pub mod intervals;
 

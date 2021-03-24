@@ -18,6 +18,7 @@ maintenance = { status = "experimental" }
 jemallocator = "0.3"
 
 [dependencies]
+anyhow = "1.0"
 bincode = "1.0.0"
 reader_map = { version = "0.1.0", path = "reader_map" }
 hashbag = "0.1.2"
@@ -41,6 +42,8 @@ derive_more = "0.99.11"
 tuple = "0.5.1"
 vec1 = "1.6.0"
 maplit = "1.0.2"
+chrono = { version = "0.4.0", features = ["serde"] }
+chrono-tz = { version = "0.5", features = ["serde"] }
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
@@ -54,6 +57,7 @@ noria = { version = "0.7.0", path = "../../noria" }
 unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
 thiserror = "1.0.24"
+test-strategy = "0.1.1"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
