@@ -138,7 +138,6 @@ variable "db_password" {
   type        = string
   default     = ""
   description = "Password for the MySQL user to use to connect to RDS"
-  sensitive   = true
 }
 
 variable "kafka_instance_type" {
