@@ -307,7 +307,11 @@ impl DataType {
                     .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Date) => {
-                NaiveDate::parse_from_str(self.into(), DATE_FORMAT)
+                let text: &str = self.into();
+                NaiveDate::parse_from_str(text, DATE_FORMAT)
+                    .or_else(|_e| {
+                        NaiveDateTime::parse_from_str(text, TIMESTAMP_FORMAT).map(|dt| dt.date())
+                    })
                     .map_err(|e| mk_err("Could not parse value as date".to_owned(), Some(e.into())))
                     .map(|date| {
                         Self::Timestamp(NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0)))
@@ -462,7 +466,6 @@ impl PartialEq for DataType {
 }
 
 use std::cmp::Ordering;
-
 impl PartialOrd for DataType {
     fn partial_cmp(&self, other: &DataType) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -710,6 +713,15 @@ impl<'a> From<&'a DataType> for NaiveDateTime {
         match *data {
             DataType::Timestamp(ref dt) => *dt,
             _ => panic!("attempted to convert a {:?} to a NaiveDateTime", data),
+        }
+    }
+}
+
+impl<'a> From<&'a DataType> for NaiveDate {
+    fn from(data: &'a DataType) -> Self {
+        match *data {
+            DataType::Timestamp(ref dt) => dt.date(),
+            _ => panic!("attempted to convert a {:?} to a NaiveDate", data),
         }
     }
 }

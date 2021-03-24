@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 use thiserror::Error;
 
-use chrono::{LocalResult, NaiveDateTime, TimeZone};
+use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use nom_sql::{ArithmeticOperator, SqlType};
 use noria::{DataType, ValueCoerceError};
@@ -44,6 +44,8 @@ pub enum BuiltinFunction {
         Box<ProjectExpression>,
         Box<ProjectExpression>,
     ),
+    /// dayofweek(expr)
+    DayOfWeek(Box<ProjectExpression>),
 }
 
 /// Expression AST for projection
@@ -81,9 +83,21 @@ impl fmt::Display for ProjectExpression {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
                     write!(f, "convert_tz({},{},{})", arg1, arg2, arg3)
                 }
+                BuiltinFunction::DayOfWeek(arg) => {
+                    write!(f, "dayofweek({})", arg)
+                }
             },
         }
     }
+}
+
+macro_rules! try_cast_or {
+    ($datatype:expr, $sqltype:expr, $default:expr) => {
+        match $datatype.coerce_to($sqltype) {
+            Ok(v) => v,
+            Err(_) => return $default,
+        };
+    };
 }
 
 impl ProjectExpression {
@@ -117,14 +131,6 @@ impl ProjectExpression {
                     let param2 = arg2.eval(record)?;
                     let param3 = arg3.eval(record)?;
                     let null_result = Ok(Cow::Owned(DataType::None));
-                    macro_rules! try_cast_or {
-                        ($datatype:expr, $sqltype:expr, $default:expr) => {
-                            match $datatype.coerce_to($sqltype) {
-                                Ok(v) => v,
-                                Err(_) => return $default,
-                            };
-                        };
-                    }
                     let param1_cast = try_cast_or!(param1, &SqlType::Timestamp, null_result);
                     let param2_cast = try_cast_or!(param2, &SqlType::Text, null_result);
                     let param3_cast = try_cast_or!(param3, &SqlType::Text, null_result);
@@ -136,6 +142,14 @@ impl ProjectExpression {
                         Ok(v) => Ok(Cow::Owned(DataType::Timestamp(v))),
                         Err(_) => null_result,
                     }
+                }
+                BuiltinFunction::DayOfWeek(arg) => {
+                    let param = arg.eval(record)?;
+                    let param_cast =
+                        try_cast_or!(param, &SqlType::Date, Ok(Cow::Owned(DataType::None)));
+                    Ok(Cow::Owned(DataType::Int(
+                        day_of_week(&(param_cast.as_ref().into())) as i32,
+                    )))
                 }
             },
         }
@@ -179,6 +193,10 @@ pub fn convert_tz(
     };
 
     Ok(datetime_tz.with_timezone(&target_tz).naive_local())
+}
+
+fn day_of_week(date: &NaiveDate) -> u8 {
+    date.weekday().number_from_sunday() as u8
 }
 
 #[cfg(test)]
@@ -292,6 +310,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn eval_call_day_of_week() {
+        let expr = Call(BuiltinFunction::DayOfWeek(Box::new(Column(0))));
+        let expected = Cow::Owned(DataType::Int(2).into());
+
+        let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
+
+        assert_eq!(expr.eval(&[date.into()]).unwrap(), expected);
+        assert_eq!(expr.eval(&[date.to_string().into()]).unwrap(), expected);
+
+        let datetime = NaiveDateTime::new(
+            date, // Monday
+            NaiveTime::from_hms(18, 08, 00),
+        );
+        assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected);
+        assert_eq!(expr.eval(&[datetime.to_string().into()]).unwrap(), expected);
+    }
+
     mod builtin_funcs {
         use super::*;
         use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
@@ -314,6 +350,12 @@ mod tests {
             assert_eq!(super::convert_tz(&datetime, src, target).unwrap(), expected);
             assert!(super::convert_tz(&datetime, "invalid timezone", target).is_err());
             assert!(super::convert_tz(&datetime, src, "invalid timezone").is_err());
+        }
+
+        #[proptest]
+        fn day_of_week(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
+            let expected = datetime.weekday().number_from_sunday() as u8;
+            assert_eq!(super::day_of_week(&datetime.date()), expected);
         }
     }
 }
