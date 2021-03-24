@@ -37,7 +37,6 @@ pub struct BuiltinFunctionError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuiltinFunction {
     // Timediff,
-    // Dayofweek,
     /// convert_tz(expr, expr, expr)
     ConvertTZ(
         Box<ProjectExpression>,
@@ -46,7 +45,10 @@ pub enum BuiltinFunction {
     ),
     /// dayofweek(expr)
     DayOfWeek(Box<ProjectExpression>),
+    /// ifnull(expr, expr)
     IfNull(Box<ProjectExpression>, Box<ProjectExpression>),
+    /// month(expr)
+    Month(Box<ProjectExpression>),
 }
 
 #[derive(Debug, Error)]
@@ -107,6 +109,9 @@ impl fmt::Display for BuiltinFunction {
             IfNull(arg1, arg2) => {
                 write!(f, "ifnull({}, {})", arg1, arg2)
             }
+            Month(arg) => {
+                write!(f, "month({})", arg)
+            }
         }
     }
 }
@@ -147,11 +152,11 @@ impl fmt::Display for ProjectExpression {
     }
 }
 
-macro_rules! try_cast_or {
-    ($datatype:expr, $sqltype:expr, $default:expr) => {
+macro_rules! try_cast_or_none {
+    ($datatype:expr, $sqltype:expr) => {
         match $datatype.coerce_to($sqltype) {
             Ok(v) => v,
-            Err(_) => return $default,
+            Err(_) => return Ok(Cow::Owned(DataType::None)),
         };
     };
 }
@@ -186,23 +191,21 @@ impl ProjectExpression {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let param3 = arg3.eval(record)?;
-                    let null_result = Ok(Cow::Owned(DataType::None));
-                    let param1_cast = try_cast_or!(param1, &SqlType::Timestamp, null_result);
-                    let param2_cast = try_cast_or!(param2, &SqlType::Text, null_result);
-                    let param3_cast = try_cast_or!(param3, &SqlType::Text, null_result);
+                    let param1_cast = try_cast_or_none!(param1, &SqlType::Timestamp);
+                    let param2_cast = try_cast_or_none!(param2, &SqlType::Text);
+                    let param3_cast = try_cast_or_none!(param3, &SqlType::Text);
                     match convert_tz(
                         &(param1_cast.as_ref().into()),
                         param2_cast.as_ref().into(),
                         param3_cast.as_ref().into(),
                     ) {
                         Ok(v) => Ok(Cow::Owned(DataType::Timestamp(v))),
-                        Err(_) => null_result,
+                        Err(_) => Ok(Cow::Owned(DataType::None)),
                     }
                 }
                 BuiltinFunction::DayOfWeek(arg) => {
                     let param = arg.eval(record)?;
-                    let param_cast =
-                        try_cast_or!(param, &SqlType::Date, Ok(Cow::Owned(DataType::None)));
+                    let param_cast = try_cast_or_none!(param, &SqlType::Date);
                     Ok(Cow::Owned(DataType::Int(
                         day_of_week(&(param_cast.as_ref().into())) as i32,
                     )))
@@ -215,6 +218,13 @@ impl ProjectExpression {
                     } else {
                         Ok(param1)
                     }
+                }
+                BuiltinFunction::Month(arg) => {
+                    let param = arg.eval(record)?;
+                    let param_cast = try_cast_or_none!(param, &SqlType::Date);
+                    Ok(Cow::Owned(DataType::UnsignedInt(
+                        month(&(param_cast.as_ref().into())) as u32,
+                    )))
                 }
             },
         }
@@ -262,6 +272,10 @@ pub fn convert_tz(
 
 fn day_of_week(date: &NaiveDate) -> u8 {
     date.weekday().number_from_sunday() as u8
+}
+
+fn month(date: &NaiveDate) -> u8 {
+    date.month() as u8
 }
 
 #[cfg(test)]
@@ -417,6 +431,36 @@ mod tests {
         assert_eq!(expr3.eval(&[DataType::None]).unwrap(), value);
     }
 
+    #[test]
+    fn eval_call_month() {
+        let expr = Call(BuiltinFunction::Month(Box::new(Column(0))));
+        let datetime = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 12),
+            NaiveTime::from_hms(5, 13, 33),
+        );
+        let expected = 10 as u32;
+        assert_eq!(
+            expr.eval(&[datetime.into()]).unwrap(),
+            Cow::Owned(expected.into())
+        );
+        assert_eq!(
+            expr.eval(&[datetime.to_string().into()]).unwrap(),
+            Cow::Owned(expected.into())
+        );
+        assert_eq!(
+            expr.eval(&[datetime.date().into()]).unwrap(),
+            Cow::Owned(expected.into())
+        );
+        assert_eq!(
+            expr.eval(&[datetime.date().to_string().into()]).unwrap(),
+            Cow::Owned(expected.into())
+        );
+        assert_eq!(
+            expr.eval(&["invalid date".into()]).unwrap(),
+            Cow::Owned(DataType::None)
+        );
+    }
+
     mod builtin_funcs {
         use super::*;
         use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
@@ -445,6 +489,12 @@ mod tests {
         fn day_of_week(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
             let expected = datetime.weekday().number_from_sunday() as u8;
             assert_eq!(super::day_of_week(&datetime.date()), expected);
+        }
+
+        #[proptest]
+        fn month(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
+            let expected = datetime.month() as u8;
+            assert_eq!(super::month(&datetime.date()), expected);
         }
     }
 }
