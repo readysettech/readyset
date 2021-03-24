@@ -25,7 +25,8 @@ steps:
           volumes:
           - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -43,7 +44,8 @@ steps:
           volumes:
           - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -62,7 +64,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -81,7 +84,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
     env:
@@ -101,7 +106,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -120,7 +126,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -137,7 +144,9 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
           config: taster/build/docker-compose.yaml
       - ecr#v2.2.0:
           login: true
@@ -156,7 +165,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -175,7 +185,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
     env:
@@ -196,7 +208,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -215,7 +228,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
     env:
@@ -236,7 +251,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -256,7 +272,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
     env:
@@ -280,7 +298,8 @@ steps:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -299,7 +318,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
     env:
@@ -322,7 +343,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -338,7 +360,9 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
           config: noria-client/build/docker-compose.yaml
       - ecr#v2.2.0:
           login: true
@@ -362,7 +386,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -378,7 +403,9 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
           config: noria-mysql/build/docker-compose.yaml
       - ecr#v2.2.0:
           login: true
@@ -397,7 +424,9 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
           config: noria-mysql/build/docker-compose.yaml
       - ecr#v2.2.0:
           login: true
@@ -419,7 +448,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -437,7 +467,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -456,7 +487,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
@@ -474,7 +506,9 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
 
@@ -495,7 +529,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
           mount-ssh-agent: true
       - ecr#v2.2.0:

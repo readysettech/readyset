@@ -24,6 +24,7 @@ RUN apt-get install -y \
     liblz4-dev \
     librdkafka-dev \
     build-essential \
+    llvm \
     rsync
 
 ENV CXX /bin/sccache c++
