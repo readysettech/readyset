@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
-pub use expression::ProjectExpression;
+pub use expression::{BuiltinFunction, ProjectExpression};
 use noria::errors::ReadySetResult;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
@@ -660,6 +660,6 @@ mod tests {
     #[should_panic(expected = "resolve literal col")]
     fn it_fails_to_resolve_literal() {
         let p = setup(false, false, true);
-        p.node().resolve(2).unwrap();
+        p.node().resolve(2);
     }
 }
