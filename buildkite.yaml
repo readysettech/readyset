@@ -1,517 +1,121 @@
 steps:
-  - label: ':docker: Build build image'
-    key: build-image
-    commands:
-    - 'echo --- :docker: Building image'
-    - >-
-      docker build -f build/Dockerfile \
-        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
-        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
-        .
-    - 'echo --- :docker: Pushing image'
-    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-    plugins:
-      ecr#v2.2.0:
-        login: true
-
   - label: ':git: Lint commits'
     commands:
     - ./scripts/commit_lint.sh
 
-  - label: ':rust: Check rustfmt'
-    commands:
-    - "cargo fmt -- --check"
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+  # Do not run pipeline if the lint has not passed
+  - wait: ~
 
-  - label: ':clippy: Check clippy'
-    commands:
-    - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
-    - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
-    - "( echo '--- :rust: Checking nom-sql'; cargo clippy -p nom-sql -- -D warnings)"
-    depends_on:
-    - build-image
+  - label: ":partyparrot: Creating the pipeline"
     plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+      - Zegocover/git-diff-conditional#v1.1.1:
+          log_level: DEBUG
+          dynamic_pipeline: ".buildkite/common.yaml"
+          steps:
+            - label: ':docker: Build build image'
+              exclude:
+                - "ops/**"
 
-  - label: ':terraform: Check terraform formatting'
-    commands:
-    - cd ops
-    - terraform fmt -check
-    plugins:
-    - docker#v3.7.0:
-        image: hashicorp/terraform:0.14.7
-        entrypoint: ""
-        shell: ["/bin/sh", "-c"]
+            - label: ':rust: Check rustfmt'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build noria-logictest'
-    key: build-noria-logictest
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-logictest
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':clippy: Check clippy'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test noria-logictest'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-logictest
-    depends_on:
-    - build-image
-    - build-noria-logictest
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Build noria-logictest'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build query-generator'
-    key: build-query-generator
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p query_generator
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test noria-logictest'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build taster'
-    key: build-taster
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p taster
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build query-generator'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test taster'
-    key: test-taster
-    commands:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p taster
-    depends_on:
-    - build-image
-    - build-taster
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache
-          config: taster/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build taster'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build launchpad'
-    key: build-launchpad
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p launchpad
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test taster'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test launchpad'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p launchpad
-    depends_on:
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Build launchpad'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build nom-sql'
-    key: build-nom-sql
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p nom-sql
-    depends_on:
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test launchpad'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test nom-sql'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p nom-sql
-    depends_on:
-    - build-image
-    - build-nom-sql
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Build nom-sql'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build unbounded-interval-tree'
-    key: build-unbounded-interval-tree
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p unbounded-interval-tree
-    depends_on:
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test nom-sql'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test unbounded-interval-tree'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cd unbounded-interval-tree
-    - cargo test -v -p unbounded-interval-tree
-    depends_on:
-    - build-image
-    - build-unbounded-interval-tree
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Build unbounded-interval-tree'
+              exclude:
+                - "ops/**"
 
+            - label: ':rust: Test unbounded-interval-tree'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build noria'
-    key: build-noria
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria -p noria-server -p noria-applications
-    depends_on:
-    - build-image
-    - build-nom-sql
-    - build-unbounded-interval-tree
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build noria'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test noria'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria -p noria-server -p noria-applications
-    depends_on:
-    - build-image
-    - build-noria
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Test noria'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build noria-client'
-    key: build-noria-client
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-client
-    depends_on:
-    - build-noria
-    - build-nom-sql
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build noria-client'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test noria-client'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-client
-    depends_on:
-    - build-image
-    - build-noria-client
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache
-          config: noria-client/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Test noria-client'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build noria-mysql'
-    key: build-noria-mysql
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-mysql
-    depends_on:
-    - build-noria
-    - build-nom-sql
-    - build-image
-    - build-launchpad
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build noria-mysql'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test noria-mysql'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-mysql
-    depends_on:
-    - build-image
-    - build-noria-mysql
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache
-          config: noria-mysql/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: ':rust: Test noria-mysql'
+              exclude:
+                - "ops/**"
 
-  - label: 'Run logictest'
-    command:
-    - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest -- verify logictests --zookeeper-host zookeeper
-    depends_on:
-    - build-image
-    - build-noria-mysql
-    - build-noria-logictest
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache
-          config: noria-mysql/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
+            - label: 'Run logictest'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build debezium connector'
-    key: build-debezium-connector
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p debezium_connector
-    depends_on:
-    - build-noria
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build debezium connector'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test debezium connector'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p debezium_connector
-    depends_on:
-    - build-debezium-connector
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test debezium connector'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Build psql-srv'
-    key: build-psql-srv
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p psql-srv
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Build psql-srv'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Test psql-srv'
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p psql-srv
-    depends_on:
-    - build-psql-srv
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Test psql-srv'
+              exclude:
+                - "ops/**"
 
-  - label: ':rust: Deploy docs'
-    branches: 'master'
-    command:
-    - 'echo +++ :rust: Building docs'
-    - cargo doc --workspace
-    - 'echo +++ :ec2: Deploying docs'
-    - apt-get install -y rsync
-    - mkdir -p ~/.ssh
-    - echo '172.31.41.177 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBByYJ6scdtZbyjpIeBB1BrIcfUI/jMYo/re6/0U8ulKEdeh8gyhQ/ujaktSeTQy6yJUE7bIPlpYja2zMsHkOycg=' > ~/.ssh/known_hosts
-    - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache
-          - CARGO_INCREMENTAL=0
-          mount-ssh-agent: true
-      - ecr#v2.2.0:
-          login: true
+            - label: ':rust: Deploy docs'
+              exclude:
+                - "ops/**"
+
+            - label: ':terraform: Check terraform formatting'
+              include:
+                - "ops/**"
