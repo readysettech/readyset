@@ -3,9 +3,11 @@ extern crate serde_json;
 extern crate derive_more;
 
 use clap::{App, Arg};
+use std::str::FromStr;
 
 mod debezium_connector;
 
+use debezium_connector::DatabaseType;
 pub use debezium_connector::{Builder, DebeziumConnector};
 
 #[tokio::main]
@@ -87,6 +89,13 @@ async fn main() -> anyhow::Result<()> {
                     .long("no-auto-commit")
                     .help("Disable auto commit for Kafka"),
             )
+            .arg(
+                Arg::with_name("db_type")
+                    .short("db")
+                    .long("database_type")
+                    .default_value("mysql")
+                    .help("The database we are connected to: mysql or postgres"),
+            )
             .get_matches();
 
     let bootstrap_servers: &str = matches.value_of("kafka-bootstrap-servers").unwrap();
@@ -102,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
     let timeout = matches.value_of("kafka-timeout").unwrap();
     let eof = matches.is_present("kafka-partition-eof");
     let auto_commit = !matches.is_present("kafka-no-auto-commit");
+    let db_type = DatabaseType::from_str(matches.value_of("db_type").unwrap()).unwrap();
 
     DebeziumConnector::builder()
         .set_bootstrap_servers(bootstrap_servers)
@@ -113,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         .set_timeout(timeout)
         .set_eof(eof)
         .set_auto_commit(auto_commit)
+        .set_database_type(db_type)
         .build()
         .await?
         .start()
