@@ -597,6 +597,9 @@ steps:
     - docker#v3.7.0:
         image: hashicorp/terraform:0.14.7
         entrypoint: ""
+        environment:
+        # https://github.com/hashicorp/terraform/issues/21408#issuecomment-495746582
+        - AWS_DEFAULT_REGION=us-east-2
         shell: ["/bin/sh", "-c"]
 
   - label: ':terraform: Check terraform best-practices'

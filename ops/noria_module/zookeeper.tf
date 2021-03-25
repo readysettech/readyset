@@ -71,23 +71,21 @@ resource "aws_instance" "zookeeper" {
     Name = "zookeeper"
   }
 
-  user_data = file("${path.module}/files/zookeeper_init.sh")
+  user_data = templatefile("${path.module}/files/zookeeper_init.sh", {
+    device_name = "/dev/xvdd"
+  })
+}
 
-  ebs_block_device {
-    delete_on_termination = false
-    device_name           = "/dev/sdg"
-    encrypted             = var.encrypt_zookeeper_disk
-    volume_size           = var.zookeeper_disk_size_gb
-    kms_key_id            = var.zookeeper_disk_kms_key_id
-    volume_type           = "gp2"
-  }
+resource "aws_ebs_volume" "zookeeper" {
+  availability_zone = aws_instance.zookeeper.availability_zone
+  type              = "gp2"
+  size              = var.zookeeper_disk_size_gb
+  encrypted         = var.encrypt_zookeeper_disk
+  kms_key_id        = var.zookeeper_disk_kms_key_id
+}
 
-  lifecycle {
-    ignore_changes = [
-      # Something about the way the ebs block device is created makes terraform
-      # want to recreate it on every apply. This is very sad, and requires us
-      # disabling tracking it entirely
-      ebs_block_device
-    ]
-  }
+resource "aws_volume_attachment" "zookeeper" {
+  device_name = "/dev/xvdd"
+  instance_id = aws_instance.zookeeper.id
+  volume_id   = aws_ebs_volume.zookeeper.id
 }

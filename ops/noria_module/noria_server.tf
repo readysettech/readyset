@@ -65,6 +65,7 @@ resource "aws_instance" "noria_server" {
     noria_memory_bytes = var.noria_memory_bytes
     quorum             = var.noria_quorum
     shards             = var.noria_shards
+    device_name        = "/dev/xvdd"
   })
 
   subnet_id = local.subnet_id
@@ -77,12 +78,18 @@ resource "aws_instance" "noria_server" {
   tags = {
     Name = "noria_server"
   }
+}
 
-  ebs_block_device {
-    delete_on_termination = false
-    device_name           = "/dev/sdf"
-    encrypted             = var.encrypt_noria_disk
-    volume_size           = var.noria_disk_size_gb
-    kms_key_id            = var.noria_disk_kms_key_id
-  }
+resource "aws_ebs_volume" "noria_server" {
+  availability_zone = aws_instance.noria_server.availability_zone
+  type              = "gp2"
+  size              = var.noria_disk_size_gb
+  encrypted         = var.encrypt_noria_disk
+  kms_key_id        = var.noria_disk_kms_key_id
+}
+
+resource "aws_volume_attachment" "noria_server" {
+  device_name = "/dev/xvdd"
+  instance_id = aws_instance.noria_server.id
+  volume_id   = aws_ebs_volume.noria_server.id
 }

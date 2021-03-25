@@ -7,7 +7,8 @@ find_nvme_device() {
     apt-get -y install nvme-cli jq >&2
     nvme_devices=$(nvme list -o json | jq -r '.Devices | map(.DevicePath) | .[]')
     for nvme_dev in $nvme_devices; do
-        ebs_block_dev=$(nvme id-ctrl -vb "$nvme_dev" 2>/dev/null | tr '\0' ' ' | cut -b 3073-3075)
+        # https://github.com/transferwise/ansible-ebs-automatic-nvme-mapping
+        ebs_block_dev=$(nvme id-ctrl -vb "$nvme_dev" 2>/dev/null | cut -c3073-3104 | tr -s ' ' | sed 's/ $//g')
         if [ "$ebs_block_dev" = "$block_dev" ]; then
             echo "$nvme_dev"
             return 0
@@ -19,7 +20,7 @@ find_nvme_device() {
 
 systemctl stop zookeeper
 
-block_device_name=$(curl http://169.254.169.254/latest/meta-data/block-device-mapping/ebs1)
+block_device_name="${device_name}"
 if [ -f "/dev/$block_device_name" ]; then
     block_device="/dev/$block_device_name"
 else
@@ -31,9 +32,14 @@ else
     fi
 fi
 
+echo "Found NVME device at: $block_device"
+
 mkfs.ext4 "$block_device"
 mount "$block_device" /var/lib/zookeeper
-echo "$block_device /var/lib/zookeeper ext4 rw,discard,x-systemd.growfs 0 0" >> /etc/fstab
+chown -R zookeeper:zookeeper /var/lib/zookeeper
+UUID=$(lsblk -J -f $block_device | jq -r '.blockdevices[] | .uuid')
+echo "UUID of NVME device at $block_device is $UUID"
+echo "$UUID /var/lib/zookeeper ext4 rw,discard,x-systemd.growfs 0 0" >> /etc/fstab
 
 systemctl reset-failed
 systemctl restart zookeeper
