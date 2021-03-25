@@ -83,5 +83,6 @@ resource "aws_instance" "noria_server" {
     device_name           = "/dev/sdf"
     encrypted             = var.encrypt_noria_disk
     volume_size           = var.noria_disk_size_gb
+    kms_key_id            = var.noria_disk_kms_key_id
   }
 }
