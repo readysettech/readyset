@@ -1,0 +1,20 @@
+[package]
+name = "noria-client-adapter"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+clap = "2.24.0"
+futures-util = "0.3.0"
+maplit = "1.0.2"
+nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
+noria = { version = "0.7", path = "../../noria/noria/" }
+noria-client = { version = "0.1.0", path = ".." }
+slog = "2.4.0"
+slog-term = "2.4.0"
+tokio = { version = "0.2.0", features = ["signal", "rt-threaded", "io-driver", "time"] }
+tracing = "0.1.3"
+tracing-subscriber = "0.2.0"
+tracing-timing = { version = "0.4.0", features = ["layer"] }
