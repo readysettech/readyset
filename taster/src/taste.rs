@@ -253,11 +253,23 @@ fn benchmark(
 
     // Don't try parsing the output if we didn't succeed
     if !output.status.success() {
+        error!(
+            "Benchmark {} failed with exit code {}",
+            bench.name,
+            output
+                .status
+                .code()
+                .map_or("unknown".to_string(), |code| code.to_string())
+        );
         return Ok((output.status, Default::default()));
     }
 
     // Success, so let's look for the results
-    let res = parse_output(&bench.name, &bench.output_format, previous_result, &output)?;
+    let res =
+        parse_output(&bench.name, &bench.output_format, previous_result, &output).map_err(|e| {
+            error!("Error parsing output from benchmark {}: {}", bench.name, e);
+            e
+        })?;
 
     Ok((output.status, res))
 }
@@ -409,6 +421,7 @@ pub fn taste_commit(
         .as_ref()
         .map_or(false, |results| results.iter().all(|x| x.1.success()));
 
+    info!("Finished tasting commit {}", commit.id);
     Ok((
         Some(cfg),
         TastingResult {
