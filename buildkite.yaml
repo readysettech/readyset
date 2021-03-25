@@ -124,6 +124,14 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':terraform: Check terraform formatting'
+            - label: ':terraform: Terraform fmt'
+              include:
+                - "ops/**"
+
+            - label: ':terraform: Terraform validate'
+              include:
+                - "ops/**"
+
+            - label: ':terraform: Check terraform best-practices'
               include:
                 - "ops/**"

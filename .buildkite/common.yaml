@@ -578,12 +578,45 @@ steps:
 
 # --- OPS STEPS ----#
 
-  - label: ':terraform: Check terraform formatting'
+  - label: ':terraform: Terraform fmt'
     commands:
-    - cd ops
-    - terraform fmt -check
+    - cd ops/noria_module
+    - terraform fmt -check -recursive -diff
     plugins:
     - docker#v3.7.0:
         image: hashicorp/terraform:0.14.7
         entrypoint: ""
         shell: ["/bin/sh", "-c"]
+
+  - label: ':terraform: Terraform validate'
+    commands:
+    - cd ops/noria_module
+    - terraform init -backend=false
+    - terraform validate
+    plugins:
+    - docker#v3.7.0:
+        image: hashicorp/terraform:0.14.7
+        entrypoint: ""
+        shell: ["/bin/sh", "-c"]
+
+  - label: ':terraform: Check terraform best-practices'
+    plugins:
+    - docker#v3.7.0:
+        image: wata727/tflint:latest
+        mount-checkout: false
+        volumes: ["./ops/noria_module:/data"]
+        command: [
+          "--only", "terraform_deprecated_interpolation",
+          "--only", "terraform_deprecated_index",
+          "--only", "terraform_unused_declarations",
+          "--only", "terraform_comment_syntax",
+          "--only", "terraform_documented_outputs",
+          "--only", "terraform_documented_variables",
+          "--only", "terraform_typed_variables",
+          "--only", "terraform_module_pinned_source",
+          "--only", "terraform_naming_convention",
+          "--only", "terraform_required_version",
+          "--only", "terraform_required_providers",
+          "--only", "terraform_standard_module_structure",
+          "--only", "terraform_workspace_remote"
+        ]
