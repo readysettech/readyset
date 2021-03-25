@@ -524,71 +524,78 @@ impl Backend {
                     unsupported!("query type unsupported");
                 }
             },
-            Writer::MySqlConnector(connector) => match parsed_query {
-                nom_sql::SqlQuery::Select(q) => {
-                    let (data, select_schema) = self
-                        .reader
-                        .handle_select(q, use_params, self.ticket.clone())
-                        .await?;
-                    Ok(QueryResult::NoriaSelect {
-                        data,
-                        select_schema,
-                    })
-                }
-                nom_sql::SqlQuery::CreateView(q) => {
-                    self.reader.handle_create_view(q).await?;
-                    Ok(QueryResult::NoriaCreateView)
-                }
-                nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
-                | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
-                | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
-                    let (num_rows_affected, last_inserted_id, identifier) = connector
-                        .on_query(&query, !self.timestamp_client.is_none())
-                        .await?;
-
-                    // Update ticket if RYW enabled
-                    if let Some(timestamp_service) = &mut self.timestamp_client {
-                        let affected_tables = vec![WriteKey::TableName(t.name.clone())];
-                        let new_timestamp =
-                            timestamp_service.append_write(
-                                WriteId::TransactionId(identifier.expect(
-                                    "RYW enabled writes should always produce an identifier",
-                                )),
-                                affected_tables,
-                            );
-                        self.ticket = Some(Timestamp::join(
-                            &self
-                                .ticket
-                                .as_ref()
-                                .expect("RYW enabled backends must have a current ticket"),
-                            &new_timestamp,
-                        ));
+            Writer::MySqlConnector(connector) => {
+                match parsed_query {
+                    nom_sql::SqlQuery::Select(q) => {
+                        let (data, select_schema) = self
+                            .reader
+                            .handle_select(q, use_params, self.ticket.clone())
+                            .await?;
+                        Ok(QueryResult::NoriaSelect {
+                            data,
+                            select_schema,
+                        })
                     }
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
+                    nom_sql::SqlQuery::CreateView(q) => {
+                        self.reader.handle_create_view(q).await?;
+                        Ok(QueryResult::NoriaCreateView)
+                    }
+                    nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
+                    | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
+                    | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                        let (num_rows_affected, last_inserted_id, identifier) = connector
+                            .on_query(&query, !self.timestamp_client.is_none())
+                            .await?;
+
+                        // Update ticket if RYW enabled
+                        if let Some(timestamp_service) = &mut self.timestamp_client {
+                            let identifier = identifier.ok_or_else(|| internal_err("RYW enabled writes should always produce a transaction identifier"))?;
+
+                            // TODO(andrew): Move table name to table index conversion to timestamp service
+                            // https://app.clubhouse.io/readysettech/story/331
+                            let index = self.reader.node_index_of(t.name.as_str()).await?;
+                            let affected_tables = vec![WriteKey::TableIndex(index)];
+
+                            let new_timestamp = timestamp_service
+                                .append_write(WriteId::MySqlGtid(identifier), affected_tables)
+                                .map_err(|e| internal_err(e.to_string()))?;
+
+                            // TODO(andrew, justin): solidify error handling in client
+                            // https://app.clubhouse.io/readysettech/story/366
+                            let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
+                                internal_err("RYW enabled backends must have a current ticket")
+                            })?;
+
+                            self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
+                        }
+
+                        Ok(QueryResult::MySqlWrite {
+                            num_rows_affected,
+                            last_inserted_id,
+                        })
+                    }
+
+                    // Table Create / Drop (RYW not supported)
+                    // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
+                    nom_sql::SqlQuery::CreateTable(_) | nom_sql::SqlQuery::DropTable(_) => {
+                        let (num_rows_affected, last_inserted_id, _) =
+                            connector.on_query(&parsed_query.to_string(), false).await?;
+                        Ok(QueryResult::MySqlWrite {
+                            num_rows_affected,
+                            last_inserted_id,
+                        })
+                    }
+                    // Other queries that we are not expecting, just pass straight to MySQL
+                    _ => {
+                        let (num_rows_affected, last_inserted_id, _) =
+                            connector.on_query(&parsed_query.to_string(), false).await?;
+                        Ok(QueryResult::MySqlWrite {
+                            num_rows_affected,
+                            last_inserted_id,
+                        })
+                    }
                 }
-                // Table Create / Drop (RYW not supported)
-                // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                nom_sql::SqlQuery::CreateTable(_) | nom_sql::SqlQuery::DropTable(_) => {
-                    let (num_rows_affected, last_inserted_id, _) =
-                        connector.on_query(&parsed_query.to_string(), false).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-                // Other queries that we are not expecting, just pass straight to MySQL
-                _ => {
-                    let (num_rows_affected, last_inserted_id, _) =
-                        connector.on_query(&parsed_query.to_string(), false).await?;
-                    Ok(QueryResult::MySqlWrite {
-                        num_rows_affected,
-                        last_inserted_id,
-                    })
-                }
-            },
+            }
         };
 
         if self.slowlog {

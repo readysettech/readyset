@@ -10,7 +10,7 @@ pub enum Error {
     #[error("MySQL error: {0}")]
     MySql(#[from] mysql::error::Error),
     #[error("MySQL error: {0}")]
-    MySqlAsync(#[from] mysql_async::error::Error),
+    MySqlAsync(#[from] mysql_async::Error),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
     #[error(transparent)]

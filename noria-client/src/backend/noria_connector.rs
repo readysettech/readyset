@@ -1,7 +1,6 @@
-use noria::consistency::Timestamp;
 use noria::{
-    ControllerHandle, DataType, ReadySetResult, Table, TableOperation, View, ViewQuery,
-    ViewQueryFilter, ViewQueryOperator, ZookeeperAuthority,
+    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetResult,
+    Table, TableOperation, View, ViewQuery, ViewQueryFilter, ViewQueryOperator, ZookeeperAuthority,
 };
 
 use msql_srv::{self, *};
@@ -147,6 +146,12 @@ impl NoriaConnector {
         }
     }
 
+    // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
+    // repeatedly. Eventually, this will be responsibility of the TimestampService.
+    pub async fn node_index_of(&mut self, table_name: &str) -> Result<LocalNodeIndex, Error> {
+        let table_handle = self.inner.noria.table(table_name).await?;
+        Ok(table_handle.node)
+    }
     pub async fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
