@@ -16,6 +16,7 @@ use nom_sql::{
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
+use std::cmp;
 use std::collections::{HashMap, HashSet};
 
 use std::ops::Deref;
@@ -203,76 +204,80 @@ impl SqlToMirConverter {
         columns: &mut Vec<Column>,
         n: &MirNodeRef,
     ) -> Vec<(usize, FilterCondition)> {
-        use std::cmp::max;
+        use dataflow::ops::filter;
+
+        let mut column_from_parent = |col: &nom_sql::Column| -> usize {
+            let absolute_column_ids: Vec<Option<usize>> = columns
+                .iter()
+                .map(|c| n.borrow().find_source_for_child_column(c, None))
+                .collect();
+            let max_column_id = absolute_column_ids
+                .iter()
+                .filter_map(|x| *x)
+                .max()
+                .unwrap_or(0);
+            let num_columns = cmp::max(columns.len(), max_column_id + 1);
+
+            if let Some(pos) = columns.iter().rposition(|c| *c.name == col.name) {
+                absolute_column_ids[pos].unwrap_or_else(|| {
+                    panic!(
+                        "could not find column {} in parent {:?}",
+                        col.name,
+                        n.borrow()
+                    )
+                })
+            } else {
+                // Might occur if the column doesn't exist in the parent; e.g., for
+                // aggregations.  We assume that the column is appended at the end, unless we
+                // have an aggregation, in which case it needs to go before the computed column,
+                // which is last.
+                let column: Column = col.clone().into();
+                match n.borrow().inner {
+                    MirNodeType::Aggregation { .. } => {
+                        columns.insert(columns.len() - 1, column);
+                        num_columns - 1
+                    }
+                    _ => {
+                        columns.push(column);
+                        num_columns
+                    }
+                }
+            }
+        };
 
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => column_from_parent(f),
             _ => unimplemented!(),
         };
-        use dataflow::ops::filter;
         let f = match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
                 FilterCondition::Comparison(
-                    ct.operator.clone(),
+                    ct.operator,
                     filter::Value::Constant(DataType::from(*i)),
                 )
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
                 FilterCondition::Comparison(
-                    ct.operator.clone(),
+                    ct.operator,
                     filter::Value::Constant(DataType::from(s.clone())),
                 )
             }
             ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => {
-                FilterCondition::Comparison(
-                    ct.operator.clone(),
-                    filter::Value::Constant(DataType::None),
-                )
+                FilterCondition::Comparison(ct.operator, filter::Value::Constant(DataType::None))
             }
             ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => {
                 FilterCondition::In(ll.iter().map(|l| DataType::from(l.clone())).collect())
             }
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => {
-                // NOTE(jon): the uwnrap here is almost certainly wrong given the business
-                // that goes on further down where it appens a column in magical circumstances.
-                // also, what if two columns share a name, but differ in .table?
-                let fi = columns.iter().rposition(|c| *c.name == f.name).unwrap();
-                FilterCondition::Comparison(ct.operator.clone(), filter::Value::Column(fi))
-            }
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => FilterCondition::Comparison(
+                ct.operator,
+                filter::Value::Column(column_from_parent(f)),
+            ),
             _ => unimplemented!(),
         };
 
-        let absolute_column_ids: Vec<usize> = columns
-            .iter()
-            .map(|c| n.borrow().column_id_for_column(c, None))
-            .collect();
-        let max_column_id = *absolute_column_ids.iter().max().unwrap();
-        let num_columns = max(columns.len(), max_column_id + 1);
         let mut filters = Vec::new();
-
-        match columns.iter().rposition(|c| *c.name == l.name) {
-            None => {
-                // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
-                // We assume that the column is appended at the end, unless we have an aggregation,
-                // in which case it needs to go before the computed column, which is last.
-                match n.borrow().inner {
-                    MirNodeType::Aggregation { .. } => {
-                        columns.insert(columns.len() - 1, Column::from(l));
-                        filters.push((num_columns - 1, f));
-                    }
-                    _ => {
-                        columns.push(Column::from(l));
-                        filters.push((num_columns, f));
-                    }
-                }
-            }
-            Some(pos) => {
-                let index = absolute_column_ids[pos];
-                filters.push((index, f));
-            }
-        }
-
+        filters.push((l, f));
         filters
     }
 
@@ -985,7 +990,7 @@ impl SqlToMirConverter {
             self.schema_version,
             fields,
             MirNodeType::Filter { conditions: filter },
-            vec![parent.clone()],
+            vec![parent],
             vec![],
         )
     }
