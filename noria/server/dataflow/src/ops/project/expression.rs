@@ -81,7 +81,32 @@ impl BuiltinFunction {
                     args.next().ok_or_else(arity_error)?,
                 )))
             }
+            "ifnull" => {
+                let arity_error = || BuiltinFunctionConvertError::ArityError("ifnull".to_owned());
+                Ok(Self::IfNull(
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                ))
+            }
             _ => Err(BuiltinFunctionConvertError::NoSuchFunction(name.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for BuiltinFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use BuiltinFunction::*;
+
+        match self {
+            ConvertTZ(arg1, arg2, arg3) => {
+                write!(f, "convert_tz({},{},{})", arg1, arg2, arg3)
+            }
+            DayOfWeek(arg) => {
+                write!(f, "dayofweek({})", arg)
+            }
+            IfNull(arg1, arg2) => {
+                write!(f, "ifnull({}, {})", arg1, arg2)
+            }
         }
     }
 }
@@ -117,14 +142,7 @@ impl fmt::Display for ProjectExpression {
             Literal(l) => write!(f, "(lit: {})", l),
             Op { op, left, right } => write!(f, "({} {} {})", left, op, right),
             Cast(expr, ty) => write!(f, "cast({} as {})", expr, ty),
-            Call(func) => match func {
-                BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
-                    write!(f, "convert_tz({},{},{})", arg1, arg2, arg3)
-                }
-                BuiltinFunction::DayOfWeek(arg) => {
-                    write!(f, "dayofweek({})", arg)
-                }
-            },
+            Call(func) => write!(f, "{}", func),
         }
     }
 }
@@ -192,11 +210,11 @@ impl ProjectExpression {
                 BuiltinFunction::IfNull(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
-                    return if param1.is_none() {
+                    if param1.is_none() {
                         Ok(param2)
                     } else {
                         Ok(param1)
-                    };
+                    }
                 }
             },
         }
