@@ -18,6 +18,9 @@ fn collapse_where_in_recursive(
         }
         ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
             ItemPlaceholder::QuestionMark,
+        )))
+        | ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
+            ItemPlaceholder::DollarNumber(_),
         ))) => {
             *leftmost_param_index += 1;
             None
@@ -32,7 +35,12 @@ fn collapse_where_in_recursive(
         ConditionExpression::Base(ConditionBase::LiteralList(ref list)) => {
             *leftmost_param_index += list
                 .iter()
-                .filter(|&l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+                .filter(|&l| {
+                    matches!(l,
+                        Literal::Placeholder(ItemPlaceholder::QuestionMark) |
+                        Literal::Placeholder(ItemPlaceholder::DollarNumber(_)
+                    ))
+                })
                 .count();
             None
         }
@@ -75,9 +83,11 @@ fn collapse_where_in_recursive(
                     *ct.right
                 {
                     if rewrite_literals
-                        || list
-                            .iter()
-                            .all(|l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+                        || (list.iter().all(|l| {
+                            matches!(l,
+                            Literal::Placeholder(ItemPlaceholder::QuestionMark)
+                            | Literal::Placeholder(ItemPlaceholder::DollarNumber(_)))
+                        }))
                     {
                         do_it = true;
                         mem::replace(list, Vec::new())
@@ -110,25 +120,31 @@ fn collapse_where_in_recursive(
                 unsupported!("unsupported condition expression: {:?}", ct.left);
             }
 
-            let c = mem::replace(
-                &mut ct.left,
-                Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
-                ))),
-            );
-
-            *ct = ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: c,
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
-                ))),
-            };
-
             if literals.is_empty() {
                 // TODO(eta): probably shouldn't be unsupported; was eprintln before
                 unsupported!("spotted empty WHERE IN ()");
             }
+
+            let replacement_literal = match literals[0] {
+                Literal::Placeholder(ItemPlaceholder::DollarNumber(x)) => {
+                    Literal::Placeholder(ItemPlaceholder::DollarNumber(x))
+                }
+                _ => Literal::Placeholder(ItemPlaceholder::QuestionMark),
+            };
+
+            let c = mem::replace(
+                &mut ct.left,
+                Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    replacement_literal.clone(),
+                ))),
+            );
+            *ct = ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: c,
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    replacement_literal,
+                ))),
+            };
 
             Some((*leftmost_param_index, literals))
         }
@@ -289,6 +305,77 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query("SELECT * FROM x WHERE x.y = 'foo'").unwrap()
+        );
+    }
+
+    #[test]
+    fn collapsed_where_dollarsign_placeholders() {
+        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y IN ($1, $2, $3)").unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query("SELECT * FROM x WHERE x.y = $1").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE y IN ($1, $2, $3)").unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query("SELECT * FROM x WHERE y = $1").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)").unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) = $1").unwrap()
+        );
+
+        let mut q =
+            nom_sql::parse_query("SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5")
+                .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 1);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query("SELECT * FROM t WHERE x = $1 AND y = $2 OR z = $5").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
+        )
+        .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 1);
+        assert_eq!(rewritten.1.len(), 2);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = $2 OR z = $4"
+            )
+            .unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
+        )
+        .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 1);
+        assert_eq!(rewritten.1.len(), 2);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = $2) OR z = $4",
+            )
+            .unwrap()
         );
     }
 }
