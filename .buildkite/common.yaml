@@ -369,6 +369,29 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
+  - label: ':rust: Build noria-client-adapter'
+    key: build-noria-client-adapter
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria-client-adapter
+    depends_on:
+    - build-noria
+    - build-nom-sql
+    - build-image
+    - build-launchpad
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
   - label: ':rust: Build noria-mysql'
     key: build-noria-mysql
     commands:
