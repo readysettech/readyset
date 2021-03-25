@@ -65,22 +65,20 @@ async fn main() {
     // Make some writes to underlying DB (could also make writes via mysql shell)
     // Current ticket will always be default until TimestampService is implemented
     let write_res = b
-        .query("INSERT INTO employees VALUES (11, 'John', 'Doe', 'M'), (12, 'John2', 'Doe2', 'M')")
+        .query("INSERT INTO employees VALUES (1, 'John', 'Doe', 'M')")
         .await;
     println!("{:?}", write_res);
     println!("New Ticket: {:?}", b.ticket());
+
+    std::thread::sleep(Duration::from_millis(5000));
 
     let write_res = b
-        .query(
-            "INSERT INTO employees VALUES (31, 'John3', 'Doe3', 'M'), (14, 'John4', 'Doe4', 'M')",
-        )
+        .query("INSERT INTO employees VALUES (2, 'John3', 'Doe3', 'M')")
         .await;
     println!("{:?}", write_res);
     println!("New Ticket: {:?}", b.ticket());
 
-    // Waiting for writes to propagate
-    std::thread::sleep(Duration::from_millis(2000));
-
+    // Will block until the writes are through
     let res = b.query("select * from employees;").await;
 
     match res {
