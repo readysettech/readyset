@@ -31,7 +31,7 @@ resource "aws_security_group" "kafka" {
     self        = true
     security_groups = [
       aws_security_group.debezium[0].id,
-      aws_security_group.debezium-connector[0].id
+      aws_security_group.debezium_connector[0].id
     ]
   }
 
@@ -134,7 +134,7 @@ resource "aws_instance" "debezium" {
 
 ###
 
-data "aws_ami" "debezium-connector" {
+data "aws_ami" "debezium_connector" {
   owners      = [local.readyset_account_id]
   most_recent = true
 
@@ -150,7 +150,7 @@ data "aws_ami" "debezium-connector" {
 }
 
 # Only used so other security groups can allow it
-resource "aws_security_group" "debezium-connector" {
+resource "aws_security_group" "debezium_connector" {
   count       = local.count
   name        = "debezium-connector"
   description = "Noria Debezium Connector"
@@ -164,9 +164,9 @@ resource "aws_security_group" "debezium-connector" {
   }
 }
 
-resource "aws_instance" "debezium-connector" {
+resource "aws_instance" "debezium_connector" {
   count         = local.count
-  ami           = data.aws_ami.debezium-connector.image_id
+  ami           = data.aws_ami.debezium_connector.image_id
   instance_type = var.debezium_connector_instance_type
   key_name      = var.key_name
 
@@ -180,7 +180,7 @@ resource "aws_instance" "debezium-connector" {
 
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
-    [aws_security_group.debezium-connector[0].id],
+    [aws_security_group.debezium_connector[0].id],
     var.extra_security_groups
   )
   associate_public_ip_address = var.associate_public_ip_addresses

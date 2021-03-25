@@ -42,7 +42,7 @@ resource "aws_security_group" "zookeeper" {
       var.enable_rds_connector ? [
         aws_security_group.kafka[0].id,
         aws_security_group.debezium[0].id,
-        aws_security_group.debezium-connector[0].id
+        aws_security_group.debezium_connector[0].id
       ] : []
     )
   }

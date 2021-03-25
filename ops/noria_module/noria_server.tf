@@ -27,7 +27,7 @@ resource "aws_security_group" "noria_server" {
     security_groups = concat(
       [aws_security_group.noria_mysql.id],
       var.enable_rds_connector ? [
-        aws_security_group.debezium-connector[0].id
+        aws_security_group.debezium_connector[0].id
       ] : []
     )
   }
@@ -41,7 +41,7 @@ resource "aws_security_group" "noria_server" {
     security_groups = concat(
       [aws_security_group.noria_mysql.id],
       var.enable_rds_connector ? [
-        aws_security_group.debezium-connector[0].id
+        aws_security_group.debezium_connector[0].id
       ] : []
     )
   }
