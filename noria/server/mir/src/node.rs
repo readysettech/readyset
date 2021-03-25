@@ -222,7 +222,7 @@ impl MirNode {
         &self,
         child: &Column,
         table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    ) -> usize {
+    ) -> Option<usize> {
         // we give the alias preference here because in a query like
         // SELECT table1.column1 AS my_alias
         // my_alias will be the column name and "table1.column1" will be the alias.
@@ -237,16 +237,7 @@ impl MirNode {
         // TODO : ideally, we would prioritize the alias when using the table mapping if we are looking
         // for a child column. However, I am not sure this case is totally possible so for now,
         // we are leaving it as is.
-        parent_index.unwrap_or_else(|| {
-            self.get_column_id_from_table_mapping(child, table_mapping)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "tried to look up non-existent column {:?} on node \
-                                 \"{}\" (columns: {:?})",
-                        child, self.name, self.columns
-                    );
-                })
-        })
+        parent_index.or_else(|| self.get_column_id_from_table_mapping(child, table_mapping))
     }
 
     pub fn column_id_for_column(
@@ -1122,7 +1113,9 @@ mod tests {
 
         let child_column = Column::from("c3");
 
-        let idx = a.find_source_for_child_column(&child_column, Option::None);
+        let idx = a
+            .find_source_for_child_column(&child_column, Option::None)
+            .unwrap();
         assert_eq!(2, idx);
     }
 
@@ -1184,7 +1177,9 @@ mod tests {
             flow_node: None,
         };
 
-        let idx = a.find_source_for_child_column(&child_column, Option::None);
+        let idx = a
+            .find_source_for_child_column(&child_column, Option::None)
+            .unwrap();
         assert_eq!(2, idx);
     }
 

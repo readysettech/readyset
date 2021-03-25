@@ -927,6 +927,7 @@ fn make_project_node(
             parent
                 .borrow()
                 .find_source_for_child_column(c, table_mapping)
+                .unwrap()
         })
         .collect::<Vec<_>>();
 
