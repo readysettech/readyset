@@ -1,13 +1,16 @@
 output "zookeeper_private_ip" {
-  value = aws_instance.zookeeper.private_ip
+  value       = aws_instance.zookeeper.private_ip
+  description = "Zookeper instance private IP."
 }
 
 output "noria_server_public_ip" {
-  value = aws_instance.noria_server.private_ip
+  value       = aws_instance.noria_server.public_ip
+  description = "Noria server instance public IP."
 }
 
 output "noria_mysql_private_ip" {
-  value = aws_instance.noria_mysql.private_ip
+  value       = aws_instance.noria_mysql.private_ip
+  description = "Noria MySQL instance private IP."
 }
 
 output "debezium_connect_security_group_id" {
