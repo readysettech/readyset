@@ -126,7 +126,7 @@ impl SlackNotifier {
 
                 let mut fields = res
                     .iter()
-                    .filter(|r| self.verbose || is_regression(*r))
+                    .filter(|r| self.verbose || (is_regression(*r) && r.1.change() != 0.0))
                     .map(|(k, v)| {
                         let icon = if v.change() > 0.1 {
                             ":chart_with_upwards_trend:"
