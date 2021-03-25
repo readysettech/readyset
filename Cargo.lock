@@ -3410,6 +3410,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "noria-client-adapter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap 2.33.3",
+ "futures-util",
+ "maplit",
+ "nom-sql",
+ "noria",
+ "noria-client",
+ "slog",
+ "slog-term",
+ "tokio 0.2.25",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-timing",
+]
+
+[[package]]
 name = "noria-common"
 version = "0.7.0"
 dependencies = [
@@ -3513,25 +3533,12 @@ dependencies = [
 name = "noria-mysql"
 version = "0.4.0"
 dependencies = [
- "anyhow",
  "async-trait",
- "clap 2.33.3",
- "futures-executor",
- "futures-util",
- "lazy_static",
- "maplit",
  "msql-srv",
- "nom-sql",
- "noria",
  "noria-client",
- "noria-server",
- "slog",
- "slog-term",
+ "noria-client-adapter",
  "tokio 0.2.25",
  "tracing",
- "tracing-subscriber",
- "tracing-timing",
- "zookeeper",
 ]
 
 [[package]]
@@ -3545,6 +3552,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-client",
+ "noria-client-adapter",
  "noria-server",
  "postgres 0.19.0",
  "psql-srv",

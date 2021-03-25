@@ -9,7 +9,9 @@ async-trait = "0.1"
 msql-srv = { version = "0.8.7", path = "../msql-srv" }
 noria = { version = "0.7", path = "../noria/noria/" }
 noria-client = { version = "0.1.0", path = "../noria-client" }
+noria-client-adapter = { version = "0.1.0", path = "../noria-client/adapter" }
 psql-srv = { version = "0.1.0", path = "../psql-srv" }
+tokio = { version = "0.2.0" }
 
 [dev-dependencies]
 chrono = "0.4"
