@@ -338,12 +338,6 @@ impl Benchmark {
                 .unwrap_or(0f64)
                 .floor() as usize;
 
-            assert_eq!(
-                total_upquery_time_us(&metrics),
-                0,
-                "upqueries have somehow happened while cold"
-            );
-
             let mut view = noria.view(query_name).await?;
             let lookup_key = query.state.key();
 
