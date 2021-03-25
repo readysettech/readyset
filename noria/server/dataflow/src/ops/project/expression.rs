@@ -6,6 +6,7 @@ use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use nom_sql::{ArithmeticOperator, SqlType};
 use noria::{DataType, ValueCoerceError};
+use std::fmt::Formatter;
 
 #[derive(Debug, Error)]
 pub enum EvalError {
@@ -35,7 +36,6 @@ pub struct BuiltinFunctionError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuiltinFunction {
-    // IfNull,
     // Timediff,
     // Dayofweek,
     /// convert_tz(expr, expr, expr)
@@ -46,6 +46,7 @@ pub enum BuiltinFunction {
     ),
     /// dayofweek(expr)
     DayOfWeek(Box<ProjectExpression>),
+    IfNull(Box<ProjectExpression>, Box<ProjectExpression>),
 }
 
 #[derive(Debug, Error)]
@@ -187,6 +188,15 @@ impl ProjectExpression {
                     Ok(Cow::Owned(DataType::Int(
                         day_of_week(&(param_cast.as_ref().into())) as i32,
                     )))
+                }
+                BuiltinFunction::IfNull(arg1, arg2) => {
+                    let param1 = arg1.eval(record)?;
+                    let param2 = arg2.eval(record)?;
+                    return if param1.is_none() {
+                        Ok(param2)
+                    } else {
+                        Ok(param1)
+                    };
                 }
             },
         }
@@ -363,6 +373,30 @@ mod tests {
         );
         assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected);
         assert_eq!(expr.eval(&[datetime.to_string().into()]).unwrap(), expected);
+    }
+
+    #[test]
+    fn eval_call_if_null() {
+        let expr = Call(BuiltinFunction::IfNull(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let value = Cow::Owned(DataType::Int(2).into());
+
+        assert_eq!(expr.eval(&[DataType::None, 2.into()]).unwrap(), value);
+        assert_eq!(expr.eval(&[2.into(), 3.into()]).unwrap(), value);
+
+        let expr2 = Call(BuiltinFunction::IfNull(
+            Box::new(Literal(DataType::None)),
+            Box::new(Column(0)),
+        ));
+        assert_eq!(expr2.eval(&[2.into()]).unwrap(), value);
+
+        let expr3 = Call(BuiltinFunction::IfNull(
+            Box::new(Column(0)),
+            Box::new(Literal(DataType::Int(2))),
+        ));
+        assert_eq!(expr3.eval(&[DataType::None]).unwrap(), value);
     }
 
     mod builtin_funcs {
