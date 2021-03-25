@@ -4,13 +4,13 @@ use noria::results::Results;
 use psql_srv as ps;
 use std::convert::TryInto;
 use std::iter;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// A structure that contains a `Vec<Results>`, as provided by `QueryResult::NoriaSelect`, and
 /// facilitates iteration over these results as `Row` values.
 pub struct Resultset {
     /// The data types of the fields in each row.
-    col_types: Rc<Vec<ps::ColType>>,
+    col_types: Arc<Vec<ps::ColType>>,
 
     /// The query result data, comprising nested `Vec`s of rows that may come from separate Noria
     /// interface lookups performed by the backend.
@@ -22,12 +22,12 @@ pub struct Resultset {
     /// query may be present in `results` but should be excluded from query output. This
     /// `project_fields` attribute contains the indices of the fields that _should_ be projected
     /// into the output.
-    project_fields: Rc<Vec<usize>>,
+    project_fields: Arc<Vec<usize>>,
 }
 
 impl Resultset {
     pub fn try_new(results: Vec<Results>, schema: &SelectSchema) -> Result<Self, ps::Error> {
-        let col_types = Rc::new(
+        let col_types = Arc::new(
             schema
                 .0
                 .schema
@@ -35,7 +35,7 @@ impl Resultset {
                 .map(|c| MysqlType(c.coltype).try_into())
                 .collect::<Result<Vec<ps::ColType>, ps::Error>>()?,
         );
-        let project_fields = Rc::new(
+        let project_fields = Arc::new(
             schema
                 .0
                 .schema
@@ -63,9 +63,14 @@ impl IntoIterator for Resultset {
     type IntoIter = std::iter::Map<
         std::iter::Zip<
             std::iter::Flatten<std::vec::IntoIter<Results>>,
-            std::iter::Repeat<(Rc<Vec<ps::ColType>>, Rc<Vec<usize>>)>,
+            std::iter::Repeat<(Arc<Vec<ps::ColType>>, Arc<Vec<usize>>)>,
         >,
-        fn((noria::results::Row, (Rc<Vec<ps::ColType>>, Rc<Vec<usize>>))) -> Row,
+        fn(
+            (
+                noria::results::Row,
+                (Arc<Vec<ps::ColType>>, Arc<Vec<usize>>),
+            ),
+        ) -> Row,
     >;
 
     fn into_iter(self) -> Self::IntoIter {

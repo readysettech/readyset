@@ -13,7 +13,7 @@ use crate::value::Value;
 use crate::{Backend, PrepareResponse, QueryResponse::*, Schema};
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 const ATTTYPMOD_NONE: i32 = -1;
@@ -41,7 +41,7 @@ struct PortalData {
     prepared_statement_id: u32,
     prepared_statement_name: String,
     params: Vec<Value>,
-    result_transfer_formats: Rc<Vec<TransferFormat>>,
+    result_transfer_formats: Arc<Vec<TransferFormat>>,
 }
 
 impl Protocol {
@@ -120,7 +120,7 @@ impl Protocol {
                         prepared_statement_id: *prepared_statement_id,
                         prepared_statement_name: prepared_statement_name.to_string(),
                         params,
-                        result_transfer_formats: Rc::new(result_transfer_formats),
+                        result_transfer_formats: Arc::new(result_transfer_formats),
                     },
                 );
 

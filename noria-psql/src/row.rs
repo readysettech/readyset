@@ -1,12 +1,12 @@
 use crate::value::Value;
 use noria::DataType;
 use psql_srv as ps;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct Row {
-    pub col_types: Rc<Vec<ps::ColType>>,
+    pub col_types: Arc<Vec<ps::ColType>>,
     pub values: Vec<DataType>,
-    pub project_fields: Rc<Vec<usize>>,
+    pub project_fields: Arc<Vec<usize>>,
 }
 
 impl IntoIterator for Row {

@@ -376,7 +376,7 @@ mod tests {
     use arccstr::ArcCStr;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     struct Value(DataValue);
 
@@ -512,7 +512,7 @@ mod tests {
             .encode(
                 DataRow {
                     values: vec![],
-                    explicit_transfer_formats: Some(Rc::new(vec![])),
+                    explicit_transfer_formats: Some(Arc::new(vec![])),
                 },
                 &mut buf,
             )
@@ -532,7 +532,7 @@ mod tests {
             .encode(
                 DataRow {
                     values: vec![Value(DataValue::Int(42))],
-                    explicit_transfer_formats: Some(Rc::new(vec![Binary])),
+                    explicit_transfer_formats: Some(Arc::new(vec![Binary])),
                 },
                 &mut buf,
             )
@@ -558,7 +558,7 @@ mod tests {
                         Value(DataValue::Null),
                         Value(DataValue::Text(ArcCStr::try_from("some text").unwrap())),
                     ],
-                    explicit_transfer_formats: Some(Rc::new(vec![Binary, Binary, Binary])),
+                    explicit_transfer_formats: Some(Arc::new(vec![Binary, Binary, Binary])),
                 },
                 &mut buf,
             )

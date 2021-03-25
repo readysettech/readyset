@@ -3,7 +3,7 @@ use crate::message::TransferFormat;
 use crate::r#type::Type;
 use crate::value::Value;
 use std::convert::TryInto;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub use postgres::error::SqlState;
 
@@ -31,7 +31,7 @@ pub enum BackendMessage<R> {
     },
     DataRow {
         values: R,
-        explicit_transfer_formats: Option<Rc<Vec<TransferFormat>>>,
+        explicit_transfer_formats: Option<Arc<Vec<TransferFormat>>>,
     },
     ErrorResponse {
         severity: ErrorSeverity,
