@@ -35,7 +35,8 @@ benchmark_name_key = "query"
     [query_generator.metrics]
     cold_materialization_size = { lower_better = true }
     cold_write_time_ns = { key = "cold_write_time", lower_better = true }
-    upquery_forward_time_ns = { key = "upquery_forward_time", lower_better = true }
+    upquery_forward_time_ns = { key = "upquery_time", lower_better = true }
+    forward_time_ns = { key = "forward_time", lower_better = true }
     cold_read_time_ns = { key = "cold_read_time", lower_better = true }
     warm_write_time_ns = { key = "warm_write_time", lower_better = true }
     warm_read_time_ns = { key = "warm_read_time", lower_better = true }
