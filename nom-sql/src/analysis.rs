@@ -207,31 +207,46 @@ impl<'a> ReferredColumnsIter<'a> {
 
         self.visit_arithmetic_item(&ari.right)
     }
+
+    fn finished(&self) -> bool {
+        self.exprs_to_visit.is_empty()
+            && self.function_arguments_to_visit.is_empty()
+            && self.arithmetic_to_visit.is_empty()
+            && self.condition_expressions_to_visit.is_empty()
+            && self.columns_to_visit.is_empty()
+    }
 }
 
 impl<'a> Iterator for ReferredColumnsIter<'a> {
     type Item = Cow<'a, Column>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.exprs_to_visit
-            .pop()
-            .and_then(|expr| self.visit_expr(expr))
-            .or_else(|| {
-                self.function_arguments_to_visit
-                    .pop()
-                    .and_then(|farg| self.visit_function_argument(farg))
-            })
-            .or_else(|| {
-                self.arithmetic_to_visit
-                    .pop()
-                    .and_then(|ari| self.visit_arithmetic(ari).map(Cow::Borrowed))
-            })
-            .or_else(|| {
-                self.condition_expressions_to_visit
-                    .pop()
-                    .and_then(|ce| self.visit_condition_expression(ce))
-            })
-            .or_else(|| self.columns_to_visit.pop().map(Cow::Borrowed))
+        while !self.finished() {
+            let next = self
+                .exprs_to_visit
+                .pop()
+                .and_then(|expr| self.visit_expr(expr))
+                .or_else(|| {
+                    self.function_arguments_to_visit
+                        .pop()
+                        .and_then(|farg| self.visit_function_argument(farg))
+                })
+                .or_else(|| {
+                    self.arithmetic_to_visit
+                        .pop()
+                        .and_then(|ari| self.visit_arithmetic(ari).map(Cow::Borrowed))
+                })
+                .or_else(|| {
+                    self.condition_expressions_to_visit
+                        .pop()
+                        .and_then(|ce| self.visit_condition_expression(ce))
+                })
+                .or_else(|| self.columns_to_visit.pop().map(Cow::Borrowed));
+            if next.is_some() {
+                return next;
+            }
+        }
+        None
     }
 }
 
@@ -278,6 +293,7 @@ impl ReferredColumns for ConditionExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BinaryOperator, Literal};
 
     mod referred_columns {
         use super::*;
@@ -369,5 +385,23 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn condition_expr() {
+        assert_eq!(
+            ConditionExpression::ComparisonOp(ConditionTree {
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                    Column::from("sign")
+                ))),
+                operator: BinaryOperator::Greater,
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Integer(0)
+                )))
+            })
+            .referred_columns()
+            .collect::<Vec<_>>(),
+            vec![Cow::Owned(Column::from("sign"))]
+        );
     }
 }
