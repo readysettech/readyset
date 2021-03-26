@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
     BinaryOperator, Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-    CreateTableStatement, FieldValueExpression, ItemPlaceholder, Literal, LiteralExpression,
-    SelectStatement, SqlQuery, TableKey, UpdateStatement,
+    CreateTableStatement, FieldValueExpression, Literal, LiteralExpression, SelectStatement,
+    SqlQuery, TableKey, UpdateStatement,
 };
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
@@ -231,17 +231,11 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<(&Column, Bi
     match *cond {
         ConditionExpression::ComparisonOp(ConditionTree {
             left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            right:
-                box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
-                    ItemPlaceholder::QuestionMark,
-                ))),
+            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(_))),
             operator: binop,
         }) => vec![(c, binop)],
         ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
-                    ItemPlaceholder::QuestionMark,
-                ))),
+            left: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(_))),
             right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
             operator: binop,
         }) => vec![(c, binop.flip_comparison().unwrap_or(binop))],
@@ -252,7 +246,7 @@ fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<(&Column, Bi
         }) if (|| {
             literals
                 .iter()
-                .all(|l| *l == Literal::Placeholder(ItemPlaceholder::QuestionMark))
+                .all(|l| matches!(*l, Literal::Placeholder(_)))
         })() =>
         {
             // the weird extra closure above is due to
@@ -328,9 +322,7 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, v)| match *v {
-                    Literal::Placeholder(ItemPlaceholder::QuestionMark) => {
-                        Some(&query.fields.as_ref().unwrap()[i])
-                    }
+                    Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
                     _ => None,
                 })
                 .collect()
@@ -338,7 +330,7 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
         SqlQuery::Update(ref query) => {
             let field_params = query.fields.iter().filter_map(|f| {
                 if let FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                    value: Literal::Placeholder(_),
                     alias: None,
                 }) = f.1
                 {
@@ -378,7 +370,7 @@ where
             right: box ConditionExpression::Base(ConditionBase::Literal(l)),
         }) => {
             let v = match l {
-                Literal::Placeholder(ItemPlaceholder::QuestionMark) => params
+                Literal::Placeholder(_) => params
                     .as_mut()
                     .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
                     .next()
@@ -421,7 +413,7 @@ where
         {
             match q.fields.swap_remove(sets).1 {
                 FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                    value: Literal::Placeholder(_),
                     alias: None,
                 }) => {
                     let v = params
@@ -777,6 +769,18 @@ mod tests {
     fn test_parameter_column_extraction() {
         let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
                      AND `votes`.`story_id` = ? AND `votes`.`comment_id` IS NULL \
+                     ORDER BY `votes`.`id` ASC LIMIT 1";
+        let q = nom_sql::parse_query(query).unwrap();
+
+        let pc = get_parameter_columns(&q);
+
+        assert_eq!(pc, vec![&Column::from("votes.story_id")]);
+    }
+
+    #[test]
+    fn test_dollar_number_parameter_column_extraction() {
+        let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
+                     AND `votes`.`story_id` = $1 AND `votes`.`comment_id` IS NULL \
                      ORDER BY `votes`.`id` ASC LIMIT 1";
         let q = nom_sql::parse_query(query).unwrap();
 
