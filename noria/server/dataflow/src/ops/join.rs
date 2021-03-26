@@ -1,10 +1,11 @@
+use itertools::Itertools;
+use launchpad::Indices;
 use maplit::hashmap;
 use noria::{internal, ReadySetError};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryInto;
 use std::mem;
-use vec1::vec1;
 
 use crate::prelude::*;
 use noria::errors::{internal_err, ReadySetResult};
@@ -35,8 +36,8 @@ pub struct Join {
     left: IndexPair,
     right: IndexPair,
 
-    // Key column in the left and right parents respectively
-    on: (usize, usize),
+    /// Key columns in the left and right parents respectively
+    on: Vec<(usize, usize)>,
 
     // Which columns to emit. True means the column is from the left parent, false means from the
     // right
@@ -76,9 +77,6 @@ impl Join {
                 }
             })
             .collect();
-
-        assert_eq!(join_columns.len(), 1, "only supports single column joins");
-        let on = *join_columns.iter().next().unwrap();
 
         let (in_place_left_emit, in_place_right_emit) = {
             let compute_in_place_emit = |left| {
@@ -121,12 +119,20 @@ impl Join {
         Self {
             left: left.into(),
             right: right.into(),
-            on,
+            on: join_columns,
             emit,
             in_place_left_emit,
             in_place_right_emit,
             kind,
         }
+    }
+
+    fn on_left(&self) -> Vec<usize> {
+        self.on.iter().map(|(l, _)| *l).collect()
+    }
+
+    fn on_right(&self) -> Vec<usize> {
+        self.on.iter().map(|(_, r)| *r).collect()
     }
 
     fn generate_row(
@@ -250,37 +256,64 @@ impl Ingredient for Join {
             });
         }
 
-        let (other, from_key, other_key) = if from == *self.left {
-            (*self.right, self.on.0, self.on.1)
+        let other = if from == *self.left {
+            *self.right
         } else {
-            (*self.left, self.on.1, self.on.0)
+            *self.left
         };
 
-        let replay_key_cols = replay_key_cols
-            .map(|cols| {
-                cols.iter()
-                    .map(|&col| -> ReadySetResult<_> {
-                        Ok(match self.emit[col] {
-                            (true, l) if from == *self.left => l,
-                            (false, r) if from == *self.right => r,
-                            (true, l) if l == self.on.0 => {
-                                // since we didn't hit the case above, we know that the message
-                                // *isn't* from left.
-                                self.on.1
+        let mut from_key = vec![];
+        let mut other_key = vec![];
+        for (left_key, right_key) in &self.on {
+            if from == *self.left {
+                from_key.push(*left_key);
+                other_key.push(*right_key);
+            } else {
+                from_key.push(*right_key);
+                other_key.push(*left_key);
+            }
+        }
+
+        let replay_key_cols: Option<Vec<usize>> =
+            replay_key_cols
+                .map(|cols| {
+                    cols.iter()
+                        .map(|&col| -> ReadySetResult<_> {
+                            match self.emit[col] {
+                                (true, l) if from == *self.left => return Ok(l),
+                                (false, r) if from == *self.right => return Ok(r),
+                                (true, l) => {
+                                    if let Some(r) = self.on.iter().find_map(|(on_l, r)| {
+                                        if *on_l == l {
+                                            Some(r)
+                                        } else {
+                                            None
+                                        }
+                                    }) {
+                                        // since we didn't hit the case above, we know that the message
+                                        // *isn't* from left.
+                                        return Ok(*r);
+                                    }
+                                }
+                                (false, r) => {
+                                    if let Some(l) = self.on.iter().find_map(|(l, on_r)| {
+                                        if *on_r == r {
+                                            Some(l)
+                                        } else {
+                                            None
+                                        }
+                                    }) {
+                                        // same
+                                        return Ok(*l);
+                                    }
+                                }
                             }
-                            (false, r) if r == self.on.1 => {
-                                // same
-                                self.on.0
-                            }
-                            _ => {
-                                internal!(
-                                    "we're getting a partial replay, but the replay key doesn't exist in the parent we're getting the replay from?!"
-                                )
-                            }
+                            internal!(
+                                "we're getting a partial replay, but the replay key doesn't exist in the parent we're getting the replay from?!"
+                            )
                         })
-                    })
-                    .collect()
-            })
+                        .collect()
+                })
             .transpose()?;
 
         // First, we want to be smart about multiple added/removed rows with the same join key
@@ -288,7 +321,10 @@ impl Ingredient for Join {
         // two queries. We'll do this by sorting the batch by our join key.
         let mut rs: Vec<_> = rs.into();
         {
-            let cmp = |a: &Record, b: &Record| a[from_key].cmp(&b[from_key]);
+            let cmp = |a: &Record, b: &Record| {
+                a.indices(from_key.clone())
+                    .cmp(&b.indices(from_key.clone()))
+            };
             rs.sort_by(cmp);
         }
 
@@ -297,14 +333,14 @@ impl Ingredient for Join {
         while at != rs.len() {
             let mut old_right_count = None;
             let mut new_right_count = None;
-            let prev_join_key = rs[at][from_key].clone();
+            let prev_join_key = rs[at].indices(from_key.clone());
 
             if from == *self.right && self.kind == JoinType::Left {
                 let rc = self
                     .lookup(
                         *self.right,
-                        &[self.on.1],
-                        &KeyType::Single(&prev_join_key),
+                        &self.on_right(),
+                        &KeyType::from(prev_join_key.clone()),
                         nodes,
                         state,
                     )
@@ -322,7 +358,7 @@ impl Ingredient for Join {
                     // (possibly several times over for each a).
                     at = rs[at..]
                         .iter()
-                        .position(|r| r[from_key] != prev_join_key)
+                        .position(|r| r.indices(from_key.clone()) != prev_join_key)
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
                     continue;
@@ -330,8 +366,14 @@ impl Ingredient for Join {
                     if replay_key_cols.is_some() {
                         lookups.push(Lookup {
                             on: *self.right,
-                            cols: vec![self.on.1],
-                            key: vec1![prev_join_key.clone()].into(),
+                            cols: self.on_right(),
+                            key: prev_join_key
+                                .clone()
+                                .into_iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .try_into()
+                                .map_err(|_| internal_err("Empty join key"))?,
                         });
                     }
 
@@ -345,8 +387,8 @@ impl Ingredient for Join {
             let mut other_rows = self
                 .lookup(
                     other,
-                    &[other_key],
-                    &KeyType::Single(&prev_join_key),
+                    &other_key,
+                    &KeyType::from(prev_join_key.clone()),
                     nodes,
                     state,
                 )
@@ -357,7 +399,7 @@ impl Ingredient for Join {
                 let from = at;
                 at = rs[at..]
                     .iter()
-                    .position(|r| r[from_key] != prev_join_key)
+                    .position(|r| r.indices(from_key.clone()) != prev_join_key)
                     .map(|p| at + p)
                     .unwrap_or_else(|| rs.len());
 
@@ -373,8 +415,8 @@ impl Ingredient for Join {
 
                 misses.extend((from..at).map(|_| Miss {
                     on: other,
-                    lookup_idx: vec![other_key],
-                    lookup_cols: vec![from_key],
+                    lookup_idx: other_key.clone(),
+                    lookup_cols: from_key.clone(),
                     replay_cols: replay_key_cols.clone(),
                     record: records.next().unwrap(),
                 }));
@@ -384,8 +426,14 @@ impl Ingredient for Join {
             if replay_key_cols.is_some() {
                 lookups.push(Lookup {
                     on: other,
-                    cols: vec![other_key],
-                    key: vec1![prev_join_key.clone()].into(),
+                    cols: other_key.clone(),
+                    key: prev_join_key
+                        .clone()
+                        .into_iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .map_err(|_| internal_err("Empty join key"))?,
                 });
             }
 
@@ -396,7 +444,7 @@ impl Ingredient for Join {
                 // records that existed *before* this batch of records was processed so we know
                 // whether or not to generate +/- NULL rows.
                 if let Some(mut old_rc) = old_right_count {
-                    while at != rs.len() && rs[at][from_key] == prev_join_key {
+                    while at != rs.len() && rs[at].indices(from_key.clone()) == prev_join_key {
                         if rs[at].is_positive() {
                             old_rc -= 1
                         } else {
@@ -419,7 +467,7 @@ impl Ingredient for Join {
                     let start = at;
                     at = rs[at..]
                         .iter()
-                        .position(|r| r[from_key] != prev_join_key)
+                        .position(|r| r.indices(from_key.clone()) != prev_join_key)
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
 
@@ -435,8 +483,8 @@ impl Ingredient for Join {
 
                     misses.extend((start..at).map(|_| Miss {
                         on: from,
-                        lookup_idx: vec![self.on.1],
-                        lookup_cols: vec![from_key],
+                        lookup_idx: self.on_right(),
+                        lookup_cols: from_key.clone(),
                         replay_cols: replay_key_cols.clone(),
                         record: records.next().unwrap(),
                     }));
@@ -448,7 +496,7 @@ impl Ingredient for Join {
                 // we didn't find the end above, so find it now
                 at = rs[at..]
                     .iter()
-                    .position(|r| r[from_key] != prev_join_key)
+                    .position(|r| r.indices(from_key.clone()) != prev_join_key)
                     .map(|p| at + p)
                     .unwrap_or_else(|| rs.len());
             }
@@ -567,8 +615,8 @@ impl Ingredient for Join {
 
     fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Index> {
         hashmap! {
-            self.left.as_global() => Index::hash_map(vec![self.on.0]),
-            self.right.as_global() => Index::hash_map(vec![self.on.1]),
+            self.left.as_global() => Index::hash_map(self.on_left()),
+            self.right.as_global() => Index::hash_map(self.on_right()),
         }
     }
 
@@ -605,28 +653,41 @@ impl Ingredient for Join {
         };
 
         format!(
-            "[{}] {}:{} {} {}:{}",
+            "[{}] {}:({}) {} {}:({})",
             emit,
             self.left.as_global().index(),
-            self.on.0,
+            self.on_left().into_iter().map(|i| i.to_string()).join(", "),
             op,
             self.right.as_global().index(),
-            self.on.1
+            self.on_right()
+                .into_iter()
+                .map(|i| i.to_string())
+                .join(", ")
         )
     }
 
     fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        let pcol = self.emit[col];
-        if (pcol.0 && pcol.1 == self.on.0) || (!pcol.0 && pcol.1 == self.on.1) {
+        let (is_left, pcol) = self.emit[col];
+
+        if let Some((on_l, on_r)) = self
+            .on
+            .iter()
+            // if the column comes from the left and is in the join, find the corresponding right
+            // column
+            .find(|(l, _)| is_left && *l == pcol)
+            // otherwise, if the column comes from the right and is in the join, find the
+            // corresponding left column
+            .or_else(|| self.on.iter().find(|(_, r)| !is_left && *r == pcol))
+        {
             // Join column comes from both parents
             Ok(vec![
-                (self.left.as_global(), Some(self.on.0)),
-                (self.right.as_global(), Some(self.on.1)),
+                (self.left.as_global(), Some(*on_l)),
+                (self.right.as_global(), Some(*on_r)),
             ])
         } else {
             Ok(vec![(
-                if pcol.0 { &self.left } else { &self.right }.as_global(),
-                Some(pcol.1),
+                if is_left { &self.left } else { &self.right }.as_global(),
+                Some(pcol),
             )])
         }
     }
@@ -660,7 +721,7 @@ mod tests {
         let (j, l, r) = setup();
         assert_eq!(
             j.node().description(true),
-            format!("[{}:0, {}:1, {}:1] {}:0 ⋉ {}:0", l, l, r, l, r)
+            format!("[{}:0, {}:1, {}:1] {}:(0) ⋉ {}:(0)", l, l, r, l, r)
         );
     }
 
@@ -686,9 +747,9 @@ mod tests {
         j.seed(r, r_y1.clone());
         j.seed(r, r_z2.clone());
 
-        j.one_row(r, r_x1.clone(), false);
-        j.one_row(r, r_y1.clone(), false);
-        j.one_row(r, r_z2.clone(), false);
+        j.one_row(r, r_x1, false);
+        j.one_row(r, r_y1, false);
+        j.one_row(r, r_z2, false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
         let null = vec![(vec![3.into(), "c".into(), DataType::None], true)].into();
@@ -698,7 +759,7 @@ mod tests {
 
         // doing it again should produce the same result
         j.seed(l, l_c3.clone());
-        let rs = j.one_row(l, l_c3.clone(), false);
+        let rs = j.one_row(l, l_c3, false);
         assert_eq!(rs, null);
 
         // record from the right should revoke the nulls and replace them with full rows
@@ -731,7 +792,7 @@ mod tests {
 
         // forward from left with single matching record on right
         j.seed(l, l_b2.clone());
-        let rs = j.one_row(l, l_b2.clone(), false);
+        let rs = j.one_row(l, l_b2, false);
         assert_eq!(
             rs,
             vec![(vec![2.into(), "b".into(), "z".into()], true)].into()
@@ -739,14 +800,14 @@ mod tests {
 
         // forward from left with two matching records on right
         j.seed(l, l_a1.clone());
-        let rs = j.one_row(l, l_a1.clone(), false);
+        let rs = j.one_row(l, l_a1, false);
         assert_eq!(rs.len(), 2);
         assert!(rs.has_positive(&[1.into(), "a".into(), "x".into()][..]));
         assert!(rs.has_positive(&[1.into(), "a".into(), "y".into()][..]));
 
         // forward from right with two matching records on left (and one more on right)
         j.seed(r, r_w3.clone());
-        let rs = j.one_row(r, r_w3.clone(), false);
+        let rs = j.one_row(r, r_w3, false);
         assert_eq!(
             rs,
             vec![
@@ -758,7 +819,7 @@ mod tests {
 
         // unmatched forward from right should have no effect
         j.seed(r, r_v4.clone());
-        let rs = j.one_row(r, r_v4.clone(), false);
+        let rs = j.one_row(r, r_v4, false);
         assert_eq!(rs.len(), 0);
     }
 
@@ -779,5 +840,100 @@ mod tests {
         assert_eq!(g.node().resolve(0).unwrap(), Some(vec![(l.as_global(), 0)]));
         assert_eq!(g.node().resolve(1).unwrap(), Some(vec![(l.as_global(), 1)]));
         assert_eq!(g.node().resolve(2).unwrap(), Some(vec![(r.as_global(), 1)]));
+    }
+
+    #[test]
+    fn parent_join_columns() {
+        let (g, l, r) = setup();
+        let res = g.node().parent_columns(0).unwrap();
+        assert_eq!(
+            res,
+            vec![(l.as_global(), Some(0)), (r.as_global(), Some(0))]
+        );
+    }
+
+    mod compound_keys {
+        use super::*;
+
+        fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
+            let mut g = ops::test::MockGraph::new();
+            let l = g.add_base("left", &["l0", "l1", "l2"]);
+            let r = g.add_base("right", &["r0", "r1", "r2"]);
+
+            use self::JoinSource::*;
+            let j = Join::new(
+                l.as_global(),
+                r.as_global(),
+                JoinType::Left,
+                vec![B(0, 0), B(1, 1), L(2), R(2)],
+            );
+
+            g.set_op("join", &["j0", "j1", "j2", "j3"], j, false);
+            (g, l, r)
+        }
+
+        #[test]
+        fn left_join_null() {
+            let (mut j, l, r) = setup();
+
+            // forward row from left; should produce [row + None] since no records in right match
+            j.seed(l, vec![3.into(), 4.into(), "c".into()]);
+            let rs = j.one_row(l, vec![3.into(), 4.into(), "c".into()], false);
+            assert_eq!(
+                rs,
+                vec![(vec![3.into(), 4.into(), "c".into(), DataType::None], true)].into()
+            );
+
+            // Both of the keys have to match to give us a match
+            j.seed(r, vec![3.into(), 3.into(), "w".into()]);
+            assert!(j
+                .one_row(r, vec![3.into(), 3.into(), "w".into()], false)
+                .is_empty());
+
+            // Once we get a match, we should revoke the nulls and replace it with a full row
+            j.seed(r, vec![3.into(), 4.into(), "w".into()]);
+            let rs = j.one_row(r, vec![3.into(), 4.into(), "w".into()], false);
+            assert_eq!(
+                rs,
+                vec![
+                    (vec![3.into(), 4.into(), "c".into(), DataType::None], false),
+                    (vec![3.into(), 4.into(), "c".into(), "w".into()], true)
+                ]
+                .into()
+            );
+        }
+
+        #[test]
+        fn lookup_matching() {
+            let (mut j, l, r) = setup();
+
+            j.seed(r, vec![1.into(), 2.into(), "x".into()]);
+            j.seed(r, vec![2.into(), 2.into(), "y".into()]);
+            j.seed(r, vec![2.into(), 2.into(), "z".into()]);
+
+            j.one_row(r, vec![1.into(), 2.into(), "x".into()], false);
+            j.one_row(r, vec![2.into(), 2.into(), "y".into()], false);
+            j.one_row(r, vec![2.into(), 2.into(), "z".into()], false);
+
+            // forward from left with single matching record on right
+            j.seed(l, vec![1.into(), 2.into(), "a".into()]);
+            let rs = j.one_row(l, vec![1.into(), 2.into(), "a".into()], false);
+            assert_eq!(
+                rs,
+                vec![(vec![1.into(), 2.into(), "a".into(), "x".into()], true)].into()
+            );
+
+            // forward from left with two matching records on right
+            j.seed(l, vec![2.into(), 2.into(), "b".into()]);
+            let rs = j.one_row(l, vec![2.into(), 2.into(), "b".into()], false);
+            assert_eq!(
+                rs,
+                vec![
+                    (vec![2.into(), 2.into(), "b".into(), "y".into()], true),
+                    (vec![2.into(), 2.into(), "b".into(), "z".into()], true)
+                ]
+                .into()
+            );
+        }
     }
 }

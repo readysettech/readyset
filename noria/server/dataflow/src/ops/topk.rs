@@ -1,4 +1,5 @@
 use launchpad::hash::hash;
+use launchpad::Indices;
 use maplit::hashmap;
 use noria::{internal, invariant, ReadySetError};
 use std::borrow::Cow;
@@ -106,10 +107,7 @@ impl TopK {
     where
         R: Index<usize, Output = DataType> + ?Sized,
     {
-        self.group_by
-            .iter()
-            .map(|&col| &(rec[col]))
-            .collect::<Vec<_>>()
+        rec.indices(self.group_by.clone())
     }
 
     /// Calculate a hash for the columns we are grouping by out of the given record, for use in
