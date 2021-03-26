@@ -3022,7 +3022,7 @@ mod tests {
             // Check join node
             let join = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(join.fields(), &["id", "friend", "friend"]);
-            assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:1 ⋈ 2:0");
+            assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:(1) ⋈ 2:(0)");
 
             // Check leaf projection node
             let leaf_view = get_node(&inc, mig, "q_1");
