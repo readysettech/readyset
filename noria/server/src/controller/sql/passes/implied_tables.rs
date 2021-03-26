@@ -55,6 +55,7 @@ where
             left: Box::new(rewrite_conditional(expand_columns, *left, avail_tables)),
             right: Box::new(rewrite_conditional(expand_columns, *right, avail_tables)),
         }),
+        Bracketed(ce) => rewrite_conditional(expand_columns, *ce, avail_tables),
         x => x,
     }
 }

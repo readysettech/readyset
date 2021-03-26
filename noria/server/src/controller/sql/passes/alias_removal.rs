@@ -69,6 +69,7 @@ fn rewrite_conditional(
             };
             ConditionExpression::LogicalOp(rewritten_ct)
         }
+        ConditionExpression::Bracketed(ce) => rewrite_conditional(col_table_remap, ce),
         x => x.clone(),
     }
 }

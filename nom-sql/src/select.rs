@@ -1,21 +1,22 @@
 use nom::character::complete::{multispace0, multispace1};
+use nom::error::ErrorKind;
+use nom::multi::many0;
+use nom::{alt, delimited, do_parse, named, opt, tag, tag_no_case};
 use std::fmt;
 use std::str;
 
-use crate::column::Column;
-use crate::common::FieldDefinitionExpression;
 use crate::common::{
     as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
-    table_list, unsigned_number,
+    table_list, unsigned_number, FieldDefinitionExpression,
 };
 use crate::condition::{condition_expr, ConditionExpression};
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
+use crate::Column;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
-use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 
@@ -204,10 +205,10 @@ fn join_constraint(i: &[u8]) -> IResult<&[u8], JoinConstraint> {
             condition_expr,
             preceded(multispace0, tag(")")),
         ),
-        condition_expr,
+        preceded(multispace1, condition_expr),
     ));
-    let on_clause = map(tuple((tag_no_case("on"), multispace1, on_condition)), |t| {
-        JoinConstraint::On(t.2)
+    let on_clause = map(tuple((tag_no_case("on"), on_condition)), |t| {
+        JoinConstraint::On(t.1)
     });
 
     alt((using_clause, on_clause))(i)
@@ -221,7 +222,7 @@ fn join_clause(i: &[u8]) -> IResult<&[u8], JoinClause> {
         join_operator,
         multispace1,
         join_rhs,
-        multispace1,
+        multispace0,
         join_constraint,
     ))(i)?;
 
@@ -274,6 +275,98 @@ pub fn selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
     terminated(nested_selection, statement_terminator)(i)
 }
 
+/// The semantics of SQL natively represent the FROM clause of a query as a fully nested AST of join
+/// clauses, but our AST has distinct fields for the tables and a list of joins. To be able to parse
+/// parenthesized join clauses with explicit precedence such as `FROM ((t1 JOIN t2) JOIN t3)`, we
+/// first parse to a tree then convert to the latter representation afterwards.
+#[derive(Debug)]
+enum FromClause {
+    Tables(Vec<Table>),
+    NestedSelect(Box<SelectStatement>, Option<String>),
+    Join {
+        lhs: Box<FromClause>,
+        join_clause: JoinClause,
+    },
+}
+
+impl FromClause {
+    fn into_tables_and_joins(self) -> Result<(Vec<Table>, Vec<JoinClause>), String> {
+        use FromClause::*;
+
+        // The current representation means that a nested select on the lhs of a join is never
+        // allowed
+        let lhs_nested_select = Err("SELECT from subqueries is not currently supported".to_owned());
+
+        match self {
+            Tables(tables) => Ok((tables, vec![])),
+            NestedSelect(_, _) => lhs_nested_select,
+            Join {
+                mut lhs,
+                join_clause,
+            } => {
+                let mut joins = vec![join_clause];
+                let tables = loop {
+                    match *lhs {
+                        Tables(tables) => break tables,
+                        NestedSelect(_, _) => return lhs_nested_select,
+                        Join {
+                            lhs: new_lhs,
+                            join_clause,
+                        } => {
+                            joins.push(join_clause);
+                            lhs = new_lhs;
+                        }
+                    }
+                };
+                joins.reverse();
+                Ok((tables, joins))
+            }
+        }
+    }
+}
+
+named!(nested_select(&[u8]) -> FromClause, do_parse!(
+    tag!("(")
+        >> multispace0
+        >> selection: nested_selection
+        >> multispace0
+        >> tag!(")")
+        >> alias: opt!(as_alias)
+        >> (FromClause::NestedSelect(Box::new(selection), alias.map(|s| s.to_owned())))
+));
+
+named!(from_clause_join(&[u8]) -> FromClause, do_parse!(
+    multispace0
+        >> lhs: nested_from_clause
+        >> join_clause: join_clause
+        >> multispace0
+        >> (FromClause::Join {
+            lhs: Box::new(lhs),
+            join_clause
+        })
+));
+
+named!(nested_from_clause(&[u8]) -> FromClause, alt!(
+    delimited!(tag!("("), from_clause_join, tag!(")"))
+        | table_list => { |ts| FromClause::Tables(ts) }
+        | nested_select
+));
+
+named!(from_clause_tree(&[u8]) -> FromClause, alt!(
+    delimited!(tag!("("), from_clause_join, tag!(")"))
+        | from_clause_join
+        | table_list => { |ts| FromClause::Tables(ts) }
+        | nested_select
+));
+
+named!(from_clause(&[u8]) -> FromClause, do_parse!(
+    multispace0
+        >> tag_no_case!("from")
+        >> multispace1
+        >> from_clause: from_clause_tree
+        >> (from_clause)
+));
+
 pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
     let (remaining_input, (_, _, distinct, _, fields)) = tuple((
         tag_no_case("select"),
@@ -284,8 +377,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
     ))(i)?;
 
     let (remaining_input, from_clause) = opt(tuple((
-        delimited(multispace0, tag_no_case("from"), multispace0),
-        table_list,
+        from_clause,
         many0(join_clause),
         opt(where_clause),
         opt(group_by_clause),
@@ -299,7 +391,13 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
         ..Default::default()
     };
 
-    if let Some((_, tables, join, where_clause, group_by, order, limit)) = from_clause {
+    if let Some((from, extra_joins, where_clause, group_by, order, limit)) = from_clause {
+        let (tables, mut join) = from
+            .into_tables_and_joins()
+            .map_err(|_| nom::Err::Error((remaining_input, ErrorKind::Tag)))?;
+
+        join.extend(extra_joins);
+
         result.tables = tables;
         result.join = join;
         result.where_clause = where_clause;
@@ -1096,7 +1194,7 @@ mod tests {
         // group by PCMember.contactId"
         let qstring = "select PCMember.contactId \
                        from PCMember \
-                       join PaperReview on (PCMember.contactId=PaperReview.contactId) \
+                       join PaperReview on PCMember.contactId=PaperReview.contactId \
                        order by contactId;";
 
         let res = selection(qstring.as_bytes());
@@ -1119,14 +1217,6 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert_eq!(res.unwrap().1, expected);
-
-        // Same as above, but no brackets
-        let qstring = "select PCMember.contactId \
-                       from PCMember \
-                       join PaperReview on PCMember.contactId=PaperReview.contactId \
-                       order by contactId;";
-        let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1, expected);
     }
 
@@ -1314,11 +1404,11 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("ids".into())),
-                constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
+                constraint: JoinConstraint::On(Bracketed(Box::new(ComparisonOp(ConditionTree {
                     operator: BinaryOperator::Equal,
                     left: Box::new(Base(Field(Column::from("orders.o_id")))),
                     right: Box::new(Base(Field(Column::from("ids.ol_i_id")))),
-                })),
+                })))),
             }],
             ..Default::default()
         };
@@ -1410,11 +1500,11 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::Table(Table::from("django_content_type")),
-                constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
+                constraint: JoinConstraint::On(Bracketed(Box::new(ComparisonOp(ConditionTree {
                     operator: BinaryOperator::Equal,
                     left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
                     right: Box::new(Base(Field(Column::from("django_content_type.id")))),
-                })),
+                })))),
             }],
             where_clause: expected_where_clause,
             ..Default::default()
@@ -1485,5 +1575,27 @@ mod tests {
                 ..Default::default()
             }
         )
+    }
+
+    #[test]
+    fn parenthesized_joins() {
+        let qstr = b"select `lp`.`vehicle_id` AS `vehicle_id`,`util`.`utility_id` AS `utility_id`,
+            cast(convert_tz(`lp`.`start_dttm`,'UTC',`util`.`time_zone`) as date) AS `local_date`,
+            cast(convert_tz(`lp`.`start_dttm`,'UTC',`util`.`time_zone`) as time) AS `local_start_time`,
+            timediff(`lp`.`end_dttm`,`lp`.`start_dttm`) AS `duration`,
+            sum(ifnull(`lp`.`energy_delivered`,`lp`.`energy_added`)) AS `usage_kwh`
+            from ((((`wg_static`.`vehicle_load_profiles` `lp`
+            join `wg_static`.`vehicles` `v` on(`v`.`vehicle_id` = `lp`.`vehicle_id`))
+            join `wg_static`.`registrations` `r` on(`r`.`registration_id` = `v`.`registration_id`))
+            join `wg_static`.`users` `u` on(`u`.`user_id` = `r`.`user_id`))
+            join `wg_static`.`utilities` `util` on(`util`.`utility_id` = `u`.`utility_id`))
+            where `lp`.`is_home` = 1
+            group by lp.vehicle_id, lp.start_dttm, util.time_zone, lp.end_dttm
+        ";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.join.len(), 4);
     }
 }
