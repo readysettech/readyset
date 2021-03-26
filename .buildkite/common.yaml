@@ -284,7 +284,7 @@ steps:
     key: build-noria
     commands:
     - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria -p noria-server -p noria-applications
+    - RUSTFLAGS='-D warnings' cargo build -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
     depends_on:
     - build-image
     - build-nom-sql
@@ -307,7 +307,7 @@ steps:
   - label: ':rust: Test noria'
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria -p noria-server -p noria-applications
+    - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
     depends_on:
     - build-image
     - build-noria
