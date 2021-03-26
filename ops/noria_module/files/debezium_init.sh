@@ -3,6 +3,12 @@ set -euo pipefail
 
 systemctl stop debezium-connect
 
+# Patch the systemd unit until we do it in Packer image
+# Ideally we should use something like ConditionPathExists for checking if /etc/default/debezium-connect exists
+sed -i '/^ExecStartPre/d' /etc/systemd/system/debezium-connect.service
+sed -i '/^ExecStart=.*/i ExecStartPre=\/usr\/bin\/docker system prune -a -f --volumes' /etc/systemd/system/debezium-connect.service
+systemctl daemon-reload
+
 sudo tee /etc/default/debezium-connect > /dev/null <<EOF
 BOOTSTRAP_SERVERS=${kafka_ip}:9092
 EOF
