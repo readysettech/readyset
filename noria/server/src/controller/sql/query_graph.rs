@@ -602,52 +602,55 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         let mut tables_mentioned: Vec<String> =
                             cond.referred_tables().into_iter().map(|t| t.name).collect();
 
-                        match *cond {
-                            ConditionExpression::ComparisonOp(ref ct) => {
-                                if tables_mentioned.len() == 2 {
-                                    // tables can appear in any order in the join predicate, but
-                                    // we cannot just rely on that order, since it may lead us to
-                                    // flip LEFT JOINs by accident (yes, this happened)
-                                    if tables_mentioned[1] != table.name {
-                                        // tables are in the wrong order in join predicate, swap
-                                        tables_mentioned.swap(0, 1);
-                                        invariant_eq!(tables_mentioned[1], table.name);
-                                    }
-                                    left_table = tables_mentioned.remove(0);
-                                    right_table = tables_mentioned.remove(0);
-                                } else if tables_mentioned.len() == 1 {
-                                    // just one table mentioned --> this is a self-join
-                                    left_table = tables_mentioned.remove(0);
-                                    right_table = left_table.clone();
-                                } else {
-                                    unsupported!("more than 2 tables mentioned in join condition!");
-                                };
-
-                                // the condition tree might specify tables in opposite order to
-                                // their join order in the query; if so, flip them
-                                // TODO(malte): this only deals with simple, flat join
-                                // conditions for now.
-                                let l = match *ct.left.as_ref() {
-                                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                    ref x => unsupported!("join condition not supported: {:?}", x),
-                                };
-                                let r = match *ct.right.as_ref() {
-                                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                    ref x => unsupported!("join condition not supported: {:?}", x),
-                                };
-                                if *l.table.as_ref().unwrap() == right_table
-                                    && *r.table.as_ref().unwrap() == left_table
-                                {
-                                    ConditionTree {
-                                        operator: ct.operator.clone(),
-                                        left: ct.right.clone(),
-                                        right: ct.left.clone(),
-                                    }
-                                } else {
-                                    ct.clone()
-                                }
-                            }
+                        let ct = match cond {
+                            ConditionExpression::ComparisonOp(ct) => ct,
+                            ConditionExpression::Bracketed(cond) => match &**cond {
+                                ConditionExpression::ComparisonOp(ct) => ct,
+                                _ => unsupported!("join condition is not a comparison!"),
+                            },
                             _ => unsupported!("join condition is not a comparison!"),
+                        };
+                        if tables_mentioned.len() == 2 {
+                            // tables can appear in any order in the join predicate, but
+                            // we cannot just rely on that order, since it may lead us to
+                            // flip LEFT JOINs by accident (yes, this happened)
+                            if tables_mentioned[1] != table.name {
+                                // tables are in the wrong order in join predicate, swap
+                                tables_mentioned.swap(0, 1);
+                                invariant_eq!(tables_mentioned[1], table.name);
+                            }
+                            left_table = tables_mentioned.remove(0);
+                            right_table = tables_mentioned.remove(0);
+                        } else if tables_mentioned.len() == 1 {
+                            // just one table mentioned --> this is a self-join
+                            left_table = tables_mentioned.remove(0);
+                            right_table = left_table.clone();
+                        } else {
+                            unsupported!("more than 2 tables mentioned in join condition!");
+                        };
+
+                        // the condition tree might specify tables in opposite order to
+                        // their join order in the query; if so, flip them
+                        // TODO(malte): this only deals with simple, flat join
+                        // conditions for now.
+                        let l = match *ct.left.as_ref() {
+                            ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                            ref x => unsupported!("join condition not supported: {:?}", x),
+                        };
+                        let r = match *ct.right.as_ref() {
+                            ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                            ref x => unsupported!("join condition not supported: {:?}", x),
+                        };
+                        if *l.table.as_ref().unwrap() == right_table
+                            && *r.table.as_ref().unwrap() == left_table
+                        {
+                            ConditionTree {
+                                operator: ct.operator.clone(),
+                                left: ct.right.clone(),
+                                right: ct.left.clone(),
+                            }
+                        } else {
+                            ct.clone()
                         }
                     }
                     JoinConstraint::Using(ref cols) => {

@@ -56,6 +56,7 @@ impl ReferredTables for ConditionExpression {
                     }
                 }
             }
+            ConditionExpression::Bracketed(ref ce) => tables.extend(ce.referred_tables()),
             _ => unimplemented!(),
         }
         tables
