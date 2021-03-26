@@ -458,10 +458,9 @@ fn update_basic_prepared() {
     sleep();
 
     {
-        // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
         let updated = conn
             .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = ?",
+                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = $1",
                 &[&1],
             )
             .unwrap();
@@ -476,10 +475,9 @@ fn update_basic_prepared() {
     assert_eq!(name, String::from("Rusty"));
 
     {
-        // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
         let updated = conn
             .execute(
-                "UPDATE Cats SET Cats.name = ? WHERE Cats.id = ?",
+                "UPDATE Cats SET Cats.name = $1 WHERE Cats.id = $2",
                 &[&"Bob", &1],
             )
             .unwrap();
@@ -724,10 +722,9 @@ fn select_collapse_where_in() {
     assert!(names.iter().any(|s| s == "Bob"));
     assert!(names.iter().any(|s| s == "Jane"));
 
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let names: Vec<String> = conn
         .query(
-            "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?)",
+            "SELECT Cats.name FROM Cats WHERE Cats.id IN ($1, $2)",
             &[&1, &2],
         )
         .unwrap()
@@ -752,10 +749,9 @@ fn select_collapse_where_in() {
     assert!(names.iter().any(|s| s == "Bob"));
     assert!(names.iter().any(|s| s == "Jane"));
 
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let names: Vec<String> = conn
         .query(
-            "SELECT Cats.name FROM Cats WHERE Cats.id IN (?, ?, ?)",
+            "SELECT Cats.name FROM Cats WHERE Cats.id IN ($1, $2, $3)",
             &[&1, &2, &3],
         )
         .unwrap()
@@ -779,10 +775,9 @@ fn select_collapse_where_in() {
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "Bob"));
 
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let names: Vec<String> = conn
         .query(
-            "SELECT Cats.name FROM Cats WHERE Cats.name = ? AND Cats.id IN (?, ?)",
+            "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id IN ($2, $3)",
             &[&"Bob".to_string(), &1, &2],
         )
         .unwrap()
@@ -865,9 +860,8 @@ fn prepared_select() {
         .unwrap();
     sleep();
 
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let rows = conn
-        .query("SELECT test.* FROM test WHERE x = ?", &[&4])
+        .query("SELECT test.* FROM test WHERE x = $1", &[&4])
         .unwrap();
     assert_eq!(rows.len(), 1);
     let row = rows.first().unwrap();
@@ -1027,9 +1021,8 @@ fn write_timestamps() {
         .unwrap();
 
     // Test binary format response.
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let row = conn
-        .query_one("SELECT id, created_at FROM posts WHERE id = ?", &[&1])
+        .query_one("SELECT id, created_at FROM posts WHERE id = $1", &[&1])
         .unwrap();
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
@@ -1059,9 +1052,8 @@ fn write_timestamps() {
         sleep();
     }
 
-    // TODO: Replace parameter placeholder with psql compatible DollarNumber version.
     let row = conn
-        .query_one("SELECT id, created_at FROM posts WHERE id = ?", &[&1])
+        .query_one("SELECT id, created_at FROM posts WHERE id = $1", &[&1])
         .unwrap();
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
