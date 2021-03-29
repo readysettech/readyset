@@ -3,9 +3,10 @@ use super::{partial_map, RangeLookupResult};
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
+use launchpad::intervals::BoundFunctor;
 use noria::KeyComparison;
 use rand::prelude::*;
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use vec1::Vec1;
 
@@ -35,8 +36,8 @@ impl SingleState {
     pub(super) fn insert_row(&mut self, r: Row) -> bool {
         macro_rules! insert_row_match_impl {
             ($self:ident, $r:ident, $map:ident, $entry:path) => {{
-                use $entry as Entry;
                 let key = MakeKey::from_row(&$self.key, &*$r);
+                use $entry as Entry;
                 match $map.entry(key) {
                     Entry::Occupied(mut rs) => {
                         rs.get_mut().insert($r);
@@ -79,6 +80,14 @@ impl SingleState {
             }
             KeyedState::SexBTree(ref mut map) => {
                 insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::MultiBTree(ref mut map, len) => {
+                debug_assert_eq!(self.key.len(), len);
+                insert_row_match_impl!(self, r, map, partial_map::Entry)
+            }
+            KeyedState::MultiHash(ref mut map, len) => {
+                debug_assert_eq!(self.key.len(), len);
+                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
             }
             KeyedState::DoubleHash(ref mut map) => {
                 insert_row_match_impl!(self, r, map, indexmap::map::Entry)
@@ -177,6 +186,14 @@ impl SingleState {
             KeyedState::SexBTree(ref mut map) => {
                 remove_row_match_impl!(self, r, map)
             }
+            KeyedState::MultiBTree(ref mut map, len) => {
+                debug_assert_eq!(self.key.len(), len);
+                remove_row_match_impl!(self, r, map)
+            }
+            KeyedState::MultiHash(ref mut map, len) => {
+                debug_assert_eq!(self.key.len(), len);
+                remove_row_match_impl!(self, r, map, Vec<_>)
+            }
             KeyedState::SingleHash(ref mut map) => {
                 if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
                     return do_remove(&mut self.rows, rs);
@@ -248,6 +265,15 @@ impl SingleState {
                 ),
                 Rows::default(),
             ),
+            KeyedState::MultiBTree(ref mut map, len) => {
+                // I hope LLVM optimizes away the unnecessary into_iter() -> collect()
+                debug_assert_eq!(key.len(), len);
+                map.insert(key.collect(), Rows::default())
+            }
+            KeyedState::MultiHash(ref mut map, len) => {
+                debug_assert_eq!(key.len(), len);
+                map.insert(key.collect(), Rows::default())
+            }
             KeyedState::SingleHash(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
             KeyedState::DoubleHash(ref mut map) => {
                 map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
@@ -326,6 +352,14 @@ impl SingleState {
                 KeyedState::SexBTree(ref mut m) => {
                     Box::new(m.remove(&MakeKey::from_key(key)).into_iter().flatten())
                 }
+                KeyedState::MultiBTree(ref mut m, len) => {
+                    debug_assert_eq!(key.len(), len);
+                    Box::new(m.remove(key.as_vec()).into_iter().flatten())
+                }
+                KeyedState::MultiHash(ref mut m, len) => {
+                    debug_assert_eq!(key.len(), len);
+                    Box::new(m.remove(key.as_vec()).into_iter().flatten())
+                }
                 KeyedState::SingleHash(ref mut m) => {
                     Box::new(m.remove(&(key[0])).into_iter().flatten())
                 }
@@ -378,6 +412,13 @@ impl SingleState {
                     KeyedState::SexBTree(ref mut m) => {
                         remove_range!(m, range, (DataType, _, _, _, _, _))
                     }
+                    KeyedState::MultiBTree(ref mut m, _) => Box::new(
+                        m.remove_range((
+                            range.start_bound().map(Vec1::as_vec),
+                            range.end_bound().map(Vec1::as_vec),
+                        ))
+                        .flat_map(|(_, rows)| rows),
+                    ),
                     _ => panic!("mark_hole with a range key called on a HashMap SingleState"),
                 }
             }
@@ -398,12 +439,14 @@ impl SingleState {
             KeyedState::QuadBTree(ref mut map) => map.clear(),
             KeyedState::QuinBTree(ref mut map) => map.clear(),
             KeyedState::SexBTree(ref mut map) => map.clear(),
+            KeyedState::MultiBTree(ref mut map, _) => map.clear(),
             KeyedState::SingleHash(ref mut map) => map.clear(),
             KeyedState::DoubleHash(ref mut map) => map.clear(),
             KeyedState::TriHash(ref mut map) => map.clear(),
             KeyedState::QuadHash(ref mut map) => map.clear(),
             KeyedState::QuinHash(ref mut map) => map.clear(),
             KeyedState::SexHash(ref mut map) => map.clear(),
+            KeyedState::MultiHash(ref mut map, _) => map.clear(),
         };
     }
 
@@ -445,12 +488,14 @@ impl SingleState {
             KeyedState::QuadBTree(ref map) => Box::new(map.values()),
             KeyedState::QuinBTree(ref map) => Box::new(map.values()),
             KeyedState::SexBTree(ref map) => Box::new(map.values()),
+            KeyedState::MultiBTree(ref map, _) => Box::new(map.values()),
             KeyedState::SingleHash(ref map) => Box::new(map.values()),
             KeyedState::DoubleHash(ref map) => Box::new(map.values()),
             KeyedState::TriHash(ref map) => Box::new(map.values()),
             KeyedState::QuadHash(ref map) => Box::new(map.values()),
             KeyedState::QuinHash(ref map) => Box::new(map.values()),
             KeyedState::SexHash(ref map) => Box::new(map.values()),
+            KeyedState::MultiHash(ref map, _) => Box::new(map.values()),
         }
     }
 

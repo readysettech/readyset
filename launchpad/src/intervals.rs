@@ -42,6 +42,20 @@ impl<A> BoundFunctor for Bound<A> {
     }
 }
 
+impl<'a, A> BoundFunctor for &'a Bound<A> {
+    type Inner = &'a A;
+    fn map<F, B>(self, mut f: F) -> Bound<B>
+    where
+        F: FnMut(Self::Inner) -> B,
+    {
+        match self {
+            Included(ref a) => Included(f(a)),
+            Excluded(ref a) => Excluded(f(a)),
+            Unbounded => Unbounded,
+        }
+    }
+}
+
 /// Provide `as_ref` for [`Bound`]
 ///
 /// NOTE: This has been submitted upstream to the standard library at
@@ -87,6 +101,16 @@ impl<A> BoundAsRef<A> for Bound<A> {
             Included(ref mut x) => Included(x),
             Excluded(ref mut x) => Excluded(x),
         }
+    }
+}
+
+/// Converts a `Bound<A>` into an `Option<A>`, which is `None` if the `Bound` is `Unbounded`
+/// and `Some` otherwise.
+pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {
+    match bound {
+        Unbounded => None,
+        Included(x) => Some(x),
+        Excluded(x) => Some(x),
     }
 }
 

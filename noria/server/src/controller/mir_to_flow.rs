@@ -574,13 +574,6 @@ fn make_grouped_node(
     conditions: Option<&[(usize, FilterCondition)]>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
-    if group_by.len() >= 6 {
-        unsupported!(
-            "can't have >6 group columns due to compound key restrictions, {} needs {}",
-            name,
-            group_by.len()
-        );
-    }
     invariant!(match kind {
         GroupedNodeType::FilterAggregation(_) => true,
         _ => else_on.is_none() && conditions.is_none(),

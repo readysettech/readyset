@@ -484,6 +484,7 @@ impl PersistentState {
             KeyType::Quad(k) => serialize(k, extra),
             KeyType::Quin(k) => serialize(k, extra),
             KeyType::Sex(k) => serialize(k, extra),
+            KeyType::Multi(k) => serialize(k, extra),
         }
     }
 
@@ -525,6 +526,7 @@ impl PersistentState {
             RangeKey::Quad(range) => do_serialize_range(*range, extra),
             RangeKey::Quin(range) => do_serialize_range(*range, extra),
             RangeKey::Sex(range) => do_serialize_range(*range, extra),
+            RangeKey::Multi(range) => do_serialize_range(*range, extra),
         }
     }
 
