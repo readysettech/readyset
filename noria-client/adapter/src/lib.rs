@@ -128,6 +128,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     .long("mysql-url")
                     .takes_value(true)
                     .required(false)
+                    .env("MYSQL_URL")
                     .help("Host for mysql connection. Should include username and password if nececssary."),
             )
             .get_matches();
