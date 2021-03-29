@@ -4,9 +4,11 @@ use neon::prelude::*;
 use noria::{results::Results, DataType};
 use noria_client::backend::{error::Error, PrepareResult, QueryResult, SelectSchema};
 
-// TODO: implement convert_error
-pub(crate) fn convert_error<'a>(_e: Error) -> NeonResult<Handle<'a, JsObject>> {
-    unimplemented!("error handling for JS client")
+pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
+where
+    C: Context<'a>,
+{
+    cx.error(e.to_string())
 }
 
 fn convert_cols<'a, C>(cx: &mut C, cols: Vec<Column>) -> NeonResult<Handle<'a, JsArray>>

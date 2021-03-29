@@ -18,6 +18,7 @@ zookeeper = "0.5.4"
 noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "0.2.0", features = ["full"] }
 maplit = "1.0.2"
+serde_json = "1.0.2"
 
 [dependencies.neon]
 version = "0.7.1-napi"

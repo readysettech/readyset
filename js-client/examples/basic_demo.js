@@ -12,6 +12,15 @@ async function test_select() {
     console.log(JSON.stringify(r, undefined, 2));
 }
 
+async function test_select_err() {
+    try {
+        await client.query("bLaHblAhBlaH");
+    }
+    catch (e) {
+        console.log(e);
+    }
+}
+
 async function test_prep_select() {
     var r = await client.prepare("select * from employees where first_name = ?;");
     console.log(JSON.stringify(r, undefined, 2));

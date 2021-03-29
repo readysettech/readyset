@@ -2351,6 +2351,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-server",
+ "serde_json",
  "slog",
  "tokio 0.2.25",
  "zookeeper",

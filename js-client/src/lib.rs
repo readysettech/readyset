@@ -120,7 +120,7 @@ fn async_prepare(mut cx: FunctionContext) -> JsResult<JsUndefined> {
                         .upcast::<JsValue>(),
                 ),
                 Err(e) => (
-                    convert::convert_error(e)?.upcast::<JsValue>(),
+                    convert::convert_error(&mut cx, e)?.upcast::<JsValue>(),
                     cx.null().upcast::<JsValue>(),
                 ),
             };
@@ -155,7 +155,7 @@ fn async_query(mut cx: FunctionContext) -> JsResult<JsUndefined> {
                     convert::convert_query_result(&mut cx, raw_query_result)?.upcast::<JsValue>(),
                 ),
                 Err(e) => (
-                    convert::convert_error(e)?.upcast::<JsValue>(),
+                    convert::convert_error(&mut cx, e)?.upcast::<JsValue>(),
                     cx.null().upcast::<JsValue>(),
                 ),
             };
