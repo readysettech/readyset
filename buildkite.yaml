@@ -116,6 +116,14 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':rust: Build msql-srv'
+              exclude:
+                - "ops/**"
+
+            - label: ':rust: Test msql-srv'
+              exclude:
+                - "ops/**"
+
             - label: ':rust: Build psql-srv'
               exclude:
                 - "ops/**"
