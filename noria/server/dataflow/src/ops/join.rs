@@ -925,14 +925,16 @@ mod tests {
 
             // forward from left with two matching records on right
             j.seed(l, vec![2.into(), 2.into(), "b".into()]);
-            let rs = j.one_row(l, vec![2.into(), 2.into(), "b".into()], false);
+            let mut rs: Vec<_> = j
+                .one_row(l, vec![2.into(), 2.into(), "b".into()], false)
+                .into();
+            rs.sort();
             assert_eq!(
                 rs,
                 vec![
-                    (vec![2.into(), 2.into(), "b".into(), "y".into()], true),
-                    (vec![2.into(), 2.into(), "b".into(), "z".into()], true)
+                    vec![2.into(), 2.into(), "b".into(), "y".into()].into(),
+                    vec![2.into(), 2.into(), "b".into(), "z".into()].into()
                 ]
-                .into()
             );
         }
     }
