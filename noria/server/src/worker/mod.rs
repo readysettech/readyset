@@ -8,6 +8,7 @@ use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use metrics::{counter, gauge};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
+use noria::metrics::recorded;
 use noria::ControllerDescriptor;
 use noria::{channel, internal, ReadySetError};
 use replica::ReplicaAddr;
@@ -419,7 +420,10 @@ async fn do_eviction(
 
     // 3. are we above the limit?
     let total: usize = sizes.iter().map(|&(_, s)| s).sum();
-    gauge!("eviction_worker.partial_memory_used_bytes", total as f64);
+    gauge!(
+        recorded::EVICTION_WORKER_PARTIAL_MEMORY_BYTES_USED,
+        total as f64
+    );
     match memory_limit {
         None => (),
         Some(limit) => {
@@ -470,7 +474,7 @@ async fn do_eviction(
                         );
 
                     counter!(
-                        "eviction_worker.evictions_requested",
+                        recorded::EVICTION_WORKER_EVICTIONS_REQUESTED,
                         1,
                         "domain" => target.0.index().to_string(),
                     );

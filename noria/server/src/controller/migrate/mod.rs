@@ -25,6 +25,7 @@ use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
 use metrics::counter;
 use nom_sql::BinaryOperator;
+use noria::metrics::recorded;
 use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -597,7 +598,7 @@ impl<'a> Migration<'a> {
         )?;
 
         counter!(
-            "controller.migration_time_us",
+            recorded::CONTROLLER_MIGRATION_TIME,
             start.elapsed().as_micros() as _
         );
         warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
