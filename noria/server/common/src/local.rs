@@ -147,6 +147,7 @@ pub enum KeyType<'a> {
     Quad((DataType, DataType, DataType, DataType)),
     Quin((DataType, DataType, DataType, DataType, DataType)),
     Sex((DataType, DataType, DataType, DataType, DataType, DataType)),
+    Multi(Vec<DataType>),
 }
 
 impl<'a> KeyType<'a> {
@@ -184,7 +185,7 @@ impl<'a> KeyType<'a> {
                 more().clone(),
                 more().clone(),
             )),
-            _ => unimplemented!(),
+            x => KeyType::Multi((0..x).map(|_| more().clone()).collect()),
         }
     }
 }
@@ -251,6 +252,7 @@ pub enum RangeKey<'a> {
             )>,
         ),
     ),
+    Multi((Bound<&'a [DataType]>, Bound<&'a [DataType]>)),
 }
 
 impl<'a> RangeKey<'a> {

@@ -151,3 +151,13 @@ impl<A: Clone> MakeKey<A> for (A, A, A, A, A, A) {
         )
     }
 }
+impl<A: Clone> MakeKey<A> for Vec<A> {
+    #[inline(always)]
+    fn from_row(key: &[usize], row: &[A]) -> Self {
+        key.iter().map(|&x| row[x].clone()).collect()
+    }
+    #[inline(always)]
+    fn from_key(key: &[A]) -> Self {
+        key.into()
+    }
+}

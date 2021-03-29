@@ -10,7 +10,7 @@ use super::partial_map::PartialMap;
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
-use launchpad::intervals::BoundFunctor;
+use launchpad::intervals::{into_bound_endpoint, BoundAsRef, BoundFunctor};
 
 /// A map containing a single index into the state of a node.
 ///
@@ -29,6 +29,8 @@ pub(super) enum KeyedState {
     QuadBTree(PartialMap<(DataType, DataType, DataType, DataType), Rows>),
     QuinBTree(PartialMap<(DataType, DataType, DataType, DataType, DataType), Rows>),
     SexBTree(PartialMap<(DataType, DataType, DataType, DataType, DataType, DataType), Rows>),
+    // the `usize` parameter is the length of the Vec.
+    MultiBTree(PartialMap<Vec<DataType>, Rows>, usize),
 
     SingleHash(IndexMap<DataType, Rows, ahash::RandomState>),
     DoubleHash(IndexMap<(DataType, DataType), Rows, ahash::RandomState>),
@@ -44,6 +46,9 @@ pub(super) enum KeyedState {
             ahash::RandomState,
         >,
     ),
+    // ♪ multi-hash ♪ https://www.youtube.com/watch?v=bEtDVy55shI
+    // (`usize` parameter as in `MultiBTree`)
+    MultiHash(IndexMap<Vec<DataType>, Rows>, usize),
 }
 
 impl KeyedState {
@@ -55,12 +60,18 @@ impl KeyedState {
             (&KeyedState::QuadBTree(ref m), &KeyType::Quad(ref k)) => m.get(k),
             (&KeyedState::QuinBTree(ref m), &KeyType::Quin(ref k)) => m.get(k),
             (&KeyedState::SexBTree(ref m), &KeyType::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiBTree(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
+                m.get(k)
+            }
             (&KeyedState::SingleHash(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::DoubleHash(ref m), &KeyType::Double(ref k)) => m.get(k),
             (&KeyedState::TriHash(ref m), &KeyType::Tri(ref k)) => m.get(k),
             (&KeyedState::QuadHash(ref m), &KeyType::Quad(ref k)) => m.get(k),
             (&KeyedState::QuinHash(ref m), &KeyType::Quin(ref k)) => m.get(k),
             (&KeyedState::SexHash(ref m), &KeyType::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiHash(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
+                m.get(k)
+            }
             _ => panic!("Invalid key type for KeyedState, got: {:?}", key),
         }
     }
@@ -86,6 +97,14 @@ impl KeyedState {
             KeyedState::SexBTree(ref mut map) => map.insert_range(
                 <(DataType, _, _, _, _, _) as MakeKey<_>>::from_range(&range),
             ),
+            // This is unwieldy, but allowing callers to insert the wrong length of Vec into us would
+            // be very bad!
+            KeyedState::MultiBTree(ref mut map, len)
+                if (into_bound_endpoint(range.0.as_ref()).map_or(true, |x| x.len() == *len)
+                    && into_bound_endpoint(range.1.as_ref()).map_or(true, |x| x.len() == *len)) =>
+            {
+                map.insert_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)))
+            }
             _ => panic!("insert_range called on a HashMap KeyedState"),
         };
     }
@@ -157,12 +176,16 @@ impl KeyedState {
             (&KeyedState::TriBTree(ref m), &RangeKey::Tri(range)) => range!(m, range),
             (&KeyedState::QuadBTree(ref m), &RangeKey::Quad(range)) => range!(m, range),
             (&KeyedState::SexBTree(ref m), &RangeKey::Sex(range)) => range!(m, range),
+            (&KeyedState::MultiBTree(ref m, _), &RangeKey::Multi(range)) => m
+                .range((range.0.map(|x| x.to_owned()), range.1.map(|x| x.to_owned())))
+                .map(flatten_rows),
             (
                 KeyedState::SingleHash(_)
                 | KeyedState::DoubleHash(_)
                 | KeyedState::TriHash(_)
                 | KeyedState::QuadHash(_)
-                | KeyedState::SexHash(_),
+                | KeyedState::SexHash(_)
+                | KeyedState::MultiHash(..),
                 _,
             ) => panic!("lookup_range called on a HashMap KeyedState"),
             _ => panic!("Invalid key type for KeyedState, got: {:?}", key),
@@ -196,6 +219,10 @@ impl KeyedState {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
+            }
+            KeyedState::MultiHash(ref mut m, _) => {
+                let index = seed % m.len();
+                m.swap_remove_index(index).map(|(k, rs)| (rs, k))
             }
 
             // TODO(grfn): This way of evicting (which also happens in reader_map) is pretty icky - we
@@ -236,6 +263,11 @@ impl KeyedState {
                 m.remove_entry(&key)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5]))
             }
+            KeyedState::MultiBTree(ref mut m, _) if !m.is_empty() => {
+                let index = seed % m.len();
+                let key = m.keys().nth(index).unwrap().clone();
+                m.remove_entry(&key).map(|(k, rs)| (rs, k))
+            }
             _ => {
                 // map must be empty, so no point in trying to evict from it.
                 return None;
@@ -259,6 +291,10 @@ impl KeyedState {
             KeyedState::QuadBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::QuinBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::SexBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
+            // FIXME(eta): this clones unnecessarily, given we could make PartialMap do the Borrow thing.
+            // That requres making the unbounded-interval-tree crate do that as well, though, and that's painful.
+            // (also everything else in here clones -- I do wonder what the perf impacts of that are)
+            KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),
 
             KeyedState::SingleHash(ref mut m) => m.remove(&(key[0])),
             KeyedState::DoubleHash(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
@@ -272,6 +308,7 @@ impl KeyedState {
             KeyedState::SexHash(ref mut m) => {
                 m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
+            KeyedState::MultiHash(ref mut m, _) => m.remove(&key.to_owned()),
         }
         .map(|rows| {
             rows.iter()
@@ -306,6 +343,18 @@ impl KeyedState {
             KeyedState::QuadBTree(m) => do_evict_range!(m, range, (DataType, _, _, _)),
             KeyedState::QuinBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _)),
             KeyedState::SexBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _, _)),
+            KeyedState::MultiBTree(m, _) => m
+                .remove_range((
+                    range.start_bound().map(Vec1::as_vec),
+                    range.end_bound().map(Vec1::as_vec),
+                ))
+                .map(|(_, rows)| -> u64 {
+                    rows.iter()
+                        .filter(|r| Rc::strong_count(&r.0) == 1)
+                        .map(SizeOf::deep_size_of)
+                        .sum()
+                })
+                .sum(),
             _ => panic!("evict_range called on a HashMap KeyedState"),
         }
     }
@@ -327,7 +376,8 @@ impl From<&Index> for KeyedState {
             (4, HashMap) => KeyedState::QuadHash(Default::default()),
             (5, HashMap) => KeyedState::QuinHash(Default::default()),
             (6, HashMap) => KeyedState::SexHash(Default::default()),
-            (x, _) => panic!("invalid compound key of length: {}", x),
+            (x, HashMap) => KeyedState::MultiHash(Default::default(), x),
+            (x, BTreeMap) => KeyedState::MultiBTree(Default::default(), x),
         }
     }
 }

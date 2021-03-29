@@ -1255,3 +1255,19 @@ fn round_trip_time_type() {
         ]
     )
 }
+#[test]
+fn multi_keyed_state() {
+    let d = Deployment::new("multi_keyed_state");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (id int, a int, b int, c int, d int, e int, f int, g int)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (id, a, b, c, d, e, f, g) VALUES (1, 2, 3, 4, 5, 6, 7, 8)")
+        .unwrap();
+
+    let result: (u32, u32, u32, u32, u32, u32, u32, u32,) = conn
+        .exec_first("SELECT * FROM test WHERE a = ? AND b = ? AND c = ? AND d = ? AND e = ? AND f = ? AND g = ?", (2, 3, 4, 5, 6, 7, 8,))
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, (1, 2, 3, 4, 5, 6, 7, 8,));
+}
