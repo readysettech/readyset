@@ -691,11 +691,7 @@ impl ToMysqlValue for myc::value::Value {
     }
 
     fn is_null(&self) -> bool {
-        if let myc::value::Value::NULL = *self {
-            true
-        } else {
-            false
-        }
+        matches!(*self, myc::value::Value::NULL)
     }
 }
 

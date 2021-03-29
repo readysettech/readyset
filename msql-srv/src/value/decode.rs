@@ -49,11 +49,7 @@ impl<'a> Value<'a> {
 
     /// Returns true if this is a NULL value
     pub fn is_null(&self) -> bool {
-        if let ValueInner::NULL = self.0 {
-            true
-        } else {
-            false
-        }
+        matches!(self.0, ValueInner::NULL)
     }
 
     pub(crate) fn parse_from(
