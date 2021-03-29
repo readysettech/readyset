@@ -111,7 +111,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
             };
 
             if msg.remaining() > 0 {
-                Err(Error::UnexpectedMessageEnd)?;
+                return Err(Error::UnexpectedMessageEnd);
             }
 
             return ret;
@@ -143,7 +143,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                     // prepared statement. In that case, the parameter data types must be inferred
                     // from the text representation of the values themselves. This is not currently
                     // implemented.
-                    Err(Error::IncorrectParameterCount(n_params))?;
+                    return Err(Error::IncorrectParameterCount(n_params));
                 }
                 let param_transfer_formats = match param_transfer_formats[..] {
                     [] => vec![Text; n_params],
@@ -152,7 +152,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                         if param_transfer_formats.len() == n_params {
                             param_transfer_formats
                         } else {
-                            Err(Error::IncorrectParameterCount(n_params))?
+                            return Err(Error::IncorrectParameterCount(n_params));
                         }
                     }
                 };
@@ -184,7 +184,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                 let name = match statement_type {
                     CLOSE_TYPE_PORTAL => Portal(name_str),
                     CLOSE_TYPE_PREPARED_STATEMENT => PreparedStatement(name_str),
-                    t => Err(Error::UnexpectedValue(t))?,
+                    t => return Err(Error::UnexpectedValue(t)),
                 };
                 Ok(Some(Close { name }))
             }
@@ -195,7 +195,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                 let name = match statement_type {
                     DESCRIBE_TYPE_PORTAL => Portal(name_str),
                     DESCRIBE_TYPE_PREPARED_STATEMENT => PreparedStatement(name_str),
-                    t => Err(Error::UnexpectedValue(t))?,
+                    t => return Err(Error::UnexpectedValue(t)),
                 };
                 Ok(Some(Describe { name }))
             }
@@ -231,7 +231,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
         };
 
         if msg.remaining() > 0 {
-            Err(Error::UnexpectedMessageEnd)?;
+            return Err(Error::UnexpectedMessageEnd);
         }
 
         ret

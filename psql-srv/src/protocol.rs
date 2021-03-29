@@ -76,7 +76,7 @@ impl Protocol {
                     channel.feed(BackendMessage::ready_for_query_idle()).await?;
                 }
 
-                m => Err(Error::UnsupportedMessage(m))?,
+                m => return Err(Error::UnsupportedMessage(m)),
             };
 
             channel.flush().await?;
@@ -109,7 +109,7 @@ impl Protocol {
                         if result_transfer_formats.len() == n_cols {
                             result_transfer_formats
                         } else {
-                            Err(Error::IncorrectFormatCount(n_cols))?
+                            return Err(Error::IncorrectFormatCount(n_cols));
                         }
                     }
                 };
@@ -326,7 +326,7 @@ impl Protocol {
                 // no response is sent
             }
 
-            m => Err(Error::UnsupportedMessage(m))?,
+            m => return Err(Error::UnsupportedMessage(m)),
         }
 
         channel.flush().await?;
@@ -382,33 +382,33 @@ fn make_field_description(
         ColType::Bool => (TYPLEN_1, ATTTYPMOD_NONE),
         ColType::Char(v) => (TYPLEN_1, i32::from(v)),
         ColType::Varchar(v) => (TYPLEN_VARLENA, i32::from(v)),
-        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedInt(_) => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Int(_) => (TYPLEN_4, ATTTYPMOD_NONE),
         ColType::Bigint(_) => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedBigint(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Tinyint(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::UnsignedTinyint(_) => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Smallint(_) => (TYPLEN_2, ATTTYPMOD_NONE),
-        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Blob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedSmallint(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Blob => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Longblob => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Mediumblob => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Tinyblob => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Double => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Float => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Float => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Real => (TYPLEN_4, ATTTYPMOD_NONE),
-        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinytext => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Mediumtext => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Longtext => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Text => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
-        ColType::Date => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Time => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Date => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::DateTime(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Time => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Timestamp => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Binary(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Varbinary(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Enum(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Decimal(_, _) => return Err(Error::UnsupportedType(col_type.clone())),
     };
     Ok(FieldDescription {
         field_name: name.clone(),
@@ -417,7 +417,7 @@ fn make_field_description(
         data_type,
         data_type_size,
         type_modifier,
-        transfer_format: transfer_format,
+        transfer_format,
     })
 }
 
@@ -427,31 +427,31 @@ fn to_type(col_type: &ColType) -> Result<Type, Error> {
         ColType::Char(_) => Ok(Type::CHAR),
         ColType::Varchar(_) => Ok(Type::VARCHAR),
         ColType::Int(_) => Ok(Type::INT4),
-        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Bigint(_) => Ok(Type::INT8),
-        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Smallint(_) => Ok(Type::INT2),
-        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Blob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Blob => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Double => Ok(Type::FLOAT8),
-        ColType::Float => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Float => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Real => Ok(Type::FLOAT4),
-        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Text => Ok(Type::TEXT),
-        ColType::Date => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Time => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Date => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Time => Err(Error::UnsupportedType(col_type.clone())),
         ColType::Timestamp => Ok(Type::TIMESTAMP),
-        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone()))?,
-        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone()))?,
+        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone())),
     }
 }
