@@ -8,6 +8,7 @@ use nom_sql::{OrderType, SelectStatement};
 use crate::ReadySetResult;
 use noria::{internal, invariant, invariant_eq, unsupported};
 use std::hash::{Hash, Hasher};
+use std::mem;
 use std::string::String;
 use std::vec::Vec;
 use std::{cmp::Ordering, num::NonZeroU64};
@@ -136,7 +137,6 @@ impl PartialOrd for OutputColumn {
 pub struct JoinRef {
     pub src: String,
     pub dst: String,
-    pub index: usize,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -171,7 +171,7 @@ pub struct QueryGraph {
     /// columns reflected in individual relations' `QueryGraphNode` structures.
     pub columns: Vec<OutputColumn>,
     /// Establishes an order for join predicates. Each join predicate can be identified by
-    /// its (src, dst) pair, and its index in the array of predicates.
+    /// its (src, dst) pair
     pub join_order: Vec<JoinRef>,
     /// Global predicates (not associated with a particular relation)
     pub global_predicates: Vec<ConditionExpression>,
@@ -409,7 +409,6 @@ fn classify_conditionals(
                                         if let Ordering::Less =
                                             rf.table.as_ref().cmp(&lf.table.as_ref())
                                         {
-                                            use std::mem;
                                             mem::swap(&mut join_ct.left, &mut join_ct.right);
                                         }
                                         join.push(join_ct);
@@ -487,6 +486,37 @@ fn classify_conditionals(
         }
     }
     Ok(())
+}
+
+/// Convert the given `ConditionExpression`, which should be a set of AND-ed together direct
+/// comparison predicates, into a list of predicate trees
+fn collect_join_predicates(
+    cond: ConditionExpression,
+    out: &mut Vec<ConditionTree>,
+) -> ReadySetResult<()> {
+    use ConditionExpression::*;
+
+    match cond {
+        ComparisonOp(ct) => {
+            out.push(ct);
+            Ok(())
+        }
+        Bracketed(cond) => collect_join_predicates(*cond, out),
+        LogicalOp(ConditionTree {
+            left,
+            operator,
+            right,
+        }) => {
+            if operator != BinaryOperator::And {
+                unsupported!("Only AND is supported between join conditions");
+            }
+
+            collect_join_predicates(*left, out)?;
+            collect_join_predicates(*right, out)?;
+            Ok(())
+        }
+        _ => unsupported!("Only direct comparisons supported for join conditions"),
+    }
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -593,7 +623,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 let left_table;
                 let right_table;
 
-                let join_pred = match jc.constraint {
+                let join_preds = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
                         use nom_sql::analysis::ReferredTables;
 
@@ -602,14 +632,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         let mut tables_mentioned: Vec<String> =
                             cond.referred_tables().into_iter().map(|t| t.name).collect();
 
-                        let ct = match cond {
-                            ConditionExpression::ComparisonOp(ct) => ct,
-                            ConditionExpression::Bracketed(cond) => match &**cond {
-                                ConditionExpression::ComparisonOp(ct) => ct,
-                                _ => unsupported!("join condition is not a comparison!"),
-                            },
-                            _ => unsupported!("join condition is not a comparison!"),
-                        };
+                        let mut join_preds = vec![];
+                        collect_join_predicates(cond.clone(), &mut join_preds)?;
+
                         if tables_mentioned.len() == 2 {
                             // tables can appear in any order in the join predicate, but
                             // we cannot just rely on that order, since it may lead us to
@@ -629,29 +654,27 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                             unsupported!("more than 2 tables mentioned in join condition!");
                         };
 
-                        // the condition tree might specify tables in opposite order to
-                        // their join order in the query; if so, flip them
-                        // TODO(malte): this only deals with simple, flat join
-                        // conditions for now.
-                        let l = match *ct.left.as_ref() {
-                            ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                            ref x => unsupported!("join condition not supported: {:?}", x),
-                        };
-                        let r = match *ct.right.as_ref() {
-                            ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                            ref x => unsupported!("join condition not supported: {:?}", x),
-                        };
-                        if *l.table.as_ref().unwrap() == right_table
-                            && *r.table.as_ref().unwrap() == left_table
-                        {
-                            ConditionTree {
-                                operator: ct.operator.clone(),
-                                left: ct.right.clone(),
-                                right: ct.left.clone(),
+                        for pred in join_preds.iter_mut() {
+                            // the condition tree might specify tables in opposite order to
+                            // their join order in the query; if so, flip them
+                            // TODO(malte): this only deals with simple, flat join
+                            // conditions for now.
+                            let l = match *pred.left.as_ref() {
+                                ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                ref x => unsupported!("join condition not supported: {:?}", x),
+                            };
+                            let r = match *pred.right.as_ref() {
+                                ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                ref x => unsupported!("join condition not supported: {:?}", x),
+                            };
+                            if *l.table.as_ref().unwrap() == right_table
+                                && *r.table.as_ref().unwrap() == left_table
+                            {
+                                mem::swap(&mut pred.left, &mut pred.right);
                             }
-                        } else {
-                            ct.clone()
                         }
+
+                        join_preds
                     }
                     JoinConstraint::Using(ref cols) => {
                         invariant_eq!(cols.len(), 1);
@@ -660,11 +683,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         left_table = prev_table.as_ref().unwrap().clone();
                         right_table = table.name.clone();
 
-                        ConditionTree {
+                        vec![ConditionTree {
                             operator: BinaryOperator::Equal,
                             left: wrapcol(&left_table, &col.name),
                             right: wrapcol(&right_table, &col.name),
-                        }
+                        }]
                     }
                 };
 
@@ -678,10 +701,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         (left_table.clone(), right_table.clone()),
                         match jc.operator {
                             JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                                QueryGraphEdge::LeftJoin(vec![join_pred])
+                                QueryGraphEdge::LeftJoin(join_preds)
                             }
                             JoinOperator::Join | JoinOperator::InnerJoin => {
-                                QueryGraphEdge::Join(vec![join_pred])
+                                QueryGraphEdge::Join(join_preds)
                             }
                             _ => unsupported!("join operator not supported"),
                         },
@@ -881,37 +904,16 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     {
         let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> = qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
-        sorted_edges.sort_by(|&(a, _), &(b, _)| {
-            let src_ord = b.0.cmp(&a.0);
-            if src_ord == Ordering::Equal {
-                a.1.cmp(&b.1)
-            } else {
-                src_ord
-            }
-        });
+        sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
-        for (&(ref src, ref dst), edge) in sorted_edges {
-            match *edge {
-                QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
-                    jps.iter()
-                        .enumerate()
-                        .map(|(idx, _)| JoinRef {
-                            src: src.clone(),
-                            dst: dst.clone(),
-                            index: idx,
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
-                    jps.iter()
-                        .enumerate()
-                        .map(|(idx, _)| JoinRef {
-                            src: src.clone(),
-                            dst: dst.clone(),
-                            index: idx,
-                        })
-                        .collect::<Vec<_>>(),
-                ),
+        for ((src, dst), edge) in sorted_edges {
+            match edge {
+                QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => {
+                    qg.join_order.push(JoinRef {
+                        src: src.clone(),
+                        dst: dst.clone(),
+                    })
+                }
                 QueryGraphEdge::GroupBy(_) => continue,
             }
         }

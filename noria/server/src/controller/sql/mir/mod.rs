@@ -1284,7 +1284,7 @@ impl SqlToMirConverter {
     fn make_join_node(
         &self,
         name: &str,
-        jp: &ConditionTree,
+        join_predicates: &[ConditionTree],
         left_node: MirNodeRef,
         right_node: MirNodeRef,
         kind: JoinType,
@@ -1295,54 +1295,55 @@ impl SqlToMirConverter {
         // automatic column pull-down to retrieve the remaining columns required.
         let projected_cols_left = left_node.borrow().columns().to_vec();
         let projected_cols_right = right_node.borrow().columns().to_vec();
-        let fields = projected_cols_left
+        let mut fields = projected_cols_left
             .into_iter()
             .chain(projected_cols_right.into_iter())
             .collect::<Vec<Column>>();
 
         // join columns need us to generate join group configs for the operator
-        // TODO(malte): no multi-level joins yet
         let mut left_join_columns = Vec::new();
         let mut right_join_columns = Vec::new();
 
-        // equi-join only
-        invariant!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
-        let mut l_col = match *jp.left {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
-            _ => unsupported!("no multi-level joins yet"),
-        };
-        let r_col = match *jp.right {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
-            _ => unsupported!("no multi-level joins yet"),
-        };
+        for jp in join_predicates {
+            // equi-join only
+            invariant!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
+            let mut l_col = match *jp.left {
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
+                _ => unsupported!("no multi-level joins yet"),
+            };
+            let r_col = match *jp.right {
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
+                _ => unsupported!("no multi-level joins yet"),
+            };
 
-        // don't duplicate the join column in the output, but instead add aliases to the columns
-        // that represent it going forward (viz., the left-side join column)
-        l_col.add_alias(&r_col);
-        // add the alias to all instances of `l_col` in `fields` (there might be more than one
-        // if `l_col` is explicitly projected multiple times)
-        let fields: Vec<Column> = fields
-            .into_iter()
-            .filter_map(|mut f| {
-                if f == r_col {
-                    // drop instances of right-side column
-                    None
-                } else if f == l_col {
-                    // add alias for right-side column to any left-side column
-                    // N.B.: since `l_col` is already aliased, need to check this *after* checking
-                    // for equivalence with `r_col` (by now, `l_col` == `r_col` via alias), so
-                    // `f == l_col` also triggers if `f` is in `l_col.aliases`.
-                    f.add_alias(&r_col);
-                    Some(f)
-                } else {
-                    // keep unaffected columns
-                    Some(f)
-                }
-            })
-            .collect();
+            // don't duplicate the join column in the output, but instead add aliases to the columns
+            // that represent it going forward (viz., the left-side join column)
+            l_col.add_alias(&r_col);
+            // add the alias to all instances of `l_col` in `fields` (there might be more than one
+            // if `l_col` is explicitly projected multiple times)
+            fields = fields
+                .into_iter()
+                .filter_map(|mut f| {
+                    if f == r_col {
+                        // drop instances of right-side column
+                        None
+                    } else if f == l_col {
+                        // add alias for right-side column to any left-side column
+                        // N.B.: since `l_col` is already aliased, need to check this *after*
+                        // checking for equivalence with `r_col` (by now, `l_col` == `r_col` via
+                        // alias), so `f == l_col` also triggers if `f` is in `l_col.aliases`.
+                        f.add_alias(&r_col);
+                        Some(f)
+                    } else {
+                        // keep unaffected columns
+                        Some(f)
+                    }
+                })
+                .collect();
 
-        left_join_columns.push(l_col);
-        right_join_columns.push(r_col);
+            left_join_columns.push(l_col);
+            right_join_columns.push(r_col);
+        }
 
         invariant_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
