@@ -1,5 +1,4 @@
 use crate::r#type::Type;
-use chrono;
 use std::ffi::FromBytesWithNulError;
 use std::fmt;
 use std::marker::{Send, Sync};
