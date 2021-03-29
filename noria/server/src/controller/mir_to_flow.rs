@@ -678,10 +678,6 @@ fn make_join_node(
         proj_cols.len()
     );
 
-    if on_left.len() != 1 || on_right.len() != 1 {
-        unsupported!("no support for multiple column joins yet");
-    }
-
     // this assumes the columns we want to join on appear first in the list
     // of projected columns. this is fine for joins against different tables
     // since we assume unique column names in each table. however, this is
@@ -691,30 +687,39 @@ fn make_join_node(
     // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
     // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
-    let left_join_col_id = left
-        .borrow()
-        .columns
+    let join_col_mappings = on_left
         .iter()
-        .position(|lc| lc == on_left.first().unwrap())
-        .ok_or_else(|| {
-            internal_err(format!(
-                "missing left-side join column {:#?} in {:#?}",
-                on_left.first().unwrap(),
-                left.borrow().columns
-            ))
-        })?;
-    let right_join_col_id = right
-        .borrow()
-        .columns
-        .iter()
-        .position(|rc| rc == on_right.first().unwrap())
-        .ok_or_else(|| {
-            internal_err(format!(
-                "missing right-side join column {:#?} in {:#?}",
-                on_right.first().unwrap(),
-                right.borrow().columns
-            ))
-        })?;
+        .zip(on_right)
+        .map(|(l, r)| -> ReadySetResult<_> {
+            let left_join_col_id = left
+                .borrow()
+                .columns
+                .iter()
+                .position(|lc| lc == l)
+                .ok_or_else(|| {
+                    internal_err(format!(
+                        "missing left-side join column {:#?} in {:#?}",
+                        on_left.first().unwrap(),
+                        left.borrow().columns
+                    ))
+                })?;
+
+            let right_join_col_id = right
+                .borrow()
+                .columns
+                .iter()
+                .position(|rc| rc == r)
+                .ok_or_else(|| {
+                    internal_err(format!(
+                        "missing right-side join column {:#?} in {:#?}",
+                        on_right.first().unwrap(),
+                        right.borrow().columns
+                    ))
+                })?;
+
+            Ok((left_join_col_id, right_join_col_id))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
 
     let mut from_left = 0;
     let mut from_right = 0;
@@ -724,9 +729,9 @@ fn make_join_node(
         .iter()
         .enumerate()
         .filter_map(|(i, c)| {
-            if i == left_join_col_id {
+            if let Some(r) = join_col_mappings.get(&i) {
                 from_left += 1;
-                Some(JoinSource::B(i, right_join_col_id))
+                Some(JoinSource::B(i, *r))
             } else if projected_cols_left.contains(c) {
                 from_left += 1;
                 Some(JoinSource::L(i))

@@ -4281,6 +4281,7 @@ async fn post_join_filter() {
         ]
     );
 }
+
 #[tokio::test(threaded_scheduler)]
 /// Tests the case where two tables have the same column name and those columns are
 /// used in a post-join filter.
@@ -4331,4 +4332,93 @@ async fn duplicate_column_names() {
             vec![2.into(), 2.into(), 1.into(), 0.into()]
         ]
     );
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn compound_join_key() {
+    let mut g = start_simple("compound_join_key").await;
+    g.install_recipe(
+        "
+      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
+      CREATE TABLE t2 (id_1 int, id_2 int, val_2 int);
+      QUERY q:
+        SELECT t1.val_1, t2.val_2
+        FROM t1
+        JOIN t2
+          ON t1.id_1 = t2.id_1 AND t1.id_2 = t2.id_2;",
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut t1 = g.table("t1").await.unwrap();
+    let mut t2 = g.table("t2").await.unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    t1.insert_many(vec![
+        vec![
+            DataType::from(1i32),
+            DataType::from(2i32),
+            DataType::from(3i32),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(3i32),
+            DataType::from(4i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(3i32),
+            DataType::from(4i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(4i32),
+            DataType::from(5i32),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    t2.insert_many(vec![
+        vec![
+            DataType::from(1i32),
+            DataType::from(2i32),
+            DataType::from(33i32),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(3i32),
+            DataType::from(44i32),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(4i32),
+            DataType::from(123i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(3i32),
+            DataType::from(44i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(5i32),
+            DataType::from(123i32),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    let res = q
+        .lookup(&[0i32.into()], true)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r["val_1"].clone().into(), r["val_2"].clone().into()))
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(3, 33), (4, 44), (4, 44)]);
 }

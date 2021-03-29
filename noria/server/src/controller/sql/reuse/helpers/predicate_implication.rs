@@ -93,26 +93,41 @@ where
     }
 }
 
-pub fn predicate_is_equivalent(np: &ConditionTree, ep: &ConditionTree) -> ReadySetResult<bool> {
-    let nl_col = match *np.left {
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-        _ => internal!(),
-    };
-    let nr_col = match *np.right {
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-        _ => internal!(),
-    };
+/// Returns true if two sets of equality predicates are equivalent, regardless of the order of the
+/// predicates or the order of fields given to the predicates
+///
+/// # Invariants
+///
+/// All of the passed conditions must have their [`operator`](ConditionTree::operator) equal to
+/// [`BinaryOperator::Equal`], and must be direct comparisons on fields.
+pub fn predicates_are_equivalent(
+    nps: &[ConditionTree],
+    eps: &[ConditionTree],
+) -> ReadySetResult<bool> {
+    fn cols(ct: &ConditionTree) -> ReadySetResult<(&nom_sql::Column, &nom_sql::Column)> {
+        debug_assert!(ct.operator == BinaryOperator::Equal);
+        let l_col = match &*ct.left {
+            ConditionExpression::Base(ConditionBase::Field(f)) => f,
+            _ => internal!(),
+        };
+        let r_col = match &*ct.right {
+            ConditionExpression::Base(ConditionBase::Field(f)) => f,
+            _ => internal!(),
+        };
+        Ok(if l_col < r_col {
+            (l_col, r_col)
+        } else {
+            (r_col, l_col)
+        })
+    }
 
-    let el_col = match *ep.left {
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-        _ => internal!(),
-    };
-    let er_col = match *ep.right {
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-        _ => internal!(),
-    };
+    let mut np_fields = nps.iter().map(cols).collect::<Result<Vec<_>, _>>()?;
+    np_fields.sort_unstable();
 
-    Ok((nl_col == el_col && nr_col == er_col) || (nl_col == er_col && nr_col == el_col))
+    let mut ep_fields = eps.iter().map(cols).collect::<Result<Vec<_>, _>>()?;
+    ep_fields.sort_unstable();
+
+    Ok(np_fields == ep_fields)
 }
 
 /// Direct elimination for complex predicates with nested `and` and `or` expressions

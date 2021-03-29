@@ -43,13 +43,13 @@ pub(super) fn make_joins(
     let mut node_count = node_count;
 
     for jref in qg.join_order.iter() {
-        let (join_type, jp) = from_join_ref(jref, &qg);
+        let (join_type, jps) = from_join_ref(jref, &qg);
         let (left_chain, right_chain) =
             pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
 
         let jn = mir_converter.make_join_node(
             &format!("{}_n{}", name, node_count),
-            jp,
+            jps,
             left_chain.last_node.clone(),
             right_chain.last_node.clone(),
             join_type,
@@ -67,10 +67,10 @@ pub(super) fn make_joins(
     Ok(join_nodes)
 }
 
-fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a ConditionTree) {
-    match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, &jps[jref.index]),
-        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, &jps[jref.index]),
+fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a [ConditionTree]) {
+    match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+        QueryGraphEdge::Join(jps) => (JoinType::Inner, jps),
+        QueryGraphEdge::LeftJoin(jps) => (JoinType::Left, jps),
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }
