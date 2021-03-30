@@ -2872,13 +2872,19 @@ dependencies = [
  "chrono",
  "futures 0.1.31",
  "getrandom 0.2.2",
+ "launchpad",
  "mysql 17.0.0",
  "mysql_async",
  "mysql_common 0.19.2",
  "nom 5.1.2",
  "postgres 0.15.2",
+ "proptest",
+ "regex",
  "rust-crypto",
+ "serde",
+ "serde_test",
  "slab",
+ "test-strategy",
  "time 0.2.7",
  "tokio 0.2.25",
 ]
@@ -5303,6 +5309,15 @@ checksum = "799e97dc9fdae36a5c8b8f2cae9ce2ee9fdce2058c57a93e6099d919fd982f79"
 dependencies = [
  "itoa",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serde_test"
+version = "1.0.125"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4bb5fef7eaf5a97917567183607ac4224c5b451c15023930f23b937cce879fe"
+dependencies = [
  "serde",
 ]
 

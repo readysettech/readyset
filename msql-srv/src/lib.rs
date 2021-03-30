@@ -118,6 +118,7 @@ pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 mod authentication;
 mod commands;
 mod constants;
+mod datatype;
 mod errorcodes;
 mod packet;
 mod params;
@@ -145,6 +146,7 @@ pub struct Column {
     pub colflags: ColumnFlags,
 }
 
+pub use crate::datatype::MysqlTime;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};
 pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};

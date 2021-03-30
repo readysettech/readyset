@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d5623315f48a272c0ead7f0e20917ea97a3488394506db2697d53b5f7d8267ac # shrinks to input = _TestParseFromStrArgs { duration: Duration { secs: 3225275596800, nanos: 0 } }
+cc c81b37a94e11ddb531cdbf8fc1f2ba5ecfb0c76b96085e36d12fe91459e0bc0c # shrinks to input = _FromStrDisplayArgs { duration: Duration { secs: -1, nanos: 999999000 } }
