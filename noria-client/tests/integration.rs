@@ -1255,6 +1255,7 @@ fn round_trip_time_type() {
         ]
     )
 }
+
 #[test]
 fn multi_keyed_state() {
     let d = Deployment::new("multi_keyed_state");
@@ -1270,4 +1271,31 @@ fn multi_keyed_state() {
         .unwrap()
         .unwrap();
     assert_eq!(result, (1, 2, 3, 4, 5, 6, 7, 8,));
+}
+
+#[test]
+// Test is ignored due to query reuse issue https://app.clubhouse.io/readysettech/story/380.
+#[ignore]
+fn reuse_similar_query() {
+    let d = Deployment::new("reuse_similar_query");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, i32)> = conn
+        .exec("SELECT x, y FROM test WHERE x = ?", (4,))
+        .unwrap();
+    assert_eq!(rows, vec![(4, 2)]);
+
+    // This query is not identical to the one above, but Noria is expected to rewrite it and then
+    // reuse the same underlying view.
+    let rows: Vec<(i32, i32)> = conn
+        .exec("SELECT x, y FROM test WHERE NOT x != ?", (4,))
+        .unwrap();
+    assert_eq!(rows, vec![(4, 2)]);
 }
