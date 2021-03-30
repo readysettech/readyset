@@ -1,6 +1,6 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use proptest::prelude::*;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
@@ -11,6 +11,11 @@ pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
 /// Generate an arbitrary [`NaiveTime`]
 pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
     (0u32..23, 0u32..59, 0u32..59).prop_map(|(hour, min, sec)| NaiveTime::from_hms(hour, min, sec))
+}
+
+/// Generate an arbitrary [`Duration`] within a MySQL TIME valid range.
+pub fn arbitrary_duration() -> impl Strategy<Value = Duration> {
+    (-3020399i64..3020399i64).prop_map(Duration::microseconds)
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`]

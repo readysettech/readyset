@@ -23,7 +23,7 @@ codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github
 maintenance = { status = "experimental" }
 
 [dependencies]
-nom = "5.0.0"
+nom = "5.0.1"
 mysql_common = "0.19"
 byteorder = "1"
 chrono = "0.4"
@@ -32,6 +32,11 @@ getrandom = "0.2.2"
 rust-crypto = "0.2.36"
 async-trait = "0.1"
 tokio = { version = "0.2", features = ["io-util", "net"] }
+regex = "1.4.3"
+serde = { version = "1.0.8", features = ["rc"] }
+serde_test = "1.0.117"
+launchpad = { path = "../launchpad" }
+test-strategy = "0.1.1"
 
 [dev-dependencies]
 postgres = "0.15.2"
@@ -39,3 +44,4 @@ mysql = "17.0.0"
 mysql_async = "0.23.0"
 slab = "0.4.2"
 futures = "0.1.26"
+proptest = "0.10.1"
