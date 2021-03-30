@@ -1187,7 +1187,6 @@ mod tests {
     // Typically, this alias would map to a different parent column however for testing purposes
     // that column is missing here to ensure it will not match with the wrong column.
     #[test]
-    #[should_panic]
     fn find_source_for_child_column_with_alias_to_parent_column() {
         let c1 = Column {
             table: Some("table".to_string()),
@@ -1231,6 +1230,9 @@ mod tests {
             flow_node: None,
         };
 
-        a.find_source_for_child_column(&child_column, Option::None);
+        assert_eq!(
+            a.find_source_for_child_column(&child_column, Option::None),
+            None
+        );
     }
 }
