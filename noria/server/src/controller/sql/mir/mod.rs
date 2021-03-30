@@ -218,7 +218,10 @@ impl SqlToMirConverter {
                 .unwrap_or(0);
             let num_columns = cmp::max(columns.len(), max_column_id + 1);
 
-            if let Some(pos) = columns.iter().rposition(|c| *c.name == col.name) {
+            if let Some(pos) = columns
+                .iter()
+                .rposition(|c| *c.name == col.name && c.table == col.table)
+            {
                 absolute_column_ids[pos].unwrap_or_else(|| {
                     panic!(
                         "could not find column {} in parent {:?}",
