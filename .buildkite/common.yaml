@@ -310,6 +310,7 @@ steps:
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
+    timeout_in_minutes: 60
     depends_on:
     - build-image
     - build-noria
@@ -358,6 +359,7 @@ steps:
     depends_on:
     - build-image
     - build-noria-client
+    timeout_in_minutes: 60
     plugins:
       - docker-compose#v3.7.0:
           run: app
