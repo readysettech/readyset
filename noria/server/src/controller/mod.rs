@@ -3,7 +3,9 @@ use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
 use crate::coordination::CoordinationMessage;
 use crate::coordination::CoordinationPayload;
+use crate::metrics::MetricsDump;
 use crate::startup::Event;
+use crate::NoriaMetricsRecorder;
 use crate::{Config, ReadySetResult};
 use async_bincode::AsyncBincodeReader;
 use dataflow::payload::ControlReplyPacket;
@@ -13,7 +15,7 @@ use futures_util::{
     sink::SinkExt,
     stream::{StreamExt, TryStreamExt},
 };
-use hyper::{self, StatusCode};
+use hyper::{self, Method, StatusCode};
 use noria::channel::TcpSender;
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::ControllerDescriptor;
@@ -61,6 +63,26 @@ impl Worker {
 }
 
 type WorkerIdentifier = SocketAddr;
+
+/// External requests that can be handled without a controller at this
+/// noria-server.
+fn external_request(
+    method: hyper::Method,
+    path: String,
+) -> Result<Result<String, ReadySetError>, StatusCode> {
+    metrics::increment_counter!("server.external_requests");
+    use serde_json as json;
+
+    match (&method, path.as_ref()) {
+        (&Method::POST, "/metrics_dump") => {
+            let recorder = NoriaMetricsRecorder::get();
+            let (counters, gauges) = recorder.with_metrics(|c, g| (c.clone(), g.clone()));
+            let md = MetricsDump::from_metrics(counters, gauges);
+            Ok(Ok(json::to_string(&md).unwrap()))
+        }
+        _ => Err(StatusCode::NOT_FOUND),
+    }
+}
 
 pub(super) async fn main<A: Authority + 'static>(
     alive: tokio::sync::mpsc::Sender<()>,
@@ -130,8 +152,17 @@ pub(super) async fn main<A: Authority + 'static>(
                     if reply_tx.send(reply).is_err() {
                         warn!(log, "client hung up");
                     }
-                } else if reply_tx.send(Err(StatusCode::NOT_FOUND)).is_err() {
-                    warn!(log, "client hung up for 404");
+                } else {
+                    // There is no controller, however, we may still support an
+                    // external request to this noria-server. If the external
+                    // request is not supported, NOT_FOUND will be returned.
+                    let reply = tokio::task::block_in_place(|| {
+                        external_request(method, path)
+                            .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
+                    });
+                    if reply_tx.send(reply).is_err() {
+                        warn!(log, "client hung up");
+                    }
                 }
             }
             Event::ManualMigration { f, done } => {
