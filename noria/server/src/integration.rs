@@ -4333,6 +4333,37 @@ async fn duplicate_column_names() {
         ]
     );
 }
+#[tokio::test(threaded_scheduler)]
+async fn filter_on_expression() {
+    let mut g = start_simple("filter_on_expression").await;
+
+    g.install_recipe(
+        "CREATE TABLE users (id int, birthday date);
+         VIEW friday_babies: SELECT id FROM users WHERE dayofweek(birthday) = 6;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("users").await.unwrap();
+    let mut q = g.view("friday_babies").await.unwrap();
+
+    t.insert_many(vec![
+        vec![
+            DataType::from(1),
+            DataType::from(NaiveDate::from_ymd(1995, 6, 2)),
+        ],
+        vec![
+            DataType::from(2),
+            DataType::from(NaiveDate::from_ymd(2015, 5, 15)),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
+
+    assert_eq!(&res["id"], &DataType::from(1));
+}
 
 #[tokio::test(threaded_scheduler)]
 async fn compound_join_key() {

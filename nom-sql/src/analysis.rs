@@ -291,6 +291,59 @@ impl ReferredColumns for ConditionExpression {
     }
 }
 
+/// Recursively traverses `ce`, a [`ConditionExpression`], to find all function calls inside,
+/// putting found function calls into `out`.
+pub fn find_function_calls<'a>(out: &mut Vec<&'a Column>, ce: &'a ConditionExpression) {
+    fn on_arithmetic<'a>(out: &mut Vec<&'a Column>, ari: &'a Arithmetic) {
+        for item in &[&ari.left, &ari.right] {
+            match **item {
+                ArithmeticItem::Base(ArithmeticBase::Column(ref col)) => {
+                    if col.function.is_some() {
+                        out.push(col);
+                    }
+                }
+                ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => {}
+                ArithmeticItem::Base(ArithmeticBase::Bracketed(ref ari)) => {
+                    on_arithmetic(out, &*ari);
+                }
+                ArithmeticItem::Expr(ref ari) => {
+                    on_arithmetic(out, &*ari);
+                }
+            }
+        }
+    }
+    match *ce {
+        ConditionExpression::ComparisonOp(ref ct) | ConditionExpression::LogicalOp(ref ct) => {
+            find_function_calls(out, &ct.left);
+            find_function_calls(out, &ct.right);
+        }
+        ConditionExpression::NegationOp(ref ce) | ConditionExpression::Bracketed(ref ce) => {
+            find_function_calls(out, &*ce)
+        }
+        ConditionExpression::Base(ref cb) => {
+            if let ConditionBase::Field(ref c) = cb {
+                if c.function.is_some() {
+                    out.push(c);
+                }
+            }
+        }
+        ConditionExpression::Arithmetic(ref ae) => {
+            on_arithmetic(out, &ae.ari);
+        }
+        ConditionExpression::Between {
+            ref operand,
+            ref min,
+            ref max,
+        } => {
+            find_function_calls(out, &*operand);
+            find_function_calls(out, &*min);
+            find_function_calls(out, &*max);
+        }
+        // unsupported, but also there aren't function calls in there anyway
+        ConditionExpression::ExistsOp(_) => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +457,25 @@ mod tests {
             .collect::<Vec<_>>(),
             vec![Cow::Owned(Column::from("sign"))]
         );
+    }
+
+    #[test]
+    fn find_funcalls_basic() {
+        let col = Column {
+            name: "test".to_string(),
+            alias: None,
+            table: None,
+            function: Some(Box::new(FunctionExpression::CountStar)),
+        };
+        let cexpr = ConditionExpression::ComparisonOp(ConditionTree {
+            left: Box::new(ConditionExpression::Base(ConditionBase::Field(col.clone()))),
+            operator: BinaryOperator::Greater,
+            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                Literal::Integer(0),
+            ))),
+        });
+        let mut out = vec![];
+        find_function_calls(&mut out, &cexpr);
+        assert_eq!(out, vec![&col]);
     }
 }
