@@ -593,8 +593,8 @@ pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
 pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], FunctionArgument> {
     alt((
         map(case_when_column, FunctionArgument::Conditional),
-        map(column_identifier_no_alias, FunctionArgument::Column),
         map(literal, FunctionArgument::Literal),
+        map(column_identifier_no_alias, FunctionArgument::Column),
         map(column_function, |f| FunctionArgument::Call(Box::new(f))),
     ))(i)
 }
@@ -1192,6 +1192,22 @@ mod tests {
             );
             assert_eq!(res, Ok((&b""[..], expected)));
         }
+    }
+
+    #[test]
+    fn generic_function_with_int_literal() {
+        let (_, res) = column_function(b"ifnull(x, 0)").unwrap();
+        assert_eq!(
+            res,
+            FunctionExpression::Generic(
+                "ifnull".to_owned(),
+                vec![
+                    FunctionArgument::Column(Column::from("x")),
+                    FunctionArgument::Literal(Literal::Integer(0))
+                ]
+                .into()
+            )
+        );
     }
 
     #[test]
