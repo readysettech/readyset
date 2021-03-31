@@ -202,40 +202,35 @@ impl SqlToMirConverter {
         &self,
         ct: &ConditionTree,
         columns: &mut Vec<Column>,
-        n: &MirNodeRef,
+        parent: &MirNodeRef,
     ) -> Vec<(usize, FilterCondition)> {
         use dataflow::ops::filter;
 
         let mut column_from_parent = |col: &nom_sql::Column| -> usize {
-            let absolute_column_ids: Vec<Option<usize>> = columns
+            let absolute_column_ids: Vec<usize> = columns
                 .iter()
-                .map(|c| n.borrow().find_source_for_child_column(c, None))
+                .map(|c| {
+                    // grr NLL
+                    let source: Option<usize> =
+                        { parent.borrow().find_source_for_child_column(c, None) };
+                    source.unwrap_or_else(|| parent.borrow_mut().add_column(c.clone()))
+                })
                 .collect();
-            let max_column_id = absolute_column_ids
-                .iter()
-                .filter_map(|x| *x)
-                .max()
-                .unwrap_or(0);
+            let max_column_id = absolute_column_ids.iter().copied().max().unwrap_or(0);
             let num_columns = cmp::max(columns.len(), max_column_id + 1);
 
             if let Some(pos) = columns
                 .iter()
                 .rposition(|c| *c.name == col.name && c.table == col.table)
             {
-                absolute_column_ids[pos].unwrap_or_else(|| {
-                    panic!(
-                        "could not find column {} in parent {:?}",
-                        col.name,
-                        n.borrow()
-                    )
-                })
+                absolute_column_ids[pos]
             } else {
                 // Might occur if the column doesn't exist in the parent; e.g., for
                 // aggregations.  We assume that the column is appended at the end, unless we
                 // have an aggregation, in which case it needs to go before the computed column,
                 // which is last.
                 let column: Column = col.clone().into();
-                match n.borrow().inner {
+                match parent.borrow().inner {
                     MirNodeType::Aggregation { .. } => {
                         columns.insert(columns.len() - 1, column);
                         num_columns - 1
