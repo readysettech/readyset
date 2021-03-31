@@ -6,8 +6,6 @@ use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
-use crate::metrics::MetricsDump;
-use crate::NoriaMetricsRecorder;
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
@@ -213,12 +211,6 @@ impl ControllerInner {
             }
             (&Method::GET, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
-            }
-            (&Method::POST, "/metrics_dump") => {
-                let recorder = NoriaMetricsRecorder::get();
-                let (counters, gauges) = recorder.with_metrics(|c, g| (c.clone(), g.clone()));
-                let md = MetricsDump::from_metrics(counters, gauges);
-                return Ok(Ok(json::to_string(&md).unwrap()));
             }
             (&Method::POST, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
