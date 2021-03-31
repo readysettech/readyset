@@ -3582,6 +3582,7 @@ dependencies = [
  "hyper 0.13.10",
  "itertools 0.10.0",
  "launchpad",
+ "maplit",
  "metrics",
  "mysql 18.2.0",
  "nom 5.1.2",
