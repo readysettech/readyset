@@ -1,7 +1,7 @@
 use mir::node::{GroupedNodeType, MirNode, MirNodeType};
 use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
-use nom_sql::analysis::ReferredColumns;
+use nom_sql::analysis::{find_function_calls, ReferredColumns};
 use petgraph::graph::NodeIndex;
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
@@ -105,6 +105,10 @@ pub(super) struct SqlToMirConverter {
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
+    // this is the 2nd return value of `project_expressions`.
+    // FIXME(eta): ideally this should be dependency injected, but it's also
+    // a big annoying type that's painful to thread through, so whatever
+    remapped_cols_to_parent_names: Option<HashMap<nom_sql::Column, String>>,
 
     /// Universe in which the conversion is happening
     universe: Universe,
@@ -117,6 +121,7 @@ impl Default for SqlToMirConverter {
             current: HashMap::default(),
             log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
+            remapped_cols_to_parent_names: None,
             schema_version: 0,
             universe: Universe::default(),
         }
@@ -207,6 +212,13 @@ impl SqlToMirConverter {
         use dataflow::ops::filter;
 
         let mut column_from_parent = |col: &nom_sql::Column| -> usize {
+            let mut name = &col.name as &str;
+            if let Some(ref epm) = self.remapped_cols_to_parent_names {
+                if let Some(remapped_name) = epm.get(col) {
+                    // haha remap go brr!
+                    name = remapped_name;
+                }
+            }
             let absolute_column_ids: Vec<usize> = columns
                 .iter()
                 .map(|c| {
@@ -221,7 +233,7 @@ impl SqlToMirConverter {
 
             if let Some(pos) = columns
                 .iter()
-                .rposition(|c| *c.name == col.name && c.table == col.table)
+                .rposition(|c| *c.name == *name && c.table == col.table)
             {
                 absolute_column_ids[pos]
             } else {
@@ -1610,6 +1622,53 @@ impl SqlToMirConverter {
         Ok(pred_nodes)
     }
 
+    /// If the provided [`ConditionExpression`] contains function calls, extract them into a new
+    /// projection node which evaluates them.
+    ///
+    /// The returned `HashMap` maps the `Column` objects that contained function calls into the
+    /// names of the projected columns that contain the evaluated results.
+    /// The returned `MirNodeRef` is either just `parent` passed through (if no projections were
+    /// done), or a node reference to the new project node.
+    fn project_expressions<'a>(
+        &self,
+        name: &str,
+        parent: &mut MirNodeRef,
+        ce: &ConditionExpression,
+    ) -> HashMap<nom_sql::Column, String> {
+        let mut ret = HashMap::new();
+        let mut funcalls = vec![];
+        find_function_calls(&mut funcalls, ce);
+        let expressions = funcalls
+            .into_iter()
+            // unwrap: okay since `find_function_calls` will only return columns where `function`
+            // is `Some`
+            .enumerate()
+            .map(|(i, fc)| {
+                let new_name = format!("{}_funcall_{}", name, i);
+                ret.insert(fc.clone(), new_name.clone());
+                (
+                    new_name,
+                    Expression::Call(*fc.function.as_ref().unwrap().clone()),
+                )
+            })
+            .collect::<Vec<_>>();
+        if !expressions.is_empty() {
+            // wahey, time to do some projecting
+            // project through all the parent's columns verbatim
+            let passthru_cols: Vec<_> = parent.borrow().columns().to_vec();
+            *parent = self.make_project_node(
+                &format!("{}_exprj", name),
+                parent.clone(),
+                passthru_cols.iter().collect(),
+                expressions,
+                vec![],
+                false,
+            );
+        }
+
+        ret
+    }
+
     fn predicates_above_group_by<'a>(
         &self,
         name: &str,
@@ -1913,10 +1972,18 @@ impl SqlToMirConverter {
                                 continue;
                             }
 
-                            let parent = match prev_node {
+                            let mut parent = match prev_node {
                                 None => node_for_rel[rel].clone(),
                                 Some(pn) => pn,
                             };
+
+                            // Project the needful expressions
+                            let exprj_map = self.project_expressions(
+                                &format!("q_{:x}{}_local{}", qg.signature().hash, uformat, i),
+                                &mut parent,
+                                p,
+                            );
+                            self.remapped_cols_to_parent_names = Some(exprj_map);
 
                             let fns = self.make_predicate_nodes(
                                 &format!(
@@ -1930,6 +1997,7 @@ impl SqlToMirConverter {
                                 p,
                                 0,
                             )?;
+                            self.remapped_cols_to_parent_names = None;
 
                             invariant!(!fns.is_empty());
                             new_node_count += fns.len();
@@ -1957,10 +2025,18 @@ impl SqlToMirConverter {
                         continue;
                     }
 
-                    let parent = match prev_node {
+                    let mut parent = match prev_node {
                         None => internal!(),
                         Some(pn) => pn,
                     };
+
+                    // Project the needful expressions
+                    let exprj_map = self.project_expressions(
+                        &format!("q_{:x}{}_local{}", qg.signature().hash, uformat, i),
+                        &mut parent,
+                        p,
+                    );
+                    self.remapped_cols_to_parent_names = Some(exprj_map);
 
                     let fns = self.make_predicate_nodes(
                         &format!(
@@ -1974,6 +2050,7 @@ impl SqlToMirConverter {
                         p,
                         0,
                     )?;
+                    self.remapped_cols_to_parent_names = None;
 
                     invariant!(!fns.is_empty());
                     new_node_count += fns.len();

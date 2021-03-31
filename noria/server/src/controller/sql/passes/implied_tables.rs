@@ -170,6 +170,15 @@ fn rewrite_selection(
                                     fe.table = find_table(fe, tables_in_query);
                                 }
                             }
+                            Generic(_, ref mut args) => {
+                                for arg in args.arguments.iter_mut() {
+                                    if let FunctionArgument::Column(ref mut fe) = arg {
+                                        if fe.table.is_none() {
+                                            fe.table = find_table(fe, tables_in_query);
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                         None
