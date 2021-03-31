@@ -30,6 +30,7 @@ const AUTHENTICATION_OK_SUCCESS: i32 = 0;
 
 const COMMAND_COMPLETE_DELETE_TAG: &str = "DELETE";
 const COMMAND_COMPLETE_INSERT_TAG: &str = "INSERT";
+const COMMAND_COMPLETE_INSERT_LEGACY_OID: &str = "0";
 const COMMAND_COMPLETE_SELECT_TAG: &str = "SELECT";
 const COMMAND_COMPLETE_UPDATE_TAG: &str = "UPDATE";
 const COMMAND_COMPLETE_TAG_BUF_LEN: usize = 32;
@@ -92,7 +93,13 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Encoder for Co
                 match tag {
                     Delete(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_DELETE_TAG, n)?,
                     Empty => {}
-                    Insert(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_INSERT_TAG, n)?,
+                    Insert(n) => write!(
+                        &mut tag_buf[..],
+                        "{} {} {}",
+                        COMMAND_COMPLETE_INSERT_TAG,
+                        COMMAND_COMPLETE_INSERT_LEGACY_OID,
+                        n
+                    )?,
                     Select(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_SELECT_TAG, n)?,
                     Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
                 };
@@ -470,9 +477,12 @@ mod tests {
             .encode(CommandComplete { tag: Insert(1) }, &mut buf)
             .unwrap();
         let mut exp = BytesMut::new();
-        exp.put_u8(b'C'); // message id
-        exp.put_i32(4 + 9); // message length
-        exp.extend_from_slice(b"INSERT 1\0");
+        // message id
+        exp.put_u8(b'C');
+        // message length
+        exp.put_i32(4 + 11);
+        // NOTE: '0' is the legacy insert oid (always zero in the current PostgreSQL protocol).
+        exp.extend_from_slice(b"INSERT 0 1\0");
         assert_eq!(buf, exp);
     }
 
