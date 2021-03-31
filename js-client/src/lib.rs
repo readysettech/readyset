@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use tokio::runtime::Runtime;
 
 use nom_sql::SelectStatement;
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
     Writer,
@@ -126,7 +126,7 @@ fn async_prepare(mut cx: FunctionContext) -> JsResult<JsUndefined> {
             };
             let callback = callback.into_inner(&mut cx);
             let this = cx.undefined();
-            let args = vec![js_err.upcast::<JsValue>(), js_res.upcast::<JsValue>()];
+            let args = vec![js_err, js_res];
             callback.call(&mut cx, this, args)?;
             Ok(())
         })
@@ -135,7 +135,44 @@ fn async_prepare(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     Ok(cx.undefined())
 }
 
-// TODO: implement async_execute once ParamParser changes have been made.
+fn async_execute(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+    let wrapped_jsclient = cx.argument::<BoxedClient>(0)?;
+    let jsclient = wrapped_jsclient.borrow_mut();
+    let statement_id = cx.argument::<JsNumber>(1)?.value(&mut cx) as u32;
+    let params: Vec<DataType> = cx
+        .argument::<JsArray>(2)?
+        .to_vec(&mut cx)?
+        .iter()
+        .map(|p| convert::convert_param(&mut cx, p))
+        .collect::<Result<Vec<_>, _>>()?;
+    let callback = cx.argument::<JsFunction>(3)?.root(&mut cx);
+    let queue = cx.queue();
+    let backend = jsclient.backend.clone();
+
+    jsclient.runtime.spawn(async move {
+        let res = backend.lock().await.execute(statement_id, params).await;
+
+        queue.send(move |mut cx| {
+            let (js_err, js_res) = match res {
+                Ok(raw_query_result) => (
+                    cx.null().upcast::<JsValue>(),
+                    convert::convert_query_result(&mut cx, raw_query_result)?.upcast::<JsValue>(),
+                ),
+                Err(e) => (
+                    convert::convert_error(&mut cx, e)?.upcast::<JsValue>(),
+                    cx.null().upcast::<JsValue>(),
+                ),
+            };
+            let callback = callback.into_inner(&mut cx);
+            let this = cx.undefined();
+            let args = vec![js_err, js_res];
+            callback.call(&mut cx, this, args)?;
+            Ok(())
+        })
+    });
+
+    Ok(cx.undefined())
+}
 
 fn async_query(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let wrapped_jsclient = cx.argument::<BoxedClient>(0)?;
@@ -174,6 +211,7 @@ fn async_query(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("connect", connect)?;
     cx.export_function("asyncPrepare", async_prepare)?;
+    cx.export_function("asyncExecute", async_execute)?;
     cx.export_function("asyncQuery", async_query)?;
     Ok(())
 }

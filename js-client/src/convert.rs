@@ -1,6 +1,6 @@
 use crate::utils;
 use msql_srv::Column;
-use neon::prelude::*;
+use neon::{prelude::*, types::JsDate};
 use noria::{results::Results, DataType};
 use noria_client::backend::{error::Error, PrepareResult, QueryResult, SelectSchema};
 
@@ -92,7 +92,6 @@ where
         DataType::BigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
         DataType::UnsignedBigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
         DataType::Real(_, _) => {
-            // TODO: test that Real to f64 conversion really works
             let n = f64::from(d);
             cx.number(n).upcast::<JsValue>()
         }
@@ -104,7 +103,7 @@ where
             let s = String::from(d);
             cx.string(s).upcast::<JsValue>()
         }
-        DataType::Timestamp(_) => unimplemented!("Timestamp conversion to JS type"), // TODO: convert Timestamp DataType to JS
+        DataType::Timestamp(_) => unimplemented!("Timestamp conversion to JS type"), // TODO: convert Timestamp DataType to JS: https://app.clubhouse.io/readysettech/story/390/implement-rust-timestamp-datatype-conversion-to-jsdate
         DataType::Time(_) => unimplemented!("Time conversion to JS type"),
     }
 }
@@ -171,7 +170,7 @@ where
         } => {
             let js_data = convert_data(cx, data, &select_schema)?;
             utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
-            utils::set_str_field(cx, &js_query_result, "selectSchema", "unimplemented")?;
+            // TODO: convert select_schema?
         }
         QueryResult::NoriaUpdate {
             num_rows_updated,
@@ -217,4 +216,30 @@ where
         }
     }
     Ok(js_query_result)
+}
+
+pub(crate) fn convert_param<'a, C>(cx: &mut C, js_param: &Handle<JsValue>) -> NeonResult<DataType>
+where
+    C: Context<'a>,
+{
+    if js_param.is_a::<JsNull, _>(cx) {
+        Ok(DataType::None)
+    } else if js_param.is_a::<JsString, _>(cx) {
+        Ok(DataType::from(
+            js_param.downcast_or_throw::<JsString, _>(cx)?.value(cx),
+        ))
+    } else if js_param.is_a::<JsNumber, _>(cx) {
+        Ok(DataType::from(
+            js_param.downcast_or_throw::<JsNumber, _>(cx)?.value(cx),
+        ))
+    } else if js_param.is_a::<JsBoolean, _>(cx) {
+        Ok(DataType::from(
+            js_param.downcast_or_throw::<JsBoolean, _>(cx)?.value(cx),
+        ))
+    } else if js_param.is_a::<JsDate, _>(cx) {
+        unimplemented!() // TODO: implement JsDate conversion to DataType: https://app.clubhouse.io/readysettech/story/387/implement-jsdate-conversion-to-rust-timestamp-datatype
+    } else {
+        let e = cx.error("Unknown parameter type")?.upcast::<JsValue>();
+        cx.throw(e)
+    }
 }

@@ -20,6 +20,8 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':prettier: Check prettier'
+
             - label: ':clippy: Check clippy'
               exclude:
                 - "ops/**"

@@ -660,6 +660,12 @@ impl From<f64> for DataType {
     }
 }
 
+impl From<bool> for DataType {
+    fn from(b: bool) -> Self {
+        DataType::from(b as u32)
+    }
+}
+
 impl<'a> From<&'a DataType> for DataType {
     fn from(dt: &'a DataType) -> Self {
         dt.clone()

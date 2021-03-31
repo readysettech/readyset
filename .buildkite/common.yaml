@@ -13,6 +13,21 @@ steps:
     plugins:
       ecr#v2.2.0:
         login: true
+  
+  - label: ':docker: Build prettier image'
+    key: prettier-image
+    commands:
+    - 'echo --- :docker: Building image'
+    - >-
+      docker build -f build/Dockerfile.prettier \
+        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:prettier \
+        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:prettier \
+        .
+    - 'echo --- :docker: Pushing image'
+    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:prettier'
+    plugins:
+      ecr#v2.2.0:
+        login: true
 
   - label: ':rust: Check rustfmt'
     commands:
@@ -24,6 +39,21 @@ steps:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
           volumes:
           - 'target:/workdir/target'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':prettier: Check prettier'
+    commands:
+    - prettier --check "/workdir/js-client/**/*.js"
+    depends_on:
+    - prettier-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:prettier'
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role

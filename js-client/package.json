@@ -12,6 +12,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "cargo-cp-artifact": "^0.1"
+    "cargo-cp-artifact": "^0.1",
+    "prettier": "2.2.1"
   }
 }

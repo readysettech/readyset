@@ -2344,6 +2344,7 @@ dependencies = [
 name = "js-client"
 version = "0.1.0"
 dependencies = [
+ "arccstr",
  "maplit",
  "msql-srv",
  "neon",
