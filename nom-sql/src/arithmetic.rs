@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
     Add,
     Subtract,

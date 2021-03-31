@@ -1,9 +1,10 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    CaseWhenExpression, Column, ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree,
-    FieldDefinitionExpression, FunctionArgument, FunctionArguments, FunctionExpression,
-    JoinConstraint, JoinRightSide, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
+    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
+    FieldValueExpression, FunctionArgument, FunctionArguments, FunctionExpression, JoinConstraint,
+    JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -70,6 +71,17 @@ fn rewrite_conditional(
             ConditionExpression::LogicalOp(rewritten_ct)
         }
         ConditionExpression::Bracketed(ce) => rewrite_conditional(col_table_remap, ce),
+        ConditionExpression::Between { operand, min, max } => ConditionExpression::Between {
+            operand: translate_ct_arm(operand.clone()),
+            min: translate_ct_arm(min.clone()),
+            max: translate_ct_arm(max.clone()),
+        },
+        ConditionExpression::Arithmetic(ae) => {
+            ConditionExpression::Arithmetic(Box::new(ArithmeticExpression {
+                ari: rewrite_arithmetic(col_table_remap, &ae.ari),
+                alias: ae.alias.clone(),
+            }))
+        }
         x => x.clone(),
     }
 }
@@ -192,6 +204,32 @@ fn rewrite_function_expression(
     }
 }
 
+fn rewrite_arithmetic_item(
+    col_table_remap: &HashMap<String, String>,
+    arithmetic_item: &ArithmeticItem,
+) -> ArithmeticItem {
+    match arithmetic_item {
+        ArithmeticItem::Base(ArithmeticBase::Column(col)) => {
+            ArithmeticItem::Base(ArithmeticBase::Column(rewrite_column(col_table_remap, col)))
+        }
+        ArithmeticItem::Base(ArithmeticBase::Bracketed(ari)) | ArithmeticItem::Expr(ari) => {
+            ArithmeticItem::Expr(Box::new(rewrite_arithmetic(col_table_remap, ari)))
+        }
+        ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => arithmetic_item.clone(),
+    }
+}
+
+fn rewrite_arithmetic(
+    col_table_remap: &HashMap<String, String>,
+    arithmetic: &Arithmetic,
+) -> Arithmetic {
+    Arithmetic {
+        left: rewrite_arithmetic_item(col_table_remap, &arithmetic.left),
+        op: arithmetic.op,
+        right: rewrite_arithmetic_item(col_table_remap, &arithmetic.right),
+    }
+}
+
 fn rewrite_field(
     col_table_remap: &HashMap<String, String>,
     field: &FieldDefinitionExpression,
@@ -206,6 +244,14 @@ fn rewrite_field(
             } else {
                 FieldDefinitionExpression::AllInTable(t.clone())
             }
+        }
+        FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ae)) => {
+            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(
+                ArithmeticExpression {
+                    ari: rewrite_arithmetic(col_table_remap, &ae.ari),
+                    alias: ae.alias.clone(),
+                },
+            ))
         }
         f => f.clone(),
     }
@@ -396,9 +442,29 @@ impl AliasRemoval for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::{AliasRemoval, TableAliasRewrite};
-    use nom_sql::{Column, FieldDefinitionExpression, Literal, SqlQuery, Table};
-    use nom_sql::{ItemPlaceholder, SelectStatement};
+    use maplit::hashmap;
+    use nom_sql::{
+        parse_query, parser, BinaryOperator, Column, ConditionBase, ConditionExpression,
+        ConditionTree, FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint,
+        JoinOperator, JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
+    };
     use std::collections::HashMap;
+
+    macro_rules! rewrites_to {
+        ($before: expr, $after: expr) => {{
+            let mut res = parse_query($before).unwrap();
+            let expected = parse_query($after).unwrap();
+            let context = hashmap! {"t1".to_owned() => "global".into()};
+            res.rewrite_table_aliases("query", &context);
+            assert_eq!(
+                res, expected,
+                "\n     expected: {} \n\
+                 to rewrite to: {} \n\
+                       but got: {}",
+                $before, expected, res,
+            );
+        }};
+    }
 
     #[test]
     fn it_removes_aliases() {
@@ -561,11 +627,6 @@ mod tests {
 
     #[test]
     fn it_rewrites_duplicate_aliases() {
-        use nom_sql::{
-            parser, BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, JoinClause,
-            JoinConstraint, JoinOperator, JoinRightSide,
-        };
-
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let mut res = parser::parse_query(
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
@@ -632,6 +693,22 @@ mod tests {
                     for_table: String::from("tab")
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn aliases_in_between() {
+        rewrites_to!(
+            "SELECT id FROM tbl t1 WHERE t1.value BETWEEN 1 AND 6",
+            "SELECT id FROM tbl WHERE tbl.value BETWEEN 1 AND 6"
+        );
+    }
+
+    #[test]
+    fn aliases_in_condition_arithmetic() {
+        rewrites_to!(
+            "SELECT id FROM tbl t1 WHERE t1.x - t1.y > 0",
+            "SELECT id FROM tbl WHERE tbl.x - tbl.y > 0"
         );
     }
 }
