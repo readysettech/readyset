@@ -187,21 +187,29 @@ impl MirNode {
         }
     }
 
-    pub fn add_column(&mut self, c: Column) {
-        match &self.inner {
+    /// Add a new column to the set of emitted columns for this node, and return the resulting index
+    /// of that column
+    pub fn add_column(&mut self, c: Column) -> usize {
+        let pos = match &self.inner {
             MirNodeType::Aggregation { .. } | MirNodeType::FilterAggregation { .. } => {
                 // the aggregation column must always be the last column
                 let pos = self.columns.len() - 1;
                 self.columns.insert(pos, c.clone());
+                pos
             }
             MirNodeType::Project { emit, .. } => {
                 // New projected columns go before all literals and expressions
                 let pos = emit.len();
-                self.columns.insert(pos, c.clone())
+                self.columns.insert(pos, c.clone());
+                pos
             }
-            _ => self.columns.push(c.clone()),
-        }
+            _ => {
+                self.columns.push(c.clone());
+                self.columns.len() - 1
+            }
+        };
         self.inner.add_column(c);
+        pos
     }
 
     pub fn ancestors(&self) -> &[MirNodeRef] {
