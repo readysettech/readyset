@@ -68,7 +68,7 @@ impl Ingredient for Project {
     }
 
     fn can_query_through(&self) -> bool {
-        true
+        !self.expressions.iter().any(|exprs| exprs.is_empty())
     }
 
     #[allow(clippy::type_complexity)]
