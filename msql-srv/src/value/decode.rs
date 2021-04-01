@@ -201,7 +201,7 @@ impl<'a> Into<&'a str> for Value<'a> {
     }
 }
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{NaiveDate, NaiveDateTime};
 impl<'a> Into<NaiveDate> for Value<'a> {
     fn into(self) -> NaiveDate {
         if let ValueInner::Date(mut v) = self.0 {
@@ -243,24 +243,42 @@ impl<'a> Into<NaiveDateTime> for Value<'a> {
     }
 }
 
-impl<'a> Into<NaiveTime> for Value<'a> {
-    fn into(self) -> NaiveTime {
+use crate::MysqlTime;
+
+impl<'a> Into<MysqlTime> for Value<'a> {
+    fn into(self) -> MysqlTime {
         if let ValueInner::Time(mut v) = self.0 {
-            v.read_u8().unwrap(); // sign
-            v.read_u32::<LittleEndian>().unwrap(); // days
-            NaiveTime::from_hms_micro(
-                v.read_u8().unwrap().into(),
-                v.read_u8().unwrap().into(),
-                v.read_u8().unwrap().into(),
-                v.read_u32::<LittleEndian>().unwrap_or(0),
-            )
+            let is_positive = v.read_u8().unwrap() == 0; // sign: 1 negative, 0 positive
+            let d = v.read_u32::<LittleEndian>().unwrap() as u16;
+            let h = v.read_u8().unwrap() as u16;
+            let m = v.read_u8().unwrap();
+            let s = v.read_u8().unwrap();
+            let us = v.read_u32::<LittleEndian>().unwrap_or(0) as u64;
+            MysqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us)
         } else {
             panic!("Invalid type conversion from {:?} to time", self)
         }
     }
 }
 
+impl From<MysqlTime> for myc::value::Value {
+    fn from(mysql_time: MysqlTime) -> Self {
+        let total_hours = mysql_time.hour();
+        let days = (total_hours / 24) as u32;
+        let hours = (total_hours % 24) as u8;
+        myc::value::Value::Time(
+            !mysql_time.is_positive(),
+            days,
+            hours,
+            mysql_time.minutes(),
+            mysql_time.seconds(),
+            mysql_time.microseconds(),
+        )
+    }
+}
+
 use std::time::Duration;
+
 impl<'a> Into<Duration> for Value<'a> {
     fn into(self) -> Duration {
         if let ValueInner::Time(mut v) = self.0 {
@@ -295,6 +313,7 @@ impl<'a> Into<Duration> for Value<'a> {
 #[allow(unused_imports)]
 mod tests {
     use super::Value;
+    use crate::datatype::MysqlTime;
     use crate::myc;
     use crate::myc::io::WriteMysqlExt;
     use crate::{Column, ColumnFlags, ColumnType};
@@ -469,8 +488,8 @@ mod tests {
     );
     rt!(
         time,
-        chrono::NaiveTime,
-        chrono::NaiveTime::from_hms(20, 15, 14),
+        MysqlTime,
+        MysqlTime::from_hmsus(true, 20, 15, 14, 123_456),
         ColumnType::MYSQL_TYPE_TIME
     );
     rt!(

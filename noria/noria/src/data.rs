@@ -50,8 +50,8 @@ pub enum DataType {
     TinyText([u8; TINYTEXT_WIDTH]),
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
-    /// A time-of-day without a date part
-    Time(NaiveTime),
+    /// A time duration
+    Time(Arc<MysqlTime>), //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
 }
 
 impl fmt::Display for DataType {
@@ -76,7 +76,9 @@ impl fmt::Display for DataType {
                 }
             }
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
-            DataType::Time(t) => write!(f, "{}", t.format(TIME_FORMAT)),
+            DataType::Time(ref t) => {
+                write!(f, "{}", t.to_string())
+            }
         }
     }
 }
@@ -99,7 +101,7 @@ impl fmt::Debug for DataType {
             DataType::UnsignedInt(n) => write!(f, "UnsignedInt({})", n),
             DataType::BigInt(n) => write!(f, "BigInt({})", n),
             DataType::UnsignedBigInt(n) => write!(f, "UnsignedBigInt({})", n),
-            DataType::Time(t) => f.debug_tuple("Time").field(&t).finish(),
+            DataType::Time(ref t) => f.debug_tuple("Time").field(t.as_ref()).finish(),
         }
     }
 }
@@ -128,7 +130,7 @@ impl DataType {
             DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
             DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
-            DataType::Time(_) => DataType::Time(NaiveTime::from_hms(0, 0, 0)),
+            DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
         }
     }
 
@@ -148,7 +150,7 @@ impl DataType {
             DataType::UnsignedInt(_) => DataType::UnsignedInt(u32::max_value()),
             DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
-            DataType::Time(_) => DataType::Time(NaiveTime::from_hms(23, 59, 59)),
+            DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
         }
     }
 
@@ -165,10 +167,7 @@ impl DataType {
 
     /// Checks if this value is `DataType::None`.
     pub fn is_none(&self) -> bool {
-        match *self {
-            DataType::None => true,
-            _ => false,
-        }
+        matches!(*self, DataType::None)
     }
 
     /// Checks if this value is of an integral data type (i.e., can be converted into integral types).
@@ -190,6 +189,11 @@ impl DataType {
     /// Checks if this value is of a timestamp data type.
     pub fn is_datetime(&self) -> bool {
         matches!(*self, DataType::Timestamp(_))
+    }
+
+    /// Checks if this value is of a time data type.
+    pub fn is_time(&self) -> bool {
+        matches!(*self, DataType::Time(_))
     }
 
     /// Returns the SqlType for this DataType, or None if [`DataType::None`] (which is valid for any
@@ -318,16 +322,35 @@ impl DataType {
                     })
                     .map(Cow::Owned)
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
-                NaiveTime::parse_from_str(self.into(), TIME_FORMAT)
-                    .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => <&str>::from(self)
+                .parse()
+                .map_err(|e: String| {
+                    mk_err(
+                        "Could not parse value as time".to_owned(),
+                        Some(anyhow::Error::msg(e)),
+                    )
+                })
+                .map(Arc::new)
+                .map(Self::Time)
+                .map(Cow::Owned),
+            (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
+                MysqlTime::try_from(<f64>::from(self))
+                    .map_err(|e: String| {
+                        mk_err(
+                            "Could not parse value as time".to_owned(),
+                            Some(anyhow::Error::msg(e)),
+                        )
+                    })
+                    .map(Arc::new)
                     .map(Self::Time)
                     .map(Cow::Owned)
             }
             (Self::Timestamp(ts), Some(Timestamp), Date) => {
                 Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
             }
-            (Self::Timestamp(ts), Some(Timestamp), Time) => Ok(Cow::Owned(Self::Time(ts.time()))),
+            (Self::Timestamp(ts), Some(Timestamp), Time) => {
+                Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
+            }
             (_, Some(Bigint(_)), Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(i32::try_from(self).map_err(
                     |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
@@ -457,7 +480,7 @@ impl PartialEq for DataType {
             }
             (&DataType::Real(ai, af), &DataType::Real(bi, bf)) => ai == bi && af == bf,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
-            (&DataType::Time(ta), &DataType::Time(tb)) => ta == tb,
+            (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
             (&DataType::None, &DataType::None) => true,
 
             _ => false,
@@ -465,7 +488,10 @@ impl PartialEq for DataType {
     }
 }
 
+use msql_srv::MysqlTime;
 use std::cmp::Ordering;
+use std::sync::Arc;
+
 impl PartialOrd for DataType {
     fn partial_cmp(&self, other: &DataType) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -507,7 +533,7 @@ impl Ord for DataType {
                 ai.cmp(bi).then_with(|| af.cmp(bf))
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
-            (&DataType::Time(ta), &DataType::Time(ref tb)) => ta.cmp(tb),
+            (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
             (&DataType::None, &DataType::None) => Ordering::Equal,
 
             // order Ints, Reals, Text, Timestamps, None
@@ -547,7 +573,7 @@ impl Hash for DataType {
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
-            DataType::Time(t) => t.hash(state),
+            DataType::Time(ref t) => t.hash(state),
         }
     }
 }
@@ -698,7 +724,7 @@ impl From<Literal> for DataType {
 
 impl From<NaiveTime> for DataType {
     fn from(t: NaiveTime) -> Self {
-        DataType::Time(t)
+        DataType::Time(Arc::new(t.into()))
     }
 }
 
@@ -728,6 +754,15 @@ impl<'a> From<&'a DataType> for NaiveDate {
         match *data {
             DataType::Timestamp(ref dt) => dt.date(),
             _ => panic!("attempted to convert a {:?} to a NaiveDate", data),
+        }
+    }
+}
+
+impl<'a> From<&'a DataType> for MysqlTime {
+    fn from(data: &'a DataType) -> Self {
+        match *data {
+            DataType::Time(ref mysql_time) => mysql_time.as_ref().clone(),
+            _ => panic!("attempted to convert a {:?} to a MysqlTime", data),
         }
     }
 }
@@ -1146,7 +1181,7 @@ impl Arbitrary for DataType {
     type Strategy = proptest::strategy::BoxedStrategy<DataType>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use launchpad::arbitrary::{arbitrary_naive_date_time, arbitrary_naive_time};
+        use launchpad::arbitrary::{arbitrary_duration, arbitrary_naive_date_time};
         use proptest::arbitrary::any;
         use proptest::prelude::*;
         use DataType::*;
@@ -1160,7 +1195,10 @@ impl Arbitrary for DataType {
             any::<(i64, i32)>().prop_map(|(i, f)| Real(i, f)),
             any::<String>().prop_map(DataType::from),
             arbitrary_naive_date_time().prop_map(Timestamp),
-            arbitrary_naive_time().prop_map(Time),
+            arbitrary_duration()
+                .prop_map(MysqlTime::new)
+                .prop_map(Arc::new)
+                .prop_map(Time),
         ]
         .boxed()
     }

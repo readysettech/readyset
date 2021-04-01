@@ -82,7 +82,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             _ => internal!(),
         },
         DataType::Timestamp(ts) => rw.write_col(ts).await,
-        DataType::Time(t) => rw.write_col(t).await,
+        DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
     };
     Ok(written?)
 }

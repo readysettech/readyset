@@ -477,6 +477,76 @@ impl ToMysqlValue for NaiveTime {
     }
 }
 
+impl ToMysqlValue for MysqlTime {
+    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
+    }
+
+    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
+        let sign = if self.is_positive() { 0 } else { 1 };
+        match c.coltype {
+            ColumnType::MYSQL_TYPE_TIME => {
+                w.write_u8(0x0cu8)?;
+                w.write_u8(sign)?; // 0: positive, 1: negative
+                w.write_u32::<LittleEndian>((self.hour() / 24) as u32)?;
+                w.write_u8((self.hour() % 24) as u8)?;
+                w.write_u8(self.minutes())?;
+                w.write_u8(self.seconds())?;
+                w.write_u32::<LittleEndian>(self.microseconds())
+            }
+            _ => Err(bad(self, c)),
+        }
+    }
+}
+
+use mysql_common::value::convert::{FromValue, FromValueError};
+
+#[derive(Debug)]
+pub struct ParseIr<T> {
+    value: Value,
+    output: T,
+}
+
+impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
+    fn new(v: Value) -> Result<ParseIr<MysqlTime>, FromValueError> {
+        match v {
+            Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
+                let hours = (days * 24) as u16 + hours as u16;
+                Ok(ParseIr {
+                    output: MysqlTime::from_hmsus(
+                        !is_neg,
+                        hours,
+                        minutes,
+                        seconds,
+                        microseconds as u64,
+                    ),
+                    value: v,
+                })
+            }
+            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&*val_bytes) {
+                Ok(time) => Ok(ParseIr {
+                    output: time,
+                    value: Value::Bytes(val_bytes),
+                }),
+                Err(_) => Err(FromValueError(Value::Bytes(val_bytes))),
+            },
+            v => Err(FromValueError(v)),
+        }
+    }
+
+    fn commit(self) -> MysqlTime {
+        self.output
+    }
+
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl FromValue for MysqlTime {
+    type Intermediate = ParseIr<MysqlTime>;
+}
+
 impl ToMysqlValue for NaiveDateTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let us = self.nanosecond() / 1_000;
@@ -539,7 +609,13 @@ impl ToMysqlValue for NaiveDateTime {
     }
 }
 
+use crate::datatype::MysqlTime;
+
+use myc::value::convert::ConvIr;
+use myc::value::Value;
+use std::prelude::v1::Result::{Err, Ok};
 use std::time::Duration;
+
 impl ToMysqlValue for Duration {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let s = self.as_secs();
@@ -707,6 +783,7 @@ mod tests {
 
     mod roundtrip_text {
         use super::*;
+        use crate::MysqlTime;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr) => {
@@ -763,6 +840,7 @@ mod tests {
 
     mod roundtrip_bin {
         use super::*;
+        use crate::MysqlTime;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr, $ct:expr) => {
@@ -922,7 +1000,7 @@ mod tests {
         rt!(opt_some, Option<u8>, Some(1), ColumnType::MYSQL_TYPE_TINY);
 
         rt!(
-            time,
+            date,
             chrono::NaiveDate,
             chrono::Local::today().naive_local(),
             ColumnType::MYSQL_TYPE_DATE
@@ -934,9 +1012,9 @@ mod tests {
             ColumnType::MYSQL_TYPE_DATETIME
         );
         rt!(
-            dur,
-            time::Duration,
-            time::Duration::from_secs(1893),
+            time,
+            MysqlTime,
+            MysqlTime::from_hmsus(true, 20, 15, 14, 123_456),
             ColumnType::MYSQL_TYPE_TIME
         );
         rt!(

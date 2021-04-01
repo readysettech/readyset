@@ -1,9 +1,11 @@
 use crate::data::DataType;
-use chrono::{NaiveDateTime, NaiveTime};
+use chrono::NaiveDateTime;
+use msql_srv::MysqlTime;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use std::convert::TryFrom;
 use std::fmt;
+use std::sync::Arc;
 
 impl serde::ser::Serialize for DataType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -94,6 +96,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "Real" => Ok(Field::Real),
                     "Text" => Ok(Field::Text),
                     "Timestamp" => Ok(Field::Timestamp),
+                    "Time" => Ok(Field::Time),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -107,6 +110,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"Real" => Ok(Field::Real),
                     b"Text" => Ok(Field::Text),
                     b"Timestamp" => Ok(Field::Timestamp),
+                    b"Time" => Ok(Field::Time),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -216,9 +220,9 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         VariantAccess::newtype_variant::<NaiveDateTime>(variant),
                         DataType::Timestamp,
                     ),
-                    (Field::Time, variant) => {
-                        VariantAccess::newtype_variant::<NaiveTime>(variant).map(DataType::Time)
-                    }
+                    (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
+                        .map(Arc::new)
+                        .map(DataType::Time),
                 }
             }
         }
@@ -232,6 +236,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "Real",
             "Text",
             "Timestamp",
+            "Time",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }

@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
+pub use msql_srv::MysqlTime;
 pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
