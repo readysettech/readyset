@@ -1,7 +1,7 @@
 use clap::value_t_or_exit;
 use futures_util::future::{self, Either};
 use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
@@ -37,6 +37,14 @@ fn main() {
                 .takes_value(true)
                 .help("IP address to advertise to other Noria instances running in the same deployment.
 If not specified, defaults to the value of `address`")
+        )
+        .arg(
+            Arg::with_name("external_port")
+            .long("external-port")
+            .short("p")
+            .takes_value(true)
+            .default_value("6033")
+            .help("Port to advertise to other Noria instances running in the same deployment, if not specified, defaults to 6033")
         )
         .arg(
             Arg::with_name("use_aws_external_address")
@@ -161,6 +169,7 @@ If specified, overrides the value of --external-address"))
                 .map_or(listen_addr.clone(), |addr| addr.parse().unwrap()),
         ))
     };
+    let external_port = value_t_or_exit!(matches, "external_port", u16);
     let zookeeper_addr = matches.value_of("zookeeper").unwrap();
     let memory = value_t_or_exit!(matches, "memory", usize);
     let memory_check_freq = value_t_or_exit!(matches, "memory_check_freq", u64);
@@ -231,7 +240,7 @@ If specified, overrides the value of --external-address"))
                 eprintln!("Error obtaining external IP address: {}", err);
                 process::exit(1)
             });
-            builder.set_external_addr(external_addr);
+            builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
             builder.start(Arc::new(authority)).await
         })
         .unwrap();

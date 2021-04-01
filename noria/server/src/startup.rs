@@ -71,7 +71,7 @@ impl fmt::Debug for Event {
 pub(super) async fn start_instance<A: Authority + 'static>(
     authority: Arc<A>,
     listen_addr: IpAddr,
-    external_addr: IpAddr,
+    external_addr: SocketAddr,
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
@@ -87,7 +87,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let wport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
     let mut waddr = wport.local_addr()?;
     // second, messages from the "real world"
-    let xport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 6033))
+    let xport = tokio::net::TcpListener::bind(external_addr)
         .or_else(|_| tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)))
         .await?;
     let mut xaddr = xport.local_addr()?;
@@ -164,9 +164,9 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         }
     });
 
-    xaddr.set_ip(external_addr);
-    waddr.set_ip(external_addr);
-    caddr.set_ip(external_addr);
+    xaddr.set_ip(external_addr.ip());
+    waddr.set_ip(external_addr.ip());
+    caddr.set_ip(external_addr.ip());
 
     let descriptor = ControllerDescriptor {
         external_addr: xaddr,
@@ -197,7 +197,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             alive.clone(),
             worker_rx,
             listen_addr,
-            external_addr,
+            external_addr.ip(),
             waddr,
             memory_limit,
             memory_check_frequency,
