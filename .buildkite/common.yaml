@@ -30,6 +30,7 @@ steps:
         login: true
 
   - label: ':rust: Check rustfmt'
+    key: check-rustfmt
     commands:
     - "cargo fmt -- --check"
     depends_on:
@@ -62,6 +63,7 @@ steps:
           login: true
 
   - label: ':clippy: Check clippy'
+    key: check-clippy
     commands:
     - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
     - "( echo '--- :rust: Checking msql-srv'; cargo clippy -p msql-srv -- -D warnings)"
@@ -103,6 +105,7 @@ steps:
           login: true
 
   - label: ':rust: Test noria-logictest'
+    key: test-noria-logictest
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria-logictest
@@ -204,6 +207,7 @@ steps:
           login: true
 
   - label: ':rust: Test launchpad'
+    key: test-launchpad
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p launchpad
@@ -247,6 +251,7 @@ steps:
           login: true
 
   - label: ':rust: Test nom-sql'
+    key: test-nom-sql
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p nom-sql
@@ -290,6 +295,7 @@ steps:
           login: true
 
   - label: ':rust: Test unbounded-interval-tree'
+    key: unbounded-interval-tree
     command:
     - 'echo +++ :rust: Running cargo test'
     - cd unbounded-interval-tree
@@ -337,6 +343,7 @@ steps:
           login: true
 
   - label: ':rust: Test noria'
+    key: test-noria
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
@@ -383,6 +390,7 @@ steps:
           login: true
 
   - label: ':rust: Test noria-client'
+    key: test-noria-client
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria-client
@@ -450,6 +458,7 @@ steps:
           login: true
 
   - label: ':rust: Test noria-mysql'
+    key: test-noria-mysql
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria-mysql
@@ -492,6 +501,7 @@ steps:
           login: true
 
   - label: ':rust: Test noria-psql'
+    key: test-noria-psql
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p noria-psql
@@ -510,6 +520,7 @@ steps:
       SCCACHE_BUCKET: readyset-sccache
 
   - label: 'Run logictest'
+    key: logictest
     command:
     - 'echo +++ Running noria-logictest'
     - cargo run --bin noria-logictest -- verify logictests --zookeeper-host zookeeper
@@ -552,6 +563,7 @@ steps:
           login: true
 
   - label: ':rust: Test debezium connector'
+    key: test-debezium-connector
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p debezium_connector
@@ -591,6 +603,7 @@ steps:
           login: true
 
   - label: ':rust: Test msql-srv'
+    key: test-mssql-srv
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p msql-srv
@@ -630,6 +643,7 @@ steps:
           login: true
 
   - label: ':rust: Test psql-srv'
+    key: test-psql-srv
     command:
     - 'echo +++ :rust: Running cargo test'
     - cargo test -v -p psql-srv

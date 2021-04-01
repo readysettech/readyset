@@ -1,5 +1,6 @@
 steps:
   - label: ':git: Lint commits'
+    key: lint-commits
     commands:
     - ./scripts/commit_lint.sh
 
@@ -149,3 +150,43 @@ steps:
             - label: ':terraform: Check terraform best-practices'
               include:
                 - "ops/**"
+
+  - block: ":packer: Build Packer images?"
+    key: build-packer-images
+    depends_on:
+      - lint-commits
+      - build-image
+      - check-rustfmt
+      - check-clippy
+      - build-noria-logictest
+      - test-noria-logictest
+      - build-query-generator
+      - build-taster
+      - test-taster
+      - build-launchpad
+      - test-launchpad
+      - build-nom-sql
+      - test-nom-sql
+      - build-unbounded-interval-tree
+      - unbounded-interval-tree
+      - build-noria
+      - test-noria
+      - build-noria-client
+      - test-noria-client
+      - build-noria-client-adapter
+      - build-noria-mysql
+      - test-noria-mysql
+      - build-noria-psql
+      - test-noria-psql
+      - logictest
+      - build-debezium-connector
+      - test-debezium-connector
+      - build-msql-srv
+      - test-mssql-srv
+      - build-psql-srv
+      - test-psql-srv
+
+  - label: ':pipeline: Build Packer pipeline'
+    command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
+    depends_on:
+      - build-packer-images
