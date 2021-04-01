@@ -4,9 +4,12 @@ use thiserror::Error;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
+use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
 use noria::{DataType, ValueCoerceError};
 use std::fmt::Formatter;
+use std::ops::Sub;
+use std::sync::Arc;
 
 #[derive(Debug, Error)]
 pub enum EvalError {
@@ -36,7 +39,6 @@ pub struct BuiltinFunctionError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuiltinFunction {
-    // Timediff,
     /// convert_tz(expr, expr, expr)
     ConvertTZ(
         Box<ProjectExpression>,
@@ -49,6 +51,8 @@ pub enum BuiltinFunction {
     IfNull(Box<ProjectExpression>, Box<ProjectExpression>),
     /// month(expr)
     Month(Box<ProjectExpression>),
+    /// timediff(expr, expr)
+    Timediff(Box<ProjectExpression>, Box<ProjectExpression>),
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +94,17 @@ impl BuiltinFunction {
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
+            "month" => {
+                let arity_error = || BuiltinFunctionConvertError::ArityError("month".to_owned());
+                Ok(Self::Month(Box::new(args.next().ok_or_else(arity_error)?)))
+            }
+            "timediff" => {
+                let arity_error = || BuiltinFunctionConvertError::ArityError("timediff".to_owned());
+                Ok(Self::Timediff(
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                ))
+            }
             _ => Err(BuiltinFunctionConvertError::NoSuchFunction(name.to_owned())),
         }
     }
@@ -111,6 +126,9 @@ impl fmt::Display for BuiltinFunction {
             }
             Month(arg) => {
                 write!(f, "month({})", arg)
+            }
+            Timediff(arg1, arg2) => {
+                write!(f, "timediff({}, {})", arg1, arg2)
             }
         }
     }
@@ -226,6 +244,42 @@ impl ProjectExpression {
                         month(&(param_cast.as_ref().into())) as u32,
                     )))
                 }
+                BuiltinFunction::Timediff(arg1, arg2) => {
+                    let param1 = arg1.eval(record)?;
+                    let param2 = arg2.eval(record)?;
+                    let null_result = Ok(Cow::Owned(DataType::None));
+                    macro_rules! get_time_or_default {
+                        ($datatype:expr) => {
+                            $datatype
+                                .coerce_to(&SqlType::Timestamp)
+                                .or($datatype.coerce_to(&SqlType::Time))
+                                .unwrap_or(Cow::Owned(DataType::None));
+                        };
+                    }
+                    let time_param1 = get_time_or_default!(param1);
+                    let time_param2 = get_time_or_default!(param2);
+                    if time_param1.is_none()
+                        || time_param1
+                            .sql_type()
+                            .and_then(|st| time_param2.sql_type().map(|st2| (st, st2)))
+                            .filter(|(st1, st2)| st1.eq(st2))
+                            .is_none()
+                    {
+                        return null_result;
+                    }
+                    let time = if time_param1.is_datetime() {
+                        timediff_datetimes(
+                            &(time_param1.as_ref().into()),
+                            &(time_param2.as_ref().into()),
+                        )
+                    } else {
+                        timediff_times(
+                            &(time_param1.as_ref().into()),
+                            &(time_param2.as_ref().into()),
+                        )
+                    };
+                    Ok(Cow::Owned(DataType::Time(Arc::new(time))))
+                }
             },
         }
     }
@@ -278,10 +332,20 @@ fn month(date: &NaiveDate) -> u8 {
     date.month() as u8
 }
 
+fn timediff_datetimes(time1: &NaiveDateTime, time2: &NaiveDateTime) -> MysqlTime {
+    let duration = time1.sub(*time2);
+    MysqlTime::new(duration)
+}
+
+fn timediff_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
+    time1.sub(*time2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+    use std::sync::Arc;
     use test_strategy::proptest;
     use ProjectExpression::*;
 
@@ -458,6 +522,116 @@ mod tests {
         assert_eq!(
             expr.eval(&["invalid date".into()]).unwrap(),
             Cow::Owned(DataType::None)
+        );
+    }
+
+    #[test]
+    fn eval_call_timediff() {
+        let expr = Call(BuiltinFunction::Timediff(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let param1 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 12),
+            NaiveTime::from_hms(5, 13, 33),
+        );
+        let param2 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 14),
+            NaiveTime::from_hms(4, 13, 33),
+        );
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                false, 47, 0, 0, 0
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                false, 47, 0, 0, 0
+            ))))
+        );
+        let param1 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 12),
+            NaiveTime::from_hms(5, 13, 33),
+        );
+        let param2 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 10),
+            NaiveTime::from_hms(4, 13, 33),
+        );
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 49, 0, 0, 0
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 49, 0, 0, 0
+            ))))
+        );
+        let param2 = NaiveTime::from_hms(4, 13, 33);
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::None)
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::None)
+        );
+        let param1 = NaiveTime::from_hms(5, 13, 33);
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 0
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 0
+            ))))
+        );
+        let param1 = "not a date nor time";
+        let param2 = "01:00:00.4";
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                false, 1, 0, 0, 400_000
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+
+        let param2 = "10000.4";
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                false, 1, 0, 0, 400_000
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+
+        let param2 = 3.57;
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+                (-param2 * 1_000_000_f64) as i64
+            ))))
         );
     }
 
