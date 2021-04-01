@@ -5,6 +5,7 @@ use noria::DataType;
 
 use arccstr::ArcCStr;
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 pub(crate) trait ToDataType {
     fn to_datatype(self) -> DataType;
@@ -56,7 +57,7 @@ impl<'a> ToDataType for Value<'a> {
             ValueInner::UInt(i) => (i as i32).into(),
             ValueInner::Double(f) => f.into(),
             ValueInner::Datetime(_) => DataType::Timestamp(self.into()),
-            ValueInner::Time(_) => DataType::Time(self.into()),
+            ValueInner::Time(_) => DataType::Time(Arc::new(self.into())),
             _ => unimplemented!(),
         }
     }

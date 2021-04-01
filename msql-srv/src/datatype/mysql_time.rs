@@ -110,6 +110,56 @@ impl MysqlTime {
         MysqlTime::new(Duration::microseconds(microseconds))
     }
 
+    /// Attempts to parse a byte array into a new [`MysqlTime`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use msql_srv::MysqlTime;
+    ///
+    /// macro_rules! assert_time {
+    ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
+    ///         assert_eq!($mysql_time.is_positive(), $positive);
+    ///         assert_eq!($mysql_time.hour(), $h);
+    ///         assert_eq!($mysql_time.minutes(), $m);
+    ///         assert_eq!($mysql_time.seconds(), $s);
+    ///         assert_eq!($mysql_time.microseconds(), $us);
+    ///     };
+    /// }
+    ///
+    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("not-timestamp".as_bytes()).unwrap(); // 00:00:00
+    /// assert_time!(mysql_time, true, 0, 0, 0, 0);
+    ///
+    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("1112".as_bytes()).unwrap(); // 00:11:12
+    /// assert_time!(mysql_time, true, 0, 11, 12, 0);
+    ///
+    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("11:12".as_bytes()).unwrap(); // 00:11:12
+    /// assert_time!(mysql_time, true, 11, 12, 0, 0);
+    ///
+    /// assert!(MysqlTime::from_bytes("60".as_bytes()).is_err());
+    /// ```
+    pub fn from_bytes(bytes: &[u8]) -> Result<MysqlTime, String> {
+        let (positive, hour, minutes, seconds, microseconds) = parse::h_m_s_us(bytes)
+            .map(|res| res.1)
+            .unwrap_or((true, 0, 0, 0, 0));
+        if minutes > 59 {
+            return Err("Minutes can't be greater than 59".to_owned());
+        }
+        if seconds > 59 {
+            return Err("Seconds can't be greater than 59".to_owned());
+        }
+        if microseconds > 999_999 {
+            return Err("Microseconds can't be greater than 999999".to_owned());
+        }
+        Ok(MysqlTime::from_hmsus(
+            positive,
+            hour,
+            minutes,
+            seconds,
+            microseconds as u64,
+        ))
+    }
+
     /// Returns the maximum value that a [`MysqlTime`] can represent: `838:59:59`.
     ///
     /// # Example
@@ -388,7 +438,7 @@ mod parse {
 impl FromStr for MysqlTime {
     type Err = String;
 
-    /// Parses a [`&str`] into a [`MysqlTime`], according to the parsing rules
+    /// Attempts to parse a [`&str`] into a [`MysqlTime`], according to the parsing rules
     /// defined by [MySQL's TIME string](https://dev.mysql.com/doc/refman/8.0/en/time.html)
     /// interpretation.
     ///
@@ -419,25 +469,7 @@ impl FromStr for MysqlTime {
     /// assert!("60".parse::<MysqlTime>().is_err());
     /// ```
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let (positive, hour, minutes, seconds, microseconds) = parse::h_m_s_us(string.as_bytes())
-            .map(|res| res.1)
-            .unwrap_or((true, 0, 0, 0, 0));
-        if minutes > 59 {
-            return Err("Minutes can't be greater than 59".to_owned());
-        }
-        if seconds > 59 {
-            return Err("Seconds can't be greater than 59".to_owned());
-        }
-        if microseconds > 999_999 {
-            return Err("Microseconds can't be greater than 999999".to_owned());
-        }
-        Ok(MysqlTime::from_hmsus(
-            positive,
-            hour,
-            minutes,
-            seconds,
-            microseconds as u64,
-        ))
+        MysqlTime::from_bytes(string.as_bytes())
     }
 }
 
