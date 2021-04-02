@@ -19,7 +19,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::{many0, many1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{do_parse, named, opt, preceded, separated_list, tag, tag_no_case, terminated, IResult};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -123,7 +123,13 @@ pub fn index_col_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
 
 // Parse rule for an individual key specification.
 pub fn key_specification(i: &[u8]) -> IResult<&[u8], TableKey> {
-    alt((full_text_key, primary_key, unique, key_or_index))(i)
+    alt((
+        full_text_key,
+        primary_key,
+        unique,
+        key_or_index,
+        foreign_key,
+    ))(i)
 }
 
 fn full_text_key(i: &[u8]) -> IResult<&[u8], TableKey> {
@@ -167,6 +173,44 @@ fn primary_key(i: &[u8]) -> IResult<&[u8], TableKey> {
 
     Ok((remaining_input, TableKey::PrimaryKey(columns)))
 }
+
+named!(
+    foreign_key<TableKey>,
+    do_parse!(
+        tag_no_case!("constraint")
+            >> name: opt!(preceded!(multispace1, sql_identifier))
+            >> multispace1
+            >> tag_no_case!("foreign")
+            >> multispace1
+            >> tag_no_case!("key")
+            >> multispace0
+            >> tag!("(")
+            >> columns:
+                separated_list!(
+                    terminated!(tag!(","), multispace0),
+                    column_identifier_no_alias
+                )
+            >> tag!(")")
+            >> multispace1
+            >> tag_no_case!("references")
+            >> multispace1
+            >> target_table: schema_table_reference
+            >> multispace0
+            >> tag!("(")
+            >> target_columns:
+                separated_list!(
+                    terminated!(tag!(","), multispace0),
+                    column_identifier_no_alias
+                )
+            >> tag!(")")
+            >> (TableKey::ForeignKey {
+                name: name.map(|n| String::from_utf8(n.to_vec()).unwrap()),
+                columns,
+                target_table,
+                target_columns
+            })
+    )
+);
 
 fn unique(i: &[u8]) -> IResult<&[u8], TableKey> {
     // TODO: add branching to correctly parse whitespace after `unique`
@@ -285,6 +329,17 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
                         TableKey::FulltextKey(name, attach_names(columns))
                     }
                     TableKey::Key(name, columns) => TableKey::Key(name, attach_names(columns)),
+                    TableKey::ForeignKey {
+                        name,
+                        columns: column,
+                        target_table,
+                        target_columns: target_column,
+                    } => TableKey::ForeignKey {
+                        name,
+                        columns: attach_names(column),
+                        target_table,
+                        target_columns: target_column,
+                    },
                 }
             })
             .collect()
@@ -800,5 +855,43 @@ mod tests {
                 ]),
             }
         );
+    }
+
+    #[test]
+    fn foreign_key() {
+        let qstring = b"CREATE TABLE users (
+          id int,
+          group_id int,
+          primary key (id),
+          constraint users_group foreign key (group_id) references groups (id),
+        )";
+
+        let (rem, res) = creation(qstring).unwrap();
+        assert!(rem.is_empty());
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("users".into()),
+            alias: None,
+            function: None,
+        };
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "users".into(),
+                fields: vec![
+                    ColumnSpecification::new(col("id"), SqlType::Int(32),),
+                    ColumnSpecification::new(col("group_id"), SqlType::Int(32),),
+                ],
+                keys: Some(vec![
+                    TableKey::PrimaryKey(vec![col("id")]),
+                    TableKey::ForeignKey {
+                        name: Some("users_group".into()),
+                        columns: vec![col("group_id")],
+                        target_table: "groups".into(),
+                        target_columns: vec!["id".into()],
+                    }
+                ])
+            }
+        )
     }
 }
