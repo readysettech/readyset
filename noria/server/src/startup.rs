@@ -198,6 +198,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
             worker_rx,
             listen_addr,
             external_addr.ip(),
+            external_addr,
             waddr,
             memory_limit,
             memory_check_frequency,

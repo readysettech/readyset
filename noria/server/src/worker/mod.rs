@@ -50,6 +50,7 @@ pub(super) async fn main(
     mut worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
     listen_addr: IpAddr,
     external_addr: IpAddr,
+    external_controller_addr: SocketAddr,
     waddr: SocketAddr,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
@@ -150,6 +151,7 @@ pub(super) async fn main(
                     coord.clone(),
                     listen_addr,
                     external_addr,
+                    external_controller_addr,
                     rep_rx,
                 )
                 .await;
@@ -191,6 +193,7 @@ async fn listen_df<'a>(
     coord: Arc<ChannelCoordinator>,
     on: IpAddr,
     external_addr: IpAddr,
+    external_controller_addr: SocketAddr,
     mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
 ) -> Result<(), anyhow::Error> {
     // first, try to connect to controller
@@ -262,6 +265,7 @@ async fn listen_df<'a>(
         let _ = ctx.send(CoordinationPayload::Register {
             addr: waddr,
             read_listen_addr: raddr,
+            controller_addr: external_controller_addr,
             log_files,
         });
 
