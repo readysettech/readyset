@@ -728,6 +728,12 @@ impl From<NaiveTime> for DataType {
     }
 }
 
+impl From<MysqlTime> for DataType {
+    fn from(t: MysqlTime) -> Self {
+        DataType::Time(Arc::new(t))
+    }
+}
+
 impl From<NaiveDate> for DataType {
     fn from(dt: NaiveDate) -> Self {
         DataType::Timestamp(dt.and_hms(0, 0, 0))

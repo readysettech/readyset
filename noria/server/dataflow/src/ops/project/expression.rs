@@ -8,7 +8,7 @@ use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
 use noria::{DataType, ValueCoerceError};
 use std::fmt::Formatter;
-use std::ops::Sub;
+use std::ops::{Add, Sub};
 use std::sync::Arc;
 
 #[derive(Debug, Error)]
@@ -53,6 +53,8 @@ pub enum BuiltinFunction {
     Month(Box<ProjectExpression>),
     /// timediff(expr, expr)
     Timediff(Box<ProjectExpression>, Box<ProjectExpression>),
+    /// addtime(expr, expr)
+    Addtime(Box<ProjectExpression>, Box<ProjectExpression>),
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +107,13 @@ impl BuiltinFunction {
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
+            "addtime" => {
+                let arity_error = || BuiltinFunctionConvertError::ArityError("addtime".to_owned());
+                Ok(Self::Timediff(
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                ))
+            }
             _ => Err(BuiltinFunctionConvertError::NoSuchFunction(name.to_owned())),
         }
     }
@@ -129,6 +138,9 @@ impl fmt::Display for BuiltinFunction {
             }
             Timediff(arg1, arg2) => {
                 write!(f, "timediff({}, {})", arg1, arg2)
+            }
+            Addtime(arg1, arg2) => {
+                write!(f, "addtime({}, {})", arg1, arg2)
             }
         }
     }
@@ -176,6 +188,15 @@ macro_rules! try_cast_or_none {
             Ok(v) => v,
             Err(_) => return Ok(Cow::Owned(DataType::None)),
         };
+    };
+}
+
+macro_rules! get_time_or_default {
+    ($datatype:expr) => {
+        $datatype
+            .coerce_to(&SqlType::Timestamp)
+            .or($datatype.coerce_to(&SqlType::Time))
+            .unwrap_or(Cow::Owned(DataType::None));
     };
 }
 
@@ -248,14 +269,6 @@ impl ProjectExpression {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let null_result = Ok(Cow::Owned(DataType::None));
-                    macro_rules! get_time_or_default {
-                        ($datatype:expr) => {
-                            $datatype
-                                .coerce_to(&SqlType::Timestamp)
-                                .or($datatype.coerce_to(&SqlType::Time))
-                                .unwrap_or(Cow::Owned(DataType::None));
-                        };
-                    }
                     let time_param1 = get_time_or_default!(param1);
                     let time_param2 = get_time_or_default!(param2);
                     if time_param1.is_none()
@@ -279,6 +292,26 @@ impl ProjectExpression {
                         )
                     };
                     Ok(Cow::Owned(DataType::Time(Arc::new(time))))
+                }
+                BuiltinFunction::Addtime(arg1, arg2) => {
+                    let param1 = arg1.eval(record)?;
+                    let param2 = arg2.eval(record)?;
+                    let time_param2 = get_time_or_default!(param2);
+                    if time_param2.is_datetime() {
+                        return Ok(Cow::Owned(DataType::None));
+                    }
+                    let time_param1 = get_time_or_default!(param1);
+                    if time_param1.is_datetime() {
+                        Ok(Cow::Owned(DataType::Timestamp(addtime_datetime(
+                            &(time_param1.as_ref().into()),
+                            &(time_param2.as_ref().into()),
+                        ))))
+                    } else {
+                        Ok(Cow::Owned(DataType::Time(Arc::new(addtime_times(
+                            &(time_param1.as_ref().into()),
+                            &(time_param2.as_ref().into()),
+                        )))))
+                    }
                 }
             },
         }
@@ -339,6 +372,14 @@ fn timediff_datetimes(time1: &NaiveDateTime, time2: &NaiveDateTime) -> MysqlTime
 
 fn timediff_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
     time1.sub(*time2)
+}
+
+fn addtime_datetime(time1: &NaiveDateTime, time2: &MysqlTime) -> NaiveDateTime {
+    time2.add(*time1)
+}
+
+fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
+    time1.add(*time2)
 }
 
 #[cfg(test)]
@@ -631,6 +672,113 @@ mod tests {
             expr.eval(&[param1.into(), param2.into()]).unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (-param2 * 1_000_000_f64) as i64
+            ))))
+        );
+    }
+
+    #[test]
+    fn eval_call_addtime() {
+        let expr = Call(BuiltinFunction::Addtime(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let param1 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 12),
+            NaiveTime::from_hms(5, 13, 33),
+        );
+        let param2 = NaiveDateTime::new(
+            NaiveDate::from_ymd(2003, 10, 14),
+            NaiveTime::from_hms(4, 13, 33),
+        );
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::None)
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::None)
+        );
+        let param2 = NaiveTime::from_hms(4, 13, 33);
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
+                NaiveDate::from_ymd(2003, 10, 12),
+                NaiveTime::from_hms(9, 27, 06),
+            )))
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
+                NaiveDate::from_ymd(2003, 10, 12),
+                NaiveTime::from_hms(9, 27, 6),
+            )))
+        );
+        let param2 = MysqlTime::from_hmsus(false, 3, 11, 35, 0);
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
+                NaiveDate::from_ymd(2003, 10, 12),
+                NaiveTime::from_hms(2, 1, 58),
+            )))
+        );
+        assert_eq!(
+            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
+                NaiveDate::from_ymd(2003, 10, 12),
+                NaiveTime::from_hms(2, 1, 58),
+            )))
+        );
+        let param1 = MysqlTime::from_hmsus(true, 10, 12, 44, 123_000);
+        assert_eq!(
+            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 7, 1, 9, 123_000
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param2.to_string().into(), param1.to_string().into()])
+                .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 7, 1, 9, 123_000
+            ))))
+        );
+        let param1 = "not a date nor time";
+        let param2 = "01:00:00.4";
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+
+        let param2 = "10000.4";
+        assert_eq!(
+            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+        assert_eq!(
+            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                true, 1, 0, 0, 400_000
+            ))))
+        );
+
+        let param2 = 3.57;
+        assert_eq!(
+            dbg!(expr.eval(&[param1.into(), param2.into()])).unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+                (param2 * 1_000_000_f64) as i64
             ))))
         );
     }
