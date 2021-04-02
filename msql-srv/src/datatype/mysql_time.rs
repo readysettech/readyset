@@ -1,4 +1,4 @@
-use chrono::{Duration, NaiveTime, Timelike};
+use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
 use serde::de;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -7,7 +7,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
-use std::ops::Sub;
+use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 const MICROSECS_IN_SECOND: i64 = 1_000_000;
@@ -518,6 +518,22 @@ impl Sub for MysqlTime {
     }
 }
 
+impl Add for MysqlTime {
+    type Output = MysqlTime;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        MysqlTime::new(self.duration.add(rhs.duration))
+    }
+}
+
+impl Add<NaiveDateTime> for MysqlTime {
+    type Output = NaiveDateTime;
+
+    fn add(self, rhs: NaiveDateTime) -> Self::Output {
+        rhs.add(self.duration)
+    }
+}
+
 impl Serialize for MysqlTime {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -681,7 +697,7 @@ impl<'de> serde::Deserialize<'de> for MysqlTime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use launchpad::arbitrary::arbitrary_duration;
+    use launchpad::arbitrary::{arbitrary_duration, arbitrary_naive_date_time};
     use serde_test::{assert_tokens, Token};
     use std::collections::hash_map::DefaultHasher;
     use test_strategy::proptest;
@@ -813,6 +829,38 @@ mod tests {
                 Token::StructEnd,
             ],
         );
+    }
+
+    #[proptest]
+    fn sub(
+        #[strategy(arbitrary_duration())] duration1: Duration,
+        #[strategy(arbitrary_duration())] duration2: Duration,
+    ) {
+        let mysql_time1 = MysqlTime::new(duration1);
+        let mysql_time2 = MysqlTime::new(duration2);
+        let total_secs = (duration1 - duration2).num_seconds();
+        assert_valid!(mysql_time1 - mysql_time2, total_secs);
+    }
+
+    #[proptest]
+    fn add(
+        #[strategy(arbitrary_duration())] duration1: Duration,
+        #[strategy(arbitrary_duration())] duration2: Duration,
+    ) {
+        let mysql_time1 = MysqlTime::new(duration1);
+        let mysql_time2 = MysqlTime::new(duration2);
+        let total_secs = (duration1 + duration2).num_seconds();
+        assert_valid!(mysql_time1 + mysql_time2, total_secs);
+    }
+
+    #[proptest]
+    fn add_naive_date_time(
+        #[strategy(arbitrary_duration())] duration: Duration,
+        #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
+    ) {
+        let mysql_time = MysqlTime::new(duration);
+        let new_datetime = ndt.add(duration);
+        assert_eq!(mysql_time + ndt, new_datetime);
     }
 
     mod from_str {
