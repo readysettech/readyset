@@ -44,7 +44,7 @@ If not specified, defaults to the value of `address`")
             .short("p")
             .takes_value(true)
             .default_value("6033")
-            .help("Port to advertise to other Noria instances running in the same deployment, if not specified, defaults to 6033")
+            .help("Port to advertise to other Noria instances running in the same deployment.")
         )
         .arg(
             Arg::with_name("use_aws_external_address")
