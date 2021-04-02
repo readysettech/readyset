@@ -52,6 +52,9 @@ pub(super) struct ControllerInner {
 
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
+    /// Map from wokrer address to the address the worker is listening on for
+    /// external http requests.
+    external_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
 
     /// State between migrations
@@ -229,6 +232,9 @@ impl ControllerInner {
             (Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
             (Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
             (Method::GET, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Method::GET, "/external_addrs") => {
+                Ok(Ok(json::to_string(&self.external_addrs).unwrap()))
+            }
             (Method::GET, "/nodes") => {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this
@@ -303,13 +309,14 @@ impl ControllerInner {
     }
 
     pub(super) fn handle_register(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
-        let (remote, read_listen_addr) = if let CoordinationPayload::Register {
+        let (remote, read_listen_addr, controller_addr) = if let CoordinationPayload::Register {
             addr: remote,
             read_listen_addr,
+            controller_addr,
             ..
         } = msg.payload
         {
-            (remote, read_listen_addr)
+            (remote, read_listen_addr, controller_addr)
         } else {
             unreachable!();
         };
@@ -323,6 +330,7 @@ impl ControllerInner {
         let ws = Worker::new(sender);
         self.workers.insert(msg.source, ws);
         self.read_addrs.insert(msg.source, read_listen_addr);
+        self.external_addrs.insert(msg.source, controller_addr);
 
         if self.workers.len() >= self.quorum {
             if let Some((recipes, mut recipe_version)) = self.pending_recovery.take() {
@@ -484,6 +492,7 @@ impl ControllerInner {
             remap: HashMap::default(),
 
             read_addrs: HashMap::default(),
+            external_addrs: HashMap::default(),
             workers: HashMap::default(),
 
             pending_recovery,

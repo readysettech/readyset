@@ -24,6 +24,9 @@ pub enum CoordinationPayload {
         addr: SocketAddr,
         /// Address the worker will be listening on to serve reads.
         read_listen_addr: SocketAddr,
+        /// Address the controller associated with the worker listens
+        /// to external requests at.
+        controller_addr: SocketAddr,
         /// Which log files are stored locally on the worker.
         log_files: Vec<String>,
     },
