@@ -1,6 +1,7 @@
 use std::str;
 use std::str::FromStr;
 
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
@@ -276,12 +277,18 @@ pub enum TableKey {
     UniqueKey(Option<String>, Vec<Column>),
     FulltextKey(Option<String>, Vec<Column>),
     Key(String, Vec<Column>),
+    ForeignKey {
+        name: Option<String>,
+        columns: Vec<Column>,
+        target_table: Table,
+        target_columns: Vec<Column>,
+    },
 }
 
 impl fmt::Display for TableKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            TableKey::PrimaryKey(ref columns) => {
+        match self {
+            TableKey::PrimaryKey(columns) => {
                 write!(f, "PRIMARY KEY ")?;
                 write!(
                     f,
@@ -293,7 +300,7 @@ impl fmt::Display for TableKey {
                         .join(", ")
                 )
             }
-            TableKey::UniqueKey(ref name, ref columns) => {
+            TableKey::UniqueKey(name, columns) => {
                 write!(f, "UNIQUE KEY ")?;
                 if let Some(ref name) = *name {
                     write!(f, "{} ", escape_if_keyword(name))?;
@@ -308,7 +315,7 @@ impl fmt::Display for TableKey {
                         .join(", ")
                 )
             }
-            TableKey::FulltextKey(ref name, ref columns) => {
+            TableKey::FulltextKey(name, columns) => {
                 write!(f, "FULLTEXT KEY ")?;
                 if let Some(ref name) = *name {
                     write!(f, "{} ", escape_if_keyword(name))?;
@@ -323,7 +330,7 @@ impl fmt::Display for TableKey {
                         .join(", ")
                 )
             }
-            TableKey::Key(ref name, ref columns) => {
+            TableKey::Key(name, columns) => {
                 write!(f, "KEY {} ", escape_if_keyword(name))?;
                 write!(
                     f,
@@ -333,6 +340,24 @@ impl fmt::Display for TableKey {
                         .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
+                )
+            }
+            TableKey::ForeignKey {
+                name,
+                columns: column,
+                target_table,
+                target_columns: target_column,
+            } => {
+                write!(
+                    f,
+                    "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
+                    name.clone().unwrap_or_else(|| "".to_owned()),
+                    column.iter().map(|c| escape_if_keyword(&c.name)).join(", "),
+                    target_table,
+                    target_column
+                        .iter()
+                        .map(|c| escape_if_keyword(&c.name))
+                        .join(", "),
                 )
             }
         }
