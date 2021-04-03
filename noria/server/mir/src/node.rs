@@ -190,25 +190,35 @@ impl MirNode {
     /// Add a new column to the set of emitted columns for this node, and return the resulting index
     /// of that column
     pub fn add_column(&mut self, c: Column) -> usize {
-        let pos = match &self.inner {
-            MirNodeType::Aggregation { .. } | MirNodeType::FilterAggregation { .. } => {
-                // the aggregation column must always be the last column
-                let pos = self.columns.len() - 1;
-                self.columns.insert(pos, c.clone());
-                pos
+        fn column_pos(node: &MirNode) -> Option<usize> {
+            match &node.inner {
+                MirNodeType::Aggregation { .. } | MirNodeType::FilterAggregation { .. } => {
+                    // the aggregation column must always be the last column
+                    Some(node.columns.len() - 1)
+                }
+                MirNodeType::Project { emit, .. } => {
+                    // New projected columns go before all literals and expressions
+                    Some(emit.len())
+                }
+                MirNodeType::Filter { .. } => {
+                    // Filters follow the column positioning rules of their parents
+                    // unwrap: filters must have a parent
+                    column_pos(&node.ancestors().first().unwrap().borrow())
+                }
+                _ => None,
             }
-            MirNodeType::Project { emit, .. } => {
-                // New projected columns go before all literals and expressions
-                let pos = emit.len();
-                self.columns.insert(pos, c.clone());
-                pos
-            }
-            _ => {
-                self.columns.push(c.clone());
-                self.columns.len() - 1
-            }
+        }
+
+        let pos = if let Some(pos) = column_pos(self) {
+            self.columns.insert(pos, c.clone());
+            pos
+        } else {
+            self.columns.push(c.clone());
+            self.columns.len()
         };
+
         self.inner.add_column(c);
+
         pos
     }
 
