@@ -30,7 +30,7 @@ pub(super) fn make_universe_naming_consistent(
     nodes_to_check.push(leaf_node.clone());
 
     // get the node that is the base table of the universe
-    let mut base_node: MirNodeRef = leaf_node.clone();
+    let mut base_node: MirNodeRef = leaf_node;
     while !nodes_to_check.is_empty() {
         let node_to_check = nodes_to_check.pop().unwrap();
         if node_to_check.borrow().name == base_name {
@@ -43,7 +43,7 @@ pub(super) fn make_universe_naming_consistent(
     }
 
     let mut nodes_to_rewrite: Vec<MirNodeRef> = Vec::new();
-    nodes_to_rewrite.push(base_node.clone());
+    nodes_to_rewrite.push(base_node);
 
     while !nodes_to_rewrite.is_empty() {
         let node_to_rewrite = nodes_to_rewrite.pop().unwrap();
@@ -80,8 +80,7 @@ pub(super) fn pull_required_base_columns(
         }
     }
 
-    while !queue.is_empty() {
-        let mn = queue.pop().unwrap();
+    while let Some(mn) = queue.pop() {
         // a node needs all of the columns it projects into its output
         // however, it may also need *additional* columns to perform its functionality; consider,
         // e.g., a filter that filters on a column that it doesn't project
@@ -173,6 +172,143 @@ pub(super) fn push_all_base_columns(q: &mut MirQuery) {
                 }
             }
             queue.push(child.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod pull_required_base_columns {
+        use dataflow::ops::filter::{FilterCondition, Value};
+        use dataflow::ops::grouped::aggregate::Aggregation;
+        use nom_sql::{
+            BinaryOperator, ColumnSpecification, Expression, FunctionArgument, FunctionExpression,
+            SqlType,
+        };
+
+        use crate::node::{MirNode, MirNodeType};
+
+        use super::*;
+
+        #[test]
+        fn changing_index() {
+            let base = MirNode::new(
+                "base",
+                0,
+                vec!["a".into(), "b".into(), "c".into()],
+                MirNodeType::Base {
+                    column_specs: vec![
+                        (
+                            ColumnSpecification {
+                                column: nom_sql::Column::from("a"),
+                                sql_type: SqlType::Int(0),
+                                constraints: vec![],
+                                comment: None,
+                            },
+                            None,
+                        ),
+                        (
+                            ColumnSpecification {
+                                column: nom_sql::Column::from("b"),
+                                sql_type: SqlType::Int(0),
+                                constraints: vec![],
+                                comment: None,
+                            },
+                            None,
+                        ),
+                        (
+                            ColumnSpecification {
+                                column: nom_sql::Column::from("c"),
+                                sql_type: SqlType::Int(0),
+                                constraints: vec![],
+                                comment: None,
+                            },
+                            None,
+                        ),
+                    ],
+                    keys: vec!["a".into()],
+                    adapted_over: None,
+                },
+                vec![],
+                vec![],
+            );
+
+            // SUM(b)
+            let grp = MirNode::new(
+                "grp",
+                0,
+                vec!["agg".into()],
+                MirNodeType::Aggregation {
+                    on: "b".into(),
+                    group_by: vec![],
+                    kind: Aggregation::SUM,
+                },
+                vec![base.clone()],
+                vec![],
+            );
+
+            // σ[a = 1]
+            let fil = MirNode::new(
+                "fil",
+                0,
+                vec!["a".into(), "agg".into()],
+                MirNodeType::Filter {
+                    conditions: vec![(
+                        1,
+                        FilterCondition::Comparison(
+                            BinaryOperator::Equal,
+                            Value::Constant(1.into()),
+                        ),
+                    )],
+                },
+                vec![grp.clone()],
+                vec![],
+            );
+
+            // a, agg, IFNULL(c, 0) as c0
+            let prj = MirNode::new(
+                "prj",
+                0,
+                vec!["a".into(), "agg".into(), "c0".into()],
+                MirNodeType::Project {
+                    emit: vec!["a".into(), "agg".into()],
+                    expressions: vec![(
+                        "c0".to_owned(),
+                        Expression::Call(FunctionExpression::Generic(
+                            "ifnull".to_owned(),
+                            vec![
+                                FunctionArgument::Column("c".into()),
+                                FunctionArgument::Literal(0.into()),
+                            ]
+                            .into(),
+                        )),
+                    )],
+                    literals: vec![],
+                },
+                vec![fil.clone()],
+                vec![],
+            );
+
+            let mut query = MirQuery {
+                name: "changing_index".to_owned(),
+                roots: vec![base],
+                leaf: prj,
+            };
+
+            pull_required_base_columns(&mut query, None, false);
+
+            assert_eq!(
+                grp.borrow().columns(),
+                &[Column::from("c"), Column::from("a"), Column::from("agg")]
+            );
+
+            // The filter has to add the column in the same place as the aggregate
+            assert_eq!(
+                fil.borrow().columns(),
+                &[Column::from("c"), Column::from("a"), Column::from("agg")]
+            );
         }
     }
 }
