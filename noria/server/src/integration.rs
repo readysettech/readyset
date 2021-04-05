@@ -1,5 +1,6 @@
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
+use crate::metrics::NoriaMetricsRecorder;
 use crate::{Builder, Handle};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -13,8 +14,12 @@ use itertools::Itertools;
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, ViewQuery,
-    ViewQueryFilter, ViewQueryOperator,
+    consistency::Timestamp,
+    internal::LocalNodeIndex,
+    metrics::client::MetricsClient,
+    metrics::recorded,
+    metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
+    DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator,
 };
 
 use crate::internal::DomainIndex;
@@ -4601,4 +4606,51 @@ async fn test_reader_replication() {
             assert!(domain_nodes.contains(node))
         }
     }
+}
+
+fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
+    let dumped_metric: &DumpedMetric = &metrics_dump
+        .metrics
+        .get(recorded::SERVER_EXTERNAL_REQUESTS)
+        .unwrap()[0];
+
+    if let DumpedMetricValue::Counter(v) = dumped_metric.value {
+        v
+    } else {
+        panic!("External requests count is not counter");
+    }
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn test_metrics_client() {
+    unsafe {
+        NoriaMetricsRecorder::install(1024).unwrap();
+    }
+
+    // Start a local instance of noria and connect the metrics client to it.
+    // We assign it a different port than the rest of the tests to prevent
+    // other tests impacting the metrics collected.
+    let mut builder = Builder::default();
+    builder.set_external_addr("127.0.0.1:6034".parse().unwrap());
+    let g = builder.start_local().await.unwrap().0;
+
+    let mut client = MetricsClient::new(g.c.clone().unwrap()).unwrap();
+    let res = client.reset_metrics().await;
+    assert!(!res.is_err());
+
+    // Each get_metrics requests is a two external requests.
+    let metrics = client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    assert_eq!(2.0, get_external_requests_count(metrics_dump));
+
+    // Verify that this value is incrementing.
+    let metrics = client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    assert_eq!(4.0, get_external_requests_count(metrics_dump));
+
+    // Reset the metrics and verify the metrics actually reset.
+    assert!(!client.reset_metrics().await.is_err());
+    let metrics = client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    assert_eq!(2.0, get_external_requests_count(metrics_dump));
 }
