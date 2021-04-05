@@ -3,6 +3,7 @@
 //! Mostly cribbed from https://docs.rs/crate/failure/0.1.8/source/src/box_std.rs.
 
 use crate::channel::tcp::SendError;
+use crate::ValueCoerceError;
 use petgraph::graph::NodeIndex;
 use thiserror::Error;
 
@@ -180,6 +181,20 @@ pub enum ReadySetError {
         /// The underlying error that occurred while manipulating the view.
         source: Box<ReadySetError>,
     },
+
+    /// A `ValueCoerceError` that really shouldn't be a separate type.
+    ///
+    /// FIXME(eta): make this not be a separate type.
+    #[error(transparent)]
+    ValueCoerce(ValueCoerceError),
+
+    /// Multiple `AUTO_INCREMENT` columns were provided, which isn't allowed.
+    #[error("Multiple auto incrementing columns are not permitted")]
+    MultipleAutoIncrement,
+
+    /// A column couldn't be found.
+    #[error("Column {0} not found in table or view")]
+    NoSuchColumn(String),
 }
 
 /// Make a new [`ReadySetError::Internal`] with the provided string-able argument.

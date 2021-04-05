@@ -259,8 +259,14 @@ impl DataType {
         let mk_err = |message: String, source: Option<anyhow::Error>| ValueCoerceError {
             value: self.clone(),
             expected_type: ty.clone(),
-            message,
-            source,
+            // FIXME(eta): this source thing is less than ideal
+            message: format!(
+                "{}: {}",
+                message,
+                source
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "<empty>".into())
+            ),
         };
 
         use SqlType::*;
@@ -429,7 +435,6 @@ impl DataType {
                 value: self.clone(),
                 expected_type: ty.clone(),
                 message: format!("Cannot coerce {:?} to {:?}", src_type, tgt_type),
-                source: None,
             }),
         }
     }
@@ -1212,7 +1217,7 @@ impl Arbitrary for DataType {
 
 /// Errors that can occur when coercing a [`DataType`] to a different [`SqlType`] with
 /// [`DataType::coerce_to`]
-#[derive(Debug, Error)]
+#[derive(Serialize, Deserialize, Debug, Error)]
 #[error("error coercing value {value:?} to {expected_type:?}: {message}")]
 pub struct ValueCoerceError {
     /// The value that was being coerced
@@ -1221,7 +1226,6 @@ pub struct ValueCoerceError {
     pub expected_type: SqlType,
     /// A human-readable message for the error
     pub message: String,
-    source: Option<anyhow::Error>,
 }
 
 #[cfg(test)]
