@@ -89,13 +89,15 @@ impl LookupError {
     /// Returns `true` if this `LookupError` represents a miss on a key, `false` if it represents a
     /// not-ready map
     pub fn is_miss(&self) -> bool {
-        matches!(self,
-              Self::MissPointSingle(_, _)
-            | Self::MissPointDouble(_, _)
-            | Self::MissPointMany(_, _)
-            | Self::MissRangeSingle(_, _)
-            | Self::MissRangeDouble(_, _)
-            | Self::MissRangeMany(_, _))
+        matches!(
+            self,
+            Self::MissPointSingle(_, _)
+                | Self::MissPointDouble(_, _)
+                | Self::MissPointMany(_, _)
+                | Self::MissRangeSingle(_, _)
+                | Self::MissRangeDouble(_, _)
+                | Self::MissRangeMany(_, _)
+        )
     }
 
     /// Returns the metadata referenced in this LookupError, if any
