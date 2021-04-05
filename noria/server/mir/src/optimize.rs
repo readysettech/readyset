@@ -28,6 +28,7 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
 
     while !node_stack.is_empty() {
         let n = node_stack.pop().unwrap();
+
         let node_name = n.borrow().versioned_name();
 
         if visited_nodes.contains_key(&node_name) {

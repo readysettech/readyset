@@ -1,6 +1,7 @@
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetResult,
-    Table, TableOperation, View, ViewQuery, ViewQueryFilter, ViewQueryOperator, ZookeeperAuthority,
+    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
+    ReadySetResult, Table, TableOperation, View, ViewQuery, ViewQueryFilter, ViewQueryOperator,
+    ZookeeperAuthority,
 };
 
 use msql_srv::{self, *};
@@ -25,8 +26,9 @@ use crate::backend::error::Error;
 use crate::backend::SelectSchema;
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
+use noria::errors::{internal_err, table_err, unsupported_err};
 use noria::results::Results;
-use noria::{internal, unsupported};
+use noria::{internal, invariant_eq, unsupported};
 use std::fmt;
 
 type StatementID = u32;
@@ -164,7 +166,7 @@ impl NoriaConnector {
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
-            .expect(&format!("no schema for table '{}'", table));
+            .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
 
         // set column names (insert schema) if not set
         if q.fields.is_none() {
@@ -224,13 +226,15 @@ impl NoriaConnector {
                     //let mut cc = c.clone();
                     //cc.table = Some(q.table.name.clone());
                     //schema_for_column(table_schemas, &cc)
-                    schema
+                    Ok(schema
                         .iter()
                         .cloned()
                         .find(|mc| c.name == mc.column)
-                        .expect(&format!("column '{}' missing in mutator schema", c))
+                        .ok_or_else(|| {
+                            internal_err(format!("column '{}' missing in mutator schema", c))
+                        })?)
                 })
-                .collect()
+                .collect::<ReadySetResult<Vec<_>>>()?
         };
 
         // nothing more to do for an insert
@@ -262,7 +266,7 @@ impl NoriaConnector {
                 return self.do_insert(&q, vec![params]).await;
             }
             _ => {
-                unreachable!(
+                internal!(
                     "Execute_prepared_insert is being called for a non insert prepared statement."
                 );
             }
@@ -275,7 +279,7 @@ impl NoriaConnector {
     ) -> std::result::Result<u64, Error> {
         let cond = q
             .where_clause
-            .expect("only supports DELETEs with WHERE-clauses");
+            .ok_or_else(|| unsupported_err("only supports DELETEs with WHERE-clauses"))?;
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
@@ -288,7 +292,7 @@ impl NoriaConnector {
                 .map(|(_, c)| c)
                 .collect()
         } else {
-            unimplemented!("cannot delete from view");
+            unsupported!("cannot delete from view");
         };
 
         trace!("delete::flatten conditionals");
@@ -373,7 +377,7 @@ impl NoriaConnector {
             PreparedStatement::Update(q) => {
                 return self.do_update(Cow::Owned(q), Some(params)).await
             }
-            _ => unreachable!(),
+            _ => internal!(),
         };
     }
 
@@ -456,7 +460,7 @@ impl NoriaConnector {
         trace!("insert::extract schema");
         let schema = putter
             .schema()
-            .expect(&format!("no schema for table '{}'", table));
+            .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
 
         let columns_specified: Vec<_> = q
             .fields
@@ -477,8 +481,10 @@ impl NoriaConnector {
             .iter()
             .filter(|c| c.constraints.contains(&ColumnConstraint::AutoIncrement))
             .collect();
-        // can only have zero or one AUTO_INCREMENT columns
-        assert!(auto_increment_columns.len() <= 1);
+        if auto_increment_columns.len() > 1 {
+            // can only have zero or one AUTO_INCREMENT columns
+            Err(table_err(table, ReadySetError::MultipleAutoIncrement))?
+        }
 
         let ai = &mut self.auto_increments;
         tokio::task::block_in_place(|| {
@@ -493,7 +499,7 @@ impl NoriaConnector {
         });
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
         let mut first_inserted_id = None;
-        tokio::task::block_in_place(|| {
+        tokio::task::block_in_place(|| -> ReadySetResult<_> {
             let ai_lock = ai.read().unwrap();
             let last_insert_id = &ai_lock[table];
 
@@ -520,7 +526,9 @@ impl NoriaConnector {
                         .fields
                         .iter()
                         .position(|f| f == *col)
-                        .expect(&format!("no column named '{}'", col.column.name));
+                        .ok_or_else(|| {
+                            table_err(table, ReadySetError::NoSuchColumn(col.column.name.clone()))
+                        })?;
                     // query can specify an explicit AUTO_INCREMENT value
                     if !columns_specified.contains(&col.column) {
                         let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
@@ -536,7 +544,9 @@ impl NoriaConnector {
                         .fields
                         .iter()
                         .position(|f| f.column == c)
-                        .expect(&format!("no column named '{}'", c.name));
+                        .ok_or_else(|| {
+                            table_err(table, ReadySetError::NoSuchColumn(c.name.clone()))
+                        })?;
                     // only use default value if query doesn't specify one
                     if !columns_specified.contains(&c) {
                         buf[ri][idx] = v.into();
@@ -548,18 +558,24 @@ impl NoriaConnector {
                         .fields
                         .iter()
                         .find_position(|f| f.column == *c)
-                        .expect(&format!("no column '{:?}' in table '{}'", c, schema.table));
+                        .ok_or_else(|| {
+                            table_err(
+                                &schema.table.name,
+                                ReadySetError::NoSuchColumn(c.name.clone()),
+                            )
+                        })?;
                     // TODO(grfn): Convert this unwrap() to an actual user error once we have proper
                     // error return values (PR#50)
                     let value = row.get(ci).unwrap().coerce_to(&field.sql_type).unwrap();
                     buf[ri][idx] = value.into_owned();
                 }
             }
-        });
+            Ok(())
+        })?;
 
         let result = if let Some(ref update_fields) = q.on_duplicate {
             trace!("insert::complex");
-            assert_eq!(buf.len(), 1);
+            invariant_eq!(buf.len(), 1);
 
             let updates = {
                 // fake out an update query
@@ -604,7 +620,9 @@ impl NoriaConnector {
         // earlier one of the same name
         trace!("select::access view");
         let getter = self.inner.ensure_getter(&qname).await?;
-        let getter_schema = getter.schema().expect("No schema for view");
+        let getter_schema = getter
+            .schema()
+            .ok_or_else(|| internal_err("No schema for view"))?;
         let mut key_types = key_column_indices
             .iter()
             .map(|i| &getter_schema[*i].sql_type)
@@ -623,16 +641,20 @@ impl NoriaConnector {
                     .map(|op| (i, col, op))
             })
             .next()
-            .map(|(idx, col, operator)| {
-                let mut key = keys.drain(0..1).next().expect("Expected at least one key");
-                assert!(
-                    keys.is_empty(),
-                    "LIKE/ILIKE not currently supported for more than one lookup key at a time"
-                );
+            .map(|(idx, col, operator)| -> ReadySetResult<_> {
+                let mut key = keys
+                    .drain(0..1)
+                    .next()
+                    .ok_or_else(|| ReadySetError::EmptyKey)?;
+                if !keys.is_empty() {
+                    unsupported!(
+                        "LIKE/ILIKE not currently supported for more than one lookup key at a time"
+                    );
+                }
                 let column = schema
                     .iter()
                     .position(|x| x.column == col.name)
-                    .expect("Filter column not in schema!");
+                    .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
                 let value = String::from(
                     &key.remove(idx)
                         .coerce_to(&key_types.remove(idx))
@@ -646,12 +668,13 @@ impl NoriaConnector {
 
                 filter_op_idx = Some(idx);
 
-                ViewQueryFilter {
+                Ok(ViewQueryFilter {
                     column,
                     operator,
                     value,
-                }
-            });
+                })
+            })
+            .transpose()?;
 
         if let Some(filter_op_idx) = filter_op_idx {
             // if we're using a column for a post-lookup filter, remove it from our list of binops
@@ -677,42 +700,50 @@ impl NoriaConnector {
                         .map(|(val, col_type)| {
                             val.coerce_to(col_type)
                                 .map(Cow::into_owned)
-                                // TODO(grfn): Drop this unwrap once we have real error return
-                                // values here (#50)
-                                .unwrap()
+                                .map_err(|e| ReadySetError::ValueCoerce(e))
                         })
-                        .collect::<Vec<DataType>>();
+                        .collect::<ReadySetResult<Vec<DataType>>>()?;
 
-                    (k, binop_to_use)
+                    Ok((k, binop_to_use)
                         .try_into()
-                        .expect("Input key cannot be empty")
+                        .map_err(|_| ReadySetError::EmptyKey)?)
                 })
-                .collect()
+                .collect::<ReadySetResult<Vec<_>>>()?
         };
 
-        let order_by = q.order.as_ref().map(|oc| {
-            // TODO(eta): support this. It isn't necessarily hard, just a pain.
-            assert_eq!(
-                oc.columns.len(),
-                1,
-                "ORDER BY expressions with more than one column are not supported yet"
-            );
-            // TODO(eta): figure out whether this error is actually possible
-            let col_idx = schema
-                .iter()
-                .position(|x| x.column == oc.columns[0].0.name)
-                .expect("ORDER BY column not in schema!");
-            (
-                col_idx,
-                oc.columns[0].1 == nom_sql::OrderType::OrderDescending,
-            )
-        });
+        let order_by = q
+            .order
+            .as_ref()
+            .map(|oc| -> ReadySetResult<_> {
+                // TODO(eta): support this. It isn't necessarily hard, just a pain.
+                if oc.columns.len() != 1 {
+                    unsupported!(
+                        "ORDER BY expressions with more than one column are not supported yet"
+                    );
+                }
+                // TODO(eta): figure out whether this error is actually possible
+                let col_idx = schema
+                    .iter()
+                    .position(|x| x.column == oc.columns[0].0.name)
+                    .ok_or_else(|| ReadySetError::NoSuchColumn(oc.columns[0].0.name.clone()))?;
+                Ok((
+                    col_idx,
+                    oc.columns[0].1 == nom_sql::OrderType::OrderDescending,
+                ))
+            })
+            .transpose()?;
 
-        let limit = q.limit.as_ref().map(|lc| {
-            assert_eq!(lc.offset, 0, "OFFSET is not supported yet");
-            // FIXME(eta): this cast is ugly!
-            lc.limit as usize
-        });
+        let limit = q
+            .limit
+            .as_ref()
+            .map(|lc| -> ReadySetResult<_> {
+                if lc.offset != 0 {
+                    unsupported!("OFFSET is not supported yet");
+                }
+                // FIXME(eta): this cast is ugly!
+                Ok(lc.limit as usize)
+            })
+            .transpose()?;
 
         let vq = ViewQuery {
             key_comparisons: keys,
@@ -753,7 +784,7 @@ impl NoriaConnector {
                 cts
             } else {
                 // no update on views
-                unimplemented!();
+                unsupported!();
             };
             utils::extract_update(q, params.map(|p| p.into_iter()), schema)?
         };
@@ -786,7 +817,7 @@ impl NoriaConnector {
             .ensure_getter(&qname)
             .await?
             .schema()
-            .expect(&format!("no schema for view '{}'", qname));
+            .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
         let schema = schema::convert_schema(&Schema::View(
             getter_schema
@@ -835,7 +866,7 @@ impl NoriaConnector {
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
         } else {
-            unreachable!();
+            internal!();
         };
 
         // check if we already have this query prepared
@@ -849,7 +880,7 @@ impl NoriaConnector {
             .ensure_getter(&qname)
             .await?
             .schema()
-            .expect(&format!("no schema for view '{}'", qname));
+            .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
         let schema = Schema::View(
             getter_schema
@@ -923,11 +954,9 @@ impl NoriaConnector {
                         // that we rewrote to WHERE x = ? AND y = ? AND z = ?
                         // so we need to turn that into the keys:
                         // [[a, b, d], [a, c, d]]
-                        assert_ne!(
-                            params.len(),
-                            0,
-                            "empty parameters passed to a rewritten query"
-                        );
+                        if params.len() == 0 {
+                            Err(ReadySetError::EmptyKey)?
+                        }
                         (0..*nrewritten)
                             .map(|poffset| {
                                 params
@@ -954,7 +983,7 @@ impl NoriaConnector {
                     .await;
             }
             _ => {
-                unreachable!()
+                internal!()
             }
         };
     }
