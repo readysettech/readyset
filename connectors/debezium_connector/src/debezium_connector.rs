@@ -346,29 +346,23 @@ impl DebeziumConnector {
             .map_err(|_| anyhow!("Failed to convert GTID to u64"))
     }
 
-    /// Parse the readyset table names from the debezium data colleciton names.
-    /// The format of these names may vary based on the type of the database
-    /// debezium is connected to.
+    /// Parse the readyset table names from the debezium data collection names.
     fn parse_table_names<'a>(
         &self,
         collections: &'a [DataCollection],
     ) -> anyhow::Result<Vec<&'a str>> {
-        match self.database_type {
-            DatabaseType::MySQL => Ok(collections
-                .iter()
-                .map(|c| c.data_collection.as_str())
-                .collect()),
-            DatabaseType::PostgreSQL => collections
-                .iter()
-                .map(|c| {
-                    // PostgreSQL data collections are in the format <schema>.<tablename>.
-                    let mut tokens = c.data_collection.split('.');
-                    tokens.nth(1).ok_or_else(|| {
-                        anyhow!("Data collection did not include a valid table name")
-                    })
-                })
-                .collect(),
-        }
+        // PostgreSQL data collections are in the format <schema>.<tablename>
+        // MySQL data bollections are in the format <dbname>.<tablename>
+        // In both cases, we only want the second token.
+        collections
+            .iter()
+            .map(|c| {
+                let mut tokens = c.data_collection.split('.');
+                tokens
+                    .nth(1)
+                    .ok_or_else(|| anyhow!("Data collection did not include a valid table name"))
+            })
+            .collect()
     }
 
     /// Processes a BEGIN or END transaction message.
