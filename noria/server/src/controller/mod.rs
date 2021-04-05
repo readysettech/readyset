@@ -70,7 +70,6 @@ fn external_request(
     method: hyper::Method,
     path: String,
 ) -> Result<Result<String, ReadySetError>, StatusCode> {
-    metrics::increment_counter!("server.external_requests");
     use serde_json as json;
 
     match (&method, path.as_ref()) {
@@ -151,8 +150,27 @@ pub(super) async fn main<A: Authority + 'static>(
                 if let Some(ref mut ctrl) = controller {
                     let authority = &authority;
                     let reply = tokio::task::block_in_place(|| {
-                        ctrl.external_request(method, path, query, body, &authority)
-                            .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
+                        let resp = ctrl.external_request(
+                            method.clone(),
+                            path.clone(),
+                            query,
+                            body,
+                            &authority,
+                        );
+                        match resp {
+                            Ok(r) => Ok(r.map_err(|e| serde_json::to_string(&e).unwrap())),
+                            Err(s) => {
+                                // If the request is not supported with a controller, check if we
+                                // can use the external request path that does not use a
+                                // controller.
+                                if let StatusCode::NOT_FOUND = s {
+                                    external_request(method, path)
+                                        .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
+                                } else {
+                                    Err(s)
+                                }
+                            }
+                        }
                     });
 
                     if reply_tx.send(reply).is_err() {
@@ -162,6 +180,7 @@ pub(super) async fn main<A: Authority + 'static>(
                     // There is no controller, however, we may still support an
                     // external request to this noria-server. If the external
                     // request is not supported, NOT_FOUND will be returned.
+                    metrics::increment_counter!("server.external_requests");
                     let reply = tokio::task::block_in_place(|| {
                         external_request(method, path)
                             .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
