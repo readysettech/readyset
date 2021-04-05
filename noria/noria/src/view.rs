@@ -94,9 +94,10 @@ fn make_views_discover(addr: SocketAddr) -> Discover {
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
 #[cfg(not(doc))]
-type Discover = impl tower_discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
-    + Unpin
-    + Send;
+type Discover =
+    impl tower_discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
+        + Unpin
+        + Send;
 #[cfg(doc)]
 type Discover = crate::doc_mock::Discover<InnerService>;
 

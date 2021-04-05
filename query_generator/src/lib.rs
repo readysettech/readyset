@@ -51,7 +51,6 @@
 //! [2]: TableSpec::fresh_column
 //! [3]: QueryOperation::permute
 
-#![feature(or_insert_with_key)]
 #![feature(duration_zero)]
 
 use anyhow::anyhow;

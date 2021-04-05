@@ -89,7 +89,6 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
-#![feature(min_const_generics)]
 
 // Note to developers: you can find decent overviews of the protocol at
 //

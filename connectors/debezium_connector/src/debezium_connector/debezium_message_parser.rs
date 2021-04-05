@@ -283,12 +283,11 @@ mod tests {
             parsed,
             EventValue::SchemaChange(SchemaChange {
                 schema: _,
-                payload:
-                    SchemaChangePayload {
-                        ddl: _,
-                        database_name: _,
-                        source: _,
-                    },
+                payload: SchemaChangePayload {
+                    ddl: _,
+                    database_name: _,
+                    source: _,
+                },
             })
         ));
     }
