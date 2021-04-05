@@ -80,6 +80,12 @@ fn external_request(
             let md = MetricsDump::from_metrics(counters, gauges);
             Ok(Ok(json::to_string(&md).unwrap()))
         }
+        (&Method::POST, "/reset_metrics") => {
+            let recorder = NoriaMetricsRecorder::get();
+            recorder.clear();
+            // Callers convert this to a 200 response to the client.
+            Ok(Ok("".to_string()))
+        }
         _ => Err(StatusCode::NOT_FOUND),
     }
 }
