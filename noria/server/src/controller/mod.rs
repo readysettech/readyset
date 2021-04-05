@@ -18,6 +18,7 @@ use futures_util::{
 use hyper::{self, Method, StatusCode};
 use noria::channel::TcpSender;
 use noria::consensus::{Authority, Epoch, STATE_KEY};
+use noria::metrics::recorded;
 use noria::ControllerDescriptor;
 use noria::{internal, ReadySetError};
 use std::net::SocketAddr;
@@ -181,7 +182,7 @@ pub(super) async fn main<A: Authority + 'static>(
                     // There is no controller, however, we may still support an
                     // external request to this noria-server. If the external
                     // request is not supported, NOT_FOUND will be returned.
-                    metrics::increment_counter!("server.external_requests");
+                    metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
                     let reply = tokio::task::block_in_place(|| {
                         external_request(method, path)
                             .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))

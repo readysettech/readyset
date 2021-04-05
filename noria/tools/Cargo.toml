@@ -17,3 +17,7 @@ path = "src/view_checker.rs"
 [[bin]]
 name = "query_installer"
 path = "src/query_installer.rs"
+
+[[bin]]
+name = "metrics_client"
+path = "src/metrics_client.rs"

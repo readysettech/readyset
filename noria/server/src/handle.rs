@@ -12,7 +12,9 @@ use stream_cancel::Trigger;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct Handle<A: Authority + 'static> {
-    c: Option<ControllerHandle<A>>,
+    /// Has a valid controller handle on `new` and is set to None if the
+    /// controller has been shutdown.
+    pub c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
     kill: Option<Trigger>,

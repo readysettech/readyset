@@ -464,4 +464,14 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn metrics_dump(&mut self) -> impl Future<Output = ReadySetResult<MetricsDump>> {
         self.rpc("metrics_dump", ())
     }
+
+    /// Fetch the a map of worker address to external address for each noria instance running
+    /// in the cluster lead by this controller.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn external_addrs(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<HashMap<SocketAddr, SocketAddr>>> {
+        self.rpc("external_addrs", ())
+    }
 }

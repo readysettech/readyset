@@ -63,6 +63,9 @@ regex = "1.4.3"
 lazy_static = "1.4.0"
 test-strategy = "0.1.1"
 
+# metrics/
+reqwest = { version = "0.10.10", features = ["json"] }
+
 # Local dependencies
 launchpad = { path = "../../launchpad" }
 msql-srv = { path = "../../msql-srv" }

@@ -17,6 +17,7 @@ use noria::builders::*;
 use noria::channel::tcp::{SendError, TcpSender};
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
+use noria::metrics::recorded;
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use slog::Logger;
@@ -202,7 +203,7 @@ impl ControllerInner {
     ) -> Result<Result<String, ReadySetError>, StatusCode> {
         // TODO(eta): the error handling / general serialization inside this function is really
         // confusing, and has been the source of at least 1 hard-to-track-down bug
-        metrics::increment_counter!("server.external_requests");
+        metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
         use serde_json as json;
 
         match (&method, path.as_ref()) {
@@ -233,7 +234,7 @@ impl ControllerInner {
             (Method::GET | Method::POST, "/instances") => {
                 Ok(Ok(json::to_string(&self.get_instances()).unwrap()))
             }
-            (Method::GET, "/external_addrs") => {
+            (Method::GET, "external_addrs") | (Method::POST, "/external_addrs") => {
                 Ok(Ok(json::to_string(&self.external_addrs).unwrap()))
             }
             (Method::GET, "/nodes") => {

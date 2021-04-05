@@ -1,5 +1,8 @@
 //! Data types representing metrics dumped from a running Noria instance
 
+/// A client for accessing noria metrics for a deployment.
+pub mod client;
+
 pub use metrics::Key;
 use metrics_util::Histogram;
 use std::borrow::Borrow;
@@ -254,6 +257,9 @@ pub mod recorded {
     /// | domain | The index of the domain. |
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str = "domain.total_node_state_size_bytes";
+
+    /// Counter: The number of external http requests received at the noria-server.
+    pub const SERVER_EXTERNAL_REQUESTS: &str = "server.external_requests";
 }
 
 /// A dumped metric's kind.
