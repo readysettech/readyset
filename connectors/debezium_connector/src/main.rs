@@ -91,7 +91,6 @@ async fn main() -> anyhow::Result<()> {
             )
             .arg(
                 Arg::with_name("db_type")
-                    .short("db")
                     .long("database_type")
                     .default_value("mysql")
                     .help("The database we are connected to: mysql or postgres"),
