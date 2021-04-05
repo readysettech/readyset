@@ -80,11 +80,6 @@ fn external_request(
             let md = MetricsDump::from_metrics(counters, gauges);
             Ok(Ok(json::to_string(&md).unwrap()))
         }
-        (&Method::GET, "/metrics_reset") => {
-            let recorder = NoriaMetricsRecorder::get();
-            recorder.clear();
-            Err(StatusCode::OK)
-        }
         _ => Err(StatusCode::NOT_FOUND),
     }
 }
