@@ -151,20 +151,8 @@ where
         // group by all columns
         self.cols = srcn.fields().len();
         self.group_by.extend(self.inner.group_by().iter().cloned());
-        self.group_by.sort();
         // cache the range of our output keys
         self.out_key = (0..self.group_by.len()).collect();
-
-        // build a translation mechanism for going from output columns to input columns
-        let colfix: Vec<_> = (0..self.cols)
-            .filter(|col| {
-                // since the generated value goes at the end,
-                // this is the n'th output value
-                // otherwise this column does not appear in output
-                self.group_by.iter().any(|c| c == col)
-            })
-            .collect();
-        self.colfix.extend(colfix.into_iter());
     }
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
@@ -324,10 +312,10 @@ where
     }
 
     fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        if col == self.colfix.len() {
+        if col == self.group_by.len() {
             return Ok(None);
         }
-        Ok(Some(vec![(self.src.as_global(), self.colfix[col])]))
+        Ok(Some(vec![(self.src.as_global(), self.group_by[col])]))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -338,10 +326,10 @@ where
         &self,
         column: usize,
     ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        if column == self.colfix.len() {
+        if column == self.group_by.len() {
             return Ok(vec![(self.src.as_global(), None)]);
         }
-        Ok(vec![(self.src.as_global(), Some(self.colfix[column]))])
+        Ok(vec![(self.src.as_global(), Some(self.group_by[column]))])
     }
 
     fn is_selective(&self) -> bool {
