@@ -1,0 +1,364 @@
+# CONFIDENTIAL TO WEAVEGRID
+
+statement ok
+CREATE TABLE `utilities` (
+  `utility_id` int(11) NOT NULL AUTO_INCREMENT,
+  `utility_acronym` varchar(8) DEFAULT NULL,
+  `utility_display_name` varchar(32) DEFAULT NULL,
+  `time_zone` varchar(64) NOT NULL DEFAULT 'UTC',
+  `is_eligible` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`utility_id`),
+  UNIQUE KEY `utility_name` (`utility_display_name`)
+)
+
+statement ok
+CREATE TABLE `users` (
+  `user_id` int(11) NOT NULL AUTO_INCREMENT,
+  `email_address` varchar(64) NOT NULL,
+  `signup_date` date DEFAULT NULL,
+  `user_first_name` varchar(32) DEFAULT NULL,
+  `user_last_name` varchar(32) DEFAULT NULL,
+  `utility_id` int(11) NOT NULL DEFAULT 1,
+  `role` varchar(16) DEFAULT 'user',
+  `confirmed_dttm` timestamp NULL DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT 1,
+  `password_hash` varchar(128) DEFAULT NULL,
+  `avatar_hash` varchar(32) DEFAULT NULL,
+  `session_token` varchar(256) NOT NULL,
+  `last_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`user_id`),
+  CONSTRAINT `user_utility` FOREIGN KEY (`utility_id`) REFERENCES `utilities` (`utility_id`)
+)
+
+statement ok
+CREATE TABLE `registrations` (
+  `registration_id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `oem_id` int(11) NOT NULL,
+  `oem_username` varchar(128) DEFAULT NULL,
+  `oem_token_key` varchar(32) DEFAULT NULL,
+  `last_poll_status` tinyint(4) DEFAULT NULL,
+  `last_poll_msg` varchar(128) DEFAULT NULL,
+  `last_poll_attempt` timestamp NULL DEFAULT current_timestamp(),
+  `last_polled_at` timestamp NULL DEFAULT NULL,
+  `poll_freq_secs` int(11) DEFAULT 86400,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`registration_id`),
+  UNIQUE KEY `user_oem` (`user_id`,`oem_id`),
+  CONSTRAINT `registration_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)
+)
+
+statement ok
+CREATE TABLE `utility_holidays` (
+ `utility_id` int(11) DEFAULT NULL,
+ `local_date` DATE,
+  CONSTRAINT `utility_holidays_utility` FOREIGN KEY (`utility_id`) REFERENCES `utilities` (`utility_id`)
+)
+
+statement ok
+CREATE TABLE `utility_peak_periods` (
+  `peak_periods_id` int(11) NOT NULL AUTO_INCREMENT,
+  `utility_id` int(11) DEFAULT NULL,
+  `start_month` int(11) DEFAULT NULL,
+  `end_month` int(11) DEFAULT NULL,
+  `local_start_time` time DEFAULT NULL,
+  `local_end_time` time DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`peak_periods_id`),
+  CONSTRAINT `peak_periods_utility` FOREIGN KEY (`utility_id`) REFERENCES `utilities` (`utility_id`)
+)
+
+statement ok
+CREATE TABLE `vehicles` (
+  `vehicle_id` int(11) NOT NULL AUTO_INCREMENT,
+  `registration_id` int(11) NOT NULL,
+  `vin` char(32) NOT NULL,
+  `display_name` varchar(128) DEFAULT NULL,
+  `ext_color` varchar(32) DEFAULT NULL,
+  `model` varchar(32) DEFAULT NULL,
+  `model_year` char(4) DEFAULT NULL,
+  `battery_size_kwh` int(11) DEFAULT NULL,
+  `home_location_id` int(11) DEFAULT NULL,
+  `last_poll_status` tinyint(4) DEFAULT NULL,
+  `last_poll_msg` varchar(128) DEFAULT NULL,
+  `last_poll_attempt` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_polled_at` timestamp NULL DEFAULT NULL,
+  `poll_freq_secs` smallint(5) unsigned DEFAULT 900,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`vehicle_id`),
+  CONSTRAINT `vehicle_registration` FOREIGN KEY (`registration_id`) REFERENCES `registrations` (`registration_id`)
+)
+
+statement ok
+CREATE TABLE `vehicle_load_profiles` (
+  `vehicle_load_profile_id` int(11) NOT NULL AUTO_INCREMENT,
+  `vehicle_id` int(11) NOT NULL,
+  `charge_event_id` int(11) DEFAULT NULL,
+  `start_dttm` timestamp NULL DEFAULT NULL,
+  `end_dttm` timestamp NULL DEFAULT NULL,
+  `is_home` tinyint(1) DEFAULT NULL,
+  `energy_delivered` float DEFAULT NULL,
+  `energy_added` float DEFAULT NULL,
+  `soc_added` float DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`vehicle_load_profile_id`),
+  CONSTRAINT `load_profile_vehicle` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`vehicle_id`)
+)
+
+statement ok
+create view load_profiles as
+  select `lp`.`vehicle_id` AS `vehicle_id`,
+  `util`.`utility_id` AS `utility_id`,
+  cast(convert_tz(`lp`.`start_dttm`,'UTC',`util`.`time_zone`) as date) AS `local_date`,
+  cast(convert_tz(`lp`.`start_dttm`,'UTC',`util`.`time_zone`) as time) AS `local_start_time`,
+  timediff(`lp`.`end_dttm`,`lp`.`start_dttm`) AS `duration`,
+  sum(ifnull(`lp`.`energy_delivered`,`lp`.`energy_added`)) AS `usage_kwh`
+  from ((((`vehicle_load_profiles` `lp`
+  join `vehicles` `v` on(`v`.`vehicle_id` = `lp`.`vehicle_id`))
+  join `registrations` `r` on(`r`.`registration_id` = `v`.`registration_id`))
+  join `users` `u` on(`u`.`user_id` = `r`.`user_id`))
+  join `utilities` `util` on(`util`.`utility_id` = `u`.`utility_id`))
+  where `lp`.`is_home` = 1
+  group by lp.vehicle_id, util.utility_id, lp.start_dttm, lp.end_dttm
+
+# and addtime(`lp`.`local_start_time`,`lp`.`duration`) <= `peak`.`local_end_time`
+statement ok
+create view on_peak_usage as
+  select
+    `lp`.`vehicle_id` AS `vehicle_id`,
+    `lp`.`local_date` AS `local_date`,
+    sum(`lp`.`usage_kwh`) AS `on_peak_usage_kwh`
+  from (((`load_profiles` `lp`
+  join `utility_peak_periods` `peak` on `lp`.`utility_id` = `peak`.`utility_id`)
+  join `utilities` `util` on (`util`.`utility_id` = `peak`.`utility_id`))
+  left join (
+       select `h1`.`local_date` AS `local_date`
+       from (`utility_holidays` `h1` join `utilities` `u1` on(`u1`.`utility_id` = `h1`.`utility_id`))
+  ) `h` on (`h`.`local_date` = `lp`.`local_date`))
+  where `h`.`local_date` is null
+  and month(`lp`.`local_date`) between `peak`.`start_month` and `peak`.`end_month`
+  and dayofweek(`lp`.`local_date`) between 2 and 6
+  and `lp`.`local_start_time` >= `peak`.`local_start_time`
+  group by `lp`.`vehicle_id`,`lp`.`local_date`
+
+statement ok
+create view total_usage as
+  select
+  `load_profiles`.`vehicle_id` AS `vehicle_id`,
+  `load_profiles`.`utility_id` AS `utility_id`,
+  `load_profiles`.`local_date` AS `local_date`,
+  sum(`load_profiles`.`usage_kwh`) AS `total_usage_kwh`
+  from `load_profiles`
+  group by `load_profiles`.`vehicle_id`, `load_profiles`.`local_date`
+
+statement ok
+create view vehicle_daily_usage as
+    select
+        `t`.`vehicle_id` AS `vehicle_id`,
+        `t`.`utility_id` AS `utility_id`,
+        `t`.`local_date` AS `local_date`,
+        ifnull(`p`.`on_peak_usage_kwh`,cast(0.0 as double)) AS `on_peak_usage_kwh`,
+        `t`.`total_usage_kwh` - ifnull(`p`.`on_peak_usage_kwh`,cast(0.0 as double)) AS `off_peak_usage_kwh`
+    from (`total_usage` `t`
+    left join `on_peak_usage` `p`
+    on `t`.`vehicle_id` = `p`.`vehicle_id` and `t`.`local_date` = `p`.`local_date`)
+
+query IDDDI
+select * from load_profiles;
+----
+
+
+statement ok
+INSERT INTO utilities
+(last_updated_at, utility_id, time_zone, created_at, utility_display_name, utility_acronym, is_eligible)
+VALUES
+('2020-01-01 12:30:45', 2, 'America/New_York', '2020-01-01 12:30:45', '0', 'a', 1),
+('2020-01-01 12:30:45', 3, 'America/New_York', '2020-01-01 12:30:45', '1', 'a', 1),
+('2020-01-01 12:30:45', 4, 'America/New_York', '2020-01-01 12:30:45', '2', 'a', 1),
+('2020-01-01 12:30:45', 5, 'America/New_York', '2020-01-01 12:30:45', '3', 'a', 1),
+('2020-01-01 12:30:45', 6, 'America/New_York', '2020-01-01 12:30:45', '4', 'a', 1)
+
+statement ok
+INSERT INTO users
+(confirmed_dttm, session_token, signup_date, password_hash, last_seen, user_id, role, is_active, last_updated_at, email_address, avatar_hash, created_at, user_first_name, user_last_name, utility_id)
+VALUES
+('2020-01-01 12:30:45', 'a', '2020-01-01 00:00:00', 'a', '2020-01-01 12:30:45', 2, 'a', 1, '2020-01-01 12:30:45', 'a', 'a', '2020-01-01 12:30:45', 'a', 'a', 2),
+('2020-01-01 12:30:45', 'a', '2020-01-01 00:00:00', 'a', '2020-01-01 12:30:45', 3, 'a', 1, '2020-01-01 12:30:45', 'a', 'a', '2020-01-01 12:30:45', 'a', 'a', 3),
+('2020-01-01 12:30:45', 'a', '2020-01-01 00:00:00', 'a', '2020-01-01 12:30:45', 4, 'a', 1, '2020-01-01 12:30:45', 'a', 'a', '2020-01-01 12:30:45', 'a', 'a', 4),
+('2020-01-01 12:30:45', 'a', '2020-01-01 00:00:00', 'a', '2020-01-01 12:30:45', 5, 'a', 1, '2020-01-01 12:30:45', 'a', 'a', '2020-01-01 12:30:45', 'a', 'a', 5),
+('2020-01-01 12:30:45', 'a', '2020-01-01 00:00:00', 'a', '2020-01-01 12:30:45', 6, 'a', 1, '2020-01-01 12:30:45', 'a', 'a', '2020-01-01 12:30:45', 'a', 'a', 6)
+
+statement ok
+INSERT INTO registrations
+(user_id, registration_id, last_polled_at, oem_token_key, poll_freq_secs, oem_username, last_poll_msg, last_poll_attempt, is_active, created_at, oem_id, last_updated_at, last_poll_status)
+VALUES
+(2, 2, '2020-01-01 12:30:45', 'a', 1, 'a', 'a', '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 2, '2020-01-01 12:30:45', 1),
+(3, 3, '2020-01-01 12:30:45', 'a', 1, 'a', 'a', '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 3, '2020-01-01 12:30:45', 1),
+(4, 4, '2020-01-01 12:30:45', 'a', 1, 'a', 'a', '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 4, '2020-01-01 12:30:45', 1),
+(5, 5, '2020-01-01 12:30:45', 'a', 1, 'a', 'a', '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 5, '2020-01-01 12:30:45', 1),
+(6, 6, '2020-01-01 12:30:45', 'a', 1, 'a', 'a', '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 6, '2020-01-01 12:30:45', 1)
+
+statement ok
+INSERT INTO vehicles
+(last_poll_status, last_polled_at, battery_size_kwh, display_name, vin, last_poll_msg, created_at, registration_id, home_location_id, last_poll_attempt, is_active, last_updated_at, ext_color, model_year, model, poll_freq_secs, vehicle_id)
+VALUES
+(1, '2020-01-01 12:30:45', 1, 'a', 'a', 'a', '2020-01-01 12:30:45', 2, 1, '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 'a', 'a', 'a', 1, 2),
+(1, '2020-01-01 12:30:45', 1, 'a', 'a', 'a', '2020-01-01 12:30:45', 3, 1, '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 'a', 'a', 'a', 1, 3),
+(1, '2020-01-01 12:30:45', 1, 'a', 'a', 'a', '2020-01-01 12:30:45', 4, 1, '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 'a', 'a', 'a', 1, 4),
+(1, '2020-01-01 12:30:45', 1, 'a', 'a', 'a', '2020-01-01 12:30:45', 5, 1, '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 'a', 'a', 'a', 1, 5),
+(1, '2020-01-01 12:30:45', 1, 'a', 'a', 'a', '2020-01-01 12:30:45', 6, 1, '2020-01-01 12:30:45', 1, '2020-01-01 12:30:45', 'a', 'a', 'a', 1, 6)
+
+statement ok
+INSERT INTO vehicle_load_profiles
+(soc_added, is_home, energy_delivered, end_dttm, charge_event_id, start_dttm, created_at, vehicle_load_profile_id, energy_added, last_updated_at, vehicle_id)
+VALUES
+(1.500000000, 1, 1.500000000, '2020-05-05 18:30:45', 1, '2020-05-05 12:30:45', '2020-01-01 12:30:45', 2, 1.500000000, '2020-01-01 12:30:45', 2),
+(1.500000000, 1, 1.500000000, '2020-05-05 18:30:45', 1, '2020-05-05 12:30:45', '2020-01-01 12:30:45', 3, 1.500000000, '2020-01-01 12:30:45', 3),
+(1.500000000, 1, 1.500000000, '2020-05-05 18:30:45', 1, '2020-05-05 12:30:45', '2020-01-01 12:30:45', 4, 1.500000000, '2020-01-01 12:30:45', 4),
+(1.500000000, 1, 1.500000000, '2020-05-05 18:30:45', 1, '2020-05-05 12:30:45', '2020-01-01 12:30:45', 5, 1.500000000, '2020-01-01 12:30:45', 5),
+(1.500000000, 1, 1.500000000, '2020-05-05 18:30:45', 1, '2020-05-05 12:30:45', '2020-01-01 12:30:45', 6, 1.500000000, '2020-01-01 12:30:45', 6)
+
+query IIRDMM nosort
+select vehicle_id, utility_id, usage_kwh, local_date, local_start_time, duration from load_profiles ORDER BY vehicle_id ASC;
+----
+2
+2
+1.5
+2020-05-05 00:00:00
+08:30:45
+06:00:00
+3
+3
+1.5
+2020-05-05 00:00:00
+08:30:45
+06:00:00
+4
+4
+1.5
+2020-05-05 00:00:00
+08:30:45
+06:00:00
+5
+5
+1.5
+2020-05-05 00:00:00
+08:30:45
+06:00:00
+6
+6
+1.5
+2020-05-05 00:00:00
+08:30:45
+06:00:00
+
+statement ok
+INSERT INTO utility_holidays (utility_id, local_date)
+VALUES
+ (2, '2020-01-01'),
+ (3, '2020-01-01'),
+ (4, '2020-01-01'),
+ (5, '2020-01-01'),
+ (6, '2020-01-01')
+
+statement ok
+INSERT INTO utility_peak_periods
+(end_month, start_month, peak_periods_id, local_start_time, created_at, local_end_time, last_updated_at, utility_id)
+VALUES
+ (8, 4, 2, '07:30:45', '2020-01-01 12:30:45', '19:30:45', '2020-01-01 19:30:45', 2),
+ (8, 4, 3, '07:30:45', '2020-01-01 12:30:45', '19:30:45', '2020-01-01 19:30:45', 3),
+ (8, 4, 4, '07:30:45', '2020-01-01 12:30:45', '19:30:45', '2020-01-01 19:30:45', 4),
+ (8, 4, 5, '07:30:45', '2020-01-01 12:30:45', '19:30:45', '2020-01-01 19:30:45', 5),
+ (8, 4, 6, '07:30:45', '2020-01-01 12:30:45', '19:30:45', '2020-01-01 19:30:45', 6)
+
+query IDR rowsort
+select vehicle_id, local_date, on_peak_usage_kwh from on_peak_usage order by vehicle_id asc;
+----
+2
+2020-05-05 00:00:00
+1.5
+3
+2020-05-05 00:00:00
+1.5
+4
+2020-05-05 00:00:00
+1.5
+5
+2020-05-05 00:00:00
+1.5
+6
+2020-05-05 00:00:00
+1.5
+
+query IIDR rowsort
+SELECT * FROM total_usage
+----
+2
+2
+2020-05-05 00:00:00
+1.5
+3
+3
+2020-05-05 00:00:00
+1.5
+4
+4
+2020-05-05 00:00:00
+1.5
+5
+5
+2020-05-05 00:00:00
+1.5
+6
+6
+2020-05-05 00:00:00
+1.5
+
+query IIDRR rowsort
+select * from vehicle_daily_usage
+----
+2
+2
+2020-05-05 00:00:00
+1.5
+0.0
+3
+3
+2020-05-05 00:00:00
+1.5
+0.0
+4
+4
+2020-05-05 00:00:00
+1.5
+0.0
+5
+5
+2020-05-05 00:00:00
+1.5
+0.0
+6
+6
+2020-05-05 00:00:00
+1.5
+0.0
+
+query IIDRR rowsort
+select * from vehicle_daily_usage where vehicle_id = ?
+? = 2
+----
+2
+2
+2020-05-05 00:00:00
+1.5
+0.0
