@@ -1,6 +1,6 @@
 FROM rustlang/rust:nightly
 
-RUN rustup toolchain install nightly-2020-11-15
+RUN rustup toolchain install nightly-2021-01-01
 
 ADD https://github.com/mozilla/sccache/releases/download/0.2.13/sccache-0.2.13-x86_64-unknown-linux-musl.tar.gz \
     sccache-0.2.13-x86_64-unknown-linux-musl.tar.gz
