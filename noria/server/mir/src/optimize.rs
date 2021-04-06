@@ -8,15 +8,17 @@ use std::collections::HashMap;
 // for example by merging certain nodes together.
 // Return a list of any new nodes created so that the caller
 // can add them to any other internal representations.
-pub fn optimize(mut q: &mut MirQuery) -> Vec<MirNodeRef> {
+pub fn optimize(_q: &mut MirQuery) -> Vec<MirNodeRef> {
     //remove_extraneous_projections(&mut q);
-    find_and_merge_filter_aggregates(&mut q)
+    // find_and_merge_filter_aggregates(q)
+    vec![]
 }
 
 pub fn optimize_post_reuse(_q: &mut MirQuery) {
     // find_and_merge_filter_chains(q);
 }
 
+#[allow(dead_code)]
 fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
     // 1. depth first search to find all the nodes, so we can process them later
 
