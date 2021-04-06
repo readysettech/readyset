@@ -1,5 +1,6 @@
 mod expression;
 
+use nom_sql::SqlType;
 use noria::{internal, ReadySetError};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -10,6 +11,12 @@ use noria::errors::ReadySetResult;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
+///
+/// Columns emitted by project are always in the following order:
+///
+/// 1. columns ([`emit`](Project::emit))
+/// 2. [`expressions`](Project::expressions)
+/// 3. literals ([`additional`](Project::additional))
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     us: Option<IndexPair>,
@@ -49,12 +56,41 @@ impl Project {
         }
     }
 
-    pub fn emits(&self) -> (&[usize], &[DataType], &[ProjectExpression]) {
-        (
-            self.emit.as_ref().map(Vec::as_slice).unwrap_or(&[]),
-            self.additional.as_ref().map(Vec::as_slice).unwrap_or(&[]),
-            self.expressions.as_ref().map(Vec::as_slice).unwrap_or(&[]),
-        )
+    /// Returns a guess as to the [`SqlType`] of the given column index as emitted by this project
+    /// node, potentially using `parent_column_type` to look up types of columns in the immediate
+    /// parent node.
+    ///
+    /// If the column always returns a `NULL` value (eg if it's a literal column with the value
+    /// NULL), then the return value will be `Ok(None)`.
+    pub fn column_type(
+        &self,
+        column_index: usize,
+        parent_column_type: impl Fn(usize) -> ReadySetResult<Option<SqlType>>,
+    ) -> ReadySetResult<Option<SqlType>> {
+        if let Some(parent_col) = self.emit.as_ref().and_then(|emit| emit.get(column_index)) {
+            // Emitted column
+            parent_column_type(*parent_col)
+        } else if let Some(expr) = self
+            .expressions
+            .as_ref()
+            // expressions go after all the emitted columns
+            .and_then(|exprs| exprs.get(column_index - self.emit.as_ref().map_or(0, |e| e.len())))
+        {
+            // Expression
+            expr.sql_type(parent_column_type)
+        } else if let Some(literal) = self.additional.as_ref().and_then(|lits| {
+            lits.get(
+                column_index
+                // literals go after both the emitted columns and the expressions
+                    - self.emit.as_ref().map_or(0, |e| e.len())
+                    - self.expressions.as_ref().map_or(0, |e| e.len()),
+            )
+        }) {
+            // Literal
+            Ok(literal.sql_type())
+        } else {
+            internal!("Column index out of bounds")
+        }
     }
 }
 
