@@ -4453,3 +4453,38 @@ async fn compound_join_key() {
 
     assert_eq!(res, vec![(3, 33), (4, 44), (4, 44)]);
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn left_join_null() {
+    let mut g = start_simple("left_join_null").await;
+
+    g.install_recipe(
+        "CREATE TABLE jim (id int, a int);
+         CREATE TABLE bob (id int);
+         VIEW funky: SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("jim").await.unwrap();
+    let mut t2 = g.table("bob").await.unwrap();
+    let mut q = g.view("funky").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(2)],
+        vec![DataType::from(3), DataType::from(6)],
+        vec![DataType::from(4), DataType::from(6)],
+    ])
+    .await
+    .unwrap();
+    t2.insert_many(vec![vec![DataType::from(3)]]).await.unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+    let res = q
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+    assert_eq!(res.len(), 2);
+}
