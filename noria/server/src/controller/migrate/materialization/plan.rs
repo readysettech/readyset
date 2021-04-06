@@ -94,6 +94,12 @@ impl<'a> Plan<'a> {
             })
             .collect();
 
+        // it doesn't make sense for a replay path to have <=1 nodes in it; this can, however,
+        // happen now that we run the materialization planner when adding indices to already
+        // materialized nodes (presumably because they might originate the columns indices are
+        // being added to?)
+        paths.retain(|x| x.len() > 1);
+
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
         // would cause a domain to request replays *twice* for a key from one view!
@@ -519,8 +525,7 @@ impl<'a> Plan<'a> {
 
             if !self.partial {
                 // this path requires doing a replay and then waiting for the replay to finish
-                self.pending
-                    .push(pending.expect("no replay for full materialization?"));
+                self.pending.push(pending.unwrap());
             }
             tags.push((tag, last_domain.unwrap()));
         }
@@ -594,12 +599,6 @@ impl<'a> Plan<'a> {
             .unwrap();
 
         if !self.partial {
-            // we know that this must be a *new* fully materialized node:
-            //
-            //  - finalize() is only called by setup()
-            //  - setup() is only called for existing nodes if they are partial
-            //  - this branch has !self.partial
-            //
             // if we're constructing a new view, there is no reason to replay any given path more
             // than once. we do need to be careful here though: the fact that the source and
             // destination of a path are the same does *not* mean that the path is the same (b/c of
@@ -610,7 +609,6 @@ impl<'a> Plan<'a> {
                 // keep if this path is different
                 distinct_paths.insert(&paths[&p.tag])
             });
-            assert!(!self.pending.is_empty());
         } else {
             assert!(self.pending.is_empty());
         }

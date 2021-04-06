@@ -828,21 +828,17 @@ impl Materializations {
                 info!(self.log, "adding partial index to existing {:?}", n;
                       "node" => node.index(),
                       "cols" => ?index_on);
-                let log = self.log.new(o!("node" => node.index()));
-                let log = mem::replace(&mut self.log, log);
-                self.setup(node, &mut index_on, graph, domains, workers, replies)?;
-                self.log = log;
-                index_on.clear();
-            } else {
-                use dataflow::payload::InitialState;
-                domains.get_mut(&n.domain()).unwrap().send_to_healthy(
-                    Box::new(Packet::PrepareState {
-                        node: n.local_addr(),
-                        state: InitialState::IndexedLocal(index_on),
-                    }),
-                    workers,
-                )?;
             }
+            let log = self.log.new(o!("node" => node.index()));
+            let log = mem::replace(&mut self.log, log);
+            // We attempt to maintain the invariant that the materialization planner is always run
+            // for every new added index, because replays might need to be done (or replay paths
+            // set up, if we're partial).
+            // This is somewhat wasteful in some (fully materialized) cases, but it's a lot easier
+            // to reason about if all the replay decisions happen in the planner.
+            self.setup(node, &mut index_on, graph, domains, workers, replies)?;
+            self.log = log;
+            index_on.clear();
         }
 
         // then, we start prepping new nodes
