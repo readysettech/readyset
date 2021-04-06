@@ -2616,6 +2616,7 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    #[ignore] // find_and_merge_filter_aggregates currently disabled
     async fn it_merges_filter_and_sum() {
         // set up graph
         let mut g = integration::start_simple("it_merges_filter_and_sum").await;
@@ -2673,6 +2674,7 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    #[ignore] // find_and_merge_filter_aggregates currently disabled
     async fn it_merges_filter_and_sum_on_filter_column() {
         // set up graph
         let mut g = integration::start_simple("it_merges_filter_and_sum_on_filter_column").await;
