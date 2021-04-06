@@ -88,6 +88,7 @@ impl GroupedOperation for ExtremumOperator {
             DataType::UnsignedInt(n) => i128::from(n),
             DataType::BigInt(n) => i128::from(n),
             DataType::UnsignedBigInt(n) => i128::from(n),
+            DataType::Timestamp(ts) => ts.timestamp_nanos().into(),
             _ => {
                 // the column we're aggregating over is non-numerical (or rather, this value is).
                 // if you've removed a column, chances are the  default value has the wrong type.
