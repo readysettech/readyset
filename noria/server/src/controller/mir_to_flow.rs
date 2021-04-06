@@ -5,6 +5,7 @@ use nom_sql::{
 };
 use std::collections::HashMap;
 
+use super::sql::query_utils::is_aggregate;
 use crate::controller::Migration;
 use crate::errors::internal_err;
 use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
@@ -839,6 +840,17 @@ fn arithmetic_item_to_project_expression(
     arithmetic_item: &ArithmeticItem,
 ) -> ProjectExpression {
     match arithmetic_item {
+        ArithmeticItem::Base(ArithmeticBase::Column(nom_sql::Column {
+            function: Some(function),
+            ..
+        }))
+            // We don't want to turn aggregate functions into project expressions, since project
+            // expressions don't know how to handle them - instead, we leave them as columns so we
+            // can reference the result in the parent. I don't like that this is how this has to
+            // happen.
+            if !is_aggregate(function) => {
+                generate_project_expression(parent, Expression::Call(*(*function).clone()))
+            }
         ArithmeticItem::Base(ArithmeticBase::Column(ref column)) => {
             let column_id = parent
                 .borrow()

@@ -2,7 +2,7 @@ mod mir;
 mod passes;
 mod query_graph;
 mod query_signature;
-mod query_utils;
+pub(crate) mod query_utils;
 mod reuse;
 pub(super) mod security;
 
