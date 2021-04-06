@@ -16,7 +16,6 @@ use nom_sql::{
 };
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
-use std::cmp;
 use std::collections::{HashMap, HashSet};
 
 use std::ops::Deref;
@@ -228,8 +227,6 @@ impl SqlToMirConverter {
                     source.unwrap_or_else(|| parent.borrow_mut().add_column(c.clone()))
                 })
                 .collect();
-            let max_column_id = absolute_column_ids.iter().copied().max().unwrap_or(0);
-            let num_columns = cmp::max(columns.len(), max_column_id + 1);
 
             if let Some(pos) = columns
                 .iter()
@@ -241,17 +238,10 @@ impl SqlToMirConverter {
                 // aggregations.  We assume that the column is appended at the end, unless we
                 // have an aggregation, in which case it needs to go before the computed column,
                 // which is last.
-                let column: Column = col.clone().into();
-                match parent.borrow().inner {
-                    MirNodeType::Aggregation { .. } => {
-                        columns.insert(columns.len() - 1, column);
-                        num_columns - 1
-                    }
-                    _ => {
-                        columns.push(column);
-                        num_columns
-                    }
-                }
+                let col: Column = col.clone().into();
+                let pos = parent.borrow_mut().add_column(col.clone());
+                columns.insert(pos, col);
+                pos
             }
         };
 
