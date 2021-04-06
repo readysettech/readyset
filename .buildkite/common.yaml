@@ -13,7 +13,7 @@ steps:
     plugins:
       ecr#v2.2.0:
         login: true
-  
+
   - label: ':docker: Build prettier image'
     key: prettier-image
     commands:
@@ -84,11 +84,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build noria-logictest'
+  - label: ':rust: Check noria-logictest'
     key: build-noria-logictest
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-logictest
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria-logictest
     depends_on:
     - build-image
     plugins:
@@ -127,11 +127,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build query-generator'
+  - label: ':rust: Check query-generator'
     key: build-query-generator
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p query_generator
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p query_generator
     depends_on:
     - build-image
     plugins:
@@ -147,11 +147,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build taster'
+  - label: ':rust: Check taster'
     key: build-taster
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p taster
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p taster
     depends_on:
     - build-image
     plugins:
@@ -186,11 +186,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build launchpad'
+  - label: ':rust: Check launchpad'
     key: build-launchpad
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p launchpad
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p launchpad
     depends_on:
     - build-image
     plugins:
@@ -229,11 +229,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build nom-sql'
+  - label: ':rust: Check nom-sql'
     key: build-nom-sql
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p nom-sql
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p nom-sql
     depends_on:
     - build-image
     - build-launchpad
@@ -273,11 +273,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build unbounded-interval-tree'
+  - label: ':rust: Check unbounded-interval-tree'
     key: build-unbounded-interval-tree
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p unbounded-interval-tree
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p unbounded-interval-tree
     depends_on:
     - build-image
     - build-launchpad
@@ -318,11 +318,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build noria'
+  - label: ':rust: Check noria'
     key: build-noria
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
     depends_on:
     - build-image
     - build-nom-sql
@@ -366,11 +366,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build noria-client'
+  - label: ':rust: Check noria-client'
     key: build-noria-client
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-client
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria-client
     depends_on:
     - build-noria
     - build-nom-sql
@@ -411,11 +411,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build noria-client-adapter'
+  - label: ':rust: Check noria-client-adapter'
     key: build-noria-client-adapter
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-client-adapter
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria-client-adapter
     depends_on:
     - build-noria
     - build-nom-sql
@@ -434,11 +434,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build noria-mysql'
+  - label: ':rust: Check noria-mysql'
     key: build-noria-mysql
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-mysql
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria-mysql
     depends_on:
     - build-noria
     - build-nom-sql
@@ -478,11 +478,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build noria-psql'
+  - label: ':rust: Check noria-psql'
     key: build-noria-psql
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p noria-psql
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p noria-psql
     depends_on:
     - build-noria
     - build-nom-sql
@@ -544,11 +544,11 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Build debezium connector'
+  - label: ':rust: Check debezium connector'
     key: build-debezium-connector
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p debezium_connector
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p debezium_connector
     depends_on:
     - build-noria
     - build-image
@@ -585,11 +585,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build msql-srv'
+  - label: ':rust: Check msql-srv'
     key: build-msql-srv
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p msql-srv
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p msql-srv
     depends_on:
     - build-image
     plugins:
@@ -625,11 +625,11 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build psql-srv'
+  - label: ':rust: Check psql-srv'
     key: build-psql-srv
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build -v -p psql-srv
+    - 'echo +++ :rust: Running cargo check'
+    - RUSTFLAGS='-D warnings' cargo check -v -p psql-srv
     depends_on:
     - build-image
     plugins:

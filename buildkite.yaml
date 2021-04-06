@@ -151,8 +151,8 @@ steps:
               include:
                 - "ops/**"
 
-  - block: ":packer: Build Packer images?"
-    key: build-packer-images
+  - block: ":rocket: :rust: Build release binaries?"
+    key: build-release-binaries
     depends_on:
       - lint-commits
       - build-image
@@ -185,6 +185,85 @@ steps:
       - test-mssql-srv
       - build-psql-srv
       - test-psql-srv
+
+  - label: ':rust: Build noria-server release binary'
+    key: build-noria-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server
+    - strip target/release/noria-server
+    artifact_paths:
+    - target/release/noria-server
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Build noria-mysql release binary'
+    key: build-noria-mysql-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-mysql
+    - strip target/release/noria-mysql
+    artifact_paths:
+    - target/release/noria-mysql
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Build debezium_connector release binary'
+    key: build-debezium-connector-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin debezium_connector
+    - strip target/release/debezium_connector
+    artifact_paths:
+    - target/release/debezium_connector
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - block: ":packer: Build Packer images?"
+    key: build-packer-images
+    depends_on:
+      - build-noria-release
+      - build-noria-mysql-release
+      - build-debezium-connector-release
 
   - label: ':pipeline: Build Packer pipeline'
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
