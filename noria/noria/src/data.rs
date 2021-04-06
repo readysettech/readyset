@@ -2035,18 +2035,6 @@ mod tests {
         }
 
         #[proptest]
-        fn char_unequal_length(
-            #[strategy(1..30u16)] chlen: u16,
-            #[strategy("a{1,30}")]
-            #[filter(#chlen != u16::try_from(#text.len()).unwrap())]
-            text: String,
-        ) {
-            use SqlType::*;
-            let input = DataType::from(text.as_str());
-            assert!(input.coerce_to(&Char(chlen)).is_err());
-        }
-
-        #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             use SqlType::*;
             let input = DataType::from(text.as_str());

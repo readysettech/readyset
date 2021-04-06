@@ -604,6 +604,12 @@ impl ToMysqlValue for NaiveDateTime {
                 }
                 Ok(())
             }
+            ColumnType::MYSQL_TYPE_DATE => {
+                if self.time() != NaiveTime::from_hms(0, 0, 0) {
+                    return Err(bad(self, c));
+                }
+                self.date().to_mysql_bin(w, c)
+            }
             _ => Err(bad(self, c)),
         }
     }
