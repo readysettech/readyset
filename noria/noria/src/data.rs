@@ -294,7 +294,7 @@ impl DataType {
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(len)) => {
                 let actual_len = <&str>::from(self).len();
-                if actual_len == usize::from(*len) {
+                if actual_len <= usize::from(*len) {
                     Ok(Cow::Borrowed(self))
                 } else {
                     Err(mk_err(
