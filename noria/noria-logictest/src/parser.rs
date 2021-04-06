@@ -8,10 +8,14 @@
 
 use std::convert::TryInto;
 use std::io;
+use std::str::FromStr;
 
 use crate::ast::*;
+use msql_srv::MysqlTime;
+use noria::TIMESTAMP_FORMAT;
 
 use anyhow::{anyhow, bail, Context};
+use chrono::NaiveDateTime;
 use nom::character::complete::{
     alphanumeric1, anychar, digit1, line_ending, multispace1, not_line_ending,
 };
@@ -109,7 +113,9 @@ named!(
     alt!(
         tag!("T") => { |_| Type::Text } |
         tag!("I") => { |_| Type::Integer } |
-        tag!("R") => { |_| Type::Real }
+        tag!("R") => { |_| Type::Real } |
+        tag!("D") => { |_| Type::Date } |
+        tag!("M") => { |_| Type::Time }
     )
 );
 
@@ -157,7 +163,7 @@ named!(
         whole: flat_map!(digit1, parse_to!(i64))
             >> tag!(".")
             >> fractional: flat_map!(digit1, parse_to!(u32))
-            >> (Value::Real(whole, fractional))
+            >> (Value::Real(whole, fractional * 100_000_000))
     )
 );
 
@@ -178,11 +184,28 @@ named!(
 named!(
     value<Value>,
     alt!(
-        complete!(float) |
-        integer => { |i| Value::Integer(i) } |
-        tag!("NULL") => { |_| Value::Null } |
-        empty_string |
-        map_opt!(
+        terminated!(tag!("NULL"), line_ending) => { |_| Value::Null } |
+        terminated!(empty_string, line_ending) |
+        terminated!(complete!(float), line_ending) |
+        terminated!(integer, line_ending) => { |i| Value::Integer(i) } |
+        terminated!(map_opt!(
+            not_line_ending,
+            |s: &[u8]| {
+                Some(Value::Date(NaiveDateTime::parse_from_str(
+                    String::from_utf8_lossy(s).as_ref(),
+                    TIMESTAMP_FORMAT,
+                ).ok()?))
+            }
+        ), line_ending) |
+        terminated!(map_opt!(
+            not_line_ending,
+            |s: &[u8]| {
+                Some(Value::Time(MysqlTime::from_str(
+                    String::from_utf8_lossy(s).as_ref(),
+                ).ok()?))
+            }
+        ), line_ending) |
+        terminated!(map_opt!(
             not_line_ending,
             |s: &[u8]| {
                 if s.is_empty() {
@@ -191,7 +214,7 @@ named!(
                     String::from_utf8(s.into()).ok()
                 }
             }
-        ) => { |s| Value::Text(s) }
+        ), line_ending) => { |s| Value::Text(s) }
     )
 );
 
@@ -202,10 +225,7 @@ named!(
 
 named!(
     positional_params<QueryParams>,
-    map!(
-        many1!(terminated!(positional_param, line_ending)),
-        QueryParams::PositionalParams
-    )
+    map!(many1!(positional_param), QueryParams::PositionalParams)
 );
 
 named!(
@@ -223,7 +243,7 @@ named!(
 
 named!(
     numbered_params<QueryParams>,
-    map!(many1!(terminated!(numbered_param, line_ending)), |ps| {
+    map!(many1!(numbered_param), |ps| {
         QueryParams::NumberedParams(ps.into_iter().collect())
     })
 );
@@ -237,7 +257,7 @@ named!(
 named!(
     end_of_query_results<()>,
     alt!(
-        complete!(count!(line_ending, 2)) => { |_| () } |
+        complete!(line_ending) => { |_| () } |
         preceded!(opt!(many1!(line_ending)), eof!()) => { |_| () }
     )
 );
@@ -246,10 +266,10 @@ named!(
     query_results<QueryResults>,
     alt!(
         preceded!(line_ending, hash_results) |
-        many_till!(
-            complete!(preceded!(line_ending, value)),
+        preceded!(line_ending, many_till!(
+            complete!(value),
             end_of_query_results
-        ) => { |(vals, _)| QueryResults::Results(vals) }
+        )) => { |(vals, _)| QueryResults::Results(vals) }
     )
 );
 
@@ -397,12 +417,12 @@ mod tests {
 
     #[test]
     fn parse_negative_number_value() {
-        assert_eq!(value(b"-1").unwrap().1, Value::Integer(-1));
+        assert_eq!(value(b"-1\n").unwrap().1, Value::Integer(-1));
     }
 
     #[test]
     fn parse_empty_string() {
-        assert_eq!(value(b"(empty)").unwrap().1, Value::Text(String::new()));
+        assert_eq!(value(b"(empty)\n").unwrap().1, Value::Text(String::new()));
     }
 
     #[test]
@@ -487,7 +507,8 @@ SELECT a,
 133
 182
 1
-183";
+183
+";
         let result = complete(query)(input);
         assert_eq!(
             result.unwrap().1,
@@ -533,7 +554,8 @@ INSERT INTO t1(x) VALUES ('a')
 query T valuesort
 SELECT * FROM t1
 ----
-a";
+a
+";
         let result = complete(records)(input);
         assert_eq!(
             result.unwrap().1,
@@ -609,7 +631,8 @@ SELECT * FROM t1 WHERE id = ?
 ? = 1
 ----
 131
-1";
+1
+";
         let result = complete(query)(input);
         assert_eq!(
             result.unwrap().1,
@@ -632,7 +655,8 @@ SELECT * FROM t1 WHERE id = $1
 $1 = 1
 ----
 131
-1";
+1
+";
         let result = complete(query)(input);
         assert_eq!(
             result.unwrap().1,
@@ -662,7 +686,8 @@ SELECT * FROM t1
 ----
 123
 456
-789";
+789
+";
         let result = complete(records)(input);
         assert_eq!(
             result.unwrap().1,

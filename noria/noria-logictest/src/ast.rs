@@ -4,11 +4,17 @@
 
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::fmt::Display;
+use std::fmt::{self, Display};
+use std::str::FromStr;
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use ascii_utils::Check;
+use chrono::NaiveDate;
 use derive_more::{From, TryInto};
+use itertools::Itertools;
+use msql_srv::MysqlTime;
+use mysql::chrono::NaiveDateTime;
+use noria::TIMESTAMP_FORMAT;
 
 /// The expected result of a statement
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -46,6 +52,8 @@ pub enum Type {
     Text,
     Integer,
     Real,
+    Date,
+    Time,
 }
 
 impl Type {
@@ -57,17 +65,21 @@ impl Type {
             UInt(_) => Some(Self::Real),
             Float(_) => Some(Self::Real),
             Double(_) => Some(Self::Real),
-            _ => None,
+            Date(_, _, _, _, _, _, _) => Some(Self::Date),
+            Time(_, _, _, _, _, _) => Some(Self::Time),
+            NULL => None,
         }
     }
 }
 
 impl Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Text => write!(f, "Text"),
-            Self::Integer => write!(f, "Integer"),
-            Self::Real => write!(f, "Real"),
+            Self::Text => write!(f, "T"),
+            Self::Integer => write!(f, "I"),
+            Self::Real => write!(f, "R"),
+            Self::Date => write!(f, "D"),
+            Self::Time => write!(f, "M"),
         }
     }
 }
@@ -104,6 +116,8 @@ pub enum Value {
     Text(String),
     Integer(i64),
     Real(i64, u32),
+    Date(NaiveDateTime),
+    Time(MysqlTime),
     Null,
 }
 
@@ -127,8 +141,21 @@ impl TryFrom<mysql::Value> for Value {
                     (f.fract() * 1_000_000_000.0).round() as u32,
                 ))
             }
-            Date(_, _, _, _, _, _, _) => bail!("Invalid column value of type Date"),
-            Time(_, _, _, _, _, _) => bail!("Invalid column value of type Time"),
+            Date(y, mo, d, h, min, s, us) => Ok(Self::Date(
+                NaiveDate::from_ymd(y.into(), mo.into(), d.into()).and_hms_micro(
+                    h.into(),
+                    min.into(),
+                    s.into(),
+                    us.into(),
+                ),
+            )),
+            Time(neg, d, h, m, s, us) => Ok(Self::Time(MysqlTime::from_hmsus(
+                !neg,
+                (d * 24 + (h as u32)).try_into()?,
+                m,
+                s,
+                us.into(),
+            ))),
         }
     }
 }
@@ -140,6 +167,15 @@ impl From<Value> for mysql::Value {
             Value::Integer(x) => x.into(),
             Value::Real(i, f) => (i as f64 + (f64::from(f) / 1_000_000_000.0)).into(),
             Value::Null => mysql::Value::NULL,
+            Value::Date(dt) => mysql::Value::from(dt),
+            Value::Time(t) => mysql::Value::Time(
+                !t.is_positive(),
+                (t.hour() / 24).into(),
+                (t.hour() % 24) as _,
+                t.minutes(),
+                t.seconds(),
+                t.microseconds(),
+            ),
         }
     }
 }
@@ -163,7 +199,9 @@ impl Display for Value {
             }
             Self::Integer(i) => write!(f, "{}", i),
             Self::Real(whole, frac) => write!(f, "{}.{}", whole, &format!("{}", frac)[..3]),
+            Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
+            Self::Time(t) => write!(f, "{}", t),
         }
     }
 }
@@ -186,6 +224,8 @@ impl Value {
             Self::Text(_) => Some(Type::Text),
             Self::Integer(_) => Some(Type::Integer),
             Self::Real(_, _) => Some(Type::Real),
+            Self::Date(_) => Some(Type::Date),
+            Self::Time(_) => Some(Type::Time),
             Self::Null => None,
         }
     }
@@ -208,6 +248,16 @@ impl Value {
                     (f.fract() * 1_000_000_000.0).round() as u32,
                 ))
             }
+            Type::Date => Ok(Self::Date(mysql::from_value_opt(val)?)),
+            Type::Time => Ok(Self::Time(match val {
+                mysql::Value::Bytes(s) => {
+                    MysqlTime::from_str(std::str::from_utf8(&s)?).map_err(|e| anyhow!("{}", e))?
+                }
+                mysql::Value::Time(neg, d, h, m, s, us) => {
+                    MysqlTime::from_hmsus(!neg, ((d * 24) + h as u32).try_into()?, m, s, us.into())
+                }
+                _ => bail!("Could not convert {:?} to Time", val),
+            })),
         }
     }
 

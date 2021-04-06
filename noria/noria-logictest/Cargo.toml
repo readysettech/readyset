@@ -27,6 +27,7 @@ itertools = "0.10.0"
 ascii_utils = "0.9.3"
 slog = "2.7.0"
 maplit = "1.0.2"
+chrono = "0.4.19"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
