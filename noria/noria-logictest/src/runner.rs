@@ -21,7 +21,7 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
-use noria_server::Builder;
+use noria_server::{Builder, ReuseConfigType};
 
 use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
 use crate::parser;
@@ -42,6 +42,7 @@ pub struct RunOptions {
     pub mysql_port: u16,
     pub mysql_user: String,
     pub mysql_db: String,
+    pub disable_reuse: bool,
     pub verbose: bool,
 }
 
@@ -56,6 +57,7 @@ impl Default for RunOptions {
             mysql_port: 3306,
             mysql_user: "root".to_string(),
             mysql_db: "sqllogictest".to_string(),
+            disable_reuse: false,
             verbose: false,
         }
     }
@@ -142,18 +144,7 @@ impl TestScript {
             mysql::Conn::new(conn_opts).with_context(|| "connecting to noria-mysql")?
         };
 
-        for record in &self.records {
-            match record {
-                Record::Statement(stmt) => self
-                    .run_statement(stmt, &mut conn)
-                    .with_context(|| format!("Running statement {}", stmt.command))?,
-                Record::Query(query) => self
-                    .run_query(query, &mut conn)
-                    .with_context(|| format!("Running query {}", query.query))?,
-                Record::HashThreshold(_) => {}
-                Record::Halt => break,
-            }
-        }
+        self.run_on_mysql(&mut conn)?;
 
         println!(
             "{}",
@@ -165,6 +156,22 @@ impl TestScript {
             .bold()
         );
 
+        Ok(())
+    }
+
+    pub fn run_on_mysql(&self, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+        for record in &self.records {
+            match record {
+                Record::Statement(stmt) => self
+                    .run_statement(stmt, conn)
+                    .with_context(|| format!("Running statement {}", stmt.command))?,
+                Record::Query(query) => self
+                    .run_query(query, conn)
+                    .with_context(|| format!("Running query {}", query.query))?,
+                Record::HashThreshold(_) => {}
+                Record::Halt => break,
+            }
+        }
         Ok(())
     }
 
@@ -254,9 +261,8 @@ impl TestScript {
             QueryResults::Results(expected_vals) => {
                 if vals != *expected_vals {
                     bail!(
-                        "Incorrect values returned from query: \nexpected:\n{:#?}\ngot:\n{:#?}",
-                        expected_vals,
-                        vals
+                        "Incorrect values returned from query (left: expected, right: actual): \n{}",
+                        pretty_assertions::Comparison::new(expected_vals, &vals)
                     )
                 }
             }
@@ -276,11 +282,17 @@ impl TestScript {
         let n = run_opts.deployment_name.clone();
         let b = barrier.clone();
         let zk_addr = run_opts.zookeeper_addr();
+        let disable_reuse = run_opts.disable_reuse;
         thread::spawn(move || {
             let mut authority = ZookeeperAuthority::new(&format!("{}/{}", &zk_addr, n)).unwrap();
             let mut builder = Builder::default();
             authority.log_with(l.clone());
             builder.log_with(l);
+
+            if disable_reuse {
+                builder.set_reuse(ReuseConfigType::NoReuse)
+            }
+
             let mut rt = tokio::runtime::Runtime::new().unwrap();
             let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
             b.wait();
@@ -328,5 +340,10 @@ impl TestScript {
         });
 
         mysql::OptsBuilder::default().tcp_port(addr.port()).into()
+    }
+
+    /// Get a reference to the test script's records.
+    pub fn records(&self) -> &[Record] {
+        &self.records
     }
 }

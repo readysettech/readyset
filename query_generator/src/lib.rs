@@ -72,7 +72,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
     CreateTableStatement, FieldDefinitionExpression, FieldValueExpression, FunctionArgument,
     FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
-    Literal, LiteralExpression, SelectStatement, SqlType, Table,
+    Literal, LiteralExpression, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
 
@@ -110,7 +110,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
         SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
-        SqlType::Date => unimplemented!(),
+        SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
     }
@@ -200,12 +200,46 @@ impl From<ColumnName> for Column {
 pub struct TableSpec {
     pub name: TableName,
     pub columns: HashMap<ColumnName, SqlType>,
+    /// Columns that should *always* be unique
+    pub unique_columns: HashSet<ColumnName>,
     column_name_counter: u32,
 
     /// Values per column that should be present in that column at least some of the time.
     ///
     /// This is used to ensure that queries that filter on constant values get at least some results
     expected_values: HashMap<ColumnName, HashSet<DataType>>,
+}
+
+impl From<CreateTableStatement> for TableSpec {
+    fn from(stmt: CreateTableStatement) -> Self {
+        TableSpec {
+            name: stmt.table.name.into(),
+            columns: stmt
+                .fields
+                .into_iter()
+                .map(|field| (field.column.name.into(), field.sql_type))
+                .collect(),
+            unique_columns: stmt
+                .keys
+                .into_iter()
+                .flatten()
+                .flat_map(|k| match k {
+                    TableKey::PrimaryKey(ks)
+                    | TableKey::UniqueKey(_, ks)
+                      // HACK(grfn): To get foreign keys filled, we just mark them as unique, which
+                      // given that we (currently) generate the same number of rows for each table
+                      // means we're coincidentally guaranteed to get values matching the other side
+                      // of the fk. This isn't super robust (unsurprisingly) and should probably be
+                      // replaced with something smarter in the future.
+                    | TableKey::ForeignKey { columns: ks, .. } => ks,
+                    _ => vec![],
+                })
+                .map(|c| c.name.into())
+                .collect(),
+            column_name_counter: 0,
+            expected_values: Default::default(),
+        }
+    }
 }
 
 impl From<TableSpec> for CreateTableStatement {
@@ -234,6 +268,7 @@ impl TableSpec {
             columns: Default::default(),
             column_name_counter: 0,
             expected_values: Default::default(),
+            unique_columns: Default::default(),
         }
     }
 
@@ -280,21 +315,22 @@ impl TableSpec {
                 self.columns
                     .iter()
                     .map(|(col_name, col_type)| {
-                        (
-                            col_name,
+                        let value = if self.unique_columns.contains(col_name) {
+                            unique_value_of_type(col_type, n as _)
+                        } else if n % 2 == 0 {
                             // if we have expected values, yield them half the time
-                            if n % 2 == 0 {
-                                self.expected_values
-                                    .get(col_name)
-                                    .map(|vals| {
-                                        // yield an even distribution of the expected values
-                                        vals.iter().nth((n / 2) % vals.len()).unwrap().clone()
-                                    })
-                                    .unwrap_or_else(|| value_of_type(col_type))
-                            } else {
-                                value_of_type(col_type)
-                            },
-                        )
+                            self.expected_values
+                                .get(col_name)
+                                .map(|vals| {
+                                    // yield an even distribution of the expected values
+                                    vals.iter().nth((n / 2) % vals.len()).unwrap().clone()
+                                })
+                                .unwrap_or_else(|| value_of_type(col_type))
+                        } else {
+                            value_of_type(col_type)
+                        };
+
+                        (col_name, value)
                     })
                     .collect()
             })
@@ -317,6 +353,15 @@ impl GeneratorState {
         self.tables
             .entry(table_name)
             .or_insert_with_key(|tn| TableSpec::new(tn.clone()))
+    }
+
+    /// Returns a reference to the table with the given name, if it exists
+    pub fn table<'a, TN>(&'a self, name: &TN) -> Option<&'a TableSpec>
+    where
+        TableName: Borrow<TN>,
+        TN: Eq + Hash,
+    {
+        self.tables.get(name)
     }
 
     /// Returns a mutable reference to the table with the given name, if it exists
@@ -400,6 +445,23 @@ impl GeneratorState {
         num_rows: usize,
     ) -> Vec<HashMap<&ColumnName, DataType>> {
         self.tables[table_name].generate_data(num_rows)
+    }
+
+    /// Get a reference to the generator state's tables.
+    pub fn tables(&self) -> &HashMap<TableName, TableSpec> {
+        &self.tables
+    }
+}
+
+impl From<Vec<CreateTableStatement>> for GeneratorState {
+    fn from(stmts: Vec<CreateTableStatement>) -> Self {
+        GeneratorState {
+            tables: stmts
+                .into_iter()
+                .map(|stmt| (stmt.table.name.clone().into(), stmt.into()))
+                .collect(),
+            ..Default::default()
+        }
     }
 }
 

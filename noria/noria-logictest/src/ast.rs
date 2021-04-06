@@ -25,6 +25,15 @@ pub enum StatementResult {
     Error,
 }
 
+impl Display for StatementResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StatementResult::Ok => f.write_str("ok"),
+            StatementResult::Error => f.write_str("error"),
+        }
+    }
+}
+
 /// A conditional for either a [`Statement`] or a [`Query`]. Can be used to omit or include tests on
 /// specific database engines
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -33,6 +42,15 @@ pub enum Conditional {
     SkipIf(String),
     /// Only run this [`Statement`] or [`Query`] on the database engine with the given name.
     OnlyIf(String),
+}
+
+impl Display for Conditional {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Conditional::SkipIf(engine) => write!(f, "skipif {}", engine),
+            Conditional::OnlyIf(engine) => write!(f, "onlyif {}", engine),
+        }
+    }
 }
 
 /// Run a statement against the database engine
@@ -44,6 +62,28 @@ pub struct Statement {
     pub command: String,
     /// Optional list of [`Conditional`]s for the statement
     pub conditionals: Vec<Conditional>,
+}
+
+impl Statement {
+    pub fn ok(command: String) -> Self {
+        Self {
+            result: StatementResult::Ok,
+            command,
+            conditionals: vec![],
+        }
+    }
+}
+
+impl Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}\nstatement {}\n{}\n",
+            self.conditionals.iter().map(|c| c.to_string()).join("\n"),
+            self.result,
+            self.command
+        )
+    }
 }
 
 /// The type of a column in the result set of a [`Query`]
@@ -107,6 +147,16 @@ impl Default for SortMode {
     /// Returns [`Self::NoSort`]
     fn default() -> Self {
         Self::NoSort
+    }
+}
+
+impl Display for SortMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SortMode::NoSort => f.write_str("nosort"),
+            SortMode::RowSort => f.write_str("rowsort"),
+            SortMode::ValueSort => f.write_str("valuesort"),
+        }
     }
 }
 
@@ -181,7 +231,7 @@ impl From<Value> for mysql::Value {
 }
 
 impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Text(s) => {
                 if s.is_empty() {
@@ -279,6 +329,26 @@ pub enum QueryResults {
     Results(Vec<Value>),
 }
 
+impl QueryResults {
+    pub fn hash(vals: &[Value]) -> Self {
+        Self::Hash {
+            count: vals.len(),
+            digest: Value::hash_results(&vals),
+        }
+    }
+}
+
+impl Display for QueryResults {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            QueryResults::Hash { count, digest } => {
+                write!(f, "{} values hashing to {:x}", count, digest)
+            }
+            QueryResults::Results(results) => write!(f, "{}", results.iter().join("\n")),
+        }
+    }
+}
+
 /// The parameters passed to a prepared query, either positional or named
 #[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
 pub enum QueryParams {
@@ -305,6 +375,23 @@ impl QueryParams {
 impl Default for QueryParams {
     fn default() -> Self {
         QueryParams::PositionalParams(vec![])
+    }
+}
+
+impl Display for QueryParams {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            QueryParams::PositionalParams(ps) => {
+                write!(f, "{}", ps.iter().map(|p| format!("? = {}", p)).join("\n"))
+            }
+            QueryParams::NumberedParams(ps) => {
+                write!(
+                    f,
+                    "{}",
+                    ps.iter().map(|(n, p)| format!("${} = {}", n, p)).join("\n")
+                )
+            }
+        }
     }
 }
 
@@ -336,6 +423,21 @@ pub struct Query {
     pub params: QueryParams,
 }
 
+impl Display for Query {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}\nquery {} {}\n{}{}\n----\n{}",
+            self.conditionals.iter().join("\n"),
+            self.column_types.iter().join(""),
+            self.sort_mode.map_or("".to_owned(), |sm| sm.to_string()),
+            self.query,
+            self.params,
+            self.results,
+        )
+    }
+}
+
 /// Top level expression in a sqllogictest test script
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Record {
@@ -353,6 +455,17 @@ pub enum Record {
 
     /// Stop testing and halt immediately. Useful when debugging.
     Halt,
+}
+
+impl Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Record::Statement(s) => write!(f, "{}", s),
+            Record::Query(q) => write!(f, "{}", q),
+            Record::HashThreshold(ht) => write!(f, "hash-threshold {}\n", ht),
+            Record::Halt => f.write_str("halt\n"),
+        }
+    }
 }
 
 #[cfg(test)]

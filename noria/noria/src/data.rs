@@ -780,6 +780,30 @@ impl From<Literal> for DataType {
     }
 }
 
+impl From<DataType> for Literal {
+    fn from(dt: DataType) -> Self {
+        match dt {
+            DataType::None => Literal::Null,
+            DataType::Int(i) => Literal::Integer(i as _),
+            DataType::UnsignedInt(i) => Literal::UnsignedInteger(i as _),
+            DataType::BigInt(i) => Literal::Integer(i),
+            DataType::UnsignedBigInt(i) => Literal::Integer(i as _),
+            DataType::Real(integral, fractional) => Literal::FixedPoint(Real {
+                integral: integral as _,
+                fractional,
+            }),
+            DataType::Text(_) => Literal::String(dt.into()),
+            DataType::TinyText(_) => Literal::String(dt.into()),
+            DataType::Timestamp(_) => {
+                Literal::String(dt.coerce_to(&SqlType::Text).unwrap().as_ref().into())
+            }
+            DataType::Time(_) => {
+                Literal::String(dt.coerce_to(&SqlType::Text).unwrap().as_ref().into())
+            }
+        }
+    }
+}
+
 impl From<NaiveTime> for DataType {
     fn from(t: NaiveTime) -> Self {
         DataType::Time(Arc::new(t.into()))
@@ -1031,6 +1055,12 @@ impl From<&'_ DataType> for String {
     fn from(dt: &DataType) -> Self {
         let s: &str = dt.into();
         s.into()
+    }
+}
+
+impl From<DataType> for String {
+    fn from(dt: DataType) -> Self {
+        (&dt).into()
     }
 }
 
