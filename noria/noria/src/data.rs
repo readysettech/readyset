@@ -2,7 +2,7 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 
-use nom_sql::{Literal, SqlType};
+use nom_sql::{Literal, Real, SqlType};
 
 use std::borrow::Cow;
 use std::convert::TryFrom;
@@ -276,6 +276,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext), Text | Tinytext | Mediumtext) => {
                 Ok(Cow::Borrowed(self))
             }
+            (_, Some(Real), Float | Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
                 let actual_len = <&str>::from(self).len();
                 if actual_len <= (*max_len).into() {
@@ -351,6 +352,12 @@ impl DataType {
                     .map(Self::Time)
                     .map(Cow::Owned)
             }
+            (Self::Timestamp(ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
+                Ok(Cow::Owned(ts.format(TIMESTAMP_FORMAT).to_string().into()))
+            }
+            (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
+                Ok(Cow::Owned(ts.to_string().into()))
+            }
             (Self::Timestamp(ts), Some(Timestamp), Date) => {
                 Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
             }
@@ -362,6 +369,20 @@ impl DataType {
                     |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
                 )?)))
             }
+            (Self::BigInt(n), Some(Bigint(_)), Tinyint(_)) => Ok(Cow::Owned(
+                i8::try_from(*n)
+                    .map_err(|e| {
+                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                    })?
+                    .into(),
+            )),
+            (Self::BigInt(n), Some(Bigint(_)), UnsignedSmallint(_)) => Ok(Cow::Owned(
+                u16::try_from(*n)
+                    .map_err(|e| {
+                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                    })?
+                    .into(),
+            )),
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::from(self)))),
             (Self::Real(n, 0), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(i32::try_from(*n).map_err(
