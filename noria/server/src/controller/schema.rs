@@ -5,8 +5,6 @@ use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::ReadySetError;
 
-use slog;
-
 type Path = std::vec::Vec<(
     petgraph::graph::NodeIndex,
     std::vec::Vec<std::option::Option<usize>>,
@@ -23,20 +21,12 @@ fn type_for_internal_column(
     // column originates at internal view: literal, aggregation output
     // FIXME(malte): return correct type depending on what column does
     match *(*node) {
-        ops::NodeOperator::Project(ref o) => {
-            let emits = o.emits();
-            assert!(column_index >= emits.0.len());
-            if column_index < emits.0.len() + emits.2.len() {
-                // computed expression
-                // TODO(malte): trace the actual column types, since this could be a
-                // real-valued arithmetic operation
-                Ok(Some(SqlType::Bigint(64)))
-            } else {
-                // literal
-                let off = column_index - (emits.0.len() + emits.2.len());
-                Ok(emits.1[off].sql_type())
-            }
-        }
+        ops::NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
+            Ok(
+                column_schema(graph, next_node_on_path, recipe, parent_col, log)?
+                    .map(|cs| cs.sql_type),
+            )
+        }),
         ops::NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
             if column_index == node.fields().len() - 1 {

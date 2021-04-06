@@ -6,7 +6,7 @@ use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
-use noria::{DataType, ValueCoerceError};
+use noria::{DataType, ReadySetResult, ValueCoerceError};
 use std::fmt::Formatter;
 use std::ops::{Add, Sub};
 use std::sync::Arc;
@@ -329,6 +329,29 @@ impl ProjectExpression {
                         )))))
                     }
                 }
+            },
+        }
+    }
+
+    pub fn sql_type(
+        &self,
+        parent_column_type: impl Fn(usize) -> ReadySetResult<Option<SqlType>>,
+    ) -> ReadySetResult<Option<SqlType>> {
+        // TODO(grfn): Throughout this whole function we basically just assume everything
+        // typechecks, which isn't great - but when we actually have a typechecker it'll be
+        // attaching types to expressions ahead of time so this is just a stop-gap for now
+        match self {
+            ProjectExpression::Column(c) => parent_column_type(*c),
+            ProjectExpression::Literal(l) => Ok(l.sql_type()),
+            ProjectExpression::Op { left, .. } => left.sql_type(parent_column_type),
+            ProjectExpression::Cast(_, typ) => Ok(Some(typ.clone())),
+            ProjectExpression::Call(f) => match f {
+                BuiltinFunction::ConvertTZ(input, _, _) => input.sql_type(parent_column_type),
+                BuiltinFunction::DayOfWeek(_) => Ok(Some(SqlType::Int(32))),
+                BuiltinFunction::IfNull(_, y) => y.sql_type(parent_column_type),
+                BuiltinFunction::Month(_) => Ok(Some(SqlType::Int(32))),
+                BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
+                BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
             },
         }
     }
