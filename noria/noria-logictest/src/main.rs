@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};

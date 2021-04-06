@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(try_blocks)]
 
 #[macro_use]

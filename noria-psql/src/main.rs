@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use async_trait::async_trait;
 use noria_client::backend as cl;
 use noria_client_adapter::{ConnectionHandler, NoriaAdapter};

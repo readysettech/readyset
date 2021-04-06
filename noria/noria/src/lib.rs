@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 //! This create contains client bindings for [Noria](https://github.com/mit-pdos/noria).
 //!
 //! # What is Noria?

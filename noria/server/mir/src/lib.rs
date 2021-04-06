@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![deny(unused_extern_crates)]
 
 #[macro_use]

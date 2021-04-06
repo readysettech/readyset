@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use hdrhistogram::serialization::interval_log;
 use hdrhistogram::Histogram;
 use std::time::Duration;

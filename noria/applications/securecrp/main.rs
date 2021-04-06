@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 mod test_populate;
 
 use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};

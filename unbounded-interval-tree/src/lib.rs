@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 //! Implementation of an interval tree that works with inclusive/exclusive
 //! bounds, as well as unbounded intervals. It is based on the
 //! data structure described in Cormen et al.

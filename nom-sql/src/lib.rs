@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(or_patterns)]
 
 extern crate nom;

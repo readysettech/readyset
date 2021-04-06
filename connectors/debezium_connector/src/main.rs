@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 extern crate serde_json;
 #[macro_use]
 extern crate derive_more;

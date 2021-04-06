@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(
     bound_cloned,
     iter_order_by,

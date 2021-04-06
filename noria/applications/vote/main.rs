@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(type_alias_impl_trait)]
 #![deny(unused_must_use)]
 

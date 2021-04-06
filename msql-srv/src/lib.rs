@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 //! Bindings for emulating a MySQL/MariaDB server.
 //!
 //! When developing new databases or caching layers, it can be immensely useful to test your system
