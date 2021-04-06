@@ -256,7 +256,7 @@ mod tests {
                 vec!["a".into(), "agg".into()],
                 MirNodeType::Filter {
                     conditions: vec![(
-                        1,
+                        0,
                         FilterCondition::Comparison(
                             BinaryOperator::Equal,
                             Value::Constant(1.into()),
@@ -309,6 +309,12 @@ mod tests {
                 fil.borrow().columns(),
                 &[Column::from("c"), Column::from("a"), Column::from("agg")]
             );
+
+            // The filter has to filter on the correct field
+            match &fil.borrow().inner {
+                MirNodeType::Filter { conditions } => assert_eq!(conditions.first().unwrap().0, 1),
+                _ => unreachable!(),
+            };
         }
     }
 }
