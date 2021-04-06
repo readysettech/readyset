@@ -563,7 +563,7 @@ impl Serialize for MysqlTime {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("MysqlTime", 5)?;
-        state.serialize_field::<bool>("is_positive", &dbg!(self).is_positive())?;
+        state.serialize_field::<bool>("is_positive", &self.is_positive())?;
         state.serialize_field::<u16>("hour", &self.hour())?;
         state.serialize_field::<u8>("minutes", &self.minutes())?;
         state.serialize_field::<u8>("seconds", &self.seconds())?;
