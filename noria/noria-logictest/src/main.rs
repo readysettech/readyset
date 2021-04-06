@@ -7,9 +7,11 @@ use anyhow::{anyhow, Context};
 use clap::Clap;
 
 pub mod ast;
+pub mod generate;
 pub mod parser;
 pub mod runner;
 
+use crate::generate::Generate;
 use crate::runner::{RunOptions, TestScript};
 
 #[derive(Clap)]
@@ -22,13 +24,15 @@ struct Opts {
 enum Command {
     Parse(Parse),
     Verify(Verify),
+    Generate(Generate),
 }
 
 impl Command {
-    fn run(&self) -> anyhow::Result<()> {
+    fn run(self) -> anyhow::Result<()> {
         match self {
             Self::Parse(parse) => parse.run(),
             Self::Verify(verify) => verify.run(),
+            Self::Generate(generate) => generate.run(),
         }
     }
 }
@@ -137,6 +141,10 @@ struct Verify {
     #[clap(long, default_value = "sqllogictest")]
     mysql_db: String,
 
+    /// Disable query graph reuse
+    #[clap(long)]
+    no_reuse: bool,
+
     /// Enable logging in both noria and noria-mysql
     #[clap(long, short)]
     verbose: bool,
@@ -176,6 +184,7 @@ impl Into<RunOptions> for &Verify {
         opts.mysql_port = self.mysql_port;
         opts.mysql_db = self.mysql_db.clone();
         opts.verbose = self.verbose;
+        opts.disable_reuse = self.no_reuse;
         opts
     }
 }
