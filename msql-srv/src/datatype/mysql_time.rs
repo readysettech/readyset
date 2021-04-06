@@ -9,6 +9,7 @@ use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub};
 use std::str::FromStr;
+use thiserror::Error;
 
 const MICROSECS_IN_SECOND: i64 = 1_000_000;
 
@@ -24,6 +25,22 @@ const MAX_MYSQL_TIME_SECONDS: i64 = 3020399; // 3020399 secs = 838:59:59
 #[derive(Clone, Copy)]
 pub struct MysqlTime {
     duration: Duration,
+}
+
+/// Errors that can occur when converting various types into a [`MysqlTime`]
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ConvertError {
+    /// An error occurred when parsing a string into a [`MysqlTime`].
+    ///
+    /// In MySQL, these result in an all-zero time
+    #[error("Error parsing string as time")]
+    ParseError,
+
+    /// A [`MysqlTime`] was parsed successfully, but one of the fields was out of bounds.
+    ///
+    /// In MySQL, these result in a NULL value
+    #[error("{0}")]
+    OutOfBounds(String),
 }
 
 impl MysqlTime {
@@ -115,7 +132,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use msql_srv::{MysqlTime, datatype::ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -127,8 +144,8 @@ impl MysqlTime {
     ///     };
     /// }
     ///
-    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("not-timestamp".as_bytes()).unwrap(); // 00:00:00
-    /// assert_time!(mysql_time, true, 0, 0, 0, 0);
+    /// let result = MysqlTime::from_bytes("not-timestamp".as_bytes());
+    /// assert_eq!(result, Err(ConvertError::ParseError));
     ///
     /// let mysql_time: MysqlTime = MysqlTime::from_bytes("1112".as_bytes()).unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 0, 11, 12, 0);
@@ -138,18 +155,24 @@ impl MysqlTime {
     ///
     /// assert!(MysqlTime::from_bytes("60".as_bytes()).is_err());
     /// ```
-    pub fn from_bytes(bytes: &[u8]) -> Result<MysqlTime, String> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<MysqlTime, ConvertError> {
         let (positive, hour, minutes, seconds, microseconds) = parse::h_m_s_us(bytes)
             .map(|res| res.1)
-            .unwrap_or((true, 0, 0, 0, 0));
+            .map_err(|_| ConvertError::ParseError)?;
         if minutes > 59 {
-            return Err("Minutes can't be greater than 59".to_owned());
+            return Err(ConvertError::OutOfBounds(
+                "Minutes can't be greater than 59".to_owned(),
+            ));
         }
         if seconds > 59 {
-            return Err("Seconds can't be greater than 59".to_owned());
+            return Err(ConvertError::OutOfBounds(
+                "Seconds can't be greater than 59".to_owned(),
+            ));
         }
         if microseconds > 999_999 {
-            return Err("Microseconds can't be greater than 999999".to_owned());
+            return Err(ConvertError::OutOfBounds(
+                "Microseconds can't be greater than 999999".to_owned(),
+            ));
         }
         Ok(MysqlTime::from_hmsus(
             positive,
@@ -436,7 +459,7 @@ mod parse {
 }
 
 impl FromStr for MysqlTime {
-    type Err = String;
+    type Err = ConvertError;
 
     /// Attempts to parse a [`&str`] into a [`MysqlTime`], according to the parsing rules
     /// defined by [MySQL's TIME string](https://dev.mysql.com/doc/refman/8.0/en/time.html)
@@ -445,7 +468,7 @@ impl FromStr for MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use msql_srv::{MysqlTime, datatype::ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -457,8 +480,8 @@ impl FromStr for MysqlTime {
     ///     };
     /// }
     ///
-    /// let mysql_time: MysqlTime = "not-timestamp".parse().unwrap(); // 00:00:00
-    /// assert_time!(mysql_time, true, 0, 0, 0, 0);
+    /// let result: Result<MysqlTime, _> = "not-timestamp".parse();
+    /// assert_eq!(result, Err(ConvertError::ParseError));
     ///
     /// let mysql_time: MysqlTime = "1112".parse().unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 0, 11, 12, 0);
@@ -490,7 +513,7 @@ impl From<NaiveTime> for MysqlTime {
 macro_rules! impl_try_from_num {
     ( $x:ty ) => {
         impl TryFrom<$x> for MysqlTime {
-            type Error = String;
+            type Error = ConvertError;
 
             fn try_from(value: $x) -> Result<Self, Self::Error> {
                 MysqlTime::from_str(format!("{:.6}", value).as_str())
@@ -1201,8 +1224,8 @@ mod tests {
 
         #[test]
         fn from_str_non_timestamp() {
-            let mysql_time = MysqlTime::from_str("banana").unwrap();
-            assert_time!(mysql_time, true, 0, 0, 0, 0);
+            let result = MysqlTime::from_str("banana");
+            assert_eq!(result, Err(ConvertError::ParseError));
         }
     }
 

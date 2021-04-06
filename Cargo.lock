@@ -2923,6 +2923,7 @@ dependencies = [
  "serde_test",
  "slab",
  "test-strategy",
+ "thiserror",
  "time 0.2.7",
  "tokio 0.2.25",
 ]

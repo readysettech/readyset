@@ -329,25 +329,21 @@ impl DataType {
                     })
                     .map(Cow::Owned)
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => <&str>::from(self)
-                .parse()
-                .map_err(|e: String| {
-                    mk_err(
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
+                match <&str>::from(self).parse() {
+                    Ok(t) => Ok(Cow::Owned(Self::Time(Arc::new(t)))),
+                    Err(msql_srv::datatype::ConvertError::ParseError) => {
+                        Ok(Cow::Owned(Self::Time(Arc::new(Default::default()))))
+                    }
+                    Err(e) => Err(mk_err(
                         "Could not parse value as time".to_owned(),
-                        Some(anyhow::Error::msg(e)),
-                    )
-                })
-                .map(Arc::new)
-                .map(Self::Time)
-                .map(Cow::Owned),
+                        Some(e.into()),
+                    )),
+                }
+            }
             (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
                 MysqlTime::try_from(<f64>::from(self))
-                    .map_err(|e: String| {
-                        mk_err(
-                            "Could not parse value as time".to_owned(),
-                            Some(anyhow::Error::msg(e)),
-                        )
-                    })
+                    .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
                     .map(Arc::new)
                     .map(Self::Time)
                     .map(Cow::Owned)
