@@ -8,10 +8,10 @@ use std::rc::Rc;
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef};
 use common::DataType;
-use dataflow::ops;
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
+use dataflow::ops::{self, filter};
 use std::collections::HashMap;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
@@ -217,7 +217,7 @@ impl MirNode {
             self.columns.len()
         };
 
-        self.inner.add_column(c);
+        self.inner.insert_column(pos, c);
 
         pos
     }
@@ -551,7 +551,7 @@ impl MirNodeType {
         format!("{:?}", self)
     }
 
-    fn add_column(&mut self, c: Column) {
+    fn insert_column(&mut self, pos: usize, c: Column) {
         match *self {
             MirNodeType::Aggregation {
                 ref mut group_by, ..
@@ -564,7 +564,25 @@ impl MirNodeType {
             } => {
                 group_by.push(c);
             }
-            MirNodeType::Filter { .. } => {}
+            MirNodeType::Filter { ref mut conditions } => {
+                // If we've added a column before the column index referenced in any of our
+                // conditions, shift those over
+                //
+                // TODO(grfn): This is really brittle, and would be a lot easier if filters in MIR
+                // used names instead of indices
+                for (c, val) in conditions.iter_mut() {
+                    if *c >= pos {
+                        *c += 1;
+                    }
+
+                    match val {
+                        FilterCondition::Comparison(_, filter::Value::Column(c)) if *c >= pos => {
+                            *c += 1
+                        }
+                        FilterCondition::Comparison(_, _) | FilterCondition::In(_) => {}
+                    }
+                }
+            }
             MirNodeType::FilterAggregation {
                 ref mut group_by, ..
             } => {
@@ -1098,159 +1116,241 @@ impl Debug for MirNodeType {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::{MirNode, MirNodeType};
-    use crate::Column;
-    use nom_sql::{ColumnSpecification, SqlType};
+    use super::*;
 
-    // tests the simple case where the child column has no alias, therefore mapping to the parent
-    // column with the same name
-    #[test]
-    fn find_source_for_child_column_with_no_alias() {
-        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-            (
-                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
-                None,
-            )
-        };
+    mod find_source_for_child_column {
+        use crate::node::{MirNode, MirNodeType};
+        use crate::Column;
+        use nom_sql::{ColumnSpecification, SqlType};
 
-        let parent_columns = vec![Column::from("c1"), Column::from("c2"), Column::from("c3")];
+        // tests the simple case where the child column has no alias, therefore mapping to the parent
+        // column with the same name
+        #[test]
+        fn with_no_alias() {
+            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+                (
+                    ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                    None,
+                )
+            };
 
-        let a = MirNode {
-            name: "a".to_string(),
-            from_version: 0,
-            columns: parent_columns,
-            inner: MirNodeType::Base {
-                column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
-                keys: vec![Column::from("c1")],
-                adapted_over: None,
-            },
-            ancestors: vec![],
-            children: vec![],
-            flow_node: None,
-        };
+            let parent_columns = vec![Column::from("c1"), Column::from("c2"), Column::from("c3")];
 
-        let child_column = Column::from("c3");
+            let a = MirNode {
+                name: "a".to_string(),
+                from_version: 0,
+                columns: parent_columns,
+                inner: MirNodeType::Base {
+                    column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
+                    keys: vec![Column::from("c1")],
+                    adapted_over: None,
+                },
+                ancestors: vec![],
+                children: vec![],
+                flow_node: None,
+            };
 
-        let idx = a
-            .find_source_for_child_column(&child_column, Option::None)
-            .unwrap();
-        assert_eq!(2, idx);
-    }
+            let child_column = Column::from("c3");
 
-    // tests the case where the child column has an alias, therefore mapping to the parent
-    // column with the same name as the alias
-    #[test]
-    fn find_source_for_child_column_with_alias() {
-        let c1 = Column {
-            table: Some("table".to_string()),
-            name: "c1".to_string(),
-            function: None,
-            aliases: vec![],
-        };
-        let c2 = Column {
-            table: Some("table".to_string()),
-            name: "c2".to_string(),
-            function: None,
-            aliases: vec![],
-        };
-        let c3 = Column {
-            table: Some("table".to_string()),
-            name: "c3".to_string(),
-            function: None,
-            aliases: vec![],
-        };
+            let idx = a
+                .find_source_for_child_column(&child_column, Option::None)
+                .unwrap();
+            assert_eq!(2, idx);
+        }
 
-        let child_column = Column {
-            table: Some("table".to_string()),
-            name: "child".to_string(),
-            function: None,
-            aliases: vec![Column {
+        // tests the case where the child column has an alias, therefore mapping to the parent
+        // column with the same name as the alias
+        #[test]
+        fn with_alias() {
+            let c1 = Column {
+                table: Some("table".to_string()),
+                name: "c1".to_string(),
+                function: None,
+                aliases: vec![],
+            };
+            let c2 = Column {
+                table: Some("table".to_string()),
+                name: "c2".to_string(),
+                function: None,
+                aliases: vec![],
+            };
+            let c3 = Column {
                 table: Some("table".to_string()),
                 name: "c3".to_string(),
                 function: None,
                 aliases: vec![],
-            }],
-        };
+            };
 
-        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-            (
-                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
-                None,
-            )
-        };
-
-        let parent_columns = vec![c1, c2, c3];
-
-        let a = MirNode {
-            name: "a".to_string(),
-            from_version: 0,
-            columns: parent_columns,
-            inner: MirNodeType::Base {
-                column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
-                keys: vec![Column::from("c1")],
-                adapted_over: None,
-            },
-            ancestors: vec![],
-            children: vec![],
-            flow_node: None,
-        };
-
-        let idx = a
-            .find_source_for_child_column(&child_column, Option::None)
-            .unwrap();
-        assert_eq!(2, idx);
-    }
-
-    // tests the case where the child column is named the same thing as a parent column BUT has an alias.
-    // Typically, this alias would map to a different parent column however for testing purposes
-    // that column is missing here to ensure it will not match with the wrong column.
-    #[test]
-    fn find_source_for_child_column_with_alias_to_parent_column() {
-        let c1 = Column {
-            table: Some("table".to_string()),
-            name: "c1".to_string(),
-            function: None,
-            aliases: vec![],
-        };
-
-        let child_column = Column {
-            table: Some("table".to_string()),
-            name: "c1".to_string(),
-            function: None,
-            aliases: vec![Column {
+            let child_column = Column {
                 table: Some("table".to_string()),
-                name: "other_name".to_string(),
+                name: "child".to_string(),
+                function: None,
+                aliases: vec![Column {
+                    table: Some("table".to_string()),
+                    name: "c3".to_string(),
+                    function: None,
+                    aliases: vec![],
+                }],
+            };
+
+            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+                (
+                    ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                    None,
+                )
+            };
+
+            let parent_columns = vec![c1, c2, c3];
+
+            let a = MirNode {
+                name: "a".to_string(),
+                from_version: 0,
+                columns: parent_columns,
+                inner: MirNodeType::Base {
+                    column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
+                    keys: vec![Column::from("c1")],
+                    adapted_over: None,
+                },
+                ancestors: vec![],
+                children: vec![],
+                flow_node: None,
+            };
+
+            let idx = a
+                .find_source_for_child_column(&child_column, Option::None)
+                .unwrap();
+            assert_eq!(2, idx);
+        }
+
+        // tests the case where the child column is named the same thing as a parent column BUT has an alias.
+        // Typically, this alias would map to a different parent column however for testing purposes
+        // that column is missing here to ensure it will not match with the wrong column.
+        #[test]
+        fn with_alias_to_parent_column() {
+            let c1 = Column {
+                table: Some("table".to_string()),
+                name: "c1".to_string(),
                 function: None,
                 aliases: vec![],
-            }],
-        };
+            };
 
-        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-            (
-                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
-                None,
+            let child_column = Column {
+                table: Some("table".to_string()),
+                name: "c1".to_string(),
+                function: None,
+                aliases: vec![Column {
+                    table: Some("table".to_string()),
+                    name: "other_name".to_string(),
+                    function: None,
+                    aliases: vec![],
+                }],
+            };
+
+            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+                (
+                    ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
+                    None,
+                )
+            };
+
+            let parent_columns = vec![c1];
+
+            let a = MirNode {
+                name: "a".to_string(),
+                from_version: 0,
+                columns: parent_columns,
+                inner: MirNodeType::Base {
+                    column_specs: vec![cspec("c1")],
+                    keys: vec![Column::from("c1")],
+                    adapted_over: None,
+                },
+                ancestors: vec![],
+                children: vec![],
+                flow_node: None,
+            };
+
+            assert_eq!(
+                a.find_source_for_child_column(&child_column, Option::None),
+                None
+            );
+        }
+    }
+
+    mod add_column {
+        use dataflow::ops::filter::Value;
+
+        use super::*;
+
+        fn setup_filter(cond: (usize, FilterCondition)) -> MirNodeRef {
+            let parent = MirNode::new(
+                "parent",
+                0,
+                vec!["x".into(), "agg".into()],
+                MirNodeType::Aggregation {
+                    on: "z".into(),
+                    group_by: vec!["x".into()],
+                    kind: AggregationKind::COUNT,
+                },
+                vec![],
+                vec![],
+            );
+
+            // σ [x = 1]
+            MirNode::new(
+                "filter",
+                0,
+                vec!["x".into(), "agg".into()],
+                MirNodeType::Filter {
+                    conditions: vec![cond],
+                },
+                vec![parent],
+                vec![],
             )
-        };
+        }
 
-        let parent_columns = vec![c1];
+        #[test]
+        fn filter_reorders_condition_lhs() {
+            let node = setup_filter((
+                1,
+                FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(1.into())),
+            ));
 
-        let a = MirNode {
-            name: "a".to_string(),
-            from_version: 0,
-            columns: parent_columns,
-            inner: MirNodeType::Base {
-                column_specs: vec![cspec("c1")],
-                keys: vec![Column::from("c1")],
-                adapted_over: None,
-            },
-            ancestors: vec![],
-            children: vec![],
-            flow_node: None,
-        };
+            node.borrow_mut().add_column("y".into());
 
-        assert_eq!(
-            a.find_source_for_child_column(&child_column, Option::None),
-            None
-        );
+            assert_eq!(
+                node.borrow().columns(),
+                vec![Column::from("x"), Column::from("y"), Column::from("agg")]
+            );
+            match &node.borrow().inner {
+                MirNodeType::Filter { conditions } => {
+                    assert_eq!(conditions[0].0, 2);
+                }
+                _ => unreachable!(),
+            };
+        }
+
+        #[test]
+        fn filter_reorders_condition_comparison_rhs() {
+            let node = setup_filter((
+                0,
+                FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(1)),
+            ));
+
+            node.borrow_mut().add_column("y".into());
+
+            assert_eq!(
+                node.borrow().columns(),
+                vec![Column::from("x"), Column::from("y"), Column::from("agg")]
+            );
+            match &node.borrow().inner {
+                MirNodeType::Filter { conditions } => {
+                    assert_eq!(
+                        conditions[0].1,
+                        FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(2))
+                    );
+                }
+                _ => unreachable!(),
+            };
+        }
     }
 }
