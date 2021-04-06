@@ -1,5 +1,6 @@
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
+use itertools::Itertools;
 use std::fmt;
 
 impl fmt::Debug for Node {
@@ -161,7 +162,11 @@ impl Node {
                         Self::escape(self.name()),
                         "B",
                         materialized,
-                        self.fields().join(", \\n"),
+                        self.fields()
+                            .iter()
+                            .enumerate()
+                            .map(|(i, f)| format!("{}: {}", i, f))
+                            .join(", \\n"),
                         sharding
                     ));
                 }
@@ -205,7 +210,14 @@ impl Node {
                     ));
 
                     // Output node outputs. Second row.
-                    s.push_str(&format!(" | {}", self.fields().join(", \\n")));
+                    s.push_str(&format!(
+                        " | {}",
+                        self.fields()
+                            .iter()
+                            .enumerate()
+                            .map(|(i, f)| format!("{}: {}", i, f))
+                            .join(", \\n"),
+                    ));
                     s.push_str(&format!(" | {}", sharding));
                     s.push_str("}");
                 }
