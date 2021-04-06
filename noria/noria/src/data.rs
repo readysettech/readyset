@@ -459,6 +459,42 @@ impl DataType {
             }),
         }
     }
+
+    /// Returns Some(&self) if self is not [`DataType::None`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noria::DataType;
+    ///
+    /// assert_eq!(DataType::Int(12).non_null(), Some(&DataType::Int(12)));
+    /// assert_eq!(DataType::None.non_null(), None);
+    /// ```
+    pub fn non_null(&self) -> Option<&Self> {
+        if self.is_none() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    /// Returns Some(self) if self is not [`DataType::None`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noria::DataType;
+    ///
+    /// assert_eq!(DataType::Int(12).into_non_null(), Some(DataType::Int(12)));
+    /// assert_eq!(DataType::None.into_non_null(), None);
+    /// ```
+    pub fn into_non_null(self) -> Option<Self> {
+        if self.is_none() {
+            None
+        } else {
+            Some(self)
+        }
+    }
 }
 
 impl PartialEq for DataType {

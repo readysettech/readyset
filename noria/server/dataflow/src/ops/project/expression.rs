@@ -200,6 +200,16 @@ macro_rules! get_time_or_default {
     };
 }
 
+macro_rules! non_null {
+    ($datatype:expr) => {
+        if let Some(dt) = $datatype.non_null() {
+            dt
+        } else {
+            return Ok(Cow::Owned(DataType::None));
+        }
+    };
+}
+
 impl ProjectExpression {
     /// Evaluate a [`ProjectExpression`] given a source record to pull columns from
     pub fn eval<'a>(&self, record: &'a [DataType]) -> Result<Cow<'a, DataType>, EvalError> {
@@ -215,15 +225,21 @@ impl ProjectExpression {
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
                 match op {
-                    ArithmeticOperator::Add => Ok(Cow::Owned(left.as_ref() + right.as_ref())),
-                    ArithmeticOperator::Subtract => Ok(Cow::Owned(left.as_ref() - right.as_ref())),
-                    ArithmeticOperator::Multiply => Ok(Cow::Owned(left.as_ref() * right.as_ref())),
-                    ArithmeticOperator::Divide => Ok(Cow::Owned(left.as_ref() / right.as_ref())),
+                    ArithmeticOperator::Add => Ok(Cow::Owned(non_null!(left) + non_null!(right))),
+                    ArithmeticOperator::Subtract => {
+                        Ok(Cow::Owned(non_null!(left) - non_null!(right)))
+                    }
+                    ArithmeticOperator::Multiply => {
+                        Ok(Cow::Owned(non_null!(left) * non_null!(right)))
+                    }
+                    ArithmeticOperator::Divide => {
+                        Ok(Cow::Owned(non_null!(left) / non_null!(right)))
+                    }
                 }
             }
             Cast(expr, ty) => match expr.eval(record)? {
                 Cow::Borrowed(val) => Ok(val.coerce_to(ty)?),
-                Cow::Owned(val) => Ok(Cow::Owned(val.coerce_to(ty)?.into_owned())),
+                Cow::Owned(val) => Ok(Cow::Owned(non_null!(val).coerce_to(ty)?.into_owned())),
             },
             Call(func) => match func {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
@@ -262,7 +278,7 @@ impl ProjectExpression {
                     let param = arg.eval(record)?;
                     let param_cast = try_cast_or_none!(param, &SqlType::Date);
                     Ok(Cow::Owned(DataType::UnsignedInt(
-                        month(&(param_cast.as_ref().into())) as u32,
+                        month(&non_null!(param_cast).into()) as u32,
                     )))
                 }
                 BuiltinFunction::Timediff(arg1, arg2) => {
@@ -780,6 +796,15 @@ mod tests {
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))))
+        );
+    }
+
+    #[test]
+    fn month_null() {
+        let expr = Call(BuiltinFunction::Month(Box::new(Column(0))));
+        assert_eq!(
+            expr.eval(&[DataType::None]).unwrap(),
+            Cow::Owned(DataType::None)
         );
     }
 
