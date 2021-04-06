@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![allow(clippy::many_single_char_names)]
 
 use clap::{value_t_or_exit, App, Arg};

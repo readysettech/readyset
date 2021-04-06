@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 extern crate nom_sql;
 
 use std::fs::File;

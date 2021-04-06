@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use noria::Builder;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

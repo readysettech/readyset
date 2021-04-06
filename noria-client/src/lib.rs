@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(box_syntax, box_patterns)]
 #![feature(nll)]
 #![feature(allow_fail)]

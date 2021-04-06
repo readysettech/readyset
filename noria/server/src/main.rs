@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use clap::value_t_or_exit;
 use futures_util::future::{self, Either};
 use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};

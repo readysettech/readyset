@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 const WRITE_BATCH_SIZE: usize = 1000;
 
 #[path = "../vote/clients/localsoup/graph.rs"]

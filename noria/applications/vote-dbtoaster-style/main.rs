@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #[path = "../vote/clients/localsoup/graph.rs"]
 mod graph;
 

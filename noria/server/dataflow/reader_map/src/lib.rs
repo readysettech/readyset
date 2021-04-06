@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 //! A lock-free, eventually consistent, concurrent multi-value map.
 //!
 //! This map implementation allows reads and writes to execute entirely in parallel, with no

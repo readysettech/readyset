@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 pub mod backend;
 mod error;
 mod response;

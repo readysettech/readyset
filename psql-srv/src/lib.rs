@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![feature(associated_type_bounds)]
 
 mod bytes;

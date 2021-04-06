@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 //! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
 //!
 //! The intent of this library is to be used to automatically and *deterministically* generate an
