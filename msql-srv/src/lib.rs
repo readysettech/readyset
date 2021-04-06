@@ -118,7 +118,7 @@ pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 mod authentication;
 mod commands;
 mod constants;
-mod datatype;
+pub mod datatype;
 mod errorcodes;
 mod packet;
 mod params;
