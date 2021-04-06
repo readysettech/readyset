@@ -201,6 +201,7 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
+use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use tokio_tower::multiplex;
@@ -346,10 +347,11 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         DataType::UnsignedInt(n) => n as usize % shards,
         DataType::BigInt(n) => n as usize % shards,
         DataType::UnsignedBigInt(n) => n as usize % shards,
-        DataType::Text(..) | DataType::TinyText(..) => {
+        DataType::Text(..) | DataType::TinyText(..) | DataType::Timestamp(..) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
-            let s: &str = dt.into();
+            let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
+            let s: &str = str_dt.as_ref().into();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
         }
