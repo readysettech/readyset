@@ -212,13 +212,31 @@ pub fn bad_request_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::BadRequest(err.into())
 }
 
+/// Renders information about the current source location *if* building in debug mode, for use in
+/// error-generating macros
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __location_info {
+    () => {
+        $crate::__location_info!(" (in {})")
+    };
+    ($fstr: literal) => {
+        if cfg!(debug) {
+            format!(
+                $fstr,
+                format!("{}:{}:{}", std::file!(), std::line!(), std::column!(),)
+            )
+        } else {
+            "".to_owned()
+        }
+    };
+}
+
 /// Return a [`ReadySetError::Internal`] from the current function.
 ///
-/// Usage is like [`panic!`], in that you can pass a format string and arguments.
-/// The returned error also captures file, line, and column information for further
+/// Usage is like [`panic!`], in that you can pass a format string and arguments.  When building in
+/// debug mode, the returned error also captures file, line, and column information for further
 /// debugging purposes.
-///
-/// (TODO(eta): make the file/line info configurably disableable)
 ///
 /// When called with no arguments, generates an internal error with the text
 /// "entered unreachable code".
@@ -229,10 +247,8 @@ macro_rules! internal {
     };
     ($($tt:tt)*) => {
         return Err($crate::errors::internal_err(format!(
-            "in {}:{}:{}: {}",
-            std::file!(),
-            std::line!(),
-            std::column!(),
+            "{}{}",
+            $crate::__location_info!("in {}: "),
             format_args!($($tt)*)
         )).into());
     };
@@ -241,10 +257,8 @@ macro_rules! internal {
 /// Return a [`ReadySetError::Unsupported`] from the current function.
 ///
 /// Usage is like [`panic!`], in that you can pass a format string and arguments.
-/// The returned error also captures file, line, and column information for further
-/// debugging purposes.
-///
-/// (TODO(eta): make the file/line info configurably disableable)
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for further debugging purposes.
 ///
 /// When called with no arguments, generates an internal error with the text
 /// "operation not implemented yet".
@@ -255,11 +269,9 @@ macro_rules! unsupported {
     };
     ($($tt:tt)*) => {
         return Err($crate::errors::unsupported_err(format!(
-            "{} (in {}:{}:{})",
+            "{}{}",
             format_args!($($tt)*),
-            std::file!(),
-            std::line!(),
-            std::column!(),
+            $crate::__location_info!()
         )).into());
     };
 }
@@ -362,8 +374,8 @@ pub fn table_err<A: Into<String>, B: Into<ReadySetError>>(name: A, err: B) -> Re
 /// argument into a [`ReadySetError::RpcFailed`] with the given `during` argument (anything
 /// that implements `Display`).
 ///
-/// The `during` argument generated also captures file, line, and column information for further
-/// debugging purposes.
+/// When building in debug mode, the `during` argument generated also captures file, line, and
+/// column information for further debugging purposes.
 ///
 /// # Example
 ///
@@ -374,18 +386,7 @@ pub fn table_err<A: Into<String>, B: Into<ReadySetError>>(name: A, err: B) -> Re
 #[macro_export]
 macro_rules! rpc_err {
     ($during:expr) => {
-        |e| {
-            $crate::errors::rpc_err(
-                format!(
-                    "{} (in {}:{}:{})",
-                    $during,
-                    std::file!(),
-                    std::line!(),
-                    std::column!(),
-                ),
-                e,
-            )
-        }
+        |e| $crate::errors::rpc_err(format!("{}{}", $during, $crate::__location_info!()), e)
     };
 }
 
