@@ -1328,30 +1328,33 @@ impl SqlToMirConverter {
                 _ => unsupported!("no multi-level joins yet"),
             };
 
-            // don't duplicate the join column in the output, but instead add aliases to the columns
-            // that represent it going forward (viz., the left-side join column)
-            l_col.add_alias(&r_col);
-            // add the alias to all instances of `l_col` in `fields` (there might be more than one
-            // if `l_col` is explicitly projected multiple times)
-            fields = fields
-                .into_iter()
-                .filter_map(|mut f| {
-                    if f == r_col {
-                        // drop instances of right-side column
-                        None
-                    } else if f == l_col {
-                        // add alias for right-side column to any left-side column
-                        // N.B.: since `l_col` is already aliased, need to check this *after*
-                        // checking for equivalence with `r_col` (by now, `l_col` == `r_col` via
-                        // alias), so `f == l_col` also triggers if `f` is in `l_col.aliases`.
-                        f.add_alias(&r_col);
-                        Some(f)
-                    } else {
-                        // keep unaffected columns
-                        Some(f)
-                    }
-                })
-                .collect();
+            if kind == JoinType::Inner {
+                // for inner joins, don't duplicate the join column in the output, but instead add
+                // aliases to the columns that represent it going forward (viz., the left-side join
+                // column)
+                l_col.add_alias(&r_col);
+                // add the alias to all instances of `l_col` in `fields` (there might be more than one
+                // if `l_col` is explicitly projected multiple times)
+                fields = fields
+                    .into_iter()
+                    .filter_map(|mut f| {
+                        if f == r_col {
+                            // drop instances of right-side column
+                            None
+                        } else if f == l_col {
+                            // add alias for right-side column to any left-side column
+                            // N.B.: since `l_col` is already aliased, need to check this *after*
+                            // checking for equivalence with `r_col` (by now, `l_col` == `r_col` via
+                            // alias), so `f == l_col` also triggers if `f` is in `l_col.aliases`.
+                            f.add_alias(&r_col);
+                            Some(f)
+                        } else {
+                            // keep unaffected columns
+                            Some(f)
+                        }
+                    })
+                    .collect();
+            }
 
             left_join_columns.push(l_col);
             right_join_columns.push(r_col);
