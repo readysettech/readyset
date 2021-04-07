@@ -19,7 +19,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use noria::consensus::LocalAuthority;
-use noria::metrics::MetricsDump;
+use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
 use noria_server::metrics::NoriaMetricsRecorder;
 use noria_server::{DurabilityMode, PersistenceParameters};
@@ -204,11 +204,11 @@ pub struct Benchmark {
 
 fn total_upquery_time_us(m: &MetricsDump) -> usize {
     [
-        "domain.handle_replay_time_us",
-        "domain.reader_replay_request_time_us",
-        "domain.seed_replay_time_us",
-        "domain.finish_replay_time_us",
-        "domain.seed_all_time_us",
+        recorded::DOMAIN_TOTAL_REPLAY_TIME,
+        recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
+        recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
+        recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
+        recorded::DOMAIN_TOTAL_SEED_ALL_TIME,
     ]
     .iter()
     .map(|metric| m.total(*metric).unwrap_or(0f64).floor() as usize)
@@ -334,7 +334,7 @@ impl Benchmark {
             let metrics = noria.metrics_dump().await?;
 
             let cold_materialization_size = metrics
-                .total("domain.total_node_state_size_bytes")
+                .total(recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES)
                 .unwrap_or(0f64)
                 .floor() as usize;
 
@@ -347,7 +347,7 @@ impl Benchmark {
             let metrics = noria.metrics_dump().await?;
 
             let warm_materialization_size = metrics
-                .total("domain.total_node_state_size_bytes")
+                .total(recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES)
                 .unwrap_or(0f64)
                 .floor() as usize;
 
@@ -374,7 +374,9 @@ impl Benchmark {
             }
             view.lookup(&unique_key, true).await?;
             let warm_write_time = start.elapsed();
-            let forward_time = metrics.total("domain.forward_time_us").unwrap_or(0f64);
+            let forward_time = metrics
+                .total(recorded::DOMAIN_TOTAL_FORWARD_TIME)
+                .unwrap_or(0f64);
             let forward_time = Duration::from_micros(forward_time.round() as u64);
 
             NoriaMetricsRecorder::get().clear();
