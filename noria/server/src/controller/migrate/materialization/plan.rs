@@ -16,7 +16,10 @@ pub(super) struct Plan<'a> {
     partial: bool,
 
     tags: HashMap<Index, Vec<(Tag, DomainIndex)>>,
+    /// New paths added in this run of the planner.
     paths: HashMap<Tag, Vec<NodeIndex>>,
+    /// Paths that already exist for this node.
+    old_paths: HashMap<Tag, Vec<NodeIndex>>,
     pending: Vec<PendingReplay>,
 }
 
@@ -37,18 +40,24 @@ impl<'a> Plan<'a> {
         workers: &'a HashMap<WorkerIdentifier, Worker>,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
+        let old_paths = m
+            .paths
+            .entry(node)
+            .or_insert_with(|| HashMap::new())
+            .clone();
         Plan {
             m,
             graph,
             node,
             domains,
             workers,
+            paths: Default::default(),
+            old_paths,
 
             partial,
 
             pending: Vec::new(),
             tags: Default::default(),
-            paths: Default::default(),
         }
     }
 
@@ -121,7 +130,10 @@ impl<'a> Plan<'a> {
         index_on: Index,
         replies: &mut DomainReplies,
     ) -> Result<(), ReadySetError> {
-        if !self.partial && !self.paths.is_empty() {
+        // if we're full and we already have some paths added... (either this run, or from previous
+        // runs)
+        if !self.partial && (!self.paths.is_empty() || !self.old_paths.is_empty()) {
+            // ...don't add any more replay paths, because...
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
             // we do need to keep track of the fact that there should be an index here though.
@@ -244,6 +256,7 @@ impl<'a> Plan<'a> {
         let mut tags = Vec::new();
         for (pi, path) in paths.into_iter().enumerate() {
             let tag = assigned_tags[pi];
+            // TODO(eta): figure out a way to check partial replay path idempotency
             self.paths
                 .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
 
@@ -540,8 +553,9 @@ impl<'a> Plan<'a> {
     /// re-indexing has to happen), whereas for new indices to partial views it should be nearly
     /// instantaneous.
     ///
-    /// Returns a list of backfill replays that need to happen before the migration is complete.
-    pub(super) fn finalize(mut self) -> Vec<PendingReplay> {
+    /// Returns a list of backfill replays that need to happen before the migration is complete,
+    /// and a set of replay paths for this node indexed by tag.
+    pub(super) fn finalize(mut self) -> (Vec<PendingReplay>, HashMap<Tag, Vec<NodeIndex>>) {
         use dataflow::payload::InitialState;
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -612,7 +626,7 @@ impl<'a> Plan<'a> {
         } else {
             assert!(self.pending.is_empty());
         }
-        self.pending
+        (self.pending, self.paths)
     }
 
     pub(super) fn on_join<'b>(

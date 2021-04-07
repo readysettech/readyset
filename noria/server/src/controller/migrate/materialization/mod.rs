@@ -51,8 +51,13 @@ impl Default for FrontierStrategy {
 pub(in crate::controller) struct Materializations {
     log: Logger,
 
+    /// Nodes that are (fully or partially) materialized.
     have: HashMap<NodeIndex, Indices>,
+    /// Nodes materialized since the last time `commit()` was invoked.
     added: HashMap<NodeIndex, Indices>,
+
+    /// A list of replay paths for each node, indexed by tag.
+    paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
 
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
@@ -69,6 +74,8 @@ impl Materializations {
 
             have: HashMap::default(),
             added: HashMap::default(),
+
+            paths: HashMap::default(),
 
             partial: HashSet::default(),
             partial_enabled: true,
@@ -974,13 +981,15 @@ impl Materializations {
         }
 
         // construct and disseminate a plan for each index
-        let pending = {
+        let (pending, paths) = {
             let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
                 plan.add(index, replies)?;
             }
             plan.finalize()
         };
+        // grr `HashMap` doesn't implement `IndexMut`
+        self.paths.get_mut(&ni).unwrap().extend(paths);
 
         if !pending.is_empty() {
             trace!(self.log, "all domains ready for replay");
