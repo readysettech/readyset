@@ -8,6 +8,7 @@ locals {
   tags = {
     Build_date = local.date
     Commit_ID  = var.short_commit_id
+    Built_with = "Packer"
   }
 }
 
