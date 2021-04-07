@@ -1,9 +1,5 @@
-locals {
-  count = var.enable_rds_connector ? 1 : 0
-}
-
 data "aws_db_instance" "rds_db" {
-  count                  = local.count
+  count                  = local.rds_connector_count
   db_instance_identifier = var.rds_instance_id
 }
 
@@ -18,7 +14,7 @@ data "aws_ami" "kafka" {
 }
 
 resource "aws_security_group" "kafka" {
-  count       = local.count
+  count       = local.rds_connector_count
   name        = "kafka"
   description = "Allow connection to kafka"
   vpc_id      = var.vpc_id
@@ -44,7 +40,7 @@ resource "aws_security_group" "kafka" {
 }
 
 resource "aws_instance" "kafka" {
-  count         = local.count
+  count         = local.rds_connector_count
   ami           = data.aws_ami.kafka.image_id
   instance_type = var.kafka_instance_type
   key_name      = var.key_name
@@ -80,7 +76,7 @@ data "aws_ami" "debezium" {
 }
 
 resource "aws_security_group" "debezium" {
-  count       = local.count
+  count       = local.rds_connector_count
   name        = "debezium"
   description = "Allow connection to debezium"
   vpc_id      = var.vpc_id
@@ -106,7 +102,7 @@ resource "aws_security_group" "debezium" {
 }
 
 resource "aws_instance" "debezium" {
-  count         = local.count
+  count         = local.rds_connector_count
   ami           = data.aws_ami.debezium.image_id
   instance_type = var.debezium_instance_type
   key_name      = var.key_name
@@ -151,7 +147,7 @@ data "aws_ami" "debezium_connector" {
 
 # Only used so other security groups can allow it
 resource "aws_security_group" "debezium_connector" {
-  count       = local.count
+  count       = local.rds_connector_count
   name        = "debezium-connector"
   description = "Noria Debezium Connector"
   vpc_id      = var.vpc_id
@@ -165,7 +161,7 @@ resource "aws_security_group" "debezium_connector" {
 }
 
 resource "aws_instance" "debezium_connector" {
-  count         = local.count
+  count         = local.rds_connector_count
   ami           = data.aws_ami.debezium_connector.image_id
   instance_type = var.debezium_connector_instance_type
   key_name      = var.key_name

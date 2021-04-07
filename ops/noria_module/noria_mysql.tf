@@ -4,14 +4,15 @@ data "aws_ami" "noria_mysql" {
 
   filter {
     name   = "name"
-    values = ["noria-mysql-*"]
+    values = ["noria_mysql-*"]
   }
 
   filter {
-    name   = "tag:Commit"
-    values = [var.noria_version]
+    name   = "tag:Built_with"
+    values = ["Packer"]
   }
 }
+
 resource "aws_security_group" "noria_mysql" {
   name        = "noria_mysql"
   description = "Allow connection to mysql adapter"
@@ -39,8 +40,9 @@ resource "aws_instance" "noria_mysql" {
   key_name      = var.key_name
 
   user_data = templatefile("${path.module}/files/noria_mysql_init.sh", {
-    deployment   = var.deployment
-    zookeeper_ip = aws_instance.zookeeper.private_ip
+    deployment              = var.deployment
+    zookeeper_ip            = aws_instance.zookeeper.private_ip
+    mysql_connection_string = "mysql://${local.db_user}:${local.db_password}@${local.db_host}:${local.db_port}/${local.db_name}"
   })
 
   subnet_id = local.subnet_id

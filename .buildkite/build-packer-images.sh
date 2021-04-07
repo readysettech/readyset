@@ -17,9 +17,11 @@ echo "      - docker#v3.7.0:"
 echo "          image: 'hashicorp/packer:latest'"
 echo "          command: [\"fmt\", \"-check\", \"-diff\", \"-recursive\", \"${IMAGES_DIR}\"]"
 echo "          workdir: /workspace"
+echo
 
 # Make sure all images wait until the Packer lint is successfull
 echo "  - wait: ~"
+echo
 
 # A step to validate each Packer image
 find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
@@ -29,14 +31,20 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    depends_on:"
   echo "      - packer-lint"
   echo "    branches: \"!master !main\""
+  echo "    command:"
+  echo "      - mkdir binaries && ls -lah && pwd"
+  echo "      - buildkite-agent artifact download target/release/* binaries/"
+  echo "      - packer validate ."
   echo "    plugins:"
   echo "      - docker#v3.7.0:"
   echo "          image: 'hashicorp/packer:latest'"
-  echo "          command: [\"validate\", \".\"]"
   echo "          mount-checkout: false"
+  echo "          entrypoint: \"\""
+  echo "          shell: [\"/bin/bash\", \"-e\", \"-c\"]"
   echo "          workdir: /workspace"
   echo "          volumes:"
-  echo "            - '${BUILDKITE_BUILD_CHECKOUT_PATH}/${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo "            - './${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo
 done
 
 # A step to do a dry run build of each Packer image
@@ -51,17 +59,23 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    depends_on:"
   echo "      - validate-packer-image-${PACKER_IMAGE}"
   echo "    branches: \"!master !main\""
+  echo "    command:"
+  echo "      - mkdir binaries && ls -lah && pwd"
+  echo "      - buildkite-agent artifact download target/release/* binaries/"
+  echo "      - packer build ."
   echo "    plugins:"
   echo "      - docker#v3.7.0:"
   echo "          image: 'hashicorp/packer:latest'"
-  echo "          command: [\"build\", \".\"]"
   echo "          mount-checkout: false"
+  echo "          entrypoint: \"\""
+  echo "          shell: [\"/bin/bash\", \"-e\", \"-c\"]"
   echo "          workdir: /workspace"
   echo "          environment:"
   echo "          - \"PKR_VAR_skip_create_ami=true\""
   echo "          - \"PKR_VAR_short_commit_id=${SHORT_COMMIT_ID}\""
   echo "          volumes:"
-  echo "            - '${BUILDKITE_BUILD_CHECKOUT_PATH}/${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo "            - './${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo
 done
 
 # A step for building each Packer image (Actual release)
@@ -77,14 +91,20 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    depends_on:"
   echo "      - packer-lint"
   echo "    branches: \"master main\""
+  echo "    command:"
+  echo "      - mkdir binaries && ls -lah && pwd"
+  echo "      - buildkite-agent artifact download target/release/* binaries/"
+  echo "      - packer build ."
   echo "    plugins:"
   echo "      - docker#v3.7.0:"
   echo "          image: 'hashicorp/packer:latest'"
-  echo "          command: [\"build\", \".\"]"
   echo "          mount-checkout: false"
+  echo "          entrypoint: \"\""
+  echo "          shell: [\"/bin/bash\", \"-e\", \"-c\"]"
   echo "          workdir: /workspace"
   echo "          environment:"
   echo "          - \"PKR_VAR_short_commit_id=${SHORT_COMMIT_ID}\""
   echo "          volumes:"
-  echo "            - '${BUILDKITE_BUILD_CHECKOUT_PATH}/${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo "            - './${IMAGES_DIR}/${PACKER_IMAGE}:/workspace'"
+  echo
 done

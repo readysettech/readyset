@@ -42,8 +42,10 @@ in the variable `extra_security_groups`
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | associate\_public\_ip\_addresses | Whether or not to associate a public IP address with all provisioned instances | `bool` | `true` | no |
+| db\_host | Hostname of the MySQL database to replicate to Noria | `string` | `""` | no |
 | db\_name | Name of the MySQL database to replicate to Noria | `string` | `""` | no |
 | db\_password | Password for the MySQL user to use to connect to RDS | `string` | `""` | no |
+| db\_port | Port of the MySQL database to replicate to Noria | `string` | `""` | no |
 | db\_user | MySQL user to use to connect to RDS | `string` | `""` | no |
 | debezium\_connector\_instance\_type | EC2 instance type to use for the Debezium Connector instance | `string` | `"t3.medium"` | no |
 | debezium\_instance\_type | EC2 instance type to use for the Debezium instance | `string` | `"t3.medium"` | no |
@@ -87,4 +89,5 @@ in the variable `extra_security_groups`
 | noria\_server\_public\_ip | Noria server instance public IP. |
 | zookeeper\_private\_ip | Zookeper instance private IP. |
 | zookeeper\_public\_ip | Zookeper instance public IP. |
+
 <!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->

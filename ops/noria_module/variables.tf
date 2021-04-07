@@ -122,6 +122,18 @@ variable "rds_instance_id" {
   description = "ID of the RDS instance to stream writes from. Required if enable_rds_connector is true"
 }
 
+variable "db_host" {
+  type        = string
+  default     = ""
+  description = "Hostname of the MySQL database to replicate to Noria"
+}
+
+variable "db_port" {
+  type        = string
+  default     = ""
+  description = "Port of the MySQL database to replicate to Noria"
+}
+
 variable "db_name" {
   type        = string
   default     = ""
