@@ -1,6 +1,7 @@
 //! Data types representing metrics dumped from a running Noria instance
 
 pub use metrics::Key;
+use metrics_util::Histogram;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -171,12 +172,16 @@ pub mod recorded {
 
 /// A dumped metric's kind.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum DumpedMetricKind {
+pub enum DumpedMetricValue {
     /// Counters that can be incremented or decremented
-    Counter,
+    Counter(f64),
 
     /// Gauges whose values can be explicitly set
-    Gauge,
+    Gauge(f64),
+
+    /// Histograms that track the number of samples that fall within
+    /// predefined buckets.
+    Histogram(Vec<(f64, u64)>),
 }
 
 /// A dumped metric's value.
@@ -185,9 +190,7 @@ pub struct DumpedMetric {
     /// Labels associated with this metric value.
     pub labels: HashMap<String, String>,
     /// The actual value.
-    pub value: f64,
-    /// The kind of this metric.
-    pub kind: DumpedMetricKind,
+    pub value: DumpedMetricValue,
 }
 
 /// A dump of metrics that implements `Serialize`.
@@ -196,7 +199,6 @@ pub struct MetricsDump {
     /// The actual metrics.
     pub metrics: HashMap<String, Vec<DumpedMetric>>,
 }
-
 fn convert_key(k: Key) -> (String, HashMap<String, String>) {
     let key_data = k.into_owned();
     let (name_parts, labels) = key_data.into_parts();
@@ -210,11 +212,14 @@ fn convert_key(k: Key) -> (String, HashMap<String, String>) {
         .collect();
     (name, labels)
 }
-
 impl MetricsDump {
     /// Build a [`MetricsDump`] from a map containing values for counters, and another map
     /// containing values for gauges
-    pub fn from_metrics(counters: HashMap<Key, u64>, gauges: HashMap<Key, f64>) -> Self {
+    pub fn from_metrics(
+        counters: HashMap<Key, u64>,
+        gauges: HashMap<Key, f64>,
+        histograms: HashMap<Key, Histogram>,
+    ) -> Self {
         let mut ret = HashMap::new();
         for (key, val) in counters.into_iter() {
             let (name, labels) = convert_key(key);
@@ -222,8 +227,7 @@ impl MetricsDump {
             ent.push(DumpedMetric {
                 labels,
                 // It's going to be serialized to JSON anyway, so who cares
-                value: val as f64,
-                kind: DumpedMetricKind::Counter,
+                value: DumpedMetricValue::Counter(val as f64),
             });
         }
         for (key, val) in gauges.into_iter() {
@@ -231,10 +235,18 @@ impl MetricsDump {
             let ent = ret.entry(name).or_insert_with(Vec::new);
             ent.push(DumpedMetric {
                 labels,
-                value: val,
-                kind: DumpedMetricKind::Gauge,
+                value: DumpedMetricValue::Gauge(val),
             });
         }
+        for (key, val) in histograms.into_iter() {
+            let (name, labels) = convert_key(key);
+            let ent = ret.entry(name).or_insert_with(Vec::new);
+            ent.push(DumpedMetric {
+                labels,
+                value: DumpedMetricValue::Histogram(val.buckets()),
+            });
+        }
+
         Self { metrics: ret }
     }
 
@@ -244,7 +256,21 @@ impl MetricsDump {
         String: Borrow<K>,
         K: Hash + Eq + ?Sized,
     {
-        Some(self.metrics.get(metric)?.iter().map(|m| m.value).sum())
+        Some(
+            self.metrics
+                .get(metric)?
+                .iter()
+                .map(|m| {
+                    match &m.value {
+                        DumpedMetricValue::Counter(v) | DumpedMetricValue::Gauge(v) => *v,
+                        // Return the sum of counts for a histogram.
+                        DumpedMetricValue::Histogram(v) => {
+                            v.iter().map(|v| v.1).sum::<u64>() as f64
+                        }
+                    }
+                })
+                .sum(),
+        )
     }
 
     /// Return an iterator over all the metric keys in this [`MetricsDump`]

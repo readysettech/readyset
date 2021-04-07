@@ -2,6 +2,7 @@
 
 use crossbeam::queue::ArrayQueue;
 use metrics::{GaugeValue, Key, Recorder, SetRecorderError, Unit};
+use metrics_util::Histogram;
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Mutex;
@@ -13,6 +14,7 @@ static mut METRICS_RECORDER: Option<NoriaMetricsRecorder> = None;
 enum MetricsOp {
     IncrementCounter(Key, u64),
     UpdateGauge(Key, GaugeValue),
+    UpdateHistogram(Key, f64),
 }
 
 type OpQueue = ArrayQueue<MetricsOp>;
@@ -21,6 +23,7 @@ type OpQueue = ArrayQueue<MetricsOp>;
 struct MetricsInner {
     counters: HashMap<Key, u64>,
     gauges: HashMap<Key, f64>,
+    histograms: HashMap<Key, Histogram>,
 }
 
 impl MetricsInner {
@@ -49,6 +52,16 @@ impl MetricsInner {
                         }
                     }
                 }
+                MetricsOp::UpdateHistogram(k, v) => {
+                    // TODO(justin): Support different bounds in histogram metrics.
+                    let ent = self.histograms.entry(k).or_insert_with(|| {
+                        // Define the buckets for the histogram to be power of 2s up to
+                        // 2^20.
+                        let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();
+                        Histogram::new(&bounds).unwrap()
+                    });
+                    ent.record(v);
+                }
             }
         }
     }
@@ -56,6 +69,7 @@ impl MetricsInner {
     fn clear(&mut self) {
         self.counters.clear();
         self.gauges.clear();
+        self.histograms.clear();
     }
 }
 
@@ -123,16 +137,17 @@ impl NoriaMetricsRecorder {
         }
     }
 
-    /// Runs `func` with two arguments: a map of counters and a map of gauges.
+    /// Runs `func` with three arguments: a map of counters, a map of gauges,
+    /// and a map of histograms.
     ///
     /// This collapses the metrics queue before running the supplied function.
     pub fn with_metrics<F, R>(&self, func: F) -> R
     where
-        F: FnOnce(&HashMap<Key, u64>, &HashMap<Key, f64>) -> R,
+        F: FnOnce(&HashMap<Key, u64>, &HashMap<Key, f64>, &HashMap<Key, Histogram>) -> R,
     {
         let mut inner = self.inner.lock().unwrap();
         inner.collapse(&self.queue);
-        func(&inner.counters, &inner.gauges)
+        func(&inner.counters, &inner.gauges, &inner.histograms)
     }
 }
 
@@ -151,7 +166,7 @@ impl Recorder for NoriaMetricsRecorder {
         _unit: Option<Unit>,
         _description: Option<&'static str>,
     ) {
-        unimplemented!("histogram metrics are not supported yet")
+        // no-op
     }
 
     fn increment_counter(&self, key: Key, value: u64) {
@@ -162,7 +177,7 @@ impl Recorder for NoriaMetricsRecorder {
         self.push_op(MetricsOp::UpdateGauge(key, value))
     }
 
-    fn record_histogram(&self, _key: Key, _value: f64) {
-        unimplemented!("histogram metrics are not supported yet")
+    fn record_histogram(&self, key: Key, value: f64) {
+        self.push_op(MetricsOp::UpdateHistogram(key, value))
     }
 }

@@ -67,6 +67,7 @@ test-strategy = "0.1.1"
 launchpad = { path = "../../launchpad" }
 msql-srv = { path = "../../msql-srv" }
 metrics = "0.14.2"
+metrics-util = "0.6.2"
 
 [dev-dependencies]
 tokio = { version = "0.2.0", features = [ "rt-threaded", "macros" ] }

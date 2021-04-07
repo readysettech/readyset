@@ -75,8 +75,9 @@ fn external_request(
     match (&method, path.as_ref()) {
         (&Method::POST, "/metrics_dump") => {
             let recorder = NoriaMetricsRecorder::get();
-            let (counters, gauges) = recorder.with_metrics(|c, g| (c.clone(), g.clone()));
-            let md = MetricsDump::from_metrics(counters, gauges);
+            let (counters, gauges, histograms) =
+                recorder.with_metrics(|c, g, h| (c.clone(), g.clone(), h.clone()));
+            let md = MetricsDump::from_metrics(counters, gauges, histograms);
             Ok(Ok(json::to_string(&md).unwrap()))
         }
         (&Method::POST, "/reset_metrics") => {
