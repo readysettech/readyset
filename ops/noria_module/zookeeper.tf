@@ -6,6 +6,16 @@ data "aws_ami" "zookeeper" {
     name   = "name"
     values = ["zookeeper-*"]
   }
+
+  filter {
+    name   = "tag:Built_with"
+    values = ["Packer"]
+  }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
+  }
 }
 
 resource "aws_security_group" "zookeeper" {

@@ -4,12 +4,17 @@ data "aws_ami" "noria_server" {
 
   filter {
     name   = "name"
-    values = ["noria-server-*"]
+    values = ["noria_server-*"]
   }
 
   filter {
-    name   = "tag:Commit"
-    values = [var.noria_version]
+    name   = "tag:Built_with"
+    values = ["Packer"]
+  }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
   }
 }
 

@@ -11,6 +11,11 @@ data "aws_ami" "noria_mysql" {
     name   = "tag:Built_with"
     values = ["Packer"]
   }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
+  }
 }
 
 resource "aws_security_group" "noria_mysql" {

@@ -9,10 +9,9 @@ variable "deployment" {
   description = "Unique identifier for the name of the Noria deployment"
 }
 
-variable "noria_version" {
+variable "readyset_version" {
   type        = string
-  default     = "2ec92b13"
-  description = "Version of Noria to deploy"
+  description = "Readyset version to deploy (This is a required field, please ask for the latest version)."
 }
 
 variable "zookeeper_instance_type" {

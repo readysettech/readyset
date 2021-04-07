@@ -64,8 +64,8 @@ in the variable `extra_security_groups`
 | noria\_quorum | Number of noria workers to wait for before starting | `number` | `1` | no |
 | noria\_server\_instance\_type | EC2 instance type to use for the Noria server instance(s) | `string` | `"m5.2xlarge"` | no |
 | noria\_shards | Number of shards to use in Noria (0 = disable sharding) | `number` | `0` | no |
-| noria\_version | Version of Noria to deploy | `string` | `"2ec92b13"` | no |
 | rds\_instance\_id | ID of the RDS instance to stream writes from. Required if enable\_rds\_connector is true | `string` | `""` | no |
+| readyset\_version | Readyset version to deploy (This is a required field, please ask for the latest version). | `string` | n/a | yes |
 | tables | List of tables to replicate from RDS | `list(string)` | `[]` | no |
 | vpc\_id | ID of the VPC to deploy all resources into | `string` | n/a | yes |
 | zookeeper\_disk\_kms\_key\_id | ARN for the KMS key ID to use to encrypt the zookeeper volume. Ignored if encrypt\_zookeeper\_disk = false. | `string` | `""` | no |

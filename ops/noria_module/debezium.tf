@@ -138,11 +138,6 @@ data "aws_ami" "debezium_connector" {
     name   = "name"
     values = ["noria-debezium-connector-*"]
   }
-
-  # filter {
-  #   name   = "tag:Commit"
-  #   values = [var.noria_version]
-  # }
 }
 
 # Only used so other security groups can allow it
