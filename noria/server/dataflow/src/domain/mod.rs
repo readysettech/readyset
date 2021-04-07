@@ -18,7 +18,7 @@ use crate::state::RangeLookupResult;
 use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
 pub use internal::DomainIndex as Index;
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, histogram};
 use noria::channel::{self, TcpSender};
 use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError};
@@ -876,7 +876,18 @@ impl Domain {
                 self.total_forward_time.stop();
                 counter!(
                     recorded::DOMAIN_TOTAL_FORWARD_TIME,
-                    start.elapsed().as_micros() as _,
+                    start.elapsed().as_micros() as u64,
+                    // HACK(eta): having to call `to_string()` here makes me sad,
+                    // but seems to be a limitation of the `metrics` crate
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "from_node" => src.to_string(),
+                    "to_node" => dst.to_string(),
+                );
+
+                histogram!(
+                    recorded::DOMAIN_FORWARD_TIME,
+                    start.elapsed().as_micros() as f64,
                     // HACK(eta): having to call `to_string()` here makes me sad,
                     // but seems to be a limitation of the `metrics` crate
                     "domain" => self.index.index().to_string(),
@@ -892,7 +903,15 @@ impl Domain {
                 self.total_replay_time.stop();
                 counter!(
                     recorded::DOMAIN_TOTAL_REPLAY_TIME,
-                    start.elapsed().as_micros() as _,
+                    start.elapsed().as_micros() as u64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
+
+                histogram!(
+                    recorded::DOMAIN_REPLAY_TIME,
+                    start.elapsed().as_micros() as f64,
                     "domain" => self.index.index().to_string(),
                     "shard" => self.shard.unwrap_or(0).to_string(),
                     "tag" => tag.to_string()
@@ -1295,9 +1314,17 @@ impl Domain {
                             self.find_tags_and_replay(keys, &cols[..], node)?;
                         }
                         self.total_replay_time.stop();
+                        histogram!(
+                            recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
+                            start.elapsed().as_micros() as f64,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "node" => node.id().to_string()
+                        );
+
                         counter!(
                             recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-                            start.elapsed().as_micros() as _,
+                            start.elapsed().as_micros() as u64,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "node" => node.id().to_string()
@@ -1327,9 +1354,17 @@ impl Domain {
                             )?;
                         }
                         self.total_replay_time.stop();
+                        histogram!(
+                            recorded::DOMAIN_SEED_REPLAY_TIME,
+                            start.elapsed().as_micros() as f64,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
+
                         counter!(
                             recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-                            start.elapsed().as_micros() as _,
+                            start.elapsed().as_micros() as u64,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "tag" => tag.to_string()
@@ -1465,10 +1500,19 @@ impl Domain {
                                        "μs" => start.elapsed().as_micros()
                                     );
 
+                                    histogram!(
+                                        recorded::DOMAIN_CHUNKED_REPLAY_TIME,
+                                        // HACK(eta): scary cast
+                                        start.elapsed().as_micros() as f64,
+                                        "domain" => domain_str.clone(),
+                                        "shard" => shard_str.clone(),
+                                        "from_node" => link.dst.id().to_string()
+                                    );
+
                                     counter!(
                                         recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
                                         // HACK(eta): scary cast
-                                        start.elapsed().as_micros() as _,
+                                        start.elapsed().as_micros() as u64,
                                         "domain" => domain_str,
                                         "shard" => shard_str,
                                         "from_node" => link.dst.id().to_string()
@@ -1479,9 +1523,17 @@ impl Domain {
                         self.handle_replay(p, executor)?;
 
                         self.total_replay_time.stop();
+                        histogram!(
+                            recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
+                            start.elapsed().as_micros() as f64,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
+
                         counter!(
                             recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
-                            start.elapsed().as_micros() as _,
+                            start.elapsed().as_micros() as u64,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "tag" => tag.to_string()
@@ -1492,9 +1544,17 @@ impl Domain {
                         self.total_replay_time.start();
                         self.finish_replay(tag, ni, executor)?;
                         self.total_replay_time.stop();
+                        histogram!(
+                            recorded::DOMAIN_FINISH_REPLAY_TIME,
+                            start.elapsed().as_micros() as f64,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "tag" => tag.to_string()
+                        );
+
                         counter!(
                             recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-                            start.elapsed().as_micros() as _,
+                            start.elapsed().as_micros() as u64,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "tag" => tag.to_string()
@@ -1711,9 +1771,18 @@ impl Domain {
                     for (tag, requesting_shard, keys, single_shard) in elapsed_replays.drain(..) {
                         let start = time::Instant::now();
                         self.seed_all(tag, requesting_shard, keys, single_shard, executor)?;
+                        histogram!(
+                            recorded::DOMAIN_SEED_ALL_TIME,
+                            start.elapsed().as_micros() as f64,
+                            "domain" => self.index.index().to_string(),
+                            "shard" => self.shard.unwrap_or(0).to_string(),
+                            "requesting_shard" => requesting_shard.to_string(),
+                            "tag" => tag.to_string()
+                        );
+
                         counter!(
                             recorded::DOMAIN_TOTAL_SEED_ALL_TIME,
-                            start.elapsed().as_micros() as _,
+                            start.elapsed().as_micros() as u64,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "requesting_shard" => requesting_shard.to_string(),

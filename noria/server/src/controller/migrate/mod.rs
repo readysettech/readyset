@@ -23,7 +23,7 @@
 use crate::controller::ControllerInner;
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet};
-use metrics::counter;
+use metrics::histogram;
 use nom_sql::BinaryOperator;
 use noria::metrics::recorded;
 use noria::ReadySetError;
@@ -597,9 +597,9 @@ impl<'a> Migration<'a> {
             &mut mainline.replies,
         )?;
 
-        counter!(
+        histogram!(
             recorded::CONTROLLER_MIGRATION_TIME,
-            start.elapsed().as_micros() as _
+            start.elapsed().as_micros() as f64
         );
         warn!(log, "migration completed"; "ms" => start.elapsed().as_millis());
 
