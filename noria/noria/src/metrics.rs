@@ -20,7 +20,7 @@ pub mod recorded {
     /// | needed_for | The client tag of the request that the replay is required for. |
     pub const DOMAIN_REPLAY_MISSES: &str = "domain.replay_misses";
 
-    /// Counter: The time in microseconds that a domain spends
+    /// Counter: The total time in microseconds that a domain spends
     /// handling and forwarding a Message or Input packet. Recorded at
     /// the domain following handling each Message and Input packet.
     ///
@@ -30,9 +30,9 @@ pub mod recorded {
     /// | shard | The shard handling the packet. |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
-    pub const DOMAIN_FORWARD_TIME: &str = "domain.forward_time_us";
+    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "domain.total_forward_time_us";
 
-    /// Counter: The time in microseconds that a domain spends
+    /// Counter: The total time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
     /// ReplayPiece packet handling.
     ///
@@ -41,9 +41,9 @@ pub mod recorded {
     /// | domain | The index of the domain the replay miss is recorded in. |
     /// | shard | The shard the replay miss is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_REPLAY_TIME: &str = "domain.handle_replay_time";
+    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "domain.total_handle_replay_time";
 
-    /// Counter: The time in microseconds spent handling a reader replay
+    /// Counter: The total time in microseconds spent handling a reader replay
     /// request. Recorded at the domain following RequestReaderReplay
     /// packet handling.
     ///
@@ -53,9 +53,10 @@ pub mod recorded {
     /// | domain | The index of the domain the reader replay request is recorded in. |
     /// | shard | The shard the reader replay request is recorded in. |
     /// | node | The LocalNodeIndex of the reader node handling the packet. |
-    pub const DOMAIN_READER_REPLAY_REQUEST_TIME: &str = "domain.reader_replay_request_time_us";
+    pub const DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME: &str =
+        "domain.reader_replay_total_request_time_us";
 
-    /// Counter: The time in microseconds that a domain spends
+    /// Counter: The total time in microseconds that a domain spends
     /// handling a RequestPartialReplay packet. Recorded at the domain
     /// following RequestPartialReplay packet handling.
     ///
@@ -64,9 +65,9 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard |The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_SEED_REPLAY_TIME: &str = "domain.seed_replay_time_us";
+    pub const DOMAIN_TOTAL_SEED_REPLAY_TIME: &str = "domain.total_seed_replay_time_us";
 
-    /// Counter: The time in microseconds that a domain spawning a state
+    /// Counter: The total time in microseconds that a domain spawning a state
     /// chunker at a node during the processing of a StartReplay packet.
     /// Recorded at the domain when the state chunker thread is finished
     /// executing.
@@ -76,9 +77,9 @@ pub mod recorded {
     /// | domain | The index of the domain the start replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | from_node | The first node on the replay path. |
-    pub const DOMAIN_CHUNKED_REPLAY_TIME: &str = "domain.chunked_replay_time_us";
+    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_TIME: &str = "domain.total_chunked_replay_time_us";
 
-    /// Counter: The time in microseconds that a domain spends
+    /// Counter: The total_time in microseconds that a domain spends
     /// handling a StartReplay packet. Recorded at the domain
     /// following StartReplay packet handling.
     ///
@@ -87,9 +88,10 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_CHUNKED_REPLAY_START_TIME: &str = "domain.chunked_replay_start_time_us";
+    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME: &str =
+        "domain.total_chunked_replay_start_time_us";
 
-    /// Counter: The time in microseconds that a domain spends
+    /// Counter: The total time in microseconds that a domain spends
     /// handling a Finish packet for a replay. Recorded at the domain
     /// following Finish packet handling.
     ///
@@ -98,9 +100,9 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_FINISH_REPLAY_TIME: &str = "domain.finish_replay_time_us";
+    pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "domain.total_finish_replay_time_us";
 
-    /// Counter: The time in microseconds that the domain spends handling
+    /// Counter: The total time in microseconds that the domain spends handling
     /// a buffered replay request. Recorded at the domain following packet
     /// handling.
     ///
@@ -110,7 +112,7 @@ pub mod recorded {
     /// | shard | The shard the replay request is recorded in. |
     /// | requesting_shard | The shard that is requesting to be seeded. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_SEED_ALL_TIME: &str = "domain.seed_all_time_us";
+    pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "domain.total_seed_all_time_us";
 
     /// Counter: The time in microseconds that the controller spent committing
     /// a migration to the soup graph. Recorded at the controller at the end of
