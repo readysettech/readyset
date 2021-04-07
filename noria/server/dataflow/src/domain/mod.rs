@@ -875,7 +875,7 @@ impl Domain {
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
                 counter!(
-                    recorded::DOMAIN_FORWARD_TIME,
+                    recorded::DOMAIN_TOTAL_FORWARD_TIME,
                     start.elapsed().as_micros() as _,
                     // HACK(eta): having to call `to_string()` here makes me sad,
                     // but seems to be a limitation of the `metrics` crate
@@ -891,7 +891,7 @@ impl Domain {
                 self.handle_replay(m, executor)?;
                 self.total_replay_time.stop();
                 counter!(
-                    recorded::DOMAIN_REPLAY_TIME,
+                    recorded::DOMAIN_TOTAL_REPLAY_TIME,
                     start.elapsed().as_micros() as _,
                     "domain" => self.index.index().to_string(),
                     "shard" => self.shard.unwrap_or(0).to_string(),
@@ -1296,7 +1296,7 @@ impl Domain {
                         }
                         self.total_replay_time.stop();
                         counter!(
-                            recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
+                            recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
                             start.elapsed().as_micros() as _,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
@@ -1328,7 +1328,7 @@ impl Domain {
                         }
                         self.total_replay_time.stop();
                         counter!(
-                            recorded::DOMAIN_SEED_REPLAY_TIME,
+                            recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
                             start.elapsed().as_micros() as _,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
@@ -1466,7 +1466,7 @@ impl Domain {
                                     );
 
                                     counter!(
-                                        recorded::DOMAIN_CHUNKED_REPLAY_TIME,
+                                        recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
                                         // HACK(eta): scary cast
                                         start.elapsed().as_micros() as _,
                                         "domain" => domain_str,
@@ -1480,7 +1480,7 @@ impl Domain {
 
                         self.total_replay_time.stop();
                         counter!(
-                            recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
+                            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
                             start.elapsed().as_micros() as _,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
@@ -1493,7 +1493,7 @@ impl Domain {
                         self.finish_replay(tag, ni, executor)?;
                         self.total_replay_time.stop();
                         counter!(
-                            recorded::DOMAIN_FINISH_REPLAY_TIME,
+                            recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
                             start.elapsed().as_micros() as _,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
@@ -1712,7 +1712,7 @@ impl Domain {
                         let start = time::Instant::now();
                         self.seed_all(tag, requesting_shard, keys, single_shard, executor)?;
                         counter!(
-                            recorded::DOMAIN_SEED_ALL_TIME,
+                            recorded::DOMAIN_TOTAL_SEED_ALL_TIME,
                             start.elapsed().as_micros() as _,
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
