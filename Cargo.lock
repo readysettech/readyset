@@ -1165,6 +1165,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
+dependencies = [
+ "cfg-if 1.0.0",
+ "num_cpus",
+]
+
+[[package]]
 name = "debezium_connector"
 version = "0.1.0"
 dependencies = [
@@ -2617,6 +2627,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mach"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2725,6 +2744,25 @@ dependencies = [
  "quote",
  "regex",
  "syn",
+]
+
+[[package]]
+name = "metrics-util"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ace44e2c64f785c3c37605ecf7504e5fc4efbb2936a49cc56c1084d79657a4d"
+dependencies = [
+ "aho-corasick",
+ "atomic-shim",
+ "crossbeam-epoch 0.9.3",
+ "crossbeam-utils 0.8.3",
+ "dashmap",
+ "indexmap",
+ "metrics",
+ "ordered-float",
+ "parking_lot 0.11.1",
+ "quanta 0.7.2",
+ "sketches-ddsketch",
 ]
 
 [[package]]
@@ -3347,6 +3385,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "metrics",
+ "metrics-util",
  "msql-srv",
  "mysql_common 0.22.2",
  "net2",
@@ -3621,6 +3660,7 @@ dependencies = [
  "launchpad",
  "maplit",
  "metrics",
+ "metrics-util",
  "mysql 18.2.0",
  "nom 5.1.2",
  "nom-sql",
@@ -3849,6 +3889,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "ordered-float"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "766f840da25490628d8e63e529cd21c014f6600c6b8517add12a6fa6167a6218"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -4441,6 +4490,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "quanta"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e76a3afdefd0ce2c0363bf3146271e947782240ea617885dd64e56c4de9fb3c9"
+dependencies = [
+ "atomic-shim",
+ "ctor",
+ "libc",
+ "mach",
+ "once_cell",
+ "raw-cpuid",
+ "winapi 0.3.9",
+]
+
+[[package]]
 name = "query_generator"
 version = "0.1.0"
 dependencies = [
@@ -4764,6 +4828,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77d416b86801d23dde1aa643023b775c3a462efc0ed96443add11546cdf1dca8"
 dependencies = [
  "rand_core 0.5.1",
+]
+
+[[package]]
+name = "raw-cpuid"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c27cb5785b85bd05d4eb171556c9a1a514552e26123aeae6bb7d811353148026"
+dependencies = [
+ "bitflags",
 ]
 
 [[package]]
@@ -5496,6 +5569,12 @@ dependencies = [
  "generic-array 0.12.4",
  "num",
 ]
+
+[[package]]
+name = "sketches-ddsketch"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a77a8fd93886010f05e7ea0720e569d6d16c65329dbe3ec033bbbccccb017b"
 
 [[package]]
 name = "slab"
@@ -6696,7 +6775,7 @@ dependencies = [
  "fxhash",
  "hdrhistogram",
  "indexmap",
- "quanta",
+ "quanta 0.3.2",
  "slab",
  "tracing-core",
  "tracing-subscriber",
