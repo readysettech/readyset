@@ -44,7 +44,7 @@ curl -i -X POST \
     "database.user": "${db_user}",
     "database.password": "${db_password}",
     "database.server.id": "184054",
-    "database.server.name": "${db_instance_name}",
+    "database.server.name": "${db_name}",
     "database.include.list": "${db_name}",
     "database.history.kafka.bootstrap.servers": "${kafka_ip}:9092",
     "database.history.kafka.topic": "dbhistory.${db_name}",
