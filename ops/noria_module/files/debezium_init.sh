@@ -19,12 +19,12 @@ systemctl restart debezium-connect
 # Wait 120 seconds for it to come up
 set +e
 timeout 120 bash <<EOF
-  until echo 2>>/dev/null >>/dev/tcp/localhost/8083
+  until curl --fail http://localhost:8083
     do sleep 1
   done
 EOF
 if [ "$?" = 124 ]; then
-    >&2 echo 'Debezium connect did not starting connections after 120 seconds'
+    >&2 echo 'Debezium connect did not start accepting connections after 120 seconds'
     exit 1
 fi
 set -e
