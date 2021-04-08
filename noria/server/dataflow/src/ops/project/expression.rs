@@ -109,7 +109,7 @@ impl BuiltinFunction {
             }
             "addtime" => {
                 let arity_error = || BuiltinFunctionConvertError::ArityError("addtime".to_owned());
-                Ok(Self::Timediff(
+                Ok(Self::Addtime(
                     Box::new(args.next().ok_or_else(arity_error)?),
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
