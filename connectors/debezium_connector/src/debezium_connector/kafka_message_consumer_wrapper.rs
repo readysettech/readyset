@@ -31,6 +31,7 @@ impl KafkaMessageConsumerWrapper {
             .set("enable.partition.eof", &eof.to_string())
             .set("session.timeout.ms", &timeout)
             .set("enable.auto.commit", &auto_commit.to_string())
+            .set("auto.offset.reset", "earliest")
             .create_with_context(context)?;
 
         info!(topics = ?names, "Subscribing to topics");
