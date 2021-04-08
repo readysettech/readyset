@@ -43,6 +43,7 @@ EOF
 echo "Found NVME device at: $block_device"
 
 mkfs.ext4 "$block_device"
+mkdir -p /var/lib/noria
 mount "$block_device" /var/lib/noria
 UUID=$(lsblk -J -f $block_device | jq -r '.blockdevices[] | .uuid')
 echo "UUID of NVME device at $block_device is $UUID"
