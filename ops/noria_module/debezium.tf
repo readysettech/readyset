@@ -11,6 +11,16 @@ data "aws_ami" "kafka" {
     name   = "name"
     values = ["kafka-*"]
   }
+
+  filter {
+    name   = "tag:Built_with"
+    values = ["Packer"]
+  }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
+  }
 }
 
 resource "aws_security_group" "kafka" {
@@ -71,7 +81,17 @@ data "aws_ami" "debezium" {
 
   filter {
     name   = "name"
-    values = ["debezium-*"]
+    values = ["debezium_connect-*"]
+  }
+
+  filter {
+    name   = "tag:Built_with"
+    values = ["Packer"]
+  }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
   }
 }
 
@@ -136,7 +156,17 @@ data "aws_ami" "debezium_connector" {
 
   filter {
     name   = "name"
-    values = ["noria-debezium-connector-*"]
+    values = ["debezium_connector-*"]
+  }
+
+  filter {
+    name   = "tag:Built_with"
+    values = ["Packer"]
+  }
+
+  filter {
+    name   = "tag:Commit_ID"
+    values = [var.readyset_version]
   }
 }
 
