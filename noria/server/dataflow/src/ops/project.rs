@@ -216,7 +216,13 @@ impl Ingredient for Project {
                 }
 
                 if let Some(ref e) = self.expressions {
-                    new_r.extend(e.iter().map(|expr| expr.eval(&r).unwrap().into_owned()));
+                    new_r.extend(e.iter().map(|expr| match expr.eval(&r) {
+                        Ok(val) => val.into_owned(),
+                        Err(e) => {
+                            eprintln!("Error evaluating project expression: {}", e);
+                            DataType::None
+                        }
+                    }));
                 }
 
                 if let Some(ref a) = self.additional {
