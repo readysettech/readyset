@@ -44,7 +44,10 @@ variable "ami_groups" {
 variable "ami_regions" {
   type        = list(string)
   description = "A list of regions to copy the AMI to. Tags and attributes are copied along with the AMI."
-  default     = ["us-east-2"]
+  default = [
+    "us-east-2",
+    "us-west-2"
+  ]
 }
 
 variable "region" {
