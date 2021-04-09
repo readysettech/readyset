@@ -4654,3 +4654,50 @@ async fn test_metrics_client() {
     let metrics_dump = &metrics[0].metrics;
     assert_eq!(2.0, get_external_requests_count(metrics_dump));
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn overlapping_indices() {
+    let mut g = start_simple_logging("overlapping_indices").await;
+
+    // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
+    g.install_recipe(
+        "CREATE TABLE test (id int, a int, b int);
+         VIEW overlapping: SELECT SUM(a), id FROM test WHERE b = ? ORDER BY id LIMIT 2;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("overlapping").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(2), DataType::from(1)],
+        vec![DataType::from(3), DataType::from(3), DataType::from(1)],
+        vec![DataType::from(4), DataType::from(4), DataType::from(2)],
+        vec![DataType::from(5), DataType::from(5), DataType::from(2)],
+        vec![DataType::from(6), DataType::from(6), DataType::from(3)],
+        vec![DataType::from(6), DataType::from(14), DataType::from(3)],
+        vec![DataType::from(7), DataType::from(7), DataType::from(3)],
+        vec![DataType::from(8), DataType::from(8), DataType::from(3)],
+    ])
+    .await
+    .unwrap();
+
+    let res = q
+        .lookup(&[3i32.into()], true)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            (
+                r["sum(a)"].clone().into(),
+                r["id"].clone().into(),
+                r["b"].clone().into(),
+            )
+        })
+        .sorted()
+        .collect::<Vec<(i32, i32, i32)>>();
+
+    assert_eq!(res, vec![(7, 7, 3), (20, 6, 3)]);
+}
