@@ -17,8 +17,11 @@ use noria::{
     ViewQueryFilter, ViewQueryOperator,
 };
 
+use crate::internal::DomainIndex;
 use chrono::NaiveDate;
+use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, thread};
@@ -53,6 +56,16 @@ pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
 }
 
 async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
+    build_custom(prefix, sharding, log, true, Arc::new(LocalAuthority::new())).await
+}
+
+async fn build_custom(
+    prefix: &str,
+    sharding: Option<usize>,
+    log: bool,
+    controller: bool,
+    authority: Arc<LocalAuthority>,
+) -> Handle<LocalAuthority> {
     use crate::logger_pls;
     let mut builder = Builder::default();
     if log {
@@ -60,7 +73,15 @@ async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<Local
     }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
-    builder.start_local().await.unwrap().0
+    if controller {
+        builder
+            .start_local_custom(authority.clone())
+            .await
+            .unwrap()
+            .0
+    } else {
+        builder.start(authority.clone()).await.unwrap().0
+    }
 }
 
 fn get_settle_time() -> Duration {
@@ -4487,4 +4508,97 @@ async fn left_join_null() {
         .into_iter()
         .collect::<Vec<_>>();
     assert_eq!(res.len(), 2);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn test_reader_replication() {
+    let authority = Arc::new(LocalAuthority::new());
+    let cluster_name = "reader_replication";
+
+    let mut w1 = build_custom(
+        cluster_name,
+        Some(DEFAULT_SHARDING),
+        true,
+        true,
+        authority.clone(),
+    )
+    .await;
+
+    let instances_standalone = w1.get_instances().await.unwrap();
+    assert_eq!(1usize, instances_standalone.len());
+
+    let w1_addr: SocketAddr = instances_standalone[0].0;
+
+    let _w2 = build_custom(
+        "reader_replication",
+        Some(DEFAULT_SHARDING),
+        true,
+        false,
+        authority.clone(),
+    )
+    .await;
+
+    while w1.get_instances().await.unwrap().len() < 2 {
+        tokio::time::delay_for(Duration::from_millis(50)).await;
+    }
+
+    let instances_cluster = w1.get_instances().await.unwrap();
+
+    let w2_addr = instances_cluster
+        .iter()
+        .map(|(addr, _, _)| addr)
+        .find(|&&addr| addr != w1_addr)
+        .unwrap()
+        .clone();
+
+    w1.install_recipe(
+        "
+      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
+      QUERY q:
+        SELECT *
+        FROM t1;",
+    )
+    .await
+    .unwrap();
+
+    let info_pre_replication = w1.get_info().await.unwrap();
+    let domains_pre_replication =
+        info_pre_replication
+            .workers
+            .values()
+            .fold(HashMap::new(), |mut acc, entry| {
+                acc.extend(entry.iter().map(|e| (e.0 .0, e.1)));
+                acc
+            });
+
+    let repl_result = w1
+        .replicate_readers(vec!["q".to_owned()], Some(w2_addr))
+        .await
+        .unwrap();
+
+    let readers = repl_result.new_readers;
+    assert!(readers.contains_key("q"));
+
+    let info_post_replication = w1.get_info().await.unwrap();
+    let domains_from_worker: HashMap<DomainIndex, Vec<NodeIndex>> = info_post_replication
+        .workers
+        .get(&w2_addr)
+        .unwrap()
+        .iter()
+        .fold(HashMap::new(), |mut acc, (dk, nodes)| {
+            acc.entry(dk.0)
+                .or_insert_with(Vec::new)
+                .extend(nodes.iter());
+            acc
+        });
+
+    for (domain, nodes) in readers.get("q").unwrap().iter() {
+        assert!(domains_pre_replication.get(domain).is_none());
+        let domain_nodes_opt = domains_from_worker.get(domain);
+        assert!(domain_nodes_opt.is_some());
+        let domain_nodes = domain_nodes_opt.unwrap();
+        for node in nodes {
+            assert!(domain_nodes.contains(node))
+        }
+    }
 }

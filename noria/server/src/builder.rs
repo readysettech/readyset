@@ -160,7 +160,23 @@ impl Builder {
             anyhow::Error,
         >,
     > {
-        let fut = self.start(Arc::new(LocalAuthority::new()));
+        self.start_local_custom(Arc::new(LocalAuthority::new()))
+    }
+
+    /// Start a local-only worker using a custom authority, and return a handle to it.
+    pub fn start_local_custom(
+        &self,
+        authority: Arc<LocalAuthority>,
+    ) -> impl Future<
+        Output = Result<
+            (
+                Handle<LocalAuthority>,
+                impl Future<Output = ()> + Unpin + Send,
+            ),
+            anyhow::Error,
+        >,
+    > {
+        let fut = self.start(authority);
         async move {
             #[allow(unused_mut)]
             let (mut wh, done) = fut.await?;
