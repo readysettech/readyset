@@ -5,6 +5,7 @@ use crate::controller::schema;
 use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::debug::info::{DomainKey, GraphInfo};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
 use crate::{ReaderReplicationResult, ReaderReplicationSpec};
 use dataflow::prelude::*;
@@ -213,10 +214,7 @@ impl ControllerInner {
             (&Method::POST, "/graphviz") => {
                 return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
             }
-            (&Method::GET, "/get_statistics") => {
-                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
-            }
-            (&Method::POST, "/get_statistics") => {
+            (&Method::GET | &Method::POST, "/get_statistics") => {
                 return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
             }
             _ => {}
@@ -232,7 +230,9 @@ impl ControllerInner {
             }
             (Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
             (Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
-            (Method::GET, "/instances") => Ok(Ok(json::to_string(&self.get_instances()).unwrap())),
+            (Method::GET | Method::POST, "/instances") => {
+                Ok(Ok(json::to_string(&self.get_instances()).unwrap()))
+            }
             (Method::GET, "/external_addrs") => {
                 Ok(Ok(json::to_string(&self.external_addrs).unwrap()))
             }
@@ -305,6 +305,7 @@ impl ControllerInner {
                     self.replicate_readers(args)
                         .map(|readers| json::to_string(&readers).unwrap())
                 }),
+            (Method::POST, "/get_info") => Ok(Ok(json::to_string(&self.get_info()).unwrap())),
             (Method::POST, "/remove_node") => json::from_slice(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
@@ -443,6 +444,23 @@ impl ControllerInner {
 
         self.check_worker_liveness()?;
         Ok(())
+    }
+
+    pub(super) fn get_info(&self) -> GraphInfo {
+        let mut worker_info = HashMap::new();
+        for (di, dh) in self.domains.iter() {
+            for (i, shard) in dh.shards.iter().enumerate() {
+                worker_info
+                    .entry(shard.worker)
+                    .or_insert_with(HashMap::new)
+                    .entry(DomainKey(*di, i))
+                    .or_insert_with(Vec::new)
+                    .extend(self.domain_nodes[di].iter())
+            }
+        }
+        GraphInfo {
+            workers: worker_info,
+        }
     }
 
     pub(super) fn replicate_readers(

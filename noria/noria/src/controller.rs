@@ -1,4 +1,5 @@
 use crate::consensus::{self, Authority};
+use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
 use crate::metrics::MetricsDump;
@@ -421,6 +422,15 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// Replicate the readers associated with the list of queries to the given worker.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn get_instances(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<Vec<(SocketAddr, bool, Duration)>>> {
+        self.rpc("instances", ())
+    }
+
+    /// Replicate the readers associated with the list of queries to the given worker.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn replicate_readers(
         &mut self,
         queries: Vec<String>,
@@ -431,6 +441,13 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             worker_addr,
         };
         self.rpc("replicate_readers", request)
+    }
+
+    /// Replicate the readers associated with the list of queries to the given worker.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn get_info(&mut self) -> impl Future<Output = ReadySetResult<GraphInfo>> {
+        self.rpc("get_info", ())
     }
 
     /// Remove the given external view from the graph.
