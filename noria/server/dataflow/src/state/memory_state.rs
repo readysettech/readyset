@@ -138,7 +138,55 @@ impl State for MemoryState {
         let index = self
             .state_for(columns)
             .expect("lookup on non-indexed column set");
-        self.state[index].lookup(key)
+        let ret = self.state[index].lookup(key);
+        if ret.is_some() {
+            return ret;
+        }
+        // We missed in the index we tried to look up on, but we might have the rows
+        // in an overlapping index (e.g. if we missed looking up [0, 1], [0] or [1]
+        // might have the rows).
+        // This happens when partial indices overlap between a parent and its children,
+        // resulting in upqueries along an overlapping replay path.
+        // FIXME(eta): a lot of this could be computed at index addition time.
+        for state in self.state.iter() {
+            // must be strictly less than, because otherwise it's either the same index, or
+            // we'd have to magic up datatypes out of thin air
+            if state.key().len() < columns.len() {
+                // For each column in `columns`, find the corresponding column in `state.key()`,
+                // if there is one, and return (its position in state.key(), its value from `key`).
+                // FIXME(eta): this seems accidentally quadratic.
+                let mut positions = columns
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, col_idx)| {
+                        state
+                            .key()
+                            .iter()
+                            .position(|x| x == col_idx)
+                            .map(|pos| (pos, key.get(i).expect("bogus key passed to lookup")))
+                    })
+                    .collect::<Vec<_>>();
+                if positions.len() == state.key().len() {
+                    // the index only contains columns from `columns` (and none other).
+                    // make a new lookup key
+                    positions.sort_unstable_by_key(|(idx, _)| *idx);
+                    let kt = KeyType::from(positions.into_iter().map(|(_, val)| val));
+                    if let LookupResult::Some(mut ret) = state.lookup(&kt) {
+                        // filter the rows in this index to ones which actually match the key
+                        // FIXME(eta): again, probably O(terrible)
+                        ret.retain(|row| {
+                            columns
+                                .iter()
+                                .enumerate()
+                                .all(|(key_idx, &col_idx)| row.get(col_idx) == key.get(key_idx))
+                        });
+                        return LookupResult::Some(ret);
+                    }
+                }
+            }
+        }
+        // oh well, that was a lot of CPU cycles and we didn't even have the records :(
+        LookupResult::Missing
     }
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {

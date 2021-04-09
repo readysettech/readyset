@@ -168,6 +168,21 @@ impl<'a> RecordResult<'a> {
             RecordResult::References(ref refs) => refs.is_empty(),
         }
     }
+
+    pub(crate) fn retain<F>(&mut self, func: F)
+    where
+        F: Fn(&[DataType]) -> bool,
+    {
+        match *self {
+            RecordResult::Borrowed(ref rs) => {
+                if rs.len() > 0 {
+                    *self = RecordResult::References(rs.iter().filter(|x| func(x)).collect());
+                }
+            }
+            RecordResult::References(ref mut rs) => rs.retain(|row| func(row)),
+            RecordResult::Owned(ref mut rs) => rs.retain(|row| func(row)),
+        }
+    }
 }
 
 impl<'a> FromIterator<Vec<DataType>> for RecordResult<'a> {

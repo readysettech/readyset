@@ -599,7 +599,7 @@ impl Materializations {
                             if columns.iter().any(Option::is_none) {
                                 break;
                             } else if self.partial.contains(&pni) {
-                                for index in &self.have[&pni] {
+                                'outer: for index in &self.have[&pni] {
                                     // is this node partial over some of the child's partial
                                     // columns, but not others? if so, we run into really sad
                                     // situations where the parent could miss in its state despite
@@ -623,6 +623,24 @@ impl Materializations {
                                                 .find(|c| !index.columns.contains(&c))
                                         });
                                     if let Some(not_shared) = unshared {
+                                        // This might be fine if we also have the child's index in
+                                        // the parent, since then the overlapping index logic in
+                                        // `MemoryState::lookup` will save us.
+                                        for other_idx in &self.have[&pni] {
+                                            let cols = columns
+                                                .iter()
+                                                .map(|x| x.unwrap())
+                                                .collect::<Vec<_>>();
+                                            if other_idx.columns == cols {
+                                                // Looks like we have the necessary index, so we'll
+                                                // be okay.
+                                                continue 'outer;
+                                            }
+                                        }
+                                        // If we get here, we've somehow managed to not index the
+                                        // parent by the same key as the child, which really should
+                                        // never happen.
+                                        // This code should probably just be taken out soon.
                                         println!("{}", graphviz(graph, true, &self));
                                         crit!(self.log, "partially overlapping partial indices";
                                                   "parent" => pni.index(),
@@ -632,8 +650,8 @@ impl Materializations {
                                                   "conflict" => not_shared,
                                         );
                                         internal!(
-                                        "partially overlapping partial indices (parent {:?} cols {:?}, child {:?} cols {:?})",
-                                        pni.index(), index, ni.index(), columns
+                                        "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
+                                        pni.index(), index, &self.have[&pni], ni.index(), columns
                                         );
                                     }
                                 }

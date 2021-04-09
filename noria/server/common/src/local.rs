@@ -151,6 +151,20 @@ pub enum KeyType<'a> {
 }
 
 impl<'a> KeyType<'a> {
+    pub fn get(&self, idx: usize) -> Option<&DataType> {
+        use tuple::TupleElements;
+
+        match self {
+            KeyType::Single(x) if idx == 0 => Some(x),
+            KeyType::Single(_) => None,
+            KeyType::Double(x) => TupleElements::get(x, idx),
+            KeyType::Tri(x) => TupleElements::get(x, idx),
+            KeyType::Quad(x) => TupleElements::get(x, idx),
+            KeyType::Quin(x) => TupleElements::get(x, idx),
+            KeyType::Sex(x) => TupleElements::get(x, idx),
+            KeyType::Multi(arr) => arr.get(idx),
+        }
+    }
     pub fn from<I>(other: I) -> Self
     where
         I: IntoIterator<Item = &'a DataType>,
