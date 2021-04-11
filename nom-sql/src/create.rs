@@ -894,4 +894,28 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn vehicle_load_profiles() {
+        let qstring = b"CREATE TABLE `vehicle_load_profiles` (
+  `vehicle_load_profile_id` int(11) NOT NULL AUTO_INCREMENT,
+  `vehicle_id` int(11) NOT NULL,
+  `charge_event_id` int(11) DEFAULT NULL,
+  `start_dttm` timestamp NULL DEFAULT NULL,
+  `end_dttm` timestamp NULL DEFAULT NULL,
+  `is_home` tinyint(1) DEFAULT NULL,
+  `energy_delivered` float DEFAULT NULL,
+  `energy_added` float DEFAULT NULL,
+  `soc_added` float DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`vehicle_load_profile_id`),
+  KEY `load_profile_vehicle` (`vehicle_id`),
+  KEY `vlp_charge_event` (`charge_event_id`),
+  CONSTRAINT `load_profile_vehicle` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`vehicle_id`),
+  CONSTRAINT `vlp_charge_event` FOREIGN KEY (`charge_event_id`) REFERENCES `charge_events` (`charge_event_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=546971 DEFAULT CHARSET=latin1";
+        let res = creation(qstring);
+        assert!(res.is_ok());
+    }
 }
