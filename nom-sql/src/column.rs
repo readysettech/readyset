@@ -11,7 +11,7 @@ use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{alt, complete, do_parse, map, named, opt, tag, tag_no_case, IResult};
 use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
 
 use crate::{common::type_identifier, Real};
@@ -181,6 +181,9 @@ pub enum ColumnConstraint {
     AutoIncrement,
     PrimaryKey,
     Unique,
+    /// NOTE(grfn): Yes, this really is its own special thing, not just an expression - see
+    /// <https://dev.mysql.com/doc/refman/8.0/en/timestamp-initialization.html>
+    OnUpdateCurrentTimestamp,
 }
 
 impl fmt::Display for ColumnConstraint {
@@ -195,6 +198,7 @@ impl fmt::Display for ColumnConstraint {
             ColumnConstraint::AutoIncrement => write!(f, "AUTO_INCREMENT"),
             ColumnConstraint::PrimaryKey => write!(f, "PRIMARY KEY"),
             ColumnConstraint::Unique => write!(f, "UNIQUE"),
+            ColumnConstraint::OnUpdateCurrentTimestamp => write!(f, "ON UPDATE CURRENT_TIMESTAMP"),
         }
     }
 }
@@ -291,6 +295,24 @@ fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
     Ok((remaining_input, Some(ColumnConstraint::DefaultValue(def))))
 }
 
+named!(
+    on_update_current_timestamp(&[u8]) -> ColumnConstraint,
+    do_parse!(
+        complete!(tag_no_case!("on"))
+            >> multispace1
+            >> complete!(tag_no_case!("update"))
+            >> multispace1
+            >> alt!(
+                tag_no_case!("current_timestamp")
+                    | tag_no_case!("now")
+                    | tag_no_case!("localtime")
+                    | tag_no_case!("localtimestamp")
+            )
+            >> opt!(tag!("()"))
+            >> (ColumnConstraint::OnUpdateCurrentTimestamp)
+    )
+);
+
 pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
     let not_null = map(
         delimited(multispace0, tag_no_case("not null"), multispace0),
@@ -342,6 +364,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         unique,
         character_set,
         collate,
+        |i| map!(i, on_update_current_timestamp, Some),
     ))(i)
 }
 
