@@ -96,6 +96,12 @@ async fn main() -> anyhow::Result<()> {
                     .default_value("mysql")
                     .help("The database we are connected to: mysql or postgres"),
             )
+            .arg(
+                Arg::with_name("group_id")
+                    .long("group-id")
+                    .takes_value(true)
+                    .help("The name of the kafka consumer group ID"),
+            )
             .get_matches();
 
     let bootstrap_servers: &str = matches.value_of("kafka-bootstrap-servers").unwrap();
@@ -112,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let eof = matches.is_present("kafka-partition-eof");
     let auto_commit = !matches.is_present("kafka-no-auto-commit");
     let db_type = DatabaseType::from_str(matches.value_of("db_type").unwrap()).unwrap();
+    let group_id = matches.value_of("group_id");
 
     DebeziumConnector::builder()
         .set_bootstrap_servers(bootstrap_servers)
@@ -124,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         .set_eof(eof)
         .set_auto_commit(auto_commit)
         .set_database_type(db_type)
+        .set_group_id(group_id)
         .build()
         .await?
         .start()
