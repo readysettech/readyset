@@ -647,13 +647,13 @@ impl Recipe {
                     }
                     Result::Ok((remainder, parsed)) => {
                         // should have consumed all input
-                        assert!(
-                            remainder.is_empty(),
-                            format!(
+                        if !remainder.is_empty() {
+                            acc.push(Err(format!(
                                 "failed to parse the complete recipe; left with: {}",
                                 remainder
-                            )
-                        );
+                            )));
+                            return acc;
+                        }
                         acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
                     }
                 }
@@ -661,13 +661,13 @@ impl Recipe {
             },
         );
 
-        Ok(parsed_queries
+        parsed_queries
             .into_iter()
             .map(|pr| {
-                let pr = pr.unwrap();
-                (pr.1.map(String::from), pr.2, pr.0)
+                let (is_leaf, r, q) = pr?;
+                Ok((r.map(String::from), q, is_leaf))
             })
-            .collect::<Vec<_>>())
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.
