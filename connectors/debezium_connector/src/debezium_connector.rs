@@ -141,11 +141,11 @@ impl Builder {
         self
     }
 
-    pub fn set_group_id<S>(&mut self, group_id: &S) -> &mut Self
+    pub fn set_group_id<S>(&mut self, group_id: Option<&S>) -> &mut Self
     where
         S: ToOwned<Owned = String> + ?Sized,
     {
-        self.group_id = Some(group_id.to_owned());
+        self.group_id = group_id.map(|x| x.to_owned());
         self
     }
 
