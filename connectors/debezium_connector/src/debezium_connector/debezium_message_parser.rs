@@ -1,6 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::Duration;
 use chrono::NaiveDateTime;
+use msql_srv::MysqlTime;
+use nom_sql::{CreateTableStatement, SqlType};
 use noria::{DataType, Modification};
 use serde::Deserialize;
 use serde_json::Value;
@@ -123,8 +125,8 @@ pub struct PrimitiveField {
 }
 
 pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
-    let field_type = f.typ.to_owned();
-    let semantic_type = f.field.to_owned();
+    let field_type = &f.typ;
+    let semantic_type = &f.field;
     match v {
         Value::Null => Ok(DataType::None),
         Value::Bool(v) => Ok(DataType::Int(*v as i32)),
@@ -137,7 +139,7 @@ pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
             } else if (field_type == "bytes")
                 && (semantic_type == "org.apache.kafka.connect.data.Decimal")
             {
-                unimplemented!("Set decimal.handling.mode to double in SQL Connector Conf.")
+                bail!("Set decimal.handling.mode to double in SQL Connector Conf.")
             } else {
                 Ok(DataType::try_from(v.as_str())?)
             }
@@ -166,7 +168,7 @@ pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
             } else if matches!(field_type.as_str(), "double" | "float32" | "float64") {
                 Ok(DataType::from(v.as_f64().unwrap()))
             } else {
-                unimplemented!("Type not implemented!")
+                bail!("Type not implemented!")
             }
         }
         _ => Ok(DataType::None),
@@ -183,8 +185,43 @@ impl EventKey {
     }
 }
 
+fn schema_column_mapping(schema: Option<&CreateTableStatement>) -> HashMap<&str, &SqlType> {
+    schema
+        .iter()
+        .flat_map(|stmt| &stmt.fields)
+        .map(|field| (field.column.name.as_str(), &field.sql_type))
+        .collect()
+}
+
+fn coerce_value(
+    val: &Value,
+    field: &PrimitiveField,
+    column_types: &HashMap<&str, &SqlType>,
+) -> Result<DataType> {
+    let mut res = field_to_datatype(field, val)?;
+    if let Some(sql_type) = column_types.get(field.field.as_str()) {
+        res = match **sql_type {
+            SqlType::Timestamp => NaiveDateTime::parse_from_str((&res).into(), "%+")?.into(),
+            SqlType::Date if res.is_integer() => NaiveDateTime::from_timestamp(0, 0)
+                .checked_add_signed(Duration::days(res.into()))
+                .ok_or_else(|| anyhow!("Numeric date value out of bounds"))?
+                .into(),
+            SqlType::Time if res.is_integer() => {
+                MysqlTime::from_microseconds(i64::from(res) * 1000).into()
+            }
+            _ => res.coerce_to(sql_type)?.into_owned(),
+        }
+    }
+    Ok(res)
+}
+
 impl CreatePayload {
-    pub fn get_create_vector(&self, after_schema: &Field) -> Result<Vec<DataType>> {
+    pub fn get_create_vector(
+        &self,
+        after_schema: &Field,
+        noria_schema: Option<&CreateTableStatement>,
+    ) -> Result<Vec<DataType>> {
+        let column_types = schema_column_mapping(noria_schema);
         match after_schema {
             Field::StructField {
                 fields: after_field_schema,
@@ -192,7 +229,7 @@ impl CreatePayload {
                 let mut insert_vec = Vec::new();
                 for f in after_field_schema.iter() {
                     let field_value = &self.after[&f.field];
-                    let new_datatype = field_to_datatype(f, field_value)?;
+                    let new_datatype = coerce_value(field_value, f, &column_types)?;
                     insert_vec.push(new_datatype)
                 }
                 Ok(insert_vec)
@@ -206,7 +243,9 @@ impl UpdatePayload {
     pub fn get_update_vector(
         &self,
         after_schema: &Field,
+        noria_schema: Option<&CreateTableStatement>,
     ) -> Result<Vec<(usize, Modification)>, anyhow::Error> {
+        let column_types = schema_column_mapping(noria_schema);
         match after_schema {
             Field::StructField {
                 fields: after_field_schema,
@@ -214,7 +253,7 @@ impl UpdatePayload {
                 let mut modifications = Vec::new();
                 for (i, f) in after_field_schema.iter().enumerate() {
                     let field_value = &self.after[&f.field];
-                    let new_datatype = field_to_datatype(f, field_value)?;
+                    let new_datatype = coerce_value(field_value, f, &column_types)?;
                     let modification: Modification = Modification::Set(new_datatype);
                     modifications.push((i, modification))
                 }
