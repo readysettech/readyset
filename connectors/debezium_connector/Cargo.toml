@@ -23,6 +23,8 @@ derive_more = "0.99.11"
 tracing = "0.1.25"
 tracing-subscriber = {version = "0.2.16", features = ["tracing-log"]}
 thiserror = "1.0.24"
+lazy_static = "1.4.0"
+regex = "1.4.5"
 
 [[bin]]
 name = "debezium_connector"
