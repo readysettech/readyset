@@ -291,11 +291,13 @@ impl DebeziumConnector {
                 // and that too in that specific order.
                 if let Some(table_name) = &p.source.table {
                     let after_field_schema = &message.schema.fields[1];
-                    let create_vector = p.get_create_vector(after_field_schema)?;
                     let mut table_mutator =
                         self.noria.table(table_name).await.with_context(|| {
                             format!("Fetching builder for table \"{}\"", table_name)
                         })?;
+                    let create_vector =
+                        p.get_create_vector(after_field_schema, table_mutator.schema())?;
+                    trace!("inserting 1 row into table {}", table_name);
                     table_mutator.insert(create_vector).await?
                 }
             }
@@ -311,11 +313,12 @@ impl DebeziumConnector {
                     // We know that the payload consist of before, after and source fields
                     // and that too in that specific order.
                     let after_field_schema = &message.schema.fields[1];
-                    let update_vector = p.get_update_vector(after_field_schema)?;
                     let mut table_mutator =
                         self.noria.table(table_name).await.with_context(|| {
                             format!("Fetching builder for table \"{}\"", table_name)
                         })?;
+                    let update_vector =
+                        p.get_update_vector(after_field_schema, table_mutator.schema())?;
                     table_mutator
                         .update(vec![pk_datatype], update_vector)
                         .await?
