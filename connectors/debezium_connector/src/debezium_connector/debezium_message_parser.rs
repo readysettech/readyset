@@ -233,11 +233,11 @@ mod tests {
     fn parse_change_event_key_event() {
         let json = r#"
         {
-            "schema": { 
+            "schema": {
                "type": "struct",
-               "name": "mysql-server-1.inventory.customers.Key", 
-               "optional": false, 
-               "fields": [ 
+               "name": "mysql-server-1.inventory.customers.Key",
+               "optional": false,
+               "fields": [
                  {
                    "field": "id",
                    "type": "int32",
@@ -245,7 +245,7 @@ mod tests {
                  }
                ]
              },
-            "payload": { 
+            "payload": {
                "id": 1001
             }
         }"#;
@@ -258,11 +258,11 @@ mod tests {
     fn parse_schema_change_event_event() {
         let json = r#"
         {
-            "schema": { 
+            "schema": {
                "type": "struct",
-               "name": "mysql-server-1.inventory.customers.Key", 
-               "optional": false, 
-               "fields": [ 
+               "name": "mysql-server-1.inventory.customers.Key",
+               "optional": false,
+               "fields": [
                 {
                     "field": "ddl",
                     "type": "string",
@@ -270,7 +270,7 @@ mod tests {
                   }
                ]
              },
-            "payload": { 
+            "payload": {
                 "databaseName": "inventory",
                 "ddl": "CREATE TABLE products ( id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, description VARCHAR(512), weight FLOAT ); ALTER TABLE products AUTO_INCREMENT = 101;",
                 "source" : {
@@ -296,14 +296,14 @@ mod tests {
     fn parse_create_change_event_event() {
         let json = r#"
         {
-            "schema": { 
+            "schema": {
               "type": "struct",
               "fields": [
                 {
                   "type": "struct",
                   "fields": [],
                   "optional": true,
-                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "name": "mysql-server-1.inventory.customers.Value",
                   "field": "before"
                 },
                 {
@@ -321,15 +321,15 @@ mod tests {
                 }
               ],
               "optional": false,
-              "name": "mysql-server-1.inventory.customers.Envelope" 
+              "name": "mysql-server-1.inventory.customers.Envelope"
             },
-            "payload": { 
+            "payload": {
               "op": "c",
-              "before": null, 
-              "after": { 
+              "before": null,
+              "after": {
                 "id": 1004
               },
-              "source": { 
+              "source": {
                 "db": "inventory",
                 "table": "customers"
               }
@@ -349,7 +349,7 @@ mod tests {
     fn parse_update_change_event_event() {
         let json = r#"
         {
-            "schema": { 
+            "schema": {
               "type": "struct",
               "fields": [
                 {
@@ -360,7 +360,7 @@ mod tests {
                     "field": "id"
                   }],
                   "optional": true,
-                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "name": "mysql-server-1.inventory.customers.Value",
                   "field": "before"
                 },
                 {
@@ -378,17 +378,17 @@ mod tests {
                 }
               ],
               "optional": false,
-              "name": "mysql-server-1.inventory.customers.Envelope" 
+              "name": "mysql-server-1.inventory.customers.Envelope"
             },
-            "payload": { 
+            "payload": {
               "op": "u",
-              "before": { 
+              "before": {
                 "id": 1002
               },
-              "after": { 
+              "after": {
                 "id": 1004
               },
-              "source": { 
+              "source": {
                 "db": "inventory",
                 "table": "customers"
               }
@@ -408,7 +408,7 @@ mod tests {
     fn parse_delete_change_event_event() {
         let json = r#"
         {
-            "schema": { 
+            "schema": {
               "type": "struct",
               "fields": [
                 {
@@ -419,7 +419,7 @@ mod tests {
                     "field": "id"
                   }],
                   "optional": true,
-                  "name": "mysql-server-1.inventory.customers.Value", 
+                  "name": "mysql-server-1.inventory.customers.Value",
                   "field": "before"
                 },
                 {
@@ -437,13 +437,13 @@ mod tests {
                 }
               ],
               "optional": false,
-              "name": "mysql-server-1.inventory.customers.Envelope" 
+              "name": "mysql-server-1.inventory.customers.Envelope"
             },
-            "payload": { 
+            "payload": {
               "op": "d",
-              "before": null, 
+              "before": null,
               "after": null,
-              "source": { 
+              "source": {
                 "db": "inventory",
                 "table": "customers"
               }
