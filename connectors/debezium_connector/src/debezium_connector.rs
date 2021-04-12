@@ -1,17 +1,19 @@
 extern crate serde_json;
 use anyhow::{anyhow, Context};
+use lazy_static::lazy_static;
 use noria::consensus::ZookeeperAuthority;
 use noria::consistency::Timestamp;
 use noria::ControllerHandle;
 use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
+use regex::Regex;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::str::FromStr;
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 mod debezium_message_parser;
 mod kafka_message_consumer_wrapper;
@@ -259,8 +261,21 @@ impl DebeziumConnector {
     }
 
     async fn handle_schema_message(&mut self, message: SchemaChange) -> anyhow::Result<()> {
-        info!("Handling schema change message");
-        self.noria.extend_recipe(&message.payload.ddl).await?;
+        let ddl = message.payload.ddl.as_str();
+        // FIXME(grfn): Replace this with something that actually parses the SQL and looks at the
+        // AST, rather than doing it all string based - this is such a hack!
+        lazy_static! {
+            // DDL that starts with either CREATE TABLE or CREATE VIEW
+            static ref SUPPORTED_DDL: Regex =
+                Regex::new(r"(?i)^\s+create\s+(?:view)|(?:table)").unwrap();
+        };
+
+        if !SUPPORTED_DDL.is_match(ddl) {
+            info!(ddl, "Handling schema change message");
+            self.noria.extend_recipe(ddl).await?;
+        } else {
+            warn!(ddl, "Ignoring schema change message");
+        }
         Ok(())
     }
 
