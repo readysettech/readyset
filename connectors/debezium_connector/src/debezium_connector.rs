@@ -457,7 +457,7 @@ impl DebeziumConnector {
             .kafka_consumer
             .take()
             .expect("Cannot start() a debezium connector twice");
-        let mut message_stream = consumer.kafka_consumer.stream();
+        let mut message_stream = consumer.kafka_consumer.start();
 
         while let Some(message) = message_stream.next().await {
             match message {
