@@ -1786,8 +1786,8 @@ impl SqlToMirConverter {
         let mut sec_round = false;
         let mut union_base_name = " ".to_string();
 
-        // Canonical operator order: B-J-G-F-P-R
-        // (Base, Join, GroupBy, Filter, Project, Reader)
+        // Canonical operator order: B-J-F-G-P-R
+        // (Base, Join, Filter, GroupBy, Project, Reader)
         {
             let mut node_for_rel: HashMap<&str, MirNodeRef> = HashMap::default();
 
@@ -1929,19 +1929,6 @@ impl SqlToMirConverter {
             for n in last_policy_nodes.iter() {
                 prev_node = Some(n.clone());
 
-                // 3. Add function and grouped nodes
-                let mut func_nodes: Vec<MirNodeRef> = make_grouped(
-                    self,
-                    &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
-                    &node_for_rel,
-                    new_node_count,
-                    &mut prev_node,
-                    false,
-                )?;
-
-                new_node_count += func_nodes.len();
-
                 let mut predicate_nodes = Vec::new();
                 // 5. Generate the necessary filter nodes for local predicates associated with each
                 // relation node in the query graph.
@@ -2051,7 +2038,20 @@ impl SqlToMirConverter {
                     predicate_nodes.extend(fns);
                 }
 
-                // 8. Get the final node
+                // 8. Add function and grouped nodes
+                let mut func_nodes: Vec<MirNodeRef> = make_grouped(
+                    self,
+                    &format!("q_{:x}{}", qg.signature().hash, uformat),
+                    &qg,
+                    &node_for_rel,
+                    new_node_count,
+                    &mut prev_node,
+                    false,
+                )?;
+
+                new_node_count += func_nodes.len();
+
+                // 9. Get the final node
                 let mut final_node: MirNodeRef = if prev_node.is_some() {
                     prev_node.unwrap().clone()
                 } else {
@@ -2060,7 +2060,7 @@ impl SqlToMirConverter {
                     node_for_rel[sorted_rels.last().unwrap()].clone()
                 };
 
-                // 9. Potentially insert TopK node below the final node
+                // 10. Potentially insert TopK node below the final node
                 // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
                 // over, but we could end up in a stick place if we reconcile/combine multiple
                 // queries (due to security universes or due to compound select queries) that do
