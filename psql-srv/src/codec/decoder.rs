@@ -827,6 +827,30 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_sync_after_invalid_message() {
+        let mut codec = Codec::<Vec<Value>>::new();
+        codec.set_start_up_complete();
+        let mut buf = BytesMut::new();
+
+        // Append an invalid Close message.
+        buf.put_u8(b'C'); // message id
+        buf.put_i32(4 + 1 + 5); // size
+        buf.put_u8(b'I'); // invalid name type
+        buf.extend_from_slice(b"name\0");
+
+        // Append a valid Sync message.
+        buf.put_u8(b'S'); // message id
+        buf.put_i32(4); // size
+
+        // The codec returns an error when attempting to parse the invalid Close message.
+        assert!(codec.decode(&mut buf).is_err());
+
+        // The codec successfully parses the Sync message. (The invalid Close message has been
+        // skipped).
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(Sync));
+    }
+
+    #[test]
     fn test_decode_terminate() {
         let mut codec = Codec::<Vec<Value>>::new();
         codec.set_start_up_complete();

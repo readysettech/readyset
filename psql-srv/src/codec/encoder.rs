@@ -58,161 +58,170 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Encoder for Co
     type Error = Error;
 
     fn encode(&mut self, message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error> {
-        use std::io::Write;
-
-        // Handle SSLResponse as a special case, since it has a nonstandard message format.
-        if let SSLResponse { byte } = message {
-            put_u8(byte, dst);
-            return Ok(());
-        }
-
         let start_ofs = dst.len();
+        encode(message, dst).map_err(|e| {
+            // On an encoding error, remove any partially encoded data.
+            dst.truncate(start_ofs);
+            e
+        })
+    }
+}
 
-        match message {
-            AuthenticationOk => {
-                put_u8(ID_AUTHENTICATION_OK, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_i32(AUTHENTICATION_OK_SUCCESS, dst);
-            }
+fn encode<R>(message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error>
+where
+    R: IntoIterator<Item: TryInto<Value, Error = BackendError>>,
+{
+    use std::io::Write;
 
-            BindComplete => {
-                put_u8(ID_BIND_COMPLETE, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-            }
+    // Handle SSLResponse as a special case, since it has a nonstandard message format.
+    if let SSLResponse { byte } = message {
+        put_u8(byte, dst);
+        return Ok(());
+    }
 
-            CloseComplete => {
-                put_u8(ID_CLOSE_COMPLETE, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-            }
+    let start_ofs = dst.len();
 
-            CommandComplete { tag } => {
-                put_u8(ID_COMMAND_COMPLETE, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                // Format command complete "tag" (eg "DELETE 5" to indicate 5 rows deleted).
-                let mut tag_buf = [0u8; COMMAND_COMPLETE_TAG_BUF_LEN];
-                match tag {
-                    Delete(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_DELETE_TAG, n)?,
-                    Empty => {}
-                    Insert(n) => write!(
-                        &mut tag_buf[..],
-                        "{} {} {}",
-                        COMMAND_COMPLETE_INSERT_TAG,
-                        COMMAND_COMPLETE_INSERT_LEGACY_OID,
-                        n
-                    )?,
-                    Select(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_SELECT_TAG, n)?,
-                    Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
+    match message {
+        AuthenticationOk => {
+            put_u8(ID_AUTHENTICATION_OK, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i32(AUTHENTICATION_OK_SUCCESS, dst);
+        }
+
+        BindComplete => {
+            put_u8(ID_BIND_COMPLETE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+        }
+
+        CloseComplete => {
+            put_u8(ID_CLOSE_COMPLETE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+        }
+
+        CommandComplete { tag } => {
+            put_u8(ID_COMMAND_COMPLETE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            // Format command complete "tag" (eg "DELETE 5" to indicate 5 rows deleted).
+            let mut tag_buf = [0u8; COMMAND_COMPLETE_TAG_BUF_LEN];
+            match tag {
+                Delete(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_DELETE_TAG, n)?,
+                Empty => {}
+                Insert(n) => write!(
+                    &mut tag_buf[..],
+                    "{} {} {}",
+                    COMMAND_COMPLETE_INSERT_TAG,
+                    COMMAND_COMPLETE_INSERT_LEGACY_OID,
+                    n
+                )?,
+                Select(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_SELECT_TAG, n)?,
+                Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
+            };
+            let tag_str = std::str::from_utf8(&tag_buf)?;
+            let tag_data_len = tag_str.find(NUL_CHAR).ok_or_else(|| {
+                Error::InternalError("error formatting command complete tag".to_string())
+            })?;
+            put_str(&tag_str[..tag_data_len], dst);
+        }
+
+        DataRow {
+            values,
+            explicit_transfer_formats,
+        } => {
+            put_u8(ID_DATA_ROW, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i16(COUNT_PLACEHOLDER, dst);
+            let mut n_values = 0;
+            for (i, v) in values.into_iter().enumerate() {
+                let format = match explicit_transfer_formats {
+                    Some(ref fs) => *fs.get(i).ok_or_else(|| {
+                        Error::InternalError("incorrect DataRow transfer format length".to_string())
+                    })?,
+                    None => Text,
                 };
-                let tag_str = std::str::from_utf8(&tag_buf)?;
-                let tag_data_len = tag_str.find(NUL_CHAR).ok_or_else(|| {
-                    Error::InternalError("error formatting command complete tag".to_string())
-                })?;
-                put_str(&tag_str[..tag_data_len], dst);
-            }
-
-            DataRow {
-                values,
-                explicit_transfer_formats,
-            } => {
-                put_u8(ID_DATA_ROW, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_i16(COUNT_PLACEHOLDER, dst);
-                let mut n_values = 0;
-                for (i, v) in values.into_iter().enumerate() {
-                    let format = match explicit_transfer_formats {
-                        Some(ref fs) => *fs.get(i).ok_or_else(|| {
-                            Error::InternalError(
-                                "incorrect DataRow transfer format length".to_string(),
-                            )
-                        })?,
-                        None => Text,
-                    };
-                    let v = v
-                        .try_into()
-                        .map_err(|e| Error::InternalError(e.to_string()))?;
-                    match format {
-                        Binary => put_binary_value(v, dst)?,
-                        Text => put_text_value(v, dst)?,
-                    };
-                    n_values += 1;
-                }
-                // Update the value count field to match the number of values just serialized.
-                set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
-            }
-
-            ErrorResponse {
-                severity,
-                sqlstate,
-                message,
-            } => {
-                let severity = match severity {
-                    ErrorSeverity::Error => ERROR_RESPONSE_SEVERITY_ERROR,
-                    ErrorSeverity::Fatal => ERROR_RESPONSE_SEVERITY_FATAL,
-                    ErrorSeverity::Panic => ERROR_RESPONSE_SEVERITY_PANIC,
+                let v = v
+                    .try_into()
+                    .map_err(|e| Error::InternalError(e.to_string()))?;
+                match format {
+                    Binary => put_binary_value(v, dst)?,
+                    Text => put_text_value(v, dst)?,
                 };
-                put_u8(ID_ERROR_RESPONSE, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_u8(ERROR_RESPONSE_S_FIELD, dst);
-                put_str(severity, dst);
-                put_u8(ERROR_RESPONSE_V_FIELD, dst);
-                put_str(severity, dst);
-                put_u8(ERROR_RESPONSE_C_FIELD, dst);
-                put_str(&sqlstate.code(), dst);
-                put_u8(ERROR_RESPONSE_M_FIELD, dst);
-                put_str(&message, dst);
-                put_u8(ERROR_RESPONSE_TERMINATOR, dst);
+                n_values += 1;
             }
+            // Update the value count field to match the number of values just serialized.
+            set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
+        }
 
-            ParameterDescription {
-                parameter_data_types,
-            } => {
-                put_u8(ID_PARAMETER_DESCRIPTION, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_i16(i16::try_from(parameter_data_types.len())?, dst);
-                for t in parameter_data_types {
-                    put_type(t, dst)?;
-                }
-            }
+        ErrorResponse {
+            severity,
+            sqlstate,
+            message,
+        } => {
+            let severity = match severity {
+                ErrorSeverity::Error => ERROR_RESPONSE_SEVERITY_ERROR,
+                ErrorSeverity::Fatal => ERROR_RESPONSE_SEVERITY_FATAL,
+                ErrorSeverity::Panic => ERROR_RESPONSE_SEVERITY_PANIC,
+            };
+            put_u8(ID_ERROR_RESPONSE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_u8(ERROR_RESPONSE_S_FIELD, dst);
+            put_str(severity, dst);
+            put_u8(ERROR_RESPONSE_V_FIELD, dst);
+            put_str(severity, dst);
+            put_u8(ERROR_RESPONSE_C_FIELD, dst);
+            put_str(&sqlstate.code(), dst);
+            put_u8(ERROR_RESPONSE_M_FIELD, dst);
+            put_str(&message, dst);
+            put_u8(ERROR_RESPONSE_TERMINATOR, dst);
+        }
 
-            ParseComplete => {
-                put_u8(ID_PARSE_COMPLETE, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-            }
-
-            ReadyForQuery { status } => {
-                put_u8(ID_READY_FOR_QUERY, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_u8(status, dst);
-            }
-
-            RowDescription { field_descriptions } => {
-                put_u8(ID_ROW_DESCRIPTION, dst);
-                put_i32(LENGTH_PLACEHOLDER, dst);
-                put_i16(i16::try_from(field_descriptions.len())?, dst);
-                for d in field_descriptions {
-                    put_str(&d.field_name, dst);
-                    put_i32(d.table_id, dst);
-                    put_i16(d.col_id, dst);
-                    put_type(d.data_type, dst)?;
-                    put_i16(d.data_type_size, dst);
-                    put_i32(d.type_modifier, dst);
-                    put_format(d.transfer_format, dst);
-                }
-            }
-
-            SSLResponse { .. } => {
-                // SSLResponse is handled as a special case above.
-                unreachable!()
+        ParameterDescription {
+            parameter_data_types,
+        } => {
+            put_u8(ID_PARAMETER_DESCRIPTION, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i16(i16::try_from(parameter_data_types.len())?, dst);
+            for t in parameter_data_types {
+                put_type(t, dst)?;
             }
         }
 
-        // Update the message length field to match the recently serialized data length in `dst`.
-        // The one byte message identifier prefix is excluded when calculating this length.
-        let message_len_without_id = dst.len() - start_ofs - 1;
-        set_i32(i32::try_from(message_len_without_id)?, dst, start_ofs + 1)?;
+        ParseComplete => {
+            put_u8(ID_PARSE_COMPLETE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+        }
 
-        Ok(())
+        ReadyForQuery { status } => {
+            put_u8(ID_READY_FOR_QUERY, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_u8(status, dst);
+        }
+
+        RowDescription { field_descriptions } => {
+            put_u8(ID_ROW_DESCRIPTION, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i16(i16::try_from(field_descriptions.len())?, dst);
+            for d in field_descriptions {
+                put_str(&d.field_name, dst);
+                put_i32(d.table_id, dst);
+                put_i16(d.col_id, dst);
+                put_type(d.data_type, dst)?;
+                put_i16(d.data_type_size, dst);
+                put_i32(d.type_modifier, dst);
+                put_format(d.transfer_format, dst);
+            }
+        }
+
+        SSLResponse { .. } => {
+            unreachable!("SSLResponse is handled as a special case above.")
+        }
     }
+
+    // Update the message length field to match the recently serialized data length in `dst`.
+    // The one byte message identifier prefix is excluded when calculating this length.
+    let message_len_without_id = dst.len() - start_ofs - 1;
+    set_i32(i32::try_from(message_len_without_id)?, dst, start_ofs + 1)?;
+
+    Ok(())
 }
 
 fn put_u8(val: u8, dst: &mut BytesMut) {
@@ -589,6 +598,65 @@ mod tests {
     fn test_encode_error_response() {
         let mut codec = Codec::<Vec<Value>>::new();
         let mut buf = BytesMut::new();
+        codec
+            .encode(
+                ErrorResponse {
+                    severity: ErrorSeverity::Error,
+                    sqlstate: SqlState::FEATURE_NOT_SUPPORTED,
+                    message: "unsupported kringle".to_string(),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'E'); // message id
+        exp.put_i32(4 + 1 + 6 + 1 + 6 + 1 + 6 + 1 + 20 + 1); // message length
+        exp.put_u8(b'S'); // field id
+        exp.extend_from_slice(b"ERROR\0");
+        exp.put_u8(b'V'); // field id
+        exp.extend_from_slice(b"ERROR\0");
+        exp.put_u8(b'C'); // field id
+        exp.extend_from_slice(b"0A000\0");
+        exp.put_u8(b'M'); // field id
+        exp.extend_from_slice(b"unsupported kringle\0");
+        exp.put_u8(b'\0'); // terminator
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_error_response_after_encoding_failure() {
+        struct UnserializableValue;
+
+        impl TryFrom<UnserializableValue> for DataValue {
+            type Error = BackendError;
+
+            fn try_from(_v: UnserializableValue) -> Result<Self, Self::Error> {
+                Err(BackendError::Unsupported(
+                    "Unserializable value.".to_string(),
+                ))
+            }
+        }
+
+        let mut codec = Codec::<Vec<UnserializableValue>>::new();
+        let mut buf = BytesMut::new();
+
+        // Attempt to encode a message containing an unserializable value, resulting in an error.
+        assert!(codec
+            .encode(
+                DataRow {
+                    values: vec![UnserializableValue],
+                    explicit_transfer_formats: None,
+                },
+                &mut buf,
+            )
+            .is_err());
+
+        // Verify that the serialization buffer does not contain any partial message data from
+        // the failed encode request above.
+        assert_eq!(buf.len(), 0);
+
+        // Encoding a subsequent message (an error response) works correctly after the above encode
+        // failure.
         codec
             .encode(
                 ErrorResponse {
