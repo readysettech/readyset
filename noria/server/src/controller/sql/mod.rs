@@ -2206,6 +2206,13 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    // note: [Ignored HAVING tests]
+    // A previous version of this test (and `it_doesnt_merge_sum_and_filter_on_sum_result`) was
+    // incorrectly using SQL - it used a WHERE clause to filter on the result of an aggregate, which
+    // isn't allowed in sql (you have to use HAVING). These tests have been updated to use HAVING
+    // after moving aggregates above filters, but we don't support HAVING yet! so they're ignored.
+    // See https://app.clubhouse.io/readysettech/story/425
+    #[ignore]
     async fn it_reuses_by_extending_existing_query() {
         use super::sql_parser;
         // set up graph
@@ -2240,7 +2247,7 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_parsed_query(
                 sql_parser::parse_query(
-                    "SELECT COUNT(uid) AS vc FROM votes WHERE vc > 5 GROUP BY aid;",
+                    "SELECT COUNT(uid) AS vc FROM votes GROUP BY aid HAVING vc > 5;",
                 )
                 .unwrap(),
                 Some("highvotes".into()),
@@ -2708,6 +2715,8 @@ mod tests {
     }
 
     #[tokio::test(threaded_scheduler)]
+    // See note: [Ignored HAVING tests]
+    #[ignore]
     async fn it_doesnt_merge_sum_and_filter_on_sum_result() {
         // set up graph
         let mut g = integration::start_simple("it_doesnt_merge_sum_and_filter_on_sum_result").await;
@@ -2730,7 +2739,7 @@ mod tests {
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
-                "SELECT SUM(sign) AS sum FROM votes WHERE sum>0 GROUP BY votes.userid;",
+                "SELECT SUM(sign) AS sum FROM votes GROUP BY votes.userid HAVING sum>0 ;",
                 None,
                 mig,
             );

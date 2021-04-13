@@ -4701,3 +4701,38 @@ async fn overlapping_indices() {
 
     assert_eq!(res, vec![(7, 7, 3), (20, 6, 3)]);
 }
+
+#[tokio::test(threaded_scheduler)]
+async fn aggregate_after_filter_non_equality() {
+    let mut g = start_simple("aggregate_after_filter_non_equality").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW filteragg: SELECT sum(value) AS s FROM test WHERE number > 2;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("filteragg").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(4)],
+        vec![DataType::from(3), DataType::from(5)],
+        vec![DataType::from(4), DataType::from(7)],
+        vec![DataType::from(5), DataType::from(1)],
+    ])
+    .await
+    .unwrap();
+
+    let res = q
+        .lookup(&[0i32.into()], true)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| i32::from(&r["s"]))
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![13]);
+}
