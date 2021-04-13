@@ -269,6 +269,18 @@ impl DataType {
             ),
         };
 
+        macro_rules! convert_numeric {
+            ($dt: expr, $source_ty: ty, $target_ty: ty) => {{
+                Ok(Cow::Owned(
+                    <$target_ty>::try_from(<$source_ty>::from($dt))
+                        .map_err(|e| {
+                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                        })?
+                        .into(),
+                ))
+            }};
+        }
+
         use SqlType::*;
         match (self, self.sql_type(), ty) {
             (_, None, _) => Ok(Cow::Borrowed(self)),
@@ -276,6 +288,22 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext), Text | Tinytext | Mediumtext) => {
                 Ok(Cow::Borrowed(self))
             }
+            // Per https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html, the "number"
+            // argument to integer types only controls the display width, not the max length
+            (_, Some(Int(_)), Int(_))
+            | (_, Some(Bigint(_)), Bigint(_))
+            | (_, Some(UnsignedInt(_)), UnsignedInt(_))
+            | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(Cow::Borrowed(self)),
+            (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i32, i8),
+            (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i32, u8),
+            (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i32, i16),
+            (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i32, u16),
+            (_, Some(Bigint(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
+            (_, Some(Bigint(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
+            (_, Some(Bigint(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
+            (_, Some(Bigint(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
+            (_, Some(Bigint(_)), Int(_)) => convert_numeric!(self, i64, i32),
+            (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
             (_, Some(Real), Float | Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
                 let actual_len = <&str>::from(self).len();
@@ -360,25 +388,6 @@ impl DataType {
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
-            (_, Some(Bigint(_)), Int(_)) => {
-                Ok(Cow::Owned(DataType::Int(i32::try_from(self).map_err(
-                    |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
-                )?)))
-            }
-            (Self::BigInt(n), Some(Bigint(_)), Tinyint(_)) => Ok(Cow::Owned(
-                i8::try_from(*n)
-                    .map_err(|e| {
-                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                    })?
-                    .into(),
-            )),
-            (Self::BigInt(n), Some(Bigint(_)), UnsignedSmallint(_)) => Ok(Cow::Owned(
-                u16::try_from(*n)
-                    .map_err(|e| {
-                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                    })?
-                    .into(),
-            )),
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::from(self)))),
             (Self::Real(n, 0), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(i32::try_from(*n).map_err(
@@ -1997,13 +2006,29 @@ mod tests {
             );
         }
 
-        #[proptest]
-        fn bigint_to_int(int: i32) {
-            assert_eq!(
-                *DataType::from(int as i64).coerce_to(&Int(32)).unwrap(),
-                DataType::from(int as i32)
-            );
+        macro_rules! int_conversion {
+            ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
+                #[proptest]
+                fn $name(source: $to) {
+                    assert_eq!(
+                        *DataType::from(<$from>::from(source))
+                            .coerce_to(&$sql_type)
+                            .unwrap(),
+                        DataType::from(source)
+                    );
+                }
+            };
         }
+
+        int_conversion!(int_to_tinyint, i32, i8, Tinyint(8));
+        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyint(8));
+        int_conversion!(int_to_smallint, i32, i16, Smallint(16));
+        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallint(16));
+        int_conversion!(bigint_to_tinyint, i64, i8, Tinyint(8));
+        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyint(8));
+        int_conversion!(bigint_to_smallint, i64, i16, Smallint(16));
+        int_conversion!(bigint_to_unsigned_smallint, i64, u16, UnsignedSmallint(16));
+        int_conversion!(bigint_to_int, i64, i32, Int(32));
 
         fn int_type() -> impl Strategy<Value = SqlType> {
             use SqlType::*;
