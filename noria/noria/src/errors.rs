@@ -1,10 +1,9 @@
-//! Annoying hacks to work around Rust's dodgy error handling ecosystem.
-//!
-//! Mostly cribbed from https://docs.rs/crate/failure/0.1.8/source/src/box_std.rs.
+//! Error handling, definitions, and utilities
 
 use crate::channel::tcp::SendError;
 use crate::ValueCoerceError;
 use petgraph::graph::NodeIndex;
+use std::error::Error;
 use thiserror::Error;
 
 /// Wraps a boxed `std::error::Error` to make it implement, um, `std::error::Error`.
