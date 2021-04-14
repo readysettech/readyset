@@ -25,7 +25,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
-use noria::{internal, ReadySetError};
+use noria::{internal, unsupported, ReadySetError};
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::str;
@@ -856,7 +856,7 @@ impl SqlIncorporator {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::CreateView(ref cvq) => cvq.name.clone(),
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
-            _ => internal!("only CREATE TABLE and SELECT queries can be added to the graph!"),
+            _ => unsupported!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
         self.nodes_for_named_query(q, name, false, is_leaf, mig)
     }
