@@ -8,11 +8,10 @@ use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::error::Error;
 use std::str::FromStr;
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 mod debezium_message_parser;
 mod kafka_message_consumer_wrapper;
@@ -92,6 +91,18 @@ impl MessageError {
         Self::InvalidMessage(e.into())
     }
 }
+
+impl From<ReadySetError> for MessageError {
+    fn from(e: ReadySetError) -> Self {
+        if e.caused_by_unparseable_query() {
+            Self::InvalidMessage(e.into())
+        } else {
+            Self::Internal(e.into())
+        }
+    }
+}
+
+type MessageResult<T> = Result<T, MessageError>;
 
 #[derive(Debug, Default)]
 pub struct Builder {
@@ -259,23 +270,11 @@ impl DebeziumConnector {
         Builder::new()
     }
 
-    async fn handle_schema_message(&mut self, message: SchemaChange) -> Result<(), MessageError> {
+    async fn handle_schema_message(&mut self, message: SchemaChange) -> MessageResult<()> {
         let ddl = message.payload.ddl.as_str();
         info!(ddl, "Handling schema change message");
 
-        if let Err(err) = self.noria.extend_recipe(ddl).await {
-            if err.caused_by_unparseable_query() {
-                warn!(
-                    ddl,
-                    err = err.to_string().as_str(),
-                    "Schema change message failed to parse, ignoring"
-                );
-                return Err(MessageError::InvalidMessage(err.into()));
-            } else {
-                return Err(MessageError::Internal(err.into()));
-            }
-        }
-
+        self.noria.extend_recipe(ddl).await?;
         Ok(())
     }
 
@@ -283,7 +282,7 @@ impl DebeziumConnector {
         &mut self,
         key_message: Option<EventKey>,
         message: DataChange,
-    ) -> anyhow::Result<()> {
+    ) -> MessageResult<()> {
         trace!("Handling data change message");
         match &message.payload {
             DataChangePayload::Create(p) => {
@@ -387,7 +386,7 @@ impl DebeziumConnector {
     /// When a transaction end message is received, we will increment the
     /// timestamps associated with each changed base table. This new timestamp
     /// will be propagated on the data flow graph.
-    async fn handle_transaction_message(&mut self, message: Transaction) -> anyhow::Result<()> {
+    async fn handle_transaction_message(&mut self, message: Transaction) -> MessageResult<()> {
         trace!("Handling transaction message");
         let payload = &message.payload;
         // We currently do not process payload begin messages or transactions
@@ -413,7 +412,7 @@ impl DebeziumConnector {
         Ok(())
     }
 
-    async fn handle_message(&mut self, message: &BorrowedMessage<'_>) -> Result<(), MessageError> {
+    async fn handle_message(&mut self, message: &BorrowedMessage<'_>) -> MessageResult<()> {
         trace!("Handling message");
         let owned_message = message.detach();
 
