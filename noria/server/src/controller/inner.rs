@@ -1339,7 +1339,7 @@ impl ControllerInner {
                 // need to restore the old recipe
                 crit!(self.log, "failed to extend recipe: {:?}", e);
                 self.recipe = old;
-                noria::internal!("failed to extend recipe: {:?}", e);
+                Err(e)
             }
         }
     }

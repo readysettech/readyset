@@ -366,3 +366,28 @@ fn instance_campaign<A: Authority + 'static>(
         })
         .unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::integration::start_simple;
+    use std::error::Error;
+
+    #[tokio::test(threaded_scheduler)]
+    async fn extend_recipe_parse_failure() {
+        let mut noria = start_simple("extend_recipe_parse_failure").await;
+        let res = noria.extend_recipe("Invalid SQL").await;
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        let source: &ReadySetError = err
+            .source()
+            .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
+            .unwrap()
+            .as_ref();
+        assert!(
+            matches!(*source, ReadySetError::UnparseableQuery { .. }),
+            "source = {:?}",
+            source
+        );
+    }
+}
