@@ -1,15 +1,14 @@
 extern crate serde_json;
 use anyhow::{anyhow, Context};
-use lazy_static::lazy_static;
 use noria::consensus::ZookeeperAuthority;
 use noria::consistency::Timestamp;
-use noria::ControllerHandle;
+use noria::{ControllerHandle, ReadySetError};
 use rdkafka::consumer::{CommitMode, Consumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
-use regex::Regex;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::error::Error;
 use std::str::FromStr;
 use thiserror::Error;
 use tokio::stream::StreamExt;
@@ -260,22 +259,23 @@ impl DebeziumConnector {
         Builder::new()
     }
 
-    async fn handle_schema_message(&mut self, message: SchemaChange) -> anyhow::Result<()> {
+    async fn handle_schema_message(&mut self, message: SchemaChange) -> Result<(), MessageError> {
         let ddl = message.payload.ddl.as_str();
-        // FIXME(grfn): Replace this with something that actually parses the SQL and looks at the
-        // AST, rather than doing it all string based - this is such a hack!
-        lazy_static! {
-            // DDL that starts with either CREATE TABLE or CREATE VIEW
-            static ref SUPPORTED_DDL: Regex =
-                Regex::new(r"(?i)^\s+create\s+(?:view)|(?:table)").unwrap();
-        };
+        info!(ddl, "Handling schema change message");
 
-        if !SUPPORTED_DDL.is_match(ddl) {
-            info!(ddl, "Handling schema change message");
-            self.noria.extend_recipe(ddl).await?;
-        } else {
-            warn!(ddl, "Ignoring schema change message");
+        if let Err(err) = self.noria.extend_recipe(ddl).await {
+            if err.caused_by_unparseable_query() {
+                warn!(
+                    ddl,
+                    err = err.to_string().as_str(),
+                    "Schema change message failed to parse, ignoring"
+                );
+                return Err(MessageError::InvalidMessage(err.into()));
+            } else {
+                return Err(MessageError::Internal(err.into()));
+            }
         }
+
         Ok(())
     }
 

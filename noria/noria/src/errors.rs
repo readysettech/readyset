@@ -197,6 +197,26 @@ pub enum ReadySetError {
     NoSuchColumn(String),
 }
 
+impl ReadySetError {
+    /// Returns `true` if the error is an [`UnparseableQuery`].
+    pub fn is_unparseable_query(&self) -> bool {
+        matches!(self, Self::UnparseableQuery { .. })
+    }
+
+    /// Returns true if the error either *is* [`UnparseableQuery`], or was *caused by*
+    /// [`UnparseableQuery`]
+    pub fn caused_by_unparseable_query(&self) -> bool {
+        // TODO(grfn): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
+        // rewritten to use that
+        self.is_unparseable_query()
+            || self
+                .source()
+                .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
+                .iter()
+                .any(|e| e.is_unparseable_query())
+    }
+}
+
 /// Make a new [`ReadySetError::Internal`] with the provided string-able argument.
 pub fn internal_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::Internal(err.into())
