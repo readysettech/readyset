@@ -231,7 +231,7 @@ async fn listen_df<'a>(
         while let Some(cm) = ctrl_rx.recv().await {
             if let Err(e) = ctrl
                 .send(CoordinationMessage {
-                    source: ctrl_addr,
+                    source: ctrl_addr, // local address part of a connection to the controller
                     payload: cm,
                     epoch,
                 })
@@ -262,7 +262,7 @@ async fn listen_df<'a>(
     tokio::spawn(async move {
         let _alive = a;
         let _ = ctx.send(CoordinationPayload::Register {
-            addr: waddr,
+            addr: waddr, // worker address
             read_listen_addr: raddr,
             controller_addr: external_controller_addr,
             log_files,

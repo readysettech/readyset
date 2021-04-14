@@ -354,6 +354,16 @@ pub struct ReaderReplicationResult {
     pub new_readers: HashMap<String, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
+/// Represents a request for a view.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ViewRequest {
+    /// Name of the view being requested.
+    pub name: String,
+    /// Pool of worker addresses. If the pool is not empty, this will
+    /// look for a view reader in the pool.
+    pub workers: Vec<SocketAddr>,
+}
+
 #[doc(hidden)]
 #[inline]
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {

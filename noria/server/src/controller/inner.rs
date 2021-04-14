@@ -7,7 +7,7 @@ use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use crate::debug::info::{DomainKey, GraphInfo};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
-use crate::{ReaderReplicationResult, ReaderReplicationSpec};
+use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewRequest};
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
@@ -57,7 +57,7 @@ pub(super) struct ControllerInner {
 
     /// Map from worker address to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    /// Map from wokrer address to the address the worker is listening on for
+    /// Map from worker address to the address the worker is listening on for
     /// external http requests.
     external_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
@@ -944,7 +944,12 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_view_for(&self, node: NodeIndex, name: &str) -> Option<NodeIndex> {
+    fn find_view_for(
+        &self,
+        node: NodeIndex,
+        name: &str,
+        workers: &[SocketAddr],
+    ) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
@@ -957,7 +962,21 @@ impl ControllerInner {
                 .unwrap_or(false)
                 && self.ingredients[child].name() == name
             {
-                return Some(child);
+                if workers.is_empty() {
+                    return Some(child);
+                } else {
+                    let domain = self.ingredients[child].domain();
+                    for worker in workers {
+                        if self
+                            .domains
+                            .get(&domain)
+                            .map(|dh| dh.assigned_to_worker(worker))
+                            .unwrap_or(false)
+                        {
+                            return Some(child);
+                        }
+                    }
+                }
             }
         }
         None
@@ -965,9 +984,11 @@ impl ControllerInner {
 
     /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
     /// (already maintained) reader node called `name`.
-    fn view_builder(&self, name: &str) -> Result<Option<ViewBuilder>, ReadySetError> {
+    fn view_builder(&self, view_req: ViewRequest) -> Result<Option<ViewBuilder>, ReadySetError> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
+        let name = view_req.name.as_str();
+        let workers = view_req.workers;
         let node = match self.recipe.node_addr_for(name) {
             Ok(ni) => ni,
             Err(_) => {
@@ -985,7 +1006,7 @@ impl ControllerInner {
             None => name,
             Some(alias) => alias,
         };
-        if let Some(r) = self.find_view_for(node, name) {
+        if let Some(r) = self.find_view_for(node, name, &workers) {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.view_schema(r)?;
@@ -1215,7 +1236,11 @@ impl ControllerInner {
             for g in groups {
                 // TODO: this should use external APIs through noria::ControllerHandle
                 // TODO: can this move to the client entirely?
-                let rgb: Option<ViewBuilder> = self.view_builder(&g)?;
+                let view_req = ViewRequest {
+                    name: g.clone(),
+                    workers: vec![],
+                };
+                let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
                 let mut view = rgb.map(|rgb| rgb.build(x.clone())).unwrap();

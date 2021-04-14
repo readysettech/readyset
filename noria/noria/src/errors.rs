@@ -4,6 +4,7 @@ use crate::channel::tcp::SendError;
 use crate::ValueCoerceError;
 use petgraph::graph::NodeIndex;
 use std::error::Error;
+use std::net::SocketAddr;
 use thiserror::Error;
 
 /// Wraps a boxed `std::error::Error` to make it implement, um, `std::error::Error`.
@@ -126,6 +127,15 @@ pub enum ReadySetError {
     /// A view couldn't be found.
     #[error("Could not find view '{0}'")]
     ViewNotFound(String),
+
+    /// A view couldn't be found in the given pool of worker.
+    #[error("Could not find view '{name}' in workers '{workers:?}'")]
+    ViewNotFoundInWorkers {
+        /// The name of the view that could not be found.
+        name: String,
+        /// The pool of workers where the view was attempted to be found.
+        workers: Vec<SocketAddr>,
+    },
 
     /// The query specified an empty lookup key.
     #[error("the query specified an empty lookup key")]
