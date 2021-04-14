@@ -4516,7 +4516,7 @@ async fn left_join_null() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_reader_replication() {
+async fn reader_replication() {
     let authority = Arc::new(LocalAuthority::new());
     let cluster_name = "reader_replication";
 
@@ -4549,12 +4549,11 @@ async fn test_reader_replication() {
 
     let instances_cluster = w1.get_instances().await.unwrap();
 
-    let w2_addr = instances_cluster
+    let w2_addr = *instances_cluster
         .iter()
         .map(|(addr, _, _)| addr)
         .find(|&&addr| addr != w1_addr)
-        .unwrap()
-        .clone();
+        .unwrap();
 
     w1.install_recipe(
         "
@@ -4565,6 +4564,19 @@ async fn test_reader_replication() {
     )
     .await
     .unwrap();
+
+    w1.table("t1")
+        .await
+        .unwrap()
+        .insert(vec![1i64.into(), 2i64.into(), 3i64.into()])
+        .await
+        .unwrap();
+
+    let worker_without_reader = if w1.view_from_workers("q", vec![w1_addr]).await.is_err() {
+        w1_addr
+    } else {
+        w2_addr
+    };
 
     let info_pre_replication = w1.get_info().await.unwrap();
     let domains_pre_replication =
@@ -4577,7 +4589,7 @@ async fn test_reader_replication() {
             });
 
     let repl_result = w1
-        .replicate_readers(vec!["q".to_owned()], Some(w2_addr))
+        .replicate_readers(vec!["q".to_owned()], Some(worker_without_reader))
         .await
         .unwrap();
 
@@ -4587,7 +4599,7 @@ async fn test_reader_replication() {
     let info_post_replication = w1.get_info().await.unwrap();
     let domains_from_worker: HashMap<DomainIndex, Vec<NodeIndex>> = info_post_replication
         .workers
-        .get(&w2_addr)
+        .get(&worker_without_reader)
         .unwrap()
         .iter()
         .fold(HashMap::new(), |mut acc, (dk, nodes)| {
@@ -4597,6 +4609,16 @@ async fn test_reader_replication() {
             acc
         });
 
+    let result = w1.view_from_workers("q", vec![worker_without_reader]).await;
+    assert!(result.is_ok());
+    let mut records: Vec<Vec<DataType>> = result
+        .unwrap()
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .into();
+    records.sort();
+    assert_eq!(records, vec![vec![1.into(), 2.into(), 3.into(), 0.into()]]);
     for (domain, nodes) in readers.get("q").unwrap().iter() {
         assert!(domains_pre_replication.get(domain).is_none());
         let domain_nodes_opt = domains_from_worker.get(domain);

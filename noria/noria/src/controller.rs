@@ -7,6 +7,7 @@ use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
     rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetResult,
+    ViewRequest,
 };
 use futures_util::future;
 use petgraph::graph::NodeIndex;
@@ -284,23 +285,62 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         #[cfg(debug_assertions)]
         assert_infrequent::at_most(200);
 
-        let views = self.views.clone();
         let name = name.to_string();
+        let request = ViewRequest {
+            name,
+            workers: vec![],
+        };
+        self.request_view(request)
+    }
+
+    /// Obtain a `View` from the given pool of workers, that allows you to query the given external view.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn view_from_workers<'a>(
+        &'a mut self,
+        name: &str,
+        workers: Vec<SocketAddr>,
+    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
+        // This call attempts to detect if this function is being called in a loop. If this is
+        // getting false positives, then it is safe to increase the allowed hit count, however, the
+        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
+        let name = name.to_string();
+        let request = ViewRequest { name, workers };
+        self.request_view(request)
+    }
+
+    fn request_view<'a>(
+        &'a mut self,
+        view_request: ViewRequest,
+    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
+        let views = self.views.clone();
         async move {
             let body: hyper::body::Bytes = self
                 .handle
                 .ready()
                 .await
-                .map_err(rpc_err!("ControllerHandle::view"))?
-                .call(ControllerRequest::new("view_builder", &name).unwrap())
+                .map_err(rpc_err!("ControllerHandle::request_view"))?
+                .call(ControllerRequest::new("view_builder", &view_request).unwrap())
                 .await
-                .map_err(rpc_err!("ControllerHandle::view"))?;
+                .map_err(rpc_err!("ControllerHandle::request_view"))?;
 
             match serde_json::from_slice::<ReadySetResult<Option<ViewBuilder>>>(&body)?
-                .map_err(|e| rpc_err_no_downcast("ControllerHandle::view", e))?
+                .map_err(|e| rpc_err_no_downcast("ControllerHandle::request_view", e))?
             {
                 Some(vb) => Ok(vb.build(views)),
-                None => Err(ReadySetError::ViewNotFound(name)),
+                None => {
+                    if view_request.workers.is_empty() {
+                        Err(ReadySetError::ViewNotFound(view_request.name))
+                    } else {
+                        Err(ReadySetError::ViewNotFoundInWorkers {
+                            name: view_request.name,
+                            workers: view_request.workers,
+                        })
+                    }
+                }
             }
         }
     }
