@@ -94,7 +94,7 @@ impl MessageError {
 
 impl From<ReadySetError> for MessageError {
     fn from(e: ReadySetError) -> Self {
-        if e.caused_by_unparseable_query() {
+        if e.caused_by_unparseable_query() || e.caused_by_unsupported() {
             Self::InvalidMessage(e.into())
         } else {
             Self::Internal(e.into())
