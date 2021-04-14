@@ -197,6 +197,20 @@ pub enum ReadySetError {
 }
 
 impl ReadySetError {
+    fn any_cause<F>(&self, f: F) -> bool
+    where
+        F: Fn(&Self) -> bool,
+    {
+        // TODO(grfn): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
+        // rewritten to use that
+        f(self)
+            || self
+                .source()
+                .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
+                .iter()
+                .any(|e| f(*e))
+    }
+
     /// Returns `true` if the error is an [`UnparseableQuery`].
     pub fn is_unparseable_query(&self) -> bool {
         matches!(self, Self::UnparseableQuery { .. })
@@ -205,14 +219,18 @@ impl ReadySetError {
     /// Returns true if the error either *is* [`UnparseableQuery`], or was *caused by*
     /// [`UnparseableQuery`]
     pub fn caused_by_unparseable_query(&self) -> bool {
-        // TODO(grfn): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
-        // rewritten to use that
-        self.is_unparseable_query()
-            || self
-                .source()
-                .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
-                .iter()
-                .any(|e| e.is_unparseable_query())
+        self.any_cause(|e| e.is_unparseable_query())
+    }
+
+    /// Returns `true` if the ready_set_error is [`Unsupported`].
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, Self::Unsupported(..))
+    }
+
+    /// Returns true if the error either *is* [`Unsupported`], or was *caused by*
+    /// [`Unsupported`]
+    pub fn caused_by_unsupported(&self) -> bool {
+        self.any_cause(|e| e.is_unsupported())
     }
 }
 
