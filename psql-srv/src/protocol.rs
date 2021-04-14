@@ -9,6 +9,7 @@ use crate::message::{
     TransferFormat::{self, *},
 };
 use crate::r#type::{ColType, Type};
+use crate::response::Response;
 use crate::value::Value;
 use crate::{Backend, PrepareResponse, QueryResponse::*, Schema};
 use std::borrow::Borrow;
@@ -53,34 +54,30 @@ impl Protocol {
         }
     }
 
-    pub async fn handle_request<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
+    pub async fn on_request<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         message: FrontendMessage,
         backend: &mut B,
         channel: &mut Channel<C, B::Row>,
-    ) -> Result<(), Error> {
+    ) -> Result<Response<B::Row, B::Resultset>, Error> {
         if self.is_starting_up {
-            match message {
-                SSLRequest { .. } => channel.feed(BackendMessage::ssl_response_n()).await?,
+            return match message {
+                SSLRequest { .. } => Ok(Response::Message(BackendMessage::ssl_response_n())),
 
                 StartupMessage { database, .. } => {
                     let database = database
                         .ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
-
                     backend.on_init(database.borrow()).await?;
-
                     self.is_starting_up = false;
                     channel.set_start_up_complete();
-
-                    channel.feed(AuthenticationOk).await?;
-                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
+                    Ok(Response::Message2(
+                        AuthenticationOk,
+                        BackendMessage::ready_for_query_idle(),
+                    ))
                 }
 
-                m => return Err(Error::UnsupportedMessage(m)),
+                m => Err(Error::UnsupportedMessage(m)),
             };
-
-            channel.flush().await?;
-            return Ok(());
         }
 
         match message {
@@ -100,7 +97,6 @@ impl Protocol {
                     .ok_or_else(|| {
                         Error::MissingPreparedStatement(prepared_statement_name.to_string())
                     })?;
-
                 let n_cols = row_schema.len();
                 let result_transfer_formats = match result_transfer_formats[..] {
                     [] => vec![Text; n_cols],
@@ -113,7 +109,6 @@ impl Protocol {
                         }
                     }
                 };
-
                 self.portals.insert(
                     portal_name.to_string(),
                     PortalData {
@@ -123,8 +118,7 @@ impl Protocol {
                         result_transfer_formats: Arc::new(result_transfer_formats),
                     },
                 );
-
-                channel.feed(BindComplete).await?;
+                Ok(Response::Message(BindComplete))
             }
 
             Close { name } => {
@@ -146,7 +140,7 @@ impl Protocol {
                         }
                     }
                 };
-                channel.feed(CloseComplete).await?;
+                Ok(Response::Message(CloseComplete))
             }
 
             Describe { name } => match name {
@@ -159,24 +153,20 @@ impl Protocol {
                         .portals
                         .get(name.borrow() as &str)
                         .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
-
                     let PreparedStatementData { row_schema, .. } = self
                         .prepared_statements
                         .get(prepared_statement_name)
                         .ok_or_else(|| {
                             Error::InternalError("missing prepared statement".to_string())
                         })?;
-
                     debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
-                    channel
-                        .feed(RowDescription {
-                            field_descriptions: row_schema
-                                .iter()
-                                .zip(result_transfer_formats.iter())
-                                .map(|(i, f)| make_field_description(i, *f))
-                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        })
-                        .await?;
+                    Ok(Response::Message(RowDescription {
+                        field_descriptions: row_schema
+                            .iter()
+                            .zip(result_transfer_formats.iter())
+                            .map(|(i, f)| make_field_description(i, *f))
+                            .collect::<Result<Vec<FieldDescription>, Error>>()?,
+                    }))
                 }
 
                 PreparedStatement(name) => {
@@ -188,23 +178,20 @@ impl Protocol {
                         .prepared_statements
                         .get(name.borrow() as &str)
                         .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
-
-                    channel
-                        .feed(ParameterDescription {
+                    Ok(Response::Message2(
+                        ParameterDescription {
                             parameter_data_types: param_schema
                                 .iter()
                                 .map(|(_, t)| to_type(t))
                                 .collect::<Result<Vec<Type>, Error>>()?,
-                        })
-                        .await?;
-                    channel
-                        .feed(RowDescription {
+                        },
+                        RowDescription {
                             field_descriptions: row_schema
                                 .iter()
                                 .map(|i| make_field_description(i, Text))
                                 .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        })
-                        .await?;
+                        },
+                    ))
                 }
             },
 
@@ -218,75 +205,52 @@ impl Protocol {
                     .portals
                     .get(portal_name.borrow() as &str)
                     .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
-
                 let response = backend.on_execute(*prepared_statement_id, params).await?;
-
                 if let Select { resultset, .. } = response {
-                    let mut n_rows = 0;
-                    for r in resultset {
-                        channel
-                            .feed(DataRow {
-                                values: r,
-                                explicit_transfer_formats: Some(result_transfer_formats.clone()),
-                            })
-                            .await?;
-                        n_rows += 1;
-                    }
-                    channel
-                        .feed(CommandComplete {
-                            tag: CommandCompleteTag::Select(n_rows),
-                        })
-                        .await?;
+                    Ok(Response::Select {
+                        header: None,
+                        resultset,
+                        result_transfer_formats: Some(result_transfer_formats.clone()),
+                        trailer: None,
+                    })
                 } else {
                     let tag = match response {
                         Insert(n) => CommandCompleteTag::Insert(n),
                         Update(n) => CommandCompleteTag::Update(n),
                         Delete(n) => CommandCompleteTag::Delete(n),
                         Command => CommandCompleteTag::Empty,
-                        Select { .. } => unreachable!(),
+                        Select { .. } => unreachable!("Select is handled as a special case above."),
                     };
-                    channel.feed(CommandComplete { tag }).await?;
+                    Ok(Response::Message(CommandComplete { tag }))
                 }
             }
 
             Query { query } => {
                 let response = backend.on_query(query.borrow()).await?;
-
                 if let Select { schema, resultset } = response {
-                    channel
-                        .feed(RowDescription {
+                    Ok(Response::Select {
+                        header: Some(RowDescription {
                             field_descriptions: schema
                                 .iter()
                                 .map(|i| make_field_description(i, Text))
                                 .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        })
-                        .await?;
-                    let mut n_rows = 0;
-                    for r in resultset {
-                        channel
-                            .feed(DataRow {
-                                values: r,
-                                explicit_transfer_formats: None,
-                            })
-                            .await?;
-                        n_rows += 1;
-                    }
-                    channel
-                        .feed(CommandComplete {
-                            tag: CommandCompleteTag::Select(n_rows),
-                        })
-                        .await?;
-                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
+                        }),
+                        resultset,
+                        result_transfer_formats: None,
+                        trailer: Some(BackendMessage::ready_for_query_idle()),
+                    })
                 } else {
                     let tag = match response {
                         Insert(n) => CommandCompleteTag::Insert(n),
                         Update(n) => CommandCompleteTag::Update(n),
                         Delete(n) => CommandCompleteTag::Delete(n),
                         Command => CommandCompleteTag::Empty,
-                        Select { .. } => unreachable!(),
+                        Select { .. } => unreachable!("Select is handled as a special case above."),
                     };
-                    channel.feed(CommandComplete { tag }).await?;
-                    channel.feed(BackendMessage::ready_for_query_idle()).await?;
+                    Ok(Response::Message2(
+                        CommandComplete { tag },
+                        BackendMessage::ready_for_query_idle(),
+                    ))
                 }
             }
 
@@ -300,7 +264,6 @@ impl Protocol {
                     param_schema,
                     row_schema,
                 } = backend.on_prepare(query.borrow()).await?;
-
                 channel.set_statement_param_types(
                     prepared_statement_name.borrow() as &str,
                     param_schema
@@ -316,36 +279,29 @@ impl Protocol {
                         row_schema,
                     },
                 );
-
-                channel.feed(ParseComplete).await?;
+                Ok(Response::Message(ParseComplete))
             }
 
-            Sync => channel.feed(BackendMessage::ready_for_query_idle()).await?,
+            Sync => Ok(Response::Message(BackendMessage::ready_for_query_idle())),
 
-            Terminate => {
-                // no response is sent
-            }
+            Terminate => Ok(Response::Empty),
 
-            m => return Err(Error::UnsupportedMessage(m)),
+            m => Err(Error::UnsupportedMessage(m)),
         }
-
-        channel.flush().await?;
-        Ok(())
     }
 
-    pub async fn handle_error<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
+    pub async fn on_error<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         error: Error,
-        channel: &mut Channel<C, B::Row>,
-    ) -> Result<(), Error> {
+    ) -> Result<Response<B::Row, B::Resultset>, Error> {
         if self.is_starting_up {
-            channel.feed(make_error_response(error)).await?;
+            Ok(Response::Message(make_error_response(error)))
         } else {
-            channel.feed(make_error_response(error)).await?;
-            channel.feed(BackendMessage::ready_for_query_idle()).await?;
+            Ok(Response::Message2(
+                make_error_response(error),
+                BackendMessage::ready_for_query_idle(),
+            ))
         }
-        channel.flush().await?;
-        Ok(())
     }
 }
 

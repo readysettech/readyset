@@ -1,7 +1,8 @@
 use crate::codec::{Codec, DecodeError, EncodeError};
 use crate::error::Error;
-use crate::message::{BackendMessage, FrontendMessage};
+use crate::message::FrontendMessage;
 use crate::r#type::Type;
+use crate::response::Response;
 use crate::value::Value;
 use futures::prelude::*;
 use std::convert::TryInto;
@@ -40,11 +41,10 @@ where
         self.0.next().await
     }
 
-    pub async fn feed(&mut self, item: BackendMessage<R>) -> Result<(), EncodeError> {
-        self.0.feed(item).await
-    }
-
-    pub async fn flush(&mut self) -> Result<(), EncodeError> {
-        self.0.flush().await
+    pub async fn send<S>(&mut self, item: Response<R, S>) -> Result<(), EncodeError>
+    where
+        S: IntoIterator<Item = R>,
+    {
+        item.write(&mut self.0).await
     }
 }

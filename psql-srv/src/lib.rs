@@ -7,6 +7,7 @@ mod codec;
 mod error;
 mod message;
 mod protocol;
+mod response;
 mod runner;
 mod r#type;
 mod value;
