@@ -11,6 +11,9 @@ use super::Authority;
 use super::Epoch;
 use super::CONTROLLER_KEY;
 use crate::{ReadySetError, ReadySetResult};
+use backoff::backoff::Backoff;
+use backoff::exponential::ExponentialBackoff;
+use backoff::SystemClock;
 
 struct EventWatcher;
 impl Watcher for EventWatcher {
@@ -44,12 +47,39 @@ pub struct ZookeeperAuthority {
 impl ZookeeperAuthority {
     /// Create a new instance.
     pub fn new(connect_string: &str) -> ReadySetResult<Self> {
-        let zk = ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).map_err(
-            |e| ReadySetError::ZookeeperConnectionFailed {
+        let zk_connect_op = || -> Result<ZooKeeper, backoff::Error<ZkError>> {
+            match ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher) {
+                // HACK(fran): Currently, the Zookeeper::connect method won't fail if Zookeeper
+                // is not available.
+                // To workaround that, we make a call to zk.exists just to try to reach Zookeeper.
+                // The downside of this, is that the zk.exists call might take longer than the duration
+                // specified in Zookeeper::connect.
+                // For more information, see https://github.com/bonifaido/rust-zookeeper/issues/64.
+                Ok(zk) => zk
+                    .exists("/", false)
+                    .map(|_| zk)
+                    .map_err(backoff::Error::Transient),
+                Err(
+                    e
+                    @
+                    (ZkError::ConnectionLoss
+                    | ZkError::SessionExpired
+                    | ZkError::OperationTimeout),
+                ) => Err(backoff::Error::Transient(e)),
+                Err(e) => Err(backoff::Error::Permanent(e)),
+            }
+        };
+        let mut backoff: ExponentialBackoff<SystemClock> = ExponentialBackoff {
+            max_elapsed_time: None,
+            ..Default::default()
+        };
+        backoff.reset();
+        let zk = backoff::retry(backoff, zk_connect_op).map_err(|e| {
+            ReadySetError::ZookeeperConnectionFailed {
                 connect_string: connect_string.into(),
                 reason: e.to_string(),
-            },
-        )?;
+            }
+        })?;
         let _ = zk.create(
             "/",
             vec![],
