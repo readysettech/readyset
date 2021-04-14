@@ -238,7 +238,7 @@ impl Recipe {
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
     // crate viz for tests
-    pub(crate) fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> Result<Recipe, String> {
+    pub(crate) fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> ReadySetResult<Recipe> {
         // remove comment lines
         let lines: Vec<String> = recipe_text
             .lines()
@@ -546,7 +546,7 @@ impl Recipe {
     /// recipe; use `replace` if removal of unused expressions is desired.
     /// Consumes `self` and returns a replacement recipe.
     // crate viz for tests
-    pub(crate) fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, String)> {
+    pub(crate) fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, ReadySetError)> {
         // parse and compute differences to current recipe
         let add_rp = match Recipe::from_str(additions, None) {
             Ok(rp) => rp,
@@ -606,7 +606,7 @@ impl Recipe {
         self.inc = Some(new_inc);
     }
 
-    fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery, bool)>, String> {
+    fn parse(recipe_text: &str) -> ReadySetResult<Vec<(Option<String>, SqlQuery, bool)>> {
         let lines: Vec<&str> = recipe_text
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
@@ -639,19 +639,20 @@ impl Recipe {
 
         let parsed_queries = query_strings.iter().fold(
             Vec::new(),
-            |mut acc: Vec<Result<(bool, Option<&str>, SqlQuery), String>>, q| {
-                match query_exprs(q) {
+            |mut acc: Vec<ReadySetResult<(bool, Option<&str>, SqlQuery)>>, query| {
+                match query_exprs(query) {
                     Result::Err(e) => {
                         // we got a parse error
-                        acc.push(Err(format!("Query \"{}\", parse error: {}", q, e)));
+                        acc.push(Err(ReadySetError::UnparseableQuery {
+                            query: query.clone(),
+                        }));
                     }
                     Result::Ok((remainder, parsed)) => {
                         // should have consumed all input
                         if !remainder.is_empty() {
-                            acc.push(Err(format!(
-                                "failed to parse the complete recipe; left with: {}",
-                                remainder
-                            )));
+                            acc.push(Err(ReadySetError::UnparseableQuery {
+                                query: query.clone(),
+                            }));
                             return acc;
                         }
                         acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
