@@ -37,16 +37,17 @@ impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
         &mut self,
         request: Result<FrontendMessage, codec::DecodeError>,
     ) -> Result<(), Error> {
-        self.protocol
-            .handle_request(request?, &mut self.backend, &mut self.channel)
+        let response = self
+            .protocol
+            .on_request(request?, &mut self.backend, &mut self.channel)
             .await?;
+        self.channel.send(response).await?;
         Ok(())
     }
 
     async fn handle_error(&mut self, error: Error) -> Result<(), Error> {
-        self.protocol
-            .handle_error::<B, C>(error, &mut self.channel)
-            .await?;
+        let response = self.protocol.on_error::<B, C>(error).await?;
+        self.channel.send(response).await?;
         Ok(())
     }
 }
