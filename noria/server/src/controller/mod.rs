@@ -27,6 +27,7 @@ use std::thread::{self, JoinHandle};
 use std::time;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::wrappers::TcpListenerStream;
 
 mod domain_handle;
 mod inner;
@@ -121,7 +122,7 @@ pub(super) async fn main<A: Authority + 'static>(
     let mut drx = Some(drx);
 
     let mut controller: Option<ControllerInner> = None;
-    while let Some(e) = ctrl_rx.next().await {
+    while let Some(e) = ctrl_rx.recv().await {
         match e {
             Event::InternalMessage(msg) => match msg.payload {
                 CoordinationPayload::Deregister => {
@@ -245,9 +246,9 @@ async fn listen_domain_replies(
     valve: Valve,
     log: slog::Logger,
     reply_tx: UnboundedSender<ControlReplyPacket>,
-    mut on: tokio::net::TcpListener,
+    on: tokio::net::TcpListener,
 ) {
-    let mut incoming = valve.wrap(on.incoming());
+    let mut incoming = valve.wrap(TcpListenerStream::new(on));
     while let Some(sock) = incoming.next().await {
         match sock {
             Err(e) => {
@@ -373,7 +374,7 @@ mod tests {
     use crate::integration::start_simple;
     use std::error::Error;
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn extend_recipe_parse_failure() {
         let mut noria = start_simple("extend_recipe_parse_failure").await;
         let res = noria.extend_recipe("Invalid SQL").await;

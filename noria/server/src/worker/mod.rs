@@ -12,7 +12,6 @@ use noria::metrics::recorded;
 use noria::ControllerDescriptor;
 use noria::{channel, internal, ReadySetError};
 use replica::ReplicaAddr;
-use slog;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -23,8 +22,8 @@ use std::sync::{
 };
 use std::time::{self, Duration};
 use stream_cancel::{Trigger, Valve};
-use tokio;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::wrappers::IntervalStream;
 
 mod readers;
 mod replica;
@@ -61,7 +60,7 @@ pub(super) async fn main(
 
     let mut worker_state = InstanceState::Pining;
     let log = log.clone();
-    while let Some(e) = worker_rx.next().await {
+    while let Some(e) = worker_rx.recv().await {
         match e {
             Event::InternalMessage(msg) => match msg.payload {
                 CoordinationPayload::RemoveDomain => {
@@ -229,7 +228,7 @@ async fn listen_df<'a>(
     let a = alive.clone();
     tokio::spawn(async move {
         let _alive = a;
-        while let Some(cm) = ctrl_rx.next().await {
+        while let Some(cm) = ctrl_rx.recv().await {
             if let Err(e) = ctrl
                 .send(CoordinationMessage {
                     source: ctrl_addr,
@@ -254,10 +253,10 @@ async fn listen_df<'a>(
     ));
 
     // and tell the controller about us
-    let mut timer = valve.wrap(tokio::time::interval_at(
+    let mut timer = valve.wrap(IntervalStream::new(tokio::time::interval_at(
         tokio::time::Instant::now() + heartbeat_every,
         heartbeat_every,
-    ));
+    )));
     let a = alive.clone();
     let ctx = ctrl_tx.clone();
     tokio::spawn(async move {
@@ -284,10 +283,10 @@ async fn listen_df<'a>(
         let coord = coord.clone();
         let mut domain_senders = HashMap::new();
         let state_sizes = state_sizes.clone();
-        let mut timer = valve.wrap(tokio::time::interval_at(
+        let mut timer = valve.wrap(IntervalStream::new(tokio::time::interval_at(
             tokio::time::Instant::now() + evict_every,
             evict_every,
-        ));
+        )));
         let a = alive.clone();
         tokio::spawn(async move {
             let _alive = a;
@@ -309,7 +308,7 @@ async fn listen_df<'a>(
     tokio::spawn(
         async move {
             let alive = alive;
-            while let Some(d) = replicas.next().await {
+            while let Some(d) = replicas.recv().await {
                 let idx = d.index;
                 let shard = d.shard.unwrap_or(0);
 

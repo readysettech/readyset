@@ -139,7 +139,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                     return;
                 }
                 succeeded = r.is_ok();
-                tokio::time::delay_for(time::Duration::from_micros(10)).await;
+                tokio::time::sleep(time::Duration::from_micros(10)).await;
             }
 
             done.wait().await;
@@ -163,7 +163,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
 
     // we now need to wait for migrate_after
     eprintln!("Waiting for migration time...");
-    tokio::time::delay_for(migrate_after).await;
+    tokio::time::sleep(migrate_after).await;
 
     // all right, migration time
     eprintln!("Starting migration");
@@ -237,7 +237,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                     stat.send(("HITF", hits as f64 / count as f64)).unwrap();
                     hits = 0;
                 }
-                tokio::time::delay_for(time::Duration::from_millis(10)).await;
+                tokio::time::sleep(time::Duration::from_millis(10)).await;
             }
 
             done.wait().await;

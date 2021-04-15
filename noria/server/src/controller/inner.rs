@@ -27,6 +27,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, io, time};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// `Controller` is the core component of the alternate Soup implementation.
 ///
@@ -77,11 +79,13 @@ pub(super) struct ControllerInner {
     pub(in crate::controller) replies: DomainReplies,
 }
 
-pub(in crate::controller) struct DomainReplies(
-    tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
-);
+pub(in crate::controller) struct DomainReplies(UnboundedReceiverStream<ControlReplyPacket>);
 
 impl DomainReplies {
+    pub(in crate::controller) fn new(recv: mpsc::UnboundedReceiver<ControlReplyPacket>) -> Self {
+        Self(UnboundedReceiverStream::new(recv))
+    }
+
     async fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
         let crps: Vec<_> = (&mut self.0).take(n).collect().await;
 
@@ -642,7 +646,7 @@ impl ControllerInner {
             pending_recovery,
             last_checked_workers: Instant::now(),
 
-            replies: DomainReplies(drx),
+            replies: DomainReplies::new(drx),
         }
     }
 

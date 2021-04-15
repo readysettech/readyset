@@ -101,10 +101,10 @@ fn get_settle_time() -> Duration {
 // Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
 // for the value given through the SETTLE_TIME environment variable.
 async fn sleep() {
-    tokio::time::delay_for(get_settle_time()).await;
+    tokio::time::sleep(get_settle_time()).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_basic() {
     let mut g = start_simple("it_works_basic").await;
     let _ = g
@@ -186,7 +186,7 @@ async fn it_works_basic() {
     //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
@@ -258,7 +258,7 @@ fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
 // that cannot be satisfied does not. If the reader node had not received
 // a timestamp, the read would not be satisfied, unless there is a bug with
 // timestamp satisfiability.
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_timestamp_propagation_simple() {
     let mut g = start_simple("test_timestamp_propagation_simple").await;
 
@@ -325,7 +325,7 @@ async fn test_timestamp_propagation_simple() {
 }
 
 // Simulate writes from two clients.
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_timestamp_propagation_multitable() {
     let mut g = start_simple("test_timestamp_propagation_multitable").await;
 
@@ -411,7 +411,7 @@ async fn test_timestamp_propagation_multitable() {
     assert_eq!(res[0], Vec::new());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn sharded_shuffle() {
     let mut g = start_simple("sharded_shuffle").await;
 
@@ -447,7 +447,7 @@ async fn sharded_shuffle() {
     assert_eq!(rows.len(), 100);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn broad_recursing_upquery() {
     let nshards = 16;
     let mut g = build("bru", Some(nshards), false).await;
@@ -530,7 +530,7 @@ async fn broad_recursing_upquery() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn base_mutation() {
     use noria::{Modification, Operation};
 
@@ -611,7 +611,7 @@ async fn base_mutation() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = start_simple("shared_interdomain_ancestor").await;
@@ -664,7 +664,7 @@ async fn shared_interdomain_ancestor() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_w_mat() {
     // set up graph
     let mut g = start_simple("it_works_w_mat").await;
@@ -723,7 +723,7 @@ async fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 6.into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_w_partial_mat() {
     // set up graph
     let mut g = start_simple("it_works_w_partial_mat").await;
@@ -777,7 +777,7 @@ async fn it_works_w_partial_mat() {
     assert_eq!(cq.len().await.unwrap(), 1);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
@@ -824,7 +824,7 @@ async fn it_works_w_partial_mat_below_empty() {
     assert_eq!(cq.len().await.unwrap(), 1);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_deletion() {
     // set up graph
     let mut g = start_simple("it_works_deletion").await;
@@ -875,7 +875,7 @@ async fn it_works_deletion() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_sql_recipe() {
     let mut g = start_simple("it_works_with_sql_recipe").await;
     let sql = "
@@ -904,7 +904,7 @@ async fn it_works_with_sql_recipe() {
     assert_eq!(result[0][0], 2.into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_vote() {
     let mut g = start_simple("it_works_with_vote").await;
     let sql = "
@@ -949,7 +949,7 @@ async fn it_works_with_vote() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_identical_queries() {
     let mut g = start_simple("it_works_with_identical_queries").await;
     let sql = "
@@ -975,7 +975,7 @@ async fn it_works_with_identical_queries() {
     assert_eq!(result[0], vec![aid.into()]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_double_query_through() {
     let mut g = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "
@@ -1011,7 +1011,7 @@ async fn it_works_with_double_query_through() {
     assert_eq!(empty.len(), 0);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_duplicate_subquery() {
     let mut g = start_simple_unsharded("it_works_with_double_query_through").await;
     let sql = "
@@ -1055,7 +1055,7 @@ async fn it_works_with_duplicate_subquery() {
     assert_eq!(empty.len(), 0);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_reads_before_writes() {
     let mut g = start_simple("it_works_with_reads_before_writes").await;
     let sql = "
@@ -1086,7 +1086,7 @@ async fn it_works_with_reads_before_writes() {
     assert_eq!(result[0], vec![aid.into(), uid.into()]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
@@ -1125,7 +1125,7 @@ async fn forced_shuffle_despite_same_shard() {
     assert_eq!(result[0][1], price.into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn double_shuffle() {
     let mut g = start_simple("double_shuffle").await;
     let sql = "
@@ -1161,7 +1161,7 @@ async fn double_shuffle() {
     assert_eq!(result[0][1], price.into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_arithmetic_aliases() {
     let mut g = start_simple("it_works_with_arithmetic_aliases").await;
     let sql = "
@@ -1189,7 +1189,7 @@ async fn it_works_with_arithmetic_aliases() {
     assert_eq!(result[0][1], (price / 100).into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
@@ -1245,7 +1245,7 @@ async fn it_recovers_persisted_bases() {
     done.await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn mutator_churn() {
     let mut g = start_simple("mutator_churn").await;
     let _ = g
@@ -1297,7 +1297,7 @@ async fn mutator_churn() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn view_connection_churn() {
     let authority = Arc::new(LocalAuthority::new());
 
@@ -1349,7 +1349,7 @@ async fn view_connection_churn() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn table_connection_churn() {
     let authority = Arc::new(LocalAuthority::new());
 
@@ -1397,7 +1397,7 @@ async fn table_connection_churn() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(LocalAuthority::new());
     let dir = tempfile::tempdir().unwrap();
@@ -1453,7 +1453,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     done.await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_simple_arithmetic() {
     let mut g = start_simple("it_works_with_simple_arithmetic").await;
 
@@ -1480,7 +1480,7 @@ async fn it_works_with_simple_arithmetic() {
     assert_eq!(result[0][1], 246.into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_multiple_arithmetic_expressions() {
     let mut g = start_simple("it_works_with_multiple_arithmetic_expressions").await;
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -1505,7 +1505,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     assert_eq!(result[0][3], 1230.into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_join_arithmetic() {
     let mut g = start_simple("it_works_with_join_arithmetic").await;
     let sql = "
@@ -1548,7 +1548,7 @@ async fn it_works_with_join_arithmetic() {
     assert_eq!(result[0][1], (f64::from(price) * fraction).into());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_function_arithmetic() {
     let mut g = start_simple("it_works_with_function_arithmetic").await;
     let sql = "
@@ -1573,7 +1573,7 @@ async fn it_works_with_function_arithmetic() {
     assert_eq!(result[0][0], DataType::from(max_price * 2));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn votes() {
     // set up graph
     let mut g = start_simple("votes").await;
@@ -1677,7 +1677,7 @@ async fn votes() {
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn empty_migration() {
     // set up graph
     let mut g = start_simple("empty_migration").await;
@@ -1727,7 +1727,7 @@ async fn empty_migration() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn simple_migration() {
     let id: DataType = 1.into();
 
@@ -1781,7 +1781,7 @@ async fn simple_migration() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn add_columns() {
     let id: DataType = "x".into();
 
@@ -1839,7 +1839,7 @@ async fn add_columns() {
     assert!(res.contains(&vec![id.clone(), "a".into(), 10.into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn migrate_added_columns() {
     let id: DataType = "x".into();
 
@@ -1890,7 +1890,7 @@ async fn migrate_added_columns() {
     assert!(res.iter().any(|r| r == &vec![10.into(), id.clone()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn migrate_drop_columns() {
     let id: DataType = "x".into();
@@ -1963,7 +1963,7 @@ async fn migrate_drop_columns() {
     assert!(res.contains(&vec![id.clone(), "b".into(), "c".into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn key_on_added() {
     // set up graph
     let mut g = start_simple("key_on_added").await;
@@ -1989,7 +1989,7 @@ async fn key_on_added() {
     assert!(bq.lookup(&[3.into()], true).await.unwrap().is_empty());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn replay_during_replay() {
     // what we're trying to set up here is a case where a join receives a record with a value for
     // the join key that does not exist in the view the record was sent from. since joins only do
@@ -2098,7 +2098,7 @@ async fn replay_during_replay() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn cascading_replays_with_sharding() {
     let mut g = start_simple("cascading_replays_with_sharding").await;
 
@@ -2158,7 +2158,7 @@ async fn cascading_replays_with_sharding() {
     sleep().await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn full_aggregation_with_bogokey() {
     // set up graph
     let mut g = start_simple("full_aggregation_with_bogokey").await;
@@ -2215,7 +2215,7 @@ async fn full_aggregation_with_bogokey() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn pkey_then_full_table_with_bogokey() {
     let mut g = start_simple_unsharded("pkey_then_full_table_with_bogokey").await;
     g.install_recipe("CREATE TABLE posts (id int, title text)")
@@ -2253,7 +2253,7 @@ async fn pkey_then_full_table_with_bogokey() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn materialization_frontier() {
     // set up graph
     let mut g = start_simple_unsharded("materialization_frontier").await;
@@ -2337,7 +2337,7 @@ async fn materialization_frontier() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn crossing_migration() {
     // set up graph
     let mut g = start_simple("crossing_migration").await;
@@ -2386,7 +2386,7 @@ async fn crossing_migration() {
     assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn independent_domain_migration() {
     let id: DataType = 1.into();
 
@@ -2440,7 +2440,7 @@ async fn independent_domain_migration() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn domain_amend_migration() {
     // set up graph
     let mut g = start_simple("domain_amend_migration").await;
@@ -2488,7 +2488,7 @@ async fn domain_amend_migration() {
     assert!(res.contains(&vec![id.clone(), 4.into()]));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn migration_depends_on_unchanged_domain() {
     // here's the case we want to test: before the migration, we have some domain that contains
     // some materialized node n, as well as an egress node. after the migration, we add a domain
@@ -2653,22 +2653,22 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn full_vote_migration_only_new() {
     do_full_vote_migration(true, false).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn full_vote_migration_new_and_old() {
     do_full_vote_migration(true, true).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn full_vote_migration_new_and_old_unsharded() {
     do_full_vote_migration(false, true).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn live_writes() {
     let mut g = start_simple("live_writes").await;
     let (_vote, vc) = g
@@ -2744,7 +2744,7 @@ async fn live_writes() {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
@@ -2804,7 +2804,7 @@ async fn state_replay_migration_query() {
     assert!(out.lookup(&[3.into()], true).await.unwrap().is_empty());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates() {
     let mut g = start_simple("recipe_activates").await;
     g.migrate(|mig| {
@@ -2820,7 +2820,7 @@ async fn recipe_activates() {
     assert_eq!(g.inputs().await.unwrap().len(), 1);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
     let r1_txt = "QUERY qa: SELECT a FROM b;\n
@@ -2838,7 +2838,7 @@ async fn recipe_activates_and_migrates() {
     assert_eq!(g.outputs().await.unwrap().len(), 2);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates_with_join() {
     let r_txt = "CREATE TABLE a (x int, y int, z int);\n
                  CREATE TABLE b (r int, s int);\n";
@@ -2917,7 +2917,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, 
     .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn finkelstein1982_queries() {
     use std::fs::File;
     use std::io::Read;
@@ -2951,17 +2951,17 @@ async fn finkelstein1982_queries() {
     .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn tpc_w() {
     test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true, false).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn lobsters() {
     test_queries("lobsters", "tests/lobsters-schema.txt", false, false, false).await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn soupy_lobsters() {
     test_queries(
         "soupy_lobsters",
@@ -2973,7 +2973,7 @@ async fn soupy_lobsters() {
     .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn mergeable_lobsters() {
     test_queries(
         "mergeable_lobsters",
@@ -2985,7 +2985,7 @@ async fn mergeable_lobsters() {
     .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn filter_aggregate_lobsters() {
     test_queries(
         "filter_aggregate_lobsters",
@@ -2997,7 +2997,7 @@ async fn filter_aggregate_lobsters() {
     .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn node_removal() {
     let mut g = start_simple("domain_removal").await;
     let cid = g
@@ -3060,7 +3060,7 @@ async fn node_removal() {
     // );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn remove_query() {
     let r_txt = "CREATE TABLE b (a int, c text, x text);\n
                  QUERY qa: SELECT a FROM b;\n
@@ -3129,7 +3129,7 @@ macro_rules! get {
     }}
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn albums() {
     let mut g = start_simple_unsharded("albums").await;
     g.install_recipe(
@@ -3220,7 +3220,7 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
 
 // FIXME: The test is disabled because UNION views do not deduplicate results as they should.
 #[ignore]
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn union_basic() {
     use itertools::sorted;
 
@@ -3265,7 +3265,7 @@ async fn union_basic() {
     assert_eq!(result_ids, expected_ids);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn union_all_basic() {
     use itertools::sorted;
 
@@ -3315,7 +3315,7 @@ async fn union_all_basic() {
     assert_eq!(result_ids, expected_ids);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn between() {
     let mut g = start_simple("between_query").await;
     g.install_recipe("CREATE TABLE things (bigness INT);")
@@ -3347,7 +3347,7 @@ async fn between() {
 // TODO(grfn): This doesn't work because of some weird stuff we don't understand
 // with multi-param queries - should look into thihs further in the future
 #[ignore]
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn between_parametrized() {
     let mut g = start_simple("between_query").await;
     g.install_recipe("CREATE TABLE things (bigness INT);")
@@ -3400,7 +3400,7 @@ async fn between_parametrized() {
 // parameters doesn't work, and the query gets rewritten to:
 //   SELECT bigness FROM things WHERE bigness < ? OR bigness > ?
 #[ignore]
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn not_between() {
     let mut g = start_simple_unsharded("things").await;
     println!("Installing recipes");
@@ -3436,7 +3436,7 @@ async fn not_between() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn topk_updates() {
     let mut g = start_simple("things").await;
     g.install_recipe(
@@ -3483,7 +3483,7 @@ async fn topk_updates() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 
@@ -3513,7 +3513,7 @@ async fn correct_nested_view_schema() {
 
 // FIXME: The test is disabled because join column projection does not work correctly.
 #[ignore]
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn join_column_projection() {
     let mut g = start_simple("join_column_projection").await;
 
@@ -3582,7 +3582,7 @@ async fn join_column_projection() {
 
 // Tests the case where the source is sharded by a different column than the key column
 // with no parameter.
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_join_across_shards() {
     let mut g = start_simple("test_join_across_shards").await;
     g.install_recipe(
@@ -3634,7 +3634,7 @@ async fn test_join_across_shards() {
 
 // Tests the case where the source is sharded by a different column than the key column
 // with a parameter.
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_join_across_shards_with_param() {
     let mut g = start_simple("test_join_across_shards_with_param").await;
     g.install_recipe(
@@ -3677,7 +3677,7 @@ async fn test_join_across_shards_with_param() {
 // FIXME: The test is disabled because aliasing the result columns with names reused from other
 // columns causes incorrect results to be returned. (See above 'join_param_results' test for
 // correct behavior in the no-param case, when column names are not reused.)
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name() {
     let mut g = start_simple("test_join_with_reused_column_name").await;
     g.install_recipe(
@@ -3727,7 +3727,7 @@ async fn test_join_with_reused_column_name() {
     assert_eq!(results, expected);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name_with_param() {
     let mut g = start_simple("test_join_with_reused_column_name").await;
     g.install_recipe(
@@ -3767,7 +3767,7 @@ async fn test_join_with_reused_column_name_with_param() {
     assert_eq!(results, expected);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn self_join_basic() {
     let mut g = start_simple("self_join_basic").await;
     g.install_recipe(
@@ -3829,7 +3829,7 @@ async fn self_join_basic() {
     assert_eq!(results, expected);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn self_join_param() {
     let mut g = start_simple("self_join_param").await;
     g.install_recipe(
@@ -3887,7 +3887,7 @@ async fn self_join_param() {
     assert_eq!(results, expected);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn non_sql_materialized_range_query() {
     let mut g = {
@@ -3929,7 +3929,7 @@ async fn non_sql_materialized_range_query() {
     )
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn non_sql_range_upquery() {
     let mut g = {
@@ -3970,7 +3970,7 @@ async fn non_sql_range_upquery() {
     )
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn range_upquery_after_point_queries() {
     let mut g = {
@@ -4042,7 +4042,7 @@ async fn range_upquery_after_point_queries() {
     )
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn query_reuse_aliases() {
     let mut g = start_simple("it_works_basic").await;
     g.install_recipe(
@@ -4076,7 +4076,7 @@ async fn query_reuse_aliases() {
     assert!(g.view("q4").await.is_ok());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn same_table_columns_inequal() {
     let mut g = start_simple("same_table_columns_inequal").await;
     g.install_recipe(
@@ -4117,9 +4117,9 @@ async fn same_table_columns_inequal() {
 
 // FIXME: The test is disabled due to panic when querying an aliased view.
 #[ignore]
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn view_reuse_aliases() {
-    let mut g = start_simple_logging("view_reuse_aliases").await;
+    let mut g = start_simple("view_reuse_aliases").await;
 
     // NOTE q1 causes panic
     g.install_recipe(
@@ -4138,7 +4138,7 @@ async fn view_reuse_aliases() {
     assert!(g.view("q2").await.is_ok());
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn post_read_ilike() {
     let mut g = {
@@ -4201,7 +4201,7 @@ async fn post_read_ilike() {
     )
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn cast_projection() {
     let mut g = start_simple("cast").await;
 
@@ -4235,7 +4235,7 @@ async fn cast_projection() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn aggregate_expression() {
     let mut g = start_simple_unsharded("aggregate_expression").await;
 
@@ -4258,7 +4258,7 @@ async fn aggregate_expression() {
     assert_eq!(&res["max_num"], &DataType::from(100));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn post_join_filter() {
     let mut g = start_simple("post_join_filter").await;
 
@@ -4308,7 +4308,7 @@ async fn post_join_filter() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 /// Tests the case where two tables have the same column name and those columns are
 /// used in a post-join filter.
 async fn duplicate_column_names() {
@@ -4359,7 +4359,7 @@ async fn duplicate_column_names() {
         ]
     );
 }
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn filter_on_expression() {
     let mut g = start_simple("filter_on_expression").await;
 
@@ -4391,7 +4391,7 @@ async fn filter_on_expression() {
     assert_eq!(&res["id"], &DataType::from(1));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn compound_join_key() {
     let mut g = start_simple("compound_join_key").await;
     g.install_recipe(
@@ -4480,7 +4480,7 @@ async fn compound_join_key() {
     assert_eq!(res, vec![(3, 33), (4, 44), (4, 44)]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn left_join_null() {
     let mut g = start_simple("left_join_null").await;
 
@@ -4515,7 +4515,7 @@ async fn left_join_null() {
     assert_eq!(res.len(), 2);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_reader_replication() {
     let authority = Arc::new(LocalAuthority::new());
     let cluster_name = "reader_replication";
@@ -4523,7 +4523,7 @@ async fn test_reader_replication() {
     let mut w1 = build_custom(
         cluster_name,
         Some(DEFAULT_SHARDING),
-        true,
+        false,
         true,
         authority.clone(),
     )
@@ -4537,14 +4537,14 @@ async fn test_reader_replication() {
     let _w2 = build_custom(
         "reader_replication",
         Some(DEFAULT_SHARDING),
-        true,
+        false,
         false,
         authority.clone(),
     )
     .await;
 
     while w1.get_instances().await.unwrap().len() < 2 {
-        tokio::time::delay_for(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     let instances_cluster = w1.get_instances().await.unwrap();
@@ -4621,7 +4621,7 @@ fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_client() {
     unsafe {
         NoriaMetricsRecorder::install(1024).unwrap();
@@ -4655,7 +4655,7 @@ async fn test_metrics_client() {
     assert_eq!(2.0, get_external_requests_count(metrics_dump));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
     let mut g = start_simple_logging("overlapping_indices").await;
 
@@ -4702,7 +4702,7 @@ async fn overlapping_indices() {
     assert_eq!(res, vec![(7, 7, 3), (20, 6, 3)]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn aggregate_after_filter_non_equality() {
     let mut g = start_simple("aggregate_after_filter_non_equality").await;
 

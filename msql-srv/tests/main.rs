@@ -145,13 +145,14 @@ where
         C: FnOnce(&mut mysql::Conn) -> (),
     {
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let port = listener.local_addr().unwrap().port();
         let jh = thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-            let s = rt
-                .handle()
-                .enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+            let s = {
+                let _guard = rt.handle().enter();
+                tokio::net::TcpStream::from_std(s).unwrap()
+            };
             rt.block_on(MysqlIntermediary::run_on_tcp(self, s))
         });
 

@@ -21,6 +21,7 @@ use std::marker::Send;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use tokio::net;
+use tokio_stream::wrappers::TcpListenerStream;
 use tracing::Level;
 
 #[async_trait]
@@ -172,11 +173,10 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
         };
         tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
-        let mut rt =
-            tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+        let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
         let listen_socket: std::net::SocketAddr = listen_addr.parse().unwrap();
 
-        let mut listener = rt
+        let listener = rt
             .block_on(tokio::net::TcpListener::bind(&listen_socket))
             .unwrap();
 
@@ -195,7 +195,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
         let ctrlc = tokio::signal::ctrl_c();
         let mut listener = Box::pin(futures_util::stream::select(
-            listener.incoming(),
+            TcpListenerStream::new(listener),
             ctrlc
                 .map(|r| {
                     if let Err(e) = r {

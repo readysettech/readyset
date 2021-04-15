@@ -272,17 +272,17 @@ async fn main() {
 
     backend.populate("Role", roles).await;
     println!("Waiting for groups to be constructed...");
-    tokio::time::delay_for(time::Duration::from_millis(120 * (nclasses as u64))).await;
+    tokio::time::sleep(time::Duration::from_millis(120 * (nclasses as u64))).await;
 
     backend.populate("User", users).await;
     backend.populate("Class", classes).await;
 
     backend.populate("Post", posts.clone()).await;
     println!("Waiting for posts to propagate...");
-    tokio::time::delay_for(time::Duration::from_millis((nposts / 10) as u64)).await;
+    tokio::time::sleep(time::Duration::from_millis((nposts / 10) as u64)).await;
 
     println!("Finished writing! Sleeping for 2 seconds...");
-    tokio::time::delay_for(time::Duration::from_secs(10)).await;
+    tokio::time::sleep(time::Duration::from_secs(10)).await;
     let leaf = "posts".to_string();
     let mut getter = backend.g.view(&leaf).await.unwrap();
 

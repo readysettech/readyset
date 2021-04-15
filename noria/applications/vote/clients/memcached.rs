@@ -1,5 +1,5 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
-use anyhow::{anyhow, Context as AnyhowContext};
+use anyhow::anyhow;
 use clap;
 use memcached;
 use memcached::proto::{MultiOperation, ProtoType};
@@ -42,8 +42,7 @@ impl Conn {
         let jh = std::thread::spawn(move || {
             let mut c = memcached::Client::connect(&[(&connstr, 1)], ProtoType::Binary).unwrap();
 
-            let mut rt = tokio::runtime::Builder::new()
-                .basic_scheduler()
+            let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
@@ -127,7 +126,7 @@ impl VoteClient for Conn {
         let conn = Conn::new(addr, fast);
 
         async move {
-            let mut conn = conn?;
+            let conn = conn?;
 
             if params.prime {
                 // prepop
@@ -167,10 +166,8 @@ impl Service<ReadRequest> for Conn {
     type Error = anyhow::Error;
     type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.c
-            .poll_ready(cx)
-            .map(|r| Ok(r.context("backing thread failed for read")?))
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: ReadRequest) -> Self::Future {
@@ -212,10 +209,8 @@ impl Service<WriteRequest> for Conn {
     type Error = anyhow::Error;
     type Future = impl Future<Output = Result<(), anyhow::Error>> + Send;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.c
-            .poll_ready(cx)
-            .map(|r| Ok(r.context("backing thread failed for write")?))
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: WriteRequest) -> Self::Future {

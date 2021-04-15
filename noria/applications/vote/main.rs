@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context as AnyhowContext};
 use clap::value_t_or_exit;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::StreamExt;
 use hdrhistogram::Histogram;
 use noria_applications::Timeline;
 use rand::prelude::*;
@@ -18,7 +19,6 @@ use std::sync::{atomic, Arc, Mutex};
 use std::task::Poll;
 use std::thread;
 use std::time;
-use tokio::stream::StreamExt;
 use tower_service::Service;
 
 thread_local! {
@@ -70,11 +70,10 @@ where
     let ts = (write_t.clone(), read_t.clone());
 
     let available_cores = num_cpus::get() - ngen;
-    let mut rt = tokio::runtime::Builder::new()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .threaded_scheduler()
         .thread_name("voter")
-        .core_threads(available_cores)
+        .worker_threads(available_cores)
         .on_thread_stop(move || {
             TIMING.with(|hs| {
                 let hs = hs.borrow();
@@ -91,7 +90,7 @@ where
         rt.block_on(async move { C::new(params, local_args).await.unwrap() })
     };
 
-    rt.block_on(async { tokio::time::delay_for(time::Duration::from_secs(1)).await });
+    rt.block_on(async { tokio::time::sleep(time::Duration::from_secs(1)).await });
 
     let start = std::time::SystemTime::now();
     let errd: &'static _ = &*Box::leak(Box::new(atomic::AtomicBool::new(false)));
@@ -297,10 +296,7 @@ where
     let mut r_capacity = 128;
 
     let mut rng = rand::thread_rng();
-    let mut rt = tokio::runtime::Builder::new()
-        .basic_scheduler()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
     let start = time::Instant::now();
     let end = start + runtime;

@@ -24,6 +24,7 @@ use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError};
 use slog::Logger;
 use stream_cancel::Valve;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::Readers;
 use noria::errors::{internal_err, ReadySetResult};
@@ -1071,7 +1072,7 @@ impl Domain {
 
                                         tokio::spawn(
                                             self.shutdown_valve
-                                                .wrap(rx)
+                                                .wrap(UnboundedReceiverStream::new(rx))
                                                 .map(move |misses| {
                                                     Box::new(Packet::RequestReaderReplay {
                                                         keys: misses,

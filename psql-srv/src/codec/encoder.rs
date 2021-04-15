@@ -53,8 +53,10 @@ const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
-impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Encoder for Codec<R> {
-    type Item = BackendMessage<R>;
+impl<R> Encoder<BackendMessage<R>> for Codec<R>
+where
+    R: IntoIterator<Item: TryInto<Value, Error = BackendError>>,
+{
     type Error = Error;
 
     fn encode(&mut self, message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error> {

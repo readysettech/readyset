@@ -62,7 +62,7 @@ impl<A: Authority + 'static> Handle<A> {
                 break;
             }
 
-            tokio::time::delay_for(time::Duration::from_millis(50)).await;
+            tokio::time::sleep(time::Duration::from_millis(50)).await;
         }
     }
 

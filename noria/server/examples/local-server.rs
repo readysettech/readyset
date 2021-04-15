@@ -65,7 +65,7 @@ async fn main() {
     vote.insert(vec![aid.into(), uid.into()]).await.unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");
-    tokio::time::delay_for(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     println!("Reading...");
     println!("{:#?}", awvc.lookup(&[aid.into()], true).await);

@@ -21,6 +21,7 @@ use std::{
 };
 use stream_cancel::Valve;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream, UnboundedReceiverStream};
 
 use crate::handle::Handle;
 use crate::{Config, ReadySetResult};
@@ -80,7 +81,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let (trigger, valve) = Valve::new();
     let (alive, done) = tokio::sync::mpsc::channel(1);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut rx = valve.wrap(rx);
+    let mut rx = valve.wrap(UnboundedReceiverStream::new(rx));
 
     // we'll be listening for a couple of different types of events:
     // first, events from workers
@@ -212,7 +213,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     );
 
     let h = Handle::new(authority, tx, trigger).await?;
-    Ok((h, done.into_future().map(|_| {})))
+    Ok((h, ReceiverStream::new(done).into_future().map(|_| {})))
 }
 
 async fn listen_internal(
@@ -220,10 +221,10 @@ async fn listen_internal(
     valve: Valve,
     log: slog::Logger,
     event_tx: UnboundedSender<Event>,
-    mut on: tokio::net::TcpListener,
+    on: tokio::net::TcpListener,
 ) {
-    let mut rx = valve.wrap(on.incoming());
-    while let Some(r) = rx.next().await {
+    let mut rx = valve.wrap(TcpListenerStream::new(on));
+    while let Some(r) = { rx.next().await } {
         match r {
             Err(e) => {
                 warn!(log, "internal connection failed: {:?}", e);
@@ -234,7 +235,7 @@ async fn listen_internal(
                 tokio::spawn(
                     valve
                         .wrap(AsyncBincodeReader::from(sock))
-                        .map_ok(Event::InternalMessage)
+                        .map_ok(|m| Event::InternalMessage(m))
                         .map_err(anyhow::Error::from)
                         .forward(
                             crate::ImplSinkForSender(event_tx.clone())
@@ -261,10 +262,10 @@ async fn listen_external<A: Authority + 'static>(
     alive: tokio::sync::mpsc::Sender<()>,
     valve: Valve,
     event_tx: UnboundedSender<Event>,
-    mut on: tokio::net::TcpListener,
+    on: tokio::net::TcpListener,
     authority: Arc<A>,
 ) -> Result<(), hyper::Error> {
-    let on = valve.wrap(on.incoming());
+    let on = valve.wrap(TcpListenerStream::new(on));
     use hyper::{service::make_service_fn, Body, Request, Response};
     use tower::Service;
     impl<A: Authority> Clone for ExternalServer<A> {

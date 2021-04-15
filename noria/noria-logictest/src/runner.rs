@@ -293,7 +293,7 @@ impl TestScript {
                 builder.set_reuse(ReuseConfigType::NoReuse)
             }
 
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
             b.wait();
             loop {
@@ -316,14 +316,15 @@ impl TestScript {
         .unwrap();
         zk_auth.log_with(logger.clone());
 
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
 
         thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
-            let s = rt
-                .handle()
-                .enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+            let s = {
+                let _guard = rt.handle().enter();
+                tokio::net::TcpStream::from_std(s).unwrap()
+            };
             let reader =
                 NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
             let writer = NoriaConnector::new(ch, auto_increments, query_cache);

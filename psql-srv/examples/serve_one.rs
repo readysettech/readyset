@@ -61,7 +61,7 @@ impl Backend for SrvOneBackend {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let mut listener = TcpListener::bind("127.0.0.1:5432").await?;
+    let listener = TcpListener::bind("127.0.0.1:5432").await?;
     loop {
         let (socket, _) = listener.accept().await?;
         run_backend(SrvOneBackend, socket).await;
