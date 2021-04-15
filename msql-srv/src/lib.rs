@@ -75,7 +75,10 @@
 //!
 //!     let jh = thread::spawn(move || {
 //!         if let Ok((s, _)) = listener.accept() {
-//!             let s = rt.handle().enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+//!             let s = {
+//!                 let _guard = rt.handle().enter();
+//!                 tokio::net::TcpStream::from_std(s).unwrap()
+//!             };
 //!             rt.block_on(MysqlIntermediary::run_on_tcp(Backend, s)).unwrap();
 //!         }
 //!     });

@@ -20,7 +20,7 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
         .parse()?)
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     use clap::{App, Arg};
     let matches = App::new("noria-server")
         .version("0.0.1")
@@ -227,24 +227,19 @@ If specified, overrides the value of --external-address"))
         builder.log_with(log);
     }
 
-    let mut rt = tokio::runtime::Builder::new();
-    rt.enable_all();
-    rt.threaded_scheduler();
-    rt.thread_name("worker");
-    if let Some(threads) = None {
-        rt.core_threads(threads);
-    }
-    let mut rt = rt.build().unwrap();
-    let (_server, done) = rt
-        .block_on(async move {
-            let external_addr = external_addr.await.unwrap_or_else(|err| {
-                eprintln!("Error obtaining external IP address: {}", err);
-                process::exit(1)
-            });
-            builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
-            builder.start(Arc::new(authority)).await
-        })
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("worker")
+        .build()?;
+    let (_server, done) = rt.block_on(async move {
+        let external_addr = external_addr.await.unwrap_or_else(|err| {
+            eprintln!("Error obtaining external IP address: {}", err);
+            process::exit(1)
+        });
+        builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
+        builder.start(Arc::new(authority)).await
+    })?;
     rt.block_on(done);
     drop(rt);
+    Ok(())
 }

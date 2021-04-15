@@ -325,7 +325,7 @@ async fn main() {
 
         // In memory-only mode we don't want to recover, just read right away:
         if !durable || no_recovery {
-            tokio::time::delay_for(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
             perform_reads(&mut g, reads, rows, skewed, use_secondary, verbose).await;
 
             // Remove any log/database files:

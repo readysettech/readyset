@@ -80,7 +80,7 @@ async fn main() {
         }
 
         // allow writes to propagate
-        tokio::time::delay_for(time::Duration::from_secs(1)).await;
+        tokio::time::sleep(time::Duration::from_secs(1)).await;
 
         let mut rng = rand::thread_rng();
         let mut v = g.graph.table("Vote").await.unwrap();

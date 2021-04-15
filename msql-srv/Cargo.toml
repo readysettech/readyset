@@ -31,7 +31,7 @@ time = "=0.2.7"
 getrandom = "0.2.2"
 rust-crypto = "0.2.36"
 async-trait = "0.1"
-tokio = { version = "0.2", features = ["io-util", "net"] }
+tokio = { version = "1.5.0", features = ["io-util", "net", "macros", "rt-multi-thread"] }
 regex = "1.4.3"
 serde = { version = "1.0.8", features = ["rc"] }
 serde_test = "1.0.117"

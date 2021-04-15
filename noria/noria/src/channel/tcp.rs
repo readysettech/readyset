@@ -5,6 +5,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use crate::Tagged;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use bincode::Options;
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
@@ -118,9 +119,15 @@ impl<T: Serialize> TcpSender<T> {
         }
 
         let mut f = move || {
-            let size = u32::try_from(bincode::serialized_size(t).unwrap()).unwrap();
+            // NOTE: this *has* to match exactly what the AsyncBincodeReader expects on the other
+            // end, or else we'll silently get the wrong data (but no deserialization errors!)
+            // https://app.clubhouse.io/readysettech/story/437 to fix that
+            let c = bincode::options()
+                .with_limit(u32::max_value() as u64)
+                .allow_trailing_bytes();
+            let size = u32::try_from(c.serialized_size(t).unwrap()).unwrap();
             poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-            poisoning_try!(self, bincode::serialize_into(&mut self.stream, t));
+            poisoning_try!(self, c.serialize_into(&mut self.stream, t));
             poisoning_try!(self, self.stream.flush());
             Ok(())
         };

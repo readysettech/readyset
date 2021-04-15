@@ -21,25 +21,22 @@ maintenance = { status = "experimental" }
 assert_infrequent = "0.1.0"
 anyhow = "1.0"
 thiserror = "1.0.23"
-hyper = { version = "0.13.0", features = [ "stream" ] }
+hyper = { version = "0.14.4", features = [ "stream" ] }
 nom-sql = { version = "0.0.11", path = "../../nom-sql" }
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
-tokio = { version = "0.2.19", features = ["blocking", "rt-util", "rt-threaded", "net", "io-util", "sync", "time"] }
-bincode = "1.3.0"
+tokio = { version = "1.5", features = ["full"] }
+bincode = "1.3.3"
 vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 arccstr = "1.2.0"
 ahash = "0.3"
 chrono = { version = "0.4.0", features = ["serde"] }
-tower-service = "0.3.0"
-tower-balance = "0.3.0"
-tower-discover = "0.3.0"
-tower-buffer = "0.3.0"
-tower-limit = "0.3.1"
-tower-load = "0.3.0"
-tokio-tower = "0.4"
+tower-service = "0.3.1"
+tower-layer = "0.3.1"
+tokio-tower = "0.5.1"
+tower = { version = "0.4.6", features = ["limit", "balance", "buffer", "discover", "util"] }
 tracing = "0.1.12"
 tracing-futures = "0.2.2"
 slab = "0.4"
@@ -58,13 +55,13 @@ zookeeper = "0.5.3"
 bufstream = "0.1.3"
 byteorder = "1.0.0"
 net2 = "0.2"
-async-bincode = "0.5.0"
+async-bincode = "0.6.1"
 regex = "1.4.3"
 lazy_static = "1.4.0"
 test-strategy = "0.1.1"
 
 # metrics/
-reqwest = { version = "0.10.10", features = ["json"] }
+reqwest = { version = "0.11.3", features = ["json"] }
 
 # Local dependencies
 launchpad = { path = "../../launchpad" }
@@ -73,7 +70,6 @@ metrics = "0.14.2"
 metrics-util = "0.6.2"
 
 [dev-dependencies]
-tokio = { version = "0.2.0", features = [ "rt-threaded", "macros" ] }
 assert_approx_eq = "1.1.0"
 
 [lib]

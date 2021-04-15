@@ -167,7 +167,7 @@ async fn main() {
         test_populate::create_users(&mut backend).await;
     }
 
-    tokio::time::delay_for(time::Duration::from_secs(2)).await;
+    tokio::time::sleep(time::Duration::from_secs(2)).await;
     let _ = backend.login(make_user(user)).await.is_ok();
 
     if args.is_present("populate") {
@@ -184,5 +184,5 @@ async fn main() {
     }
 
     // sleep "forever"
-    tokio::time::delay_for(time::Duration::from_secs(200_000)).await;
+    tokio::time::sleep(time::Duration::from_secs(200_000)).await;
 }

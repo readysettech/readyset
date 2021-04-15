@@ -223,8 +223,6 @@ pub mod channel;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod consensus;
 #[doc(hidden)]
-pub mod doc_mock;
-#[doc(hidden)]
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod internal;
 

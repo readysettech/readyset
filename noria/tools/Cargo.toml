@@ -8,7 +8,7 @@ edition = "2018"
 anyhow = "1.0.38"
 clap = "2.33.3"
 noria = { path = "../noria" }
-tokio = { version = "0.2", features = ["macros"] }
+tokio = { version = "1.5.0", features = ["macros"] }
 
 [[bin]]
 name = "view_checker"

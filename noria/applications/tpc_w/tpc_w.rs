@@ -333,7 +333,7 @@ async fn main() {
     //println!("{}", backend.g);
 
     println!("Finished writing! Sleeping for 1 second...");
-    tokio::time::delay_for(time::Duration::from_secs(1)).await;
+    tokio::time::sleep(time::Duration::from_secs(1)).await;
 
     if single_query {
         use std::fs::File;

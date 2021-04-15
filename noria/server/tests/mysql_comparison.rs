@@ -290,7 +290,7 @@ async fn check_query(
         }
     }
 
-    tokio::time::delay_for(time::Duration::from_millis(300)).await;
+    tokio::time::sleep(time::Duration::from_millis(300)).await;
 
     let mut getter = g.view(query_name).await.unwrap();
 
@@ -409,7 +409,7 @@ fn mysql_comparison() {
             let panic_state: Arc<Mutex<Option<PanicState>>> = Arc::new(Mutex::new(None));
             set_panic_hook(panic_state.clone());
             let result = panic::catch_unwind(|| {
-                let mut rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(check_query(
                     &schema.tables,
                     query_name,

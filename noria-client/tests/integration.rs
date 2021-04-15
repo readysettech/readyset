@@ -94,7 +94,7 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
         }
         authority.log_with(l.clone());
         builder.log_with(l);
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
         let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
@@ -116,16 +116,17 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
     zk_auth.log_with(logger.clone());
 
     debug!(logger, "Connecting to Noria...",);
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
     let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     debug!(logger, "Connected!");
 
     // no need for a barrier here since accept() acts as one
     thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
-        let s = rt
-            .handle()
-            .enter(|| tokio::net::TcpStream::from_std(s).unwrap());
+        let s = {
+            let _guard = rt.handle().enter();
+            tokio::net::TcpStream::from_std(s).unwrap()
+        };
 
         let writer = NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
         let reader = NoriaConnector::new(ch, auto_increments, query_cache);

@@ -6,8 +6,6 @@ use crate::coordination::CoordinationPayload;
 use ahash::{AHashMap, AHashSet};
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
-use async_timer::Oneshot;
-use bincode;
 use dataflow::{
     payload::SourceChannelIdentifier,
     prelude::{DataType, Executor},
@@ -25,7 +23,6 @@ use noria::{
 };
 use noria::{PacketData, ReadySetError, Tagged};
 use pin_project::pin_project;
-use slog;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::IpAddr;
@@ -39,7 +36,9 @@ use std::{
 use strawpoll::Strawpoll;
 use stream_cancel::Valve;
 use streamunordered::{StreamUnordered, StreamYield};
+use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
+use tokio_stream::wrappers::IntervalStream;
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
@@ -66,7 +65,7 @@ pub(super) struct Replica {
     retry: Option<Box<Packet>>,
 
     #[pin]
-    refresh_sizes: tokio::time::Interval,
+    refresh_sizes: IntervalStream,
 
     #[pin]
     valve: Valve,
@@ -98,7 +97,7 @@ pub(super) struct Replica {
     >,
 
     #[pin]
-    timeout: Strawpoll<async_timer::oneshot::Timer>,
+    timeout: Box<tokio::time::Sleep>,
     timed_out: bool,
 
     out: Outboxes,
@@ -132,10 +131,8 @@ impl Replica {
             inputs: Default::default(),
             outputs: Default::default(),
             out: Outboxes::new(ctrl_tx),
-            timeout: Strawpoll::from(async_timer::oneshot::Timer::new(time::Duration::from_secs(
-                3600,
-            ))),
-            refresh_sizes: tokio::time::interval(time::Duration::from_millis(500)),
+            timeout: Box::new(tokio::time::sleep(Duration::from_secs(3600))),
+            refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             timed_out: false,
         }
     }
@@ -344,7 +341,7 @@ impl Replica {
             while let Poll::Ready((stream, _)) = this
                 .incoming
                 .as_mut()
-                .poll_fn(cx, |mut i, cx| i.poll_accept(cx))
+                .poll_fn(cx, |i, cx| i.poll_accept(cx))
                 .map_err(|e| anyhow::Error::new(e).context("poll_accept"))?
             {
                 // we know that any new connection to a domain will first send a one-byte
@@ -431,12 +428,13 @@ impl Replica {
     // returns true if on_event(Timeout) was called
     fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, ReadySetError> {
         let mut processed = false;
-        let mut this = self.project();
+        let this = self.project();
 
-        if !this.timeout.is_expired() {
-            if let Poll::Ready(()) = this.timeout.as_mut().poll(cx) {
-                *this.timed_out = true;
-            }
+        // SAFETY: map_unchecked_mut is converting a Pin<Box<Sleep>> to a Pin<&Sleep>, which is safe
+        // per the rules of `map_unchecked_mut` ("the data you return will not move so long as the
+        // argument value does not move"), since we're borrowing from a pinned box.
+        if let Poll::Ready(()) = unsafe { this.timeout.map_unchecked_mut(|x| &mut **x) }.poll(cx) {
+            *this.timed_out = true;
         }
 
         if *this.timed_out {
@@ -724,10 +722,10 @@ impl Future for Replica {
                 match this.domain.on_event(this.out, PollEvent::ResumePolling) {
                     Ok(ProcessResult::KeepPolling(timeout)) => {
                         if let Some(timeout) = timeout {
-                            if timeout == time::Duration::new(0, 0) {
+                            if timeout == Duration::new(0, 0) {
                                 *this.timed_out = true;
                             } else {
-                                this.timeout.restart(timeout, cx.waker());
+                                this.timeout.set(Box::new(tokio::time::sleep(timeout)));
                             }
 
                             // we need to poll the timer to ensure we'll get woken up
