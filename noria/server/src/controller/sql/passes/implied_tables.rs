@@ -1,7 +1,7 @@
 use nom_sql::{
     ArithmeticBase, ArithmeticItem, CaseWhenExpression, Column, ColumnOrLiteral,
-    ConditionExpression, ConditionTree, FieldDefinitionExpression, FieldValueExpression,
-    FunctionArgument, JoinRightSide, SelectStatement, SqlQuery, Table,
+    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
+    FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use crate::errors::ReadySetResult;
@@ -145,34 +145,36 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match **f {
-                            Avg(FunctionArgument::Column(ref mut fe), _)
+                            Avg(box Expression::Column(ref mut fe), _)
                             | Count(
-                                FunctionArgument::Conditional(CaseWhenExpression {
+                                box Expression::CaseWhen(CaseWhenExpression {
                                     then_expr: ColumnOrLiteral::Column(ref mut fe),
                                     ..
                                 }),
                                 _,
                             )
-                            | Count(FunctionArgument::Column(ref mut fe), _)
+                            | Count(box Expression::Column(ref mut fe), _)
                             | Sum(
-                                FunctionArgument::Conditional(CaseWhenExpression {
+                                box Expression::CaseWhen(CaseWhenExpression {
                                     then_expr: ColumnOrLiteral::Column(ref mut fe),
                                     ..
                                 }),
                                 _,
                             )
-                            | Sum(FunctionArgument::Column(ref mut fe), _)
-                            | Min(FunctionArgument::Column(ref mut fe))
-                            | Max(FunctionArgument::Column(ref mut fe))
-                            | Cast(FunctionArgument::Column(ref mut fe), _)
-                            | GroupConcat(FunctionArgument::Column(ref mut fe), _) => {
+                            | Sum(box Expression::Column(ref mut fe), _)
+                            | Min(box Expression::Column(ref mut fe))
+                            | Max(box Expression::Column(ref mut fe))
+                            | Cast(box Expression::Column(ref mut fe), _)
+                            | GroupConcat(box Expression::Column(ref mut fe), _) => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
                             }
-                            Generic(_, ref mut args) => {
-                                for arg in args.arguments.iter_mut() {
-                                    if let FunctionArgument::Column(ref mut fe) = arg {
+                            Call {
+                                ref mut arguments, ..
+                            } => {
+                                for arg in arguments.iter_mut() {
+                                    if let Expression::Column(ref mut fe) = arg {
                                         if fe.table.is_none() {
                                             fe.table = find_table(fe, tables_in_query);
                                         }
@@ -222,16 +224,14 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => match **f {
                         Count(
-                            FunctionArgument::Conditional(CaseWhenExpression {
-                                ref mut condition,
-                                ..
+                            box Expression::CaseWhen(CaseWhenExpression {
+                                ref mut condition, ..
                             }),
                             _,
                         )
                         | Sum(
-                            FunctionArgument::Conditional(CaseWhenExpression {
-                                ref mut condition,
-                                ..
+                            box Expression::CaseWhen(CaseWhenExpression {
+                                ref mut condition, ..
                             }),
                             _,
                         ) => {

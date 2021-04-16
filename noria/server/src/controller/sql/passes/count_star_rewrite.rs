@@ -1,6 +1,6 @@
 use nom_sql::{
-    Column, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
-    FunctionArgument, SqlQuery, Table,
+    Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FieldDefinitionExpression, SqlQuery, Table,
 };
 
 use crate::errors::{internal_err, ReadySetResult};
@@ -84,12 +84,12 @@ impl CountStarRewrite for SqlQuery {
                 }
 
                 c.function = Some(Box::new(Count(
-                    FunctionArgument::Column(Column {
+                    Box::new(Expression::Column(Column {
                         name: bogo_column.clone(),
                         alias: None,
                         table: Some(bogo_table.name.clone()),
                         function: None,
-                    }),
+                    })),
                     false,
                 )));
             }
@@ -130,14 +130,14 @@ impl CountStarRewrite for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::CountStarRewrite;
+    use super::*;
     use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
     use std::collections::HashMap;
 
     #[test]
     fn it_expands_count_star() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionArgument, FunctionExpression};
+        use nom_sql::FunctionExpression;
 
         // SELECT COUNT(*) FROM users;
         // -->
@@ -159,7 +159,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            FunctionArgument::Column(Column::from("users.id")),
+                            Box::new(Expression::Column(Column::from("users.id"))),
                             false,
                         ))),
                     })]
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn it_expands_count_star_with_group_by() {
         use nom_sql::parser::parse_query;
-        use nom_sql::{FunctionArgument, FunctionExpression};
+        use nom_sql::FunctionExpression;
 
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
@@ -195,7 +195,7 @@ mod tests {
                         alias: None,
                         table: None,
                         function: Some(Box::new(FunctionExpression::Count(
-                            FunctionArgument::Column(Column::from("users.name")),
+                            Box::new(Expression::Column(Column::from("users.name"))),
                             false,
                         ))),
                     })]

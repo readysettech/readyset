@@ -4,8 +4,8 @@ use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
 use crate::{internal, invariant, unsupported};
 use mir::{Column, MirNodeRef};
-use nom_sql::analysis::{function_arguments, ReferredColumns};
-use nom_sql::{self, ConditionExpression, FunctionArgument, FunctionExpression};
+use nom_sql::analysis::ReferredColumns;
+use nom_sql::{self, ConditionExpression, FunctionExpression};
 use nom_sql::{Expression, FunctionExpression::*};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
@@ -62,14 +62,17 @@ pub(super) fn make_predicates_above_grouped<'a>(
 
 /// Normally, projection happens after grouped nodes - however, if aggregates used in grouped
 /// expressions reference expressions rather than columns directly, we need to project them out
-/// before the grouped nodes
+/// before the grouped nodes.
+///
+/// This does that projection, and returns a mapping from the expressions themselves to the names of
+/// the columns they have been projected to
 pub(super) fn make_expressions_above_grouped(
     mir_converter: &SqlToMirConverter,
     name: &str,
     qg: &QueryGraph,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-) -> Option<(Vec<(String, Expression)>, MirNodeRef)> {
+) -> HashMap<Expression, String> {
     let exprs: Vec<_> = qg
         .relations
         .get("computed_columns")
@@ -77,12 +80,9 @@ pub(super) fn make_expressions_above_grouped(
         .flat_map(|cgn| &cgn.columns)
         .filter_map(|c| c.function.as_ref())
         .filter(|f| is_aggregate(&f))
-        .flat_map(|f| function_arguments(f))
-        .filter_map(|arg| match arg {
-            FunctionArgument::Column(c) => c.function.as_ref().map(|f| (c.name.clone(), f)),
-            _ => None,
-        })
-        .map(|(n, f)| (n, Expression::Call((**f).clone())))
+        .flat_map(|f| f.arguments())
+        .filter(|arg| matches!(arg, Expression::Arithmetic(_) | Expression::Call(_)))
+        .map(|expr| (expr.to_string(), expr.clone()))
         .collect();
 
     if !exprs.is_empty() {
@@ -97,9 +97,9 @@ pub(super) fn make_expressions_above_grouped(
             false,
         );
         *prev_node = Some(node.clone());
-        Some((exprs, node))
+        exprs.into_iter().map(|(e, n)| (n, e)).collect()
     } else {
-        None
+        HashMap::new()
     }
 }
 
@@ -111,6 +111,7 @@ pub(super) fn make_grouped(
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
     is_reconcile: bool,
+    projected_exprs: &HashMap<Expression, String>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut func_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
@@ -129,30 +130,30 @@ pub(super) fn make_grouped(
             let computed_col = if is_reconcile {
                 let func = computed_col.function.as_ref().unwrap();
                 let new_func = match *func.deref() {
-                    Sum(FunctionArgument::Column(ref col), b) => {
+                    Sum(box Expression::Column(ref col), b) => {
                         let colname = format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
                         FunctionExpression::Sum(
-                            FunctionArgument::Column(nom_sql::Column::from(colname.as_ref())),
+                            Box::new(Expression::Column(nom_sql::Column::from(colname.as_ref()))),
                             b,
                         )
                     }
-                    Count(FunctionArgument::Column(ref col), b) => {
+                    Count(box Expression::Column(ref col), b) => {
                         let colname = format!("{}.count({})", col.clone().table.unwrap(), col.name);
                         FunctionExpression::Sum(
-                            FunctionArgument::Column(nom_sql::Column::from(colname.as_ref())),
+                            Box::new(Expression::Column(nom_sql::Column::from(colname.as_ref()))),
                             b,
                         )
                     }
-                    Max(FunctionArgument::Column(ref col)) => {
+                    Max(box Expression::Column(ref col)) => {
                         let colname = format!("{}.max({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Max(FunctionArgument::Column(nom_sql::Column::from(
-                            colname.as_ref(),
+                        FunctionExpression::Max(Box::new(Expression::Column(
+                            nom_sql::Column::from(colname.as_ref()),
                         )))
                     }
-                    Min(FunctionArgument::Column(ref col)) => {
+                    Min(box Expression::Column(ref col)) => {
                         let colname = format!("{}.min({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Min(FunctionArgument::Column(nom_sql::Column::from(
-                            colname.as_ref(),
+                        FunctionExpression::Min(Box::new(Expression::Column(
+                            nom_sql::Column::from(colname.as_ref()),
                         )))
                     }
                     ref x => unsupported!("unknown function expression: {:?}", x),
@@ -293,6 +294,7 @@ pub(super) fn make_grouped(
                 &Column::from(computed_col),
                 group_cols.iter().collect(),
                 parent_node.clone(),
+                projected_exprs,
             );
 
             *prev_node = Some(nodes.last().unwrap().clone());

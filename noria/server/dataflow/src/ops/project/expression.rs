@@ -6,7 +6,7 @@ use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
-use noria::{DataType, ReadySetResult, ValueCoerceError};
+use noria::{DataType, ReadySetError, ReadySetResult, ValueCoerceError};
 use std::fmt::Formatter;
 use std::ops::{Add, Sub};
 use std::sync::Arc;
@@ -57,25 +57,15 @@ pub enum BuiltinFunction {
     Addtime(Box<ProjectExpression>, Box<ProjectExpression>),
 }
 
-#[derive(Debug, Error)]
-pub enum BuiltinFunctionConvertError {
-    #[error("Function {0} does not exist")]
-    NoSuchFunction(String),
-
-    #[error("Incorrect parameter count in the call to native function '{0}'")]
-    ArityError(String),
-}
-
 impl BuiltinFunction {
-    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<Self, BuiltinFunctionConvertError>
+    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<Self, ReadySetError>
     where
         A: IntoIterator<Item = ProjectExpression>,
     {
         let mut args = args.into_iter();
         match name {
             "convert_tz" => {
-                let arity_error =
-                    || BuiltinFunctionConvertError::ArityError("convert_tz".to_owned());
+                let arity_error = || ReadySetError::ArityError("convert_tz".to_owned());
                 Ok(Self::ConvertTZ(
                     Box::new(args.next().ok_or_else(arity_error)?),
                     Box::new(args.next().ok_or_else(arity_error)?),
@@ -83,38 +73,37 @@ impl BuiltinFunction {
                 ))
             }
             "dayofweek" => {
-                let arity_error =
-                    || BuiltinFunctionConvertError::ArityError("dayofweek".to_owned());
+                let arity_error = || ReadySetError::ArityError("dayofweek".to_owned());
                 Ok(Self::DayOfWeek(Box::new(
                     args.next().ok_or_else(arity_error)?,
                 )))
             }
             "ifnull" => {
-                let arity_error = || BuiltinFunctionConvertError::ArityError("ifnull".to_owned());
+                let arity_error = || ReadySetError::ArityError("ifnull".to_owned());
                 Ok(Self::IfNull(
                     Box::new(args.next().ok_or_else(arity_error)?),
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
             "month" => {
-                let arity_error = || BuiltinFunctionConvertError::ArityError("month".to_owned());
+                let arity_error = || ReadySetError::ArityError("month".to_owned());
                 Ok(Self::Month(Box::new(args.next().ok_or_else(arity_error)?)))
             }
             "timediff" => {
-                let arity_error = || BuiltinFunctionConvertError::ArityError("timediff".to_owned());
+                let arity_error = || ReadySetError::ArityError("timediff".to_owned());
                 Ok(Self::Timediff(
                     Box::new(args.next().ok_or_else(arity_error)?),
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
             "addtime" => {
-                let arity_error = || BuiltinFunctionConvertError::ArityError("addtime".to_owned());
+                let arity_error = || ReadySetError::ArityError("addtime".to_owned());
                 Ok(Self::Addtime(
                     Box::new(args.next().ok_or_else(arity_error)?),
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
-            _ => Err(BuiltinFunctionConvertError::NoSuchFunction(name.to_owned())),
+            _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
         }
     }
 }

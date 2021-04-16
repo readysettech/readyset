@@ -1,4 +1,5 @@
 #![warn(clippy::dbg_macro)]
+
 //! Hello! Welcome to Noria.
 //!
 //! Noria is a database built to provide incrementally maintained materialized views for a known

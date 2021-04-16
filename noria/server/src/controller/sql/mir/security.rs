@@ -83,6 +83,7 @@ impl SecurityBoundary for SqlToMirConverter {
                     node_count,
                     &mut Some(node.clone()),
                     true,
+                    &HashMap::new(),
                 )?;
 
                 nodes_added.extend(grouped);

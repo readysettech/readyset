@@ -184,8 +184,7 @@ mod tests {
         use dataflow::ops::filter::{FilterCondition, Value};
         use dataflow::ops::grouped::aggregate::Aggregation;
         use nom_sql::{
-            BinaryOperator, ColumnSpecification, Expression, FunctionArgument, FunctionExpression,
-            SqlType,
+            BinaryOperator, ColumnSpecification, Expression, FunctionExpression, SqlType,
         };
 
         use crate::node::{MirNode, MirNodeType};
@@ -276,14 +275,13 @@ mod tests {
                     emit: vec!["a".into(), "agg".into()],
                     expressions: vec![(
                         "c0".to_owned(),
-                        Expression::Call(FunctionExpression::Generic(
-                            "ifnull".to_owned(),
-                            vec![
-                                FunctionArgument::Column("c".into()),
-                                FunctionArgument::Literal(0.into()),
-                            ]
-                            .into(),
-                        )),
+                        Expression::Call(FunctionExpression::Call {
+                            name: "ifnull".to_owned(),
+                            arguments: vec![
+                                Expression::Column("c".into()),
+                                Expression::Literal(0.into()),
+                            ],
+                        }),
                     )],
                     literals: vec![],
                 },

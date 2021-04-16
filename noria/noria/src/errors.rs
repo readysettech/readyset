@@ -181,11 +181,18 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// A `ValueCoerceError` that really shouldn't be a separate type.
-    ///
-    /// FIXME(eta): make this not be a separate type.
+    /// An error occurred when coercing DataType values to a different type
     #[error(transparent)]
     ValueCoerce(ValueCoerceError),
+
+    /// A user-provided SQL query referenced a function that does not exist
+    #[error("Function {0} does not exist")]
+    NoSuchFunction(String),
+
+    /// A user-provided SQL query used the wrong number of arguments in a call to a built-in
+    /// function
+    #[error("Incorrect parameter count in the call to native function '{0}'")]
+    ArityError(String),
 
     /// Multiple `AUTO_INCREMENT` columns were provided, which isn't allowed.
     #[error("Multiple auto incrementing columns are not permitted")]

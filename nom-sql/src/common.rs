@@ -16,9 +16,10 @@ use std::fmt::{self, Display};
 
 use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
 use crate::case::case_when_column;
-use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
+use crate::column::Column;
 use crate::keywords::{escape_if_keyword, sql_keyword};
 use crate::table::Table;
+use crate::{Expression, FunctionExpression};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
@@ -615,18 +616,20 @@ pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
 }
 
 // Parses the argument for an aggregation function
-pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], FunctionArgument> {
+//
+// TODO(grfn): Get rid of this, replace it with a general expression parser
+pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], Expression> {
     alt((
-        map(case_when_column, FunctionArgument::Conditional),
-        map(literal, FunctionArgument::Literal),
-        map(column_identifier_no_alias, FunctionArgument::Column),
-        map(column_function, |f| FunctionArgument::Call(Box::new(f))),
+        map(case_when_column, Expression::CaseWhen),
+        map(literal, Expression::Literal),
+        map(column_function, Expression::Call),
+        map(column_identifier_no_alias, Expression::Column),
     ))(i)
 }
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
+pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
     let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
     let (remaining_input, (distinct, args)) =
         tuple((distinct_parser, function_argument_parser))(i)?;
@@ -648,7 +651,7 @@ fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<Vec<u8>>)> {
     pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
 }
 
-fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (FunctionArgument, bool)> {
+fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
     delimited(tag("("), function_arguments, tag(")"))(i)
 }
 
@@ -663,7 +666,7 @@ named!(cast(&[u8]) -> FunctionExpression, do_parse!(
         >> type_: type_identifier
         >> multispace0
         >> complete!(char!(')'))
-        >> (FunctionExpression::Cast(arg, type_))
+        >> (FunctionExpression::Cast(Box::new(arg), type_))
 ));
 
 pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
@@ -671,19 +674,19 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
     alt((
         map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
         map(preceded(tag_no_case("count"), delim_fx_args), |args| {
-            FunctionExpression::Count(args.0.clone(), args.1)
+            FunctionExpression::Count(Box::new(args.0.clone()), args.1)
         }),
         map(preceded(tag_no_case("sum"), delim_fx_args), |args| {
-            FunctionExpression::Sum(args.0.clone(), args.1)
+            FunctionExpression::Sum(Box::new(args.0.clone()), args.1)
         }),
         map(preceded(tag_no_case("avg"), delim_fx_args), |args| {
-            FunctionExpression::Avg(args.0.clone(), args.1)
+            FunctionExpression::Avg(Box::new(args.0.clone()), args.1)
         }),
         map(preceded(tag_no_case("max"), delim_fx_args), |args| {
-            FunctionExpression::Max(args.0)
+            FunctionExpression::Max(Box::new(args.0))
         }),
         map(preceded(tag_no_case("min"), delim_fx_args), |args| {
-            FunctionExpression::Min(args.0)
+            FunctionExpression::Min(Box::new(args.0))
         }),
         cast,
         map(
@@ -695,7 +698,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
                     None => String::from(","),
                     Some(s) => String::from_utf8(s).unwrap(),
                 };
-                FunctionExpression::GroupConcat(FunctionArgument::Column(col.clone()), sep)
+                FunctionExpression::GroupConcat(Box::new(Expression::Column(col.clone())), sep)
             },
         ),
         map(
@@ -711,10 +714,10 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
             )),
             |tuple| {
                 let (name, _, _, arguments, _) = tuple;
-                FunctionExpression::Generic(
-                    str::from_utf8(name).unwrap().to_string(),
-                    FunctionArguments::from(arguments),
-                )
+                FunctionExpression::Call {
+                    name: str::from_utf8(name).unwrap().to_string(),
+                    arguments,
+                }
             },
         ),
     ))(i)
@@ -1163,8 +1166,8 @@ mod tests {
             name: String::from("max(addr_id)"),
             alias: None,
             table: None,
-            function: Some(Box::new(FunctionExpression::Max(FunctionArgument::Column(
-                Column::from("addr_id"),
+            function: Some(Box::new(FunctionExpression::Max(Box::new(
+                Expression::Column(Column::from("addr_id")),
             )))),
         };
         assert_eq!(res.unwrap().1, expected);
@@ -1174,7 +1177,7 @@ mod tests {
     fn group_concat() {
         let qs = b"group_concat(x separator ', ')";
         let expected = FunctionExpression::GroupConcat(
-            FunctionArgument::Column(Column::from("x")),
+            Box::new(Expression::Column(Column::from("x"))),
             ", ".to_owned(),
         );
         let res = column_function(qs);
@@ -1185,12 +1188,12 @@ mod tests {
     fn cast() {
         let qs = b"cast(`lp`.`start_ddtm` as date)";
         let expected = FunctionExpression::Cast(
-            FunctionArgument::Column(Column {
+            Box::new(Expression::Column(Column {
                 table: Some("lp".to_owned()),
                 name: "start_ddtm".to_owned(),
                 alias: None,
                 function: None,
-            }),
+            })),
             SqlType::Date,
         );
         let res = column_function(qs);
@@ -1207,16 +1210,29 @@ mod tests {
         ];
         for q in qlist.iter() {
             let res = column_function(q);
-            let expected = FunctionExpression::Generic(
-                "coalesce".to_string(),
-                FunctionArguments::from(vec![
-                    FunctionArgument::Column(Column::from("a")),
-                    FunctionArgument::Column(Column::from("b")),
-                    FunctionArgument::Column(Column::from("c")),
-                ]),
-            );
+            let expected = FunctionExpression::Call {
+                name: "coalesce".to_string(),
+                arguments: vec![
+                    Expression::Column(Column::from("a")),
+                    Expression::Column(Column::from("b")),
+                    Expression::Column(Column::from("c")),
+                ],
+            };
             assert_eq!(res, Ok((&b""[..], expected)));
         }
+    }
+
+    #[test]
+    fn nested_function_call() {
+        let (rem, res) = column_function(b"max(cast(foo as int))").unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(
+            res,
+            FunctionExpression::Max(Box::new(Expression::Call(FunctionExpression::Cast(
+                Box::new(Expression::Column("foo".into())),
+                SqlType::Int(32)
+            ))))
+        )
     }
 
     #[test]
@@ -1224,14 +1240,13 @@ mod tests {
         let (_, res) = column_function(b"ifnull(x, 0)").unwrap();
         assert_eq!(
             res,
-            FunctionExpression::Generic(
-                "ifnull".to_owned(),
-                vec![
-                    FunctionArgument::Column(Column::from("x")),
-                    FunctionArgument::Literal(Literal::Integer(0))
+            FunctionExpression::Call {
+                name: "ifnull".to_owned(),
+                arguments: vec![
+                    Expression::Column(Column::from("x")),
+                    Expression::Literal(Literal::Integer(0))
                 ]
-                .into()
-            )
+            }
         );
     }
 
@@ -1245,14 +1260,14 @@ mod tests {
         ];
         for q in qlist.iter() {
             let res = column_function(q);
-            let expected = FunctionExpression::Generic(
-                "coalesce".to_string(),
-                FunctionArguments::from(vec![
-                    FunctionArgument::Literal(Literal::String("a".to_owned())),
-                    FunctionArgument::Column(Column::from("b")),
-                    FunctionArgument::Column(Column::from("c")),
-                ]),
-            );
+            let expected = FunctionExpression::Call {
+                name: "coalesce".to_string(),
+                arguments: vec![
+                    Expression::Literal(Literal::String("a".to_owned())),
+                    Expression::Column(Column::from("b")),
+                    Expression::Column(Column::from("c")),
+                ],
+            };
             assert_eq!(res, Ok((&b""[..], expected)));
         }
     }
