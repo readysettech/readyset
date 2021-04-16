@@ -2,6 +2,7 @@ use noria::ReadySetError;
 use noria_client::backend as cl;
 use psql_srv as ps;
 
+/// A simple wrapper around `noria_client`'s `Error`, facilitating conversion to `psql_srv::Error`.
 pub struct Error(cl::error::Error);
 
 impl From<cl::error::Error> for Error {

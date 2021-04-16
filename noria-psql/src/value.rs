@@ -3,8 +3,14 @@ use noria::DataType;
 use psql_srv as ps;
 use std::convert::TryFrom;
 
+/// An encapsulation of a Noria `DataType` value that facilitates conversion of this `DataType`
+/// into a `psql_srv::Value`.
 pub struct Value {
+    /// A type attribute used to determine which variant of `psql_srv::Value` the `value` attribute
+    /// should be converted to.
     pub col_type: ps::ColType,
+
+    /// The data value itself.
     pub value: DataType,
 }
 

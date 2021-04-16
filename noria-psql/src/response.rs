@@ -4,6 +4,8 @@ use noria_client::backend as cl;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
+/// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
+/// `psql_srv::PrepareResponse`.
 pub struct PrepareResponse(pub cl::PrepareResult);
 
 impl TryFrom<PrepareResponse> for ps::PrepareResponse {
@@ -49,6 +51,8 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
     }
 }
 
+/// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
+/// `psql_srv::QueryResponse`.
 pub struct QueryResponse(pub cl::QueryResult);
 
 impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {

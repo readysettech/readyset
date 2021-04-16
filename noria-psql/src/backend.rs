@@ -9,6 +9,10 @@ use noria_client::backend as cl;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
+/// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
+/// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
+/// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
+/// using type conversion.
 pub struct Backend(pub cl::Backend);
 
 impl Backend {
@@ -60,6 +64,8 @@ impl ps::Backend for Backend {
     }
 }
 
+/// A simple wrapper around a request parameter `psql_srv::Value` reference, facilitiating
+/// conversion to `DataType`.
 struct ParamRef<'a>(&'a ps::Value);
 
 impl TryFrom<ParamRef<'_>> for DataType {
