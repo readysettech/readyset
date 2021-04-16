@@ -7,6 +7,8 @@ const TYPE_LEN_4: u16 = 4;
 const TYPE_LEN_8: u16 = 8;
 const TYPE_LEN_PLACEHOLDER: u16 = 0;
 
+/// A simple wrapper around `noria_client`'s `SelectSchema` facilitating conversion to
+/// `psql_srv::Schema`.
 pub struct SelectSchema(pub cl::SelectSchema);
 
 impl TryFrom<SelectSchema> for ps::Schema {
