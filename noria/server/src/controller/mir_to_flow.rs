@@ -1,7 +1,6 @@
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator,
-    ColumnConstraint, ColumnSpecification, Expression, FunctionArguments, FunctionExpression,
-    Literal, OrderType,
+    ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -301,7 +300,7 @@ fn mir_node_to_flow_parts(
                         literals,
                         mig,
                         table_mapping,
-                    )
+                    )?
                 }
                 MirNodeType::Reuse { ref node } => {
                     match *node.borrow()
@@ -838,7 +837,7 @@ fn make_latest_node(
 fn arithmetic_item_to_project_expression(
     parent: &MirNodeRef,
     arithmetic_item: &ArithmeticItem,
-) -> ProjectExpression {
+) -> ReadySetResult<ProjectExpression> {
     match arithmetic_item {
         ArithmeticItem::Base(ArithmeticBase::Column(nom_sql::Column {
             function: Some(function),
@@ -855,10 +854,10 @@ fn arithmetic_item_to_project_expression(
             let column_id = parent
                 .borrow()
                 .column_id_for_column(&Column::from(column), None);
-            ProjectExpression::Column(column_id)
+            Ok(ProjectExpression::Column(column_id))
         }
         ArithmeticItem::Base(ArithmeticBase::Scalar(ref literal)) => {
-            ProjectExpression::Literal(literal.into())
+            Ok(ProjectExpression::Literal(literal.into()))
         }
         ArithmeticItem::Base(ArithmeticBase::Bracketed(ref arithmetic)) => {
             arithmetic_to_project_expression(parent, arithmetic)
@@ -871,50 +870,57 @@ fn arithmetic_item_to_project_expression(
 fn arithmetic_to_project_expression(
     parent: &MirNodeRef,
     arithmetic: &Arithmetic,
-) -> ProjectExpression {
-    ProjectExpression::Op {
+) -> ReadySetResult<ProjectExpression> {
+    Ok(ProjectExpression::Op {
         op: arithmetic.op.clone(),
         left: Box::new(arithmetic_item_to_project_expression(
             parent,
             &arithmetic.left,
-        )),
+        )?),
         right: Box::new(arithmetic_item_to_project_expression(
             parent,
             &arithmetic.right,
-        )),
-    }
+        )?),
+    })
 }
 
-fn generate_project_expression(parent: &MirNodeRef, expr: Expression) -> ProjectExpression {
+fn generate_project_expression(
+    parent: &MirNodeRef,
+    expr: Expression,
+) -> ReadySetResult<ProjectExpression> {
     match expr {
         Expression::Arithmetic(ArithmeticExpression { ari, .. }) => {
             arithmetic_to_project_expression(parent, &ari)
         }
-        Expression::Call(FunctionExpression::Cast(arg, ty)) => ProjectExpression::Cast(
-            Box::new(generate_project_expression(parent, arg.into())),
+        Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(ProjectExpression::Cast(
+            Box::new(generate_project_expression(parent, (*arg).into())?),
             ty,
-        ),
-        Expression::Call(FunctionExpression::Generic(fname, FunctionArguments { arguments })) => {
-            ProjectExpression::Call(
-                BuiltinFunction::from_name_and_args(
-                    &fname,
-                    arguments
-                        .into_iter()
-                        .map(|arg| generate_project_expression(parent, arg.into())),
-                )
-                .unwrap(),
-            )
-        }
-        Expression::Call(call) => unreachable!(
+        )),
+        Expression::Call(FunctionExpression::Call {
+            name: fname,
+            arguments,
+        }) => Ok(ProjectExpression::Call(
+            BuiltinFunction::from_name_and_args(
+                &fname,
+                arguments
+                    .into_iter()
+                    .map(|arg| generate_project_expression(parent, arg.into()))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?,
+        )),
+        Expression::Call(call) => internal!(
             "Unexpected (aggregate?) call node in project expression: {:?}",
             call
         ),
-        Expression::Literal(lit) => ProjectExpression::Literal(lit.into()),
-        Expression::Column { name, table } => ProjectExpression::Column(
+        Expression::Literal(lit) => Ok(ProjectExpression::Literal(lit.into())),
+        Expression::Column(nom_sql::Column { name, table, .. }) => Ok(ProjectExpression::Column(
             parent
                 .borrow()
                 .column_id_for_column(&Column::new(table.as_deref(), &name), None),
-        ),
+        )),
+        Expression::CaseWhen(_) => {
+            unsupported!("CASE WHEN expressions not currently supported in projections")
+        }
     }
 }
 
@@ -927,7 +933,7 @@ fn make_project_node(
     literals: &[(String, DataType)],
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(source_columns);
 
@@ -946,7 +952,7 @@ fn make_project_node(
     let projected_expressions: Vec<ProjectExpression> = expressions
         .iter()
         .map(|(_, e)| generate_project_expression(&parent, e.clone()))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     let n = mig.add_ingredient(
         String::from(name),
@@ -958,7 +964,7 @@ fn make_project_node(
             Some(projected_expressions),
         ),
     );
-    FlowNode::New(n)
+    Ok(FlowNode::New(n))
 }
 
 fn make_distinct_node(

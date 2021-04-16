@@ -22,6 +22,15 @@ impl Column {
         }
     }
 
+    pub fn named(name: String) -> Self {
+        Self {
+            table: None,
+            name,
+            function: None,
+            aliases: vec![],
+        }
+    }
+
     pub fn add_alias(&mut self, alias: &Column) {
         self.aliases.push(alias.clone());
     }

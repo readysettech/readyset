@@ -2,8 +2,8 @@ use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
-    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, FieldDefinitionExpression,
-    FieldValueExpression, FunctionArgument, FunctionArguments, FunctionExpression, JoinConstraint,
+    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FieldDefinitionExpression, FieldValueExpression, FunctionExpression, JoinConstraint,
     JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
@@ -145,21 +145,20 @@ fn rewrite_case_when_expression(
     }
 }
 
-fn rewrite_function_argument(
-    col_table_remap: &HashMap<String, String>,
-    arg: &FunctionArgument,
-) -> FunctionArgument {
-    match arg {
-        FunctionArgument::Column(col) => {
-            FunctionArgument::Column(rewrite_column(col_table_remap, col))
+fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expression) -> Expression {
+    match expr {
+        Expression::Column(col) => Expression::Column(rewrite_column(col_table_remap, col)),
+        Expression::CaseWhen(cwe) => {
+            Expression::CaseWhen(rewrite_case_when_expression(col_table_remap, cwe))
         }
-        FunctionArgument::Conditional(cwe) => {
-            FunctionArgument::Conditional(rewrite_case_when_expression(col_table_remap, cwe))
+        Expression::Literal(_) => expr.clone(),
+        Expression::Call(fun) => {
+            Expression::Call(rewrite_function_expression(col_table_remap, fun))
         }
-        FunctionArgument::Literal(_) => arg.clone(),
-        FunctionArgument::Call(fun) => {
-            FunctionArgument::Call(Box::new(rewrite_function_expression(col_table_remap, fun)))
-        }
+        Expression::Arithmetic(ae) => Expression::Arithmetic(ArithmeticExpression {
+            ari: rewrite_arithmetic(col_table_remap, &ae.ari),
+            alias: ae.alias.clone(),
+        }),
     }
 }
 
@@ -169,38 +168,36 @@ fn rewrite_function_expression(
 ) -> FunctionExpression {
     match function {
         FunctionExpression::Avg(arg, b) => {
-            FunctionExpression::Avg(rewrite_function_argument(col_table_remap, arg), *b)
+            FunctionExpression::Avg(Box::new(rewrite_expression(col_table_remap, arg)), *b)
         }
         FunctionExpression::Count(arg, b) => {
-            FunctionExpression::Count(rewrite_function_argument(col_table_remap, arg), *b)
+            FunctionExpression::Count(Box::new(rewrite_expression(col_table_remap, arg)), *b)
         }
         FunctionExpression::CountStar => FunctionExpression::CountStar,
         FunctionExpression::Sum(arg, b) => {
-            FunctionExpression::Sum(rewrite_function_argument(col_table_remap, arg), *b)
+            FunctionExpression::Sum(Box::new(rewrite_expression(col_table_remap, arg)), *b)
         }
         FunctionExpression::Max(arg) => {
-            FunctionExpression::Max(rewrite_function_argument(col_table_remap, arg))
+            FunctionExpression::Max(Box::new(rewrite_expression(col_table_remap, arg)))
         }
         FunctionExpression::Min(arg) => {
-            FunctionExpression::Min(rewrite_function_argument(col_table_remap, arg))
+            FunctionExpression::Min(Box::new(rewrite_expression(col_table_remap, arg)))
         }
         FunctionExpression::GroupConcat(arg, s) => FunctionExpression::GroupConcat(
-            rewrite_function_argument(col_table_remap, arg),
+            Box::new(rewrite_expression(col_table_remap, arg)),
             s.clone(),
         ),
-        FunctionExpression::Cast(arg, t) => {
-            FunctionExpression::Cast(rewrite_function_argument(col_table_remap, arg), t.clone())
-        }
-        FunctionExpression::Generic(s, args) => FunctionExpression::Generic(
-            s.clone(),
-            FunctionArguments {
-                arguments: args
-                    .arguments
-                    .iter()
-                    .map(|arg| rewrite_function_argument(col_table_remap, arg))
-                    .collect(),
-            },
+        FunctionExpression::Cast(arg, t) => FunctionExpression::Cast(
+            Box::new(rewrite_expression(col_table_remap, arg)),
+            t.clone(),
         ),
+        FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
+            name: name.clone(),
+            arguments: arguments
+                .iter()
+                .map(|arg| rewrite_expression(col_table_remap, arg))
+                .collect(),
+        },
     }
 }
 
@@ -533,7 +530,7 @@ mod tests {
     #[test]
     fn it_removes_nested_aliases() {
         use nom_sql::{
-            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, FunctionArgument,
+            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, Expression,
             FunctionExpression,
         };
 
@@ -543,12 +540,12 @@ mod tests {
             table: None,
             alias: None,
             function: Some(Box::new(FunctionExpression::Count(
-                FunctionArgument::Column(Column {
+                Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("t".into()),
                     alias: None,
                     function: None,
-                }),
+                })),
                 true,
             ))),
         };
@@ -557,12 +554,12 @@ mod tests {
             table: None,
             alias: None,
             function: Some(Box::new(FunctionExpression::Count(
-                FunctionArgument::Column(Column {
+                Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("PaperTag".into()),
                     alias: None,
                     function: None,
-                }),
+                })),
                 true,
             ))),
         };

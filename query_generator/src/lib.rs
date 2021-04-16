@@ -70,7 +70,7 @@ use strum_macros::EnumIter;
 
 use nom_sql::{
     BinaryOperator, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-    CreateTableStatement, FieldDefinitionExpression, FieldValueExpression, FunctionArgument,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FieldValueExpression,
     FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
     Literal, LiteralExpression, SelectStatement, SqlType, Table, TableKey,
 };
@@ -743,12 +743,12 @@ impl QueryOperation {
                     GroupConcat => SqlType::Text,
                     _ => SqlType::Int(32),
                 });
-                let arg = FunctionArgument::Column(Column {
+                let arg = Box::new(Expression::Column(Column {
                     name: col.into(),
                     alias: None,
                     table: Some(tbl.name.clone().into()),
                     function: None,
-                });
+                }));
                 let func = match agg {
                     Count => FunctionExpression::Count(arg, false),
                     Sum => FunctionExpression::Sum(arg, false),

@@ -27,6 +27,7 @@ impl fmt::Display for ColumnOrLiteral {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+/// TODO(grfn): Make all three of the fields here just `Box<Expression>`
 pub struct CaseWhenExpression {
     pub condition: ConditionExpression,
     pub then_expr: ColumnOrLiteral,

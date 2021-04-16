@@ -413,7 +413,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 mod tests {
     use super::*;
     use crate::case::{CaseWhenExpression, ColumnOrLiteral};
-    use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
+    use crate::column::Column;
     use crate::common::{
         BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
         SqlType,
@@ -423,6 +423,7 @@ mod tests {
     use crate::condition::ConditionTree;
     use crate::order::OrderType;
     use crate::table::Table;
+    use crate::{Expression, FunctionExpression};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -843,7 +844,8 @@ mod tests {
         let qstring = "SELECT max(addr_id) FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("addr_id")));
+        let agg_expr =
+            FunctionExpression::Max(Box::new(Expression::Column(Column::from("addr_id"))));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -864,7 +866,8 @@ mod tests {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("addr_id")));
+        let agg_expr =
+            FunctionExpression::Max(Box::new(Expression::Column(Column::from("addr_id"))));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -907,7 +910,7 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
         let agg_expr =
-            FunctionExpression::Count(FunctionArgument::Column(Column::from("vote_id")), true);
+            FunctionExpression::Count(Box::new(Expression::Column(Column::from("vote_id"))), true);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -937,11 +940,11 @@ mod tests {
             operator: BinaryOperator::Greater,
         });
         let agg_expr = FunctionExpression::Count(
-            FunctionArgument::Conditional(CaseWhenExpression {
+            Box::new(Expression::CaseWhen(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: None,
                 condition: filter_cond,
-            }),
+            })),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -973,11 +976,11 @@ mod tests {
             operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            FunctionArgument::Conditional(CaseWhenExpression {
+            Box::new(Expression::CaseWhen(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: None,
                 condition: filter_cond,
-            }),
+            })),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -1010,11 +1013,11 @@ mod tests {
             operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            FunctionArgument::Conditional(CaseWhenExpression {
+            Box::new(Expression::CaseWhen(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
                 else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
                 condition: filter_cond,
-            }),
+            })),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -1057,11 +1060,11 @@ mod tests {
             operator: BinaryOperator::And,
         });
         let agg_expr = FunctionExpression::Count(
-            FunctionArgument::Conditional(CaseWhenExpression {
+            Box::new(Expression::CaseWhen(CaseWhenExpression {
                 then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
                 else_expr: None,
                 condition: filter_cond,
-            }),
+            })),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -1086,31 +1089,29 @@ mod tests {
         let qstring = "SELECT coalesce(a, b,c) as x,d FROM sometable;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Generic(
-            String::from("coalesce"),
-            FunctionArguments {
-                arguments: vec![
-                    FunctionArgument::Column(Column {
-                        name: String::from("a"),
-                        alias: None,
-                        table: None,
-                        function: None,
-                    }),
-                    FunctionArgument::Column(Column {
-                        name: String::from("b"),
-                        alias: None,
-                        table: None,
-                        function: None,
-                    }),
-                    FunctionArgument::Column(Column {
-                        name: String::from("c"),
-                        alias: None,
-                        table: None,
-                        function: None,
-                    }),
-                ],
-            },
-        );
+        let agg_expr = FunctionExpression::Call {
+            name: "coalesce".to_owned(),
+            arguments: vec![
+                Expression::Column(Column {
+                    name: String::from("a"),
+                    alias: None,
+                    table: None,
+                    function: None,
+                }),
+                Expression::Column(Column {
+                    name: String::from("b"),
+                    alias: None,
+                    table: None,
+                    function: None,
+                }),
+                Expression::Column(Column {
+                    name: String::from("c"),
+                    alias: None,
+                    table: None,
+                    function: None,
+                }),
+            ],
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("sometable")],
             fields: vec![
@@ -1319,7 +1320,7 @@ mod tests {
 
         let res = selection(qstr.as_bytes());
 
-        let agg_expr = FunctionExpression::Max(FunctionArgument::Column(Column::from("o_id")));
+        let agg_expr = FunctionExpression::Max(Box::new(Expression::Column(Column::from("o_id"))));
         let recursive_select = SelectStatement {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1432,9 +1433,9 @@ mod tests {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Max(
-                            FunctionArgument::Column("o_id".into()),
-                        ))),
+                        function: Some(Box::new(FunctionExpression::Max(Box::new(
+                            Expression::Column("o_id".into()),
+                        )))),
                     }),
                     ArithmeticBase::Scalar(3333.into()),
                     None,
@@ -1462,9 +1463,9 @@ mod tests {
                         name: String::from("max(o_id)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Max(
-                            FunctionArgument::Column("o_id".into()),
-                        ))),
+                        function: Some(Box::new(FunctionExpression::Max(Box::new(
+                            Expression::Column("o_id".into()),
+                        )))),
                     }),
                     ArithmeticBase::Scalar(2.into()),
                     Some(String::from("double_max")),
@@ -1529,7 +1530,7 @@ mod tests {
                         table: None,
                         alias: Some("created_day".to_owned()),
                         function: Some(Box::new(FunctionExpression::Cast(
-                            FunctionArgument::Column(Column::from("created_at")),
+                            Box::new(Expression::Column(Column::from("created_at"))),
                             SqlType::Date
                         ))),
                     }),
@@ -1561,14 +1562,14 @@ mod tests {
                         name: "created_day".to_owned(),
                         table: None,
                         alias: Some("created_day".to_owned()),
-                        function: Some(Box::new(FunctionExpression::Generic(
-                            "coalesce".to_owned(),
-                            FunctionArguments::from(vec![
-                                FunctionArgument::Column(Column::from("a")),
-                                FunctionArgument::Literal(Literal::String("b".to_owned())),
-                                FunctionArgument::Column(Column::from("c"))
-                            ])
-                        ))),
+                        function: Some(Box::new(FunctionExpression::Call {
+                            name: "coalesce".to_owned(),
+                            arguments: vec![
+                                Expression::Column(Column::from("a")),
+                                Expression::Literal(Literal::String("b".to_owned())),
+                                Expression::Column(Column::from("c"))
+                            ]
+                        })),
                     }),
                 ],
                 where_clause: None,

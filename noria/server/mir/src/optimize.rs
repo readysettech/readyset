@@ -2,6 +2,7 @@ use crate::node::{MirNode, MirNodeType};
 use crate::query::MirQuery;
 use crate::MirNodeRef;
 use dataflow::ops::filter::FilterCondition;
+use nom_sql::Expression;
 use std::collections::HashMap;
 
 // Mutate the given MirQuery in order to optimize it,
@@ -88,20 +89,19 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     candidate = true;
 
                     // But wait -- need to check if the filter is on the aggregation result
-                    use nom_sql::FunctionArgument;
                     use nom_sql::FunctionExpression::{Count, Sum};
                     for (i, col) in child.columns.iter().enumerate() {
                         match col.function.as_deref() {
-                            Some(Count(FunctionArgument::Column(ref col), _))
-                            | Some(Sum(FunctionArgument::Column(ref col), _))
-                                if col.name == on.name =>
-                            {
-                                // this column may be the aggregation result
-                                // so if we're filtering on it, we're not a candidate
-                                for (j, _cond) in conditions {
-                                    if *j == i {
-                                        candidate = false;
-                                        break;
+                            Some(Count(arg, _)) | Some(Sum(arg, _)) => {
+                                if matches!(&**arg, Expression::Column(col) if col.name == on.name)
+                                {
+                                    // this column may be the aggregation result
+                                    // so if we're filtering on it, we're not a candidate
+                                    for (j, _cond) in conditions {
+                                        if *j == i {
+                                            candidate = false;
+                                            break;
+                                        }
                                     }
                                 }
                             }

@@ -15,10 +15,7 @@ pub use self::arithmetic::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
 };
 pub use self::case::{CaseWhenExpression, ColumnOrLiteral};
-pub use self::column::{
-    Column, ColumnConstraint, ColumnSpecification, FunctionArgument, FunctionArguments,
-    FunctionExpression,
-};
+pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
     BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
     LiteralExpression, Real, SqlType, TableKey,
@@ -27,7 +24,7 @@ pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement}
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};
 pub use self::delete::DeleteStatement;
-pub use self::expression::Expression;
+pub use self::expression::{Expression, FunctionExpression};
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};

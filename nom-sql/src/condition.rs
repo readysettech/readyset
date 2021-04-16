@@ -354,8 +354,9 @@ mod tests {
 
     use super::*;
     use crate::arithmetic::{ArithmeticBase, ArithmeticOperator};
-    use crate::column::{Column, FunctionArgument, FunctionArguments, FunctionExpression};
+    use crate::column::Column;
     use crate::common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
+    use crate::{Expression, FunctionExpression};
     use ConditionBase::*;
     use ConditionExpression::*;
 
@@ -1013,17 +1014,15 @@ mod tests {
         let qs = b"f(foo, bar) between 1 and 2";
         let expected = Between {
             operand: Box::new(Base(Field(Column {
-                name: "f(foo,bar)".to_owned(),
+                name: "f(foo, bar)".to_owned(),
                 table: None,
-                function: Some(Box::new(FunctionExpression::Generic(
-                    "f".to_owned(),
-                    FunctionArguments {
-                        arguments: vec![
-                            FunctionArgument::Column(Column::from("foo")),
-                            FunctionArgument::Column(Column::from("bar")),
-                        ],
-                    },
-                ))),
+                function: Some(Box::new(FunctionExpression::Call {
+                    name: "f".to_owned(),
+                    arguments: vec![
+                        Expression::Column(Column::from("foo")),
+                        Expression::Column(Column::from("bar")),
+                    ],
+                })),
                 alias: None,
             }))),
             min: Box::new(Base(Literal(1.into()))),

@@ -1,12 +1,10 @@
 use std::borrow::Cow;
-use std::iter;
 
 use crate::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
     ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FunctionArgument, FunctionArguments, FunctionExpression, SqlQuery, Table,
+    FunctionExpression, SqlQuery, Table,
 };
-use itertools::Either;
 
 pub trait ReferredTables {
     fn referred_tables(&self) -> Vec<Table>;
@@ -63,29 +61,9 @@ impl ReferredTables for ConditionExpression {
     }
 }
 
-/// Returns an iterator over all the direct arguments passed to the given function call expression
-pub fn function_arguments(func: &FunctionExpression) -> impl Iterator<Item = &FunctionArgument> {
-    match func {
-        FunctionExpression::Avg(arg, _)
-        | FunctionExpression::Count(arg, _)
-        | FunctionExpression::Sum(arg, _)
-        | FunctionExpression::Max(arg)
-        | FunctionExpression::Min(arg)
-        | FunctionExpression::GroupConcat(arg, _)
-        | FunctionExpression::Cast(arg, _) => Either::Left(iter::once(arg)),
-        FunctionExpression::CountStar => Either::Right(Either::Left(iter::empty())),
-        FunctionExpression::Generic(_, FunctionArguments { arguments }) => {
-            Either::Right(Either::Right(arguments.iter()))
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct ReferredColumnsIter<'a> {
     exprs_to_visit: Vec<&'a Expression>,
-    // TODO(grfn): Once FunctionArgument and Arithmetic go away and are replaced with Expression
-    // these next two fields can go away too
-    function_arguments_to_visit: Vec<&'a FunctionArgument>,
     arithmetic_to_visit: Vec<&'a Arithmetic>,
     condition_expressions_to_visit: Vec<&'a ConditionExpression>,
     columns_to_visit: Vec<&'a Column>,
@@ -99,12 +77,21 @@ impl<'a> ReferredColumnsIter<'a> {
             }
             Expression::Call(fexpr) => self.visit_function_expression(fexpr),
             Expression::Literal(_) => None,
-            Expression::Column { name, table } => Some(Cow::Owned(Column {
-                name: name.to_string(),
-                table: table.clone(),
-                alias: None,
-                function: None,
-            })),
+            Expression::Column(col) => Some(Cow::Borrowed(col)),
+            Expression::CaseWhen(CaseWhenExpression {
+                condition,
+                then_expr,
+                else_expr,
+            }) => {
+                self.condition_expressions_to_visit.push(condition);
+                if let ColumnOrLiteral::Column(col) = then_expr {
+                    self.columns_to_visit.push(col);
+                }
+                match else_expr {
+                    Some(ColumnOrLiteral::Column(col)) => Some(Cow::Borrowed(col)),
+                    _ => None,
+                }
+            }
         }
     }
 
@@ -115,48 +102,20 @@ impl<'a> ReferredColumnsIter<'a> {
         use FunctionExpression::*;
 
         match fexpr {
-            Avg(arg, _) => self.visit_function_argument(arg),
-            Count(arg, _) => self.visit_function_argument(arg),
+            Avg(arg, _) => self.visit_expr(arg),
+            Count(arg, _) => self.visit_expr(arg),
             CountStar => None,
-            Sum(arg, _) => self.visit_function_argument(arg),
-            Max(arg) => self.visit_function_argument(arg),
-            Min(arg) => self.visit_function_argument(arg),
-            GroupConcat(arg, _) => self.visit_function_argument(arg),
-            Cast(arg, _) => self.visit_function_argument(arg),
-            Generic(_, FunctionArguments { arguments }) => {
-                arguments.first().and_then(|first_arg| {
-                    if arguments.len() >= 2 {
-                        self.function_arguments_to_visit
-                            .extend(arguments.iter().skip(1));
-                    }
-                    self.visit_function_argument(first_arg)
-                })
-            }
-        }
-    }
-
-    fn visit_function_argument(&mut self, farg: &'a FunctionArgument) -> Option<Cow<'a, Column>> {
-        match farg {
-            FunctionArgument::Column(Column {
-                function: Some(f), ..
-            }) => self.visit_function_expression(f),
-            FunctionArgument::Column(col) => Some(Cow::Borrowed(col)),
-            FunctionArgument::Conditional(CaseWhenExpression {
-                condition,
-                then_expr,
-                else_expr,
-            }) => {
-                self.condition_expressions_to_visit.push(condition);
-                if let ColumnOrLiteral::Column(col) = then_expr {
-                    self.columns_to_visit.push(col)
+            Sum(arg, _) => self.visit_expr(arg),
+            Max(arg) => self.visit_expr(arg),
+            Min(arg) => self.visit_expr(arg),
+            GroupConcat(arg, _) => self.visit_expr(arg),
+            Cast(arg, _) => self.visit_expr(arg),
+            Call { arguments, .. } => arguments.first().and_then(|first_arg| {
+                if arguments.len() >= 2 {
+                    self.exprs_to_visit.extend(arguments.iter().skip(1));
                 }
-                match else_expr {
-                    Some(ColumnOrLiteral::Column(col)) => Some(Cow::Borrowed(col)),
-                    _ => None,
-                }
-            }
-            FunctionArgument::Literal(_) => None,
-            FunctionArgument::Call(fun) => self.visit_function_expression(fun),
+                self.visit_expr(first_arg)
+            }),
         }
     }
 
@@ -211,7 +170,6 @@ impl<'a> ReferredColumnsIter<'a> {
 
     fn finished(&self) -> bool {
         self.exprs_to_visit.is_empty()
-            && self.function_arguments_to_visit.is_empty()
             && self.arithmetic_to_visit.is_empty()
             && self.condition_expressions_to_visit.is_empty()
             && self.columns_to_visit.is_empty()
@@ -227,11 +185,6 @@ impl<'a> Iterator for ReferredColumnsIter<'a> {
                 .exprs_to_visit
                 .pop()
                 .and_then(|expr| self.visit_expr(expr))
-                .or_else(|| {
-                    self.function_arguments_to_visit
-                        .pop()
-                        .and_then(|farg| self.visit_function_argument(farg))
-                })
                 .or_else(|| {
                     self.arithmetic_to_visit
                         .pop()
@@ -259,19 +212,6 @@ impl ReferredColumns for Expression {
     fn referred_columns(&self) -> ReferredColumnsIter {
         ReferredColumnsIter {
             exprs_to_visit: vec![self],
-            function_arguments_to_visit: vec![],
-            arithmetic_to_visit: vec![],
-            condition_expressions_to_visit: vec![],
-            columns_to_visit: vec![],
-        }
-    }
-}
-
-impl ReferredColumns for FunctionArgument {
-    fn referred_columns(&self) -> ReferredColumnsIter {
-        ReferredColumnsIter {
-            exprs_to_visit: vec![],
-            function_arguments_to_visit: vec![&self],
             arithmetic_to_visit: vec![],
             condition_expressions_to_visit: vec![],
             columns_to_visit: vec![],
@@ -283,7 +223,6 @@ impl ReferredColumns for ConditionExpression {
     fn referred_columns(&self) -> ReferredColumnsIter {
         ReferredColumnsIter {
             exprs_to_visit: vec![],
-            function_arguments_to_visit: vec![],
             arithmetic_to_visit: vec![],
             condition_expressions_to_visit: vec![&self],
             columns_to_visit: vec![],
@@ -367,12 +306,9 @@ mod tests {
         #[test]
         fn column() {
             assert_eq!(
-                ColExpr {
-                    name: "test".to_owned(),
-                    table: None
-                }
-                .referred_columns()
-                .collect::<Vec<_>>(),
+                ColExpr(Column::from("test"))
+                    .referred_columns()
+                    .collect::<Vec<_>>(),
                 vec![Cow::Owned(Column::from("test"))],
             )
         }
@@ -381,7 +317,7 @@ mod tests {
         fn aggregate_with_column() {
             assert_eq!(
                 Call(FunctionExpression::Sum(
-                    FunctionArgument::Column(Column::from("test")),
+                    Box::new(Expression::Column(Column::from("test"))),
                     false
                 ))
                 .referred_columns()
@@ -393,15 +329,13 @@ mod tests {
         #[test]
         fn generic_with_multiple_columns() {
             assert_eq!(
-                Call(FunctionExpression::Generic(
-                    "ifnull".to_owned(),
-                    FunctionArguments {
-                        arguments: vec![
-                            FunctionArgument::Column(Column::from("col1")),
-                            FunctionArgument::Column(Column::from("col2")),
-                        ]
-                    }
-                ))
+                Call(FunctionExpression::Call {
+                    name: "ifnull".to_owned(),
+                    arguments: vec![
+                        Expression::Column(Column::from("col1")),
+                        Expression::Column(Column::from("col2")),
+                    ]
+                })
                 .referred_columns()
                 .collect::<Vec<_>>(),
                 vec![
@@ -415,20 +349,13 @@ mod tests {
         fn nested_function_call() {
             assert_eq!(
                 Call(FunctionExpression::Count(
-                    FunctionArgument::Column(Column {
-                        name: "".to_owned(),
-                        table: None,
-                        alias: None,
-                        function: Some(Box::new(FunctionExpression::Generic(
-                            "ifnull".to_owned(),
-                            FunctionArguments {
-                                arguments: vec![
-                                    FunctionArgument::Column(Column::from("col1")),
-                                    FunctionArgument::Column(Column::from("col2")),
-                                ]
-                            }
-                        )))
-                    }),
+                    Box::new(Expression::Call(FunctionExpression::Call {
+                        name: "ifnull".to_owned(),
+                        arguments: vec![
+                            Expression::Column(Column::from("col1")),
+                            Expression::Column(Column::from("col2")),
+                        ]
+                    })),
                     false
                 ))
                 .referred_columns()
@@ -439,24 +366,24 @@ mod tests {
                 ]
             );
         }
-    }
 
-    #[test]
-    fn condition_expr() {
-        assert_eq!(
-            ConditionExpression::ComparisonOp(ConditionTree {
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                    Column::from("sign")
-                ))),
-                operator: BinaryOperator::Greater,
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Integer(0)
-                )))
-            })
-            .referred_columns()
-            .collect::<Vec<_>>(),
-            vec![Cow::Owned(Column::from("sign"))]
-        );
+        #[test]
+        fn condition_expr() {
+            assert_eq!(
+                ConditionExpression::ComparisonOp(ConditionTree {
+                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                        Column::from("sign")
+                    ))),
+                    operator: BinaryOperator::Greater,
+                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                        Literal::Integer(0)
+                    )))
+                })
+                .referred_columns()
+                .collect::<Vec<_>>(),
+                vec![Cow::Owned(Column::from("sign"))]
+            );
+        }
     }
 
     #[test]

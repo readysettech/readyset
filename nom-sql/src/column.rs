@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
-use std::fmt::{self, Display};
+use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use crate::case::CaseWhenExpression;
 use crate::common::{column_identifier_no_alias, parse_comment, sql_identifier, Literal, SqlType};
 use crate::keywords::escape_if_keyword;
+use crate::FunctionExpression;
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
@@ -15,86 +15,6 @@ use nom::{alt, complete, do_parse, map, named, opt, tag, tag_no_case, IResult};
 use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
 
 use crate::{common::type_identifier, Real};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FunctionExpression {
-    Avg(FunctionArgument, bool),
-    Count(FunctionArgument, bool),
-    CountStar,
-    Sum(FunctionArgument, bool),
-    Max(FunctionArgument),
-    Min(FunctionArgument),
-    GroupConcat(FunctionArgument, String),
-    Cast(FunctionArgument, SqlType),
-    Generic(String, FunctionArguments),
-}
-
-impl Display for FunctionExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            FunctionExpression::Avg(ref col, d) if d => write!(f, "avg(distinct {})", col),
-            FunctionExpression::Count(ref col, d) if d => write!(f, "count(distinct {})", col),
-            FunctionExpression::Sum(ref col, d) if d => write!(f, "sum(distinct {})", col),
-
-            FunctionExpression::Avg(ref col, _) => write!(f, "avg({})", col),
-            FunctionExpression::Count(ref col, _) => write!(f, "count({})", col),
-            FunctionExpression::CountStar => write!(f, "count(*)"),
-            FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col),
-            FunctionExpression::Max(ref col) => write!(f, "max({})", col),
-            FunctionExpression::Min(ref col) => write!(f, "min({})", col),
-            FunctionExpression::GroupConcat(ref col, ref s) => {
-                write!(f, "group_concat({} separator '{}')", col, s)
-            }
-            FunctionExpression::Cast(ref arg, ref typ) => write!(f, "CAST({} AS {})", arg, typ),
-            FunctionExpression::Generic(ref name, ref args) => write!(f, "{}({})", name, args),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct FunctionArguments {
-    pub arguments: Vec<FunctionArgument>,
-}
-
-impl Display for FunctionArguments {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.arguments
-                .iter()
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<String>>()
-                .join(",")
-        )?;
-        Ok(())
-    }
-}
-
-impl<'a> From<Vec<FunctionArgument>> for FunctionArguments {
-    fn from(args: Vec<FunctionArgument>) -> FunctionArguments {
-        FunctionArguments { arguments: args }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FunctionArgument {
-    Column(Column),
-    Literal(Literal),
-    Conditional(CaseWhenExpression),
-    Call(Box<FunctionExpression>),
-}
-
-impl Display for FunctionArgument {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            FunctionArgument::Column(ref col) => write!(f, "{}", col),
-            FunctionArgument::Conditional(ref e) => write!(f, "{}", e),
-            FunctionArgument::Literal(ref l) => write!(f, "{}", l.to_string()),
-            FunctionArgument::Call(ref fun) => write!(f, "{}", fun),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -395,6 +315,7 @@ pub fn column_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Expression;
 
     #[test]
     fn column_from_str() {
@@ -431,7 +352,7 @@ mod tests {
             alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Sum(
-                FunctionArgument::Column(Column::from("mytab.foo")),
+                Box::new(Expression::Column(Column::from("mytab.foo"))),
                 false,
             ))),
         };

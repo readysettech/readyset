@@ -1001,10 +1001,10 @@ impl SqlToMirConverter {
         func_col: &Column,
         group_cols: Vec<&Column>,
         parent: MirNodeRef,
+        projected_exprs: &HashMap<Expression, String>,
     ) -> Vec<MirNodeRef> {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
-        use nom_sql::FunctionArgument;
         use nom_sql::FunctionExpression::*;
 
         let mut out_nodes = Vec::new();
@@ -1047,7 +1047,7 @@ impl SqlToMirConverter {
         match *func.deref() {
             // TODO: support more types of filter expressions
             // CH: https://app.clubhouse.io/readysettech/story/193
-            Sum(FunctionArgument::Column(ref col), distinct) => mknode(
+            Sum(box Expression::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
@@ -1055,7 +1055,7 @@ impl SqlToMirConverter {
                 None,
             ),
             Sum(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
@@ -1069,7 +1069,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Sum(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: None,
@@ -1082,10 +1082,11 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
-            Count(FunctionArgument::Column(ref col), distinct) => mknode(
-                &Column::from(col),
+            Sum(ref expr, distinct) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::COUNT),
+                GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
                 None,
             ),
@@ -1098,8 +1099,15 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
+            Count(box Expression::Column(ref col), distinct) => mknode(
+                &Column::from(col),
+                None,
+                GroupedNodeType::Aggregation(Aggregation::COUNT),
+                distinct,
+                None,
+            ),
             Count(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
@@ -1113,7 +1121,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Count(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: None,
@@ -1126,7 +1134,15 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
-            Avg(FunctionArgument::Column(ref col), distinct) => mknode(
+            Count(ref expr, distinct) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
+                None,
+                GroupedNodeType::Aggregation(Aggregation::COUNT),
+                distinct,
+                None,
+            ),
+            Avg(box Expression::Column(ref col), distinct) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::AVG),
@@ -1134,7 +1150,7 @@ impl SqlToMirConverter {
                 None,
             ),
             Avg(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
@@ -1148,7 +1164,7 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Avg(
-                FunctionArgument::Conditional(CaseWhenExpression {
+                box Expression::CaseWhen(CaseWhenExpression {
                     ref condition,
                     then_expr: ColumnOrLiteral::Column(ref col),
                     else_expr: None,
@@ -1161,24 +1177,56 @@ impl SqlToMirConverter {
                 false,
                 Some(condition),
             ),
+            Avg(ref expr, distinct) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
+                None,
+                GroupedNodeType::Aggregation(Aggregation::AVG),
+                distinct,
+                None,
+            ),
             // TODO(atsakiris): Support Filters for Extremum/GroupConcat
             // CH: https://app.clubhouse.io/readysettech/story/198
-            Max(FunctionArgument::Column(ref col)) => mknode(
+            Max(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MAX),
                 false,
                 None,
             ),
-            Min(FunctionArgument::Column(ref col)) => mknode(
+            Max(ref expr) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
+                None,
+                GroupedNodeType::Extremum(Extremum::MAX),
+                false,
+                None,
+            ),
+            Min(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Extremum(Extremum::MIN),
                 false,
                 None,
             ),
-            GroupConcat(FunctionArgument::Column(ref col), ref separator) => mknode(
+            Min(ref expr) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
+                None,
+                GroupedNodeType::Extremum(Extremum::MIN),
+                false,
+                None,
+            ),
+            GroupConcat(box Expression::Column(ref col), ref separator) => mknode(
                 &Column::from(col),
+                None,
+                GroupedNodeType::GroupConcat(separator.clone()),
+                false,
+                None,
+            ),
+            GroupConcat(ref expr, ref separator) => mknode(
+                // TODO(celine): replace with ParentRef
+                &Column::named(projected_exprs[&expr].clone()),
                 None,
                 GroupedNodeType::GroupConcat(separator.clone()),
                 false,
@@ -1834,7 +1882,7 @@ impl SqlToMirConverter {
                 &mut prev_node,
             );
 
-            if expressions_above_grouped.is_some() {
+            if !expressions_above_grouped.is_empty() {
                 new_node_count += 1;
             }
 
@@ -2047,6 +2095,7 @@ impl SqlToMirConverter {
                     new_node_count,
                     &mut prev_node,
                     false,
+                    &&expressions_above_grouped,
                 )?;
 
                 new_node_count += func_nodes.len();

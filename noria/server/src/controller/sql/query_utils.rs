@@ -1,4 +1,3 @@
-use nom_sql::analysis::function_arguments;
 use nom_sql::{Expression, FunctionExpression};
 
 /// Returns true if the given [`FunctionExpression`] represents an aggregate function
@@ -13,7 +12,7 @@ pub(crate) fn is_aggregate(function: &FunctionExpression) -> bool {
         | FunctionExpression::GroupConcat(_, _) => true,
         FunctionExpression::Cast(_, _) => false,
         // For now, assume all "generic" function calls are not aggregates
-        FunctionExpression::Generic(_, _) => false,
+        FunctionExpression::Call { .. } => false,
     }
 }
 
@@ -24,9 +23,11 @@ pub(crate) fn contains_aggregate(expr: &Expression) -> bool {
         Expression::Arithmetic(_) => false,
         Expression::Call(f) => {
             is_aggregate(f)
-                || function_arguments(f).any(|arg| contains_aggregate(&arg.clone().into()))
+                || f.arguments()
+                    .any(|arg| contains_aggregate(&arg.clone().into()))
         }
         Expression::Literal(_) => false,
         Expression::Column { .. } => false,
+        Expression::CaseWhen(_) => false,
     }
 }
