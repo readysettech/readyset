@@ -1,84 +1,48 @@
-use std::fmt;
-
-use crate::column::Column;
-use crate::common::{column_identifier_no_alias, literal, Literal};
-use crate::condition::{condition_expr, ConditionExpression};
+use crate::condition::condition_expr;
+use crate::expression::expression;
+use crate::Expression;
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace0;
+use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::opt;
 use nom::sequence::{delimited, terminated, tuple};
 use nom::IResult;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum ColumnOrLiteral {
-    Column(Column),
-    Literal(Literal),
-}
-
-impl fmt::Display for ColumnOrLiteral {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ColumnOrLiteral::Column(ref c) => write!(f, "{}", c)?,
-            ColumnOrLiteral::Literal(ref l) => write!(f, "{}", l.to_string())?,
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-/// TODO(grfn): Make all three of the fields here just `Box<Expression>`
-pub struct CaseWhenExpression {
-    pub condition: ConditionExpression,
-    pub then_expr: ColumnOrLiteral,
-    pub else_expr: Option<ColumnOrLiteral>,
-}
-
-impl fmt::Display for CaseWhenExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CASE WHEN {} THEN {}", self.condition, self.then_expr)?;
-        if let Some(ref expr) = self.else_expr {
-            write!(f, " ELSE {}", expr)?;
-        }
-        write!(f, " END")?;
-        Ok(())
-    }
-}
-
-pub fn case_when_column(i: &[u8]) -> IResult<&[u8], CaseWhenExpression> {
-    let (remaining_input, (_, _, condition, _, _, _, column, _, else_val, _)) = tuple((
-        tag_no_case("case when"),
+pub fn case_when(i: &[u8]) -> IResult<&[u8], Expression> {
+    let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) = tuple((
+        tag_no_case("case"),
+        multispace1,
+        tag_no_case("when"),
         multispace0,
         condition_expr,
         multispace0,
         tag_no_case("then"),
         multispace0,
-        column_identifier_no_alias,
+        expression,
         multispace0,
         opt(delimited(
             terminated(tag_no_case("else"), multispace0),
-            literal,
+            expression,
             multispace0,
         )),
         tag_no_case("end"),
     ))(i)?;
 
-    let then_expr = ColumnOrLiteral::Column(column);
-    let else_expr = else_val.map(ColumnOrLiteral::Literal);
-
     Ok((
         remaining_input,
-        CaseWhenExpression {
+        Expression::CaseWhen {
             condition,
-            then_expr,
-            else_expr,
+            then_expr: Box::new(then_expr),
+            else_expr: else_expr.map(Box::new),
         },
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{BinaryOperator, ConditionBase, ConditionTree, Literal};
+    use crate::{
+        BinaryOperator, Column, ConditionBase, ConditionExpression, ConditionTree, Literal,
+    };
 
     use super::*;
 
@@ -91,7 +55,7 @@ mod tests {
             function: None,
         };
 
-        let exp = CaseWhenExpression {
+        let exp = Expression::CaseWhen {
             condition: ConditionExpression::ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
                 left: Box::new(ConditionExpression::Base(ConditionBase::Field(c1.clone()))),
@@ -99,15 +63,22 @@ mod tests {
                     Literal::Integer(0),
                 ))),
             }),
-            then_expr: ColumnOrLiteral::Column(c1),
-            else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(1))),
+            then_expr: Box::new(Expression::Column(c1.clone())),
+            else_expr: Some(Box::new(Expression::Literal(Literal::Integer(1)))),
         };
 
         assert_eq!(format!("{}", exp), "CASE WHEN foo = 0 THEN foo ELSE 1 END");
 
-        let exp_no_else = CaseWhenExpression {
+        let exp_no_else = Expression::CaseWhen {
+            condition: ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field(c1.clone()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Integer(0),
+                ))),
+            }),
+            then_expr: Box::new(Expression::Column(c1)),
             else_expr: None,
-            ..exp
         };
 
         assert_eq!(format!("{}", exp_no_else), "CASE WHEN foo = 0 THEN foo END");

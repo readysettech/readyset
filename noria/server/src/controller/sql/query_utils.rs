@@ -28,6 +28,18 @@ pub(crate) fn contains_aggregate(expr: &Expression) -> bool {
         }
         Expression::Literal(_) => false,
         Expression::Column { .. } => false,
-        Expression::CaseWhen(_) => false,
+        Expression::CaseWhen {
+            condition: _,
+            then_expr,
+            else_expr,
+        } => {
+            // FIXME(grfn): ignoring conditions here is incorrect, since they can contain function
+            // call nodes - that's a conscious concession until we can replace ConditionExpr with
+            // Expression and simplify expression traversal significantly
+            contains_aggregate(then_expr)
+                || else_expr
+                    .iter()
+                    .any(|expr| contains_aggregate(expr.as_ref()))
+        }
     }
 }

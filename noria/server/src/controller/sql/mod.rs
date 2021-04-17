@@ -1114,9 +1114,7 @@ mod tests {
     use crate::controller::Migration;
     use crate::integration;
     use dataflow::prelude::*;
-    use nom_sql::{
-        CaseWhenExpression, Column, ColumnOrLiteral, Expression, FunctionExpression, Literal,
-    };
+    use nom_sql::{Column, Expression, FunctionExpression, Literal};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -2460,7 +2458,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::CaseWhen(CaseWhenExpression{
+                Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
@@ -2468,9 +2466,9 @@ mod tests {
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
                     ),
-                    then_expr: ColumnOrLiteral::Column(Column::from("votes.aid")),
+                    then_expr: Box::new(Expression::Column(Column::from("votes.aid"))),
                     else_expr: None,
-                })),
+                }),
                 false
             ));
             let qid = query_id_hash(
@@ -2505,8 +2503,8 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
-                .is_ok());
+                    .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                    .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -2523,17 +2521,17 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::CaseWhen(CaseWhenExpression{
+                Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
                             left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
-                ),
-                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
+                    ),
+                    then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
                     else_expr: None,
-                })),
+                }),
                 false
             ));
             let qid = query_id_hash(
@@ -2556,7 +2554,7 @@ mod tests {
             assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
-        .await;
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2586,7 +2584,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::CaseWhen(CaseWhenExpression{
+                Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
@@ -2594,9 +2592,9 @@ mod tests {
                             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
                         }
                     ),
-                    then_expr: ColumnOrLiteral::Column(Column::from("votes.sign")),
-                    else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
-                })),
+                    then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
+                    else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
+                }),
                 false
             ));
             let qid = query_id_hash(
@@ -2821,11 +2819,11 @@ mod tests {
                 operator: BinaryOperator::And,
             });
             let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::CaseWhen(CaseWhenExpression{
+                Box::new(Expression::CaseWhen {
                     condition: filter_cond,
-                    then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
+                    then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                     else_expr: None,
-                })),
+                }),
                 false
             ));
             let qid = query_id_hash(

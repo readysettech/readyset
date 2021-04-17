@@ -918,7 +918,7 @@ fn generate_project_expression(
                 .borrow()
                 .column_id_for_column(&Column::new(table.as_deref(), &name), None),
         )),
-        Expression::CaseWhen(_) => {
+        Expression::CaseWhen { .. } => {
             unsupported!("CASE WHEN expressions not currently supported in projections")
         }
     }
