@@ -10,11 +10,10 @@ use dataflow::ops::join::JoinType;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    BinaryOperator, CaseWhenExpression, ColumnOrLiteral, ColumnSpecification,
-    CompoundSelectOperator, ConditionBase, ConditionExpression, ConditionTree, Expression, Literal,
-    SqlQuery, TableKey,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, ConditionBase,
+    ConditionExpression, ConditionTree, Expression, LimitClause, Literal, OrderClause,
+    SelectStatement, SqlQuery, TableKey,
 };
-use nom_sql::{LimitClause, OrderClause, SelectStatement};
 
 use std::collections::{HashMap, HashSet};
 
@@ -1055,11 +1054,11 @@ impl SqlToMirConverter {
                 None,
             ),
             Sum(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
-                    else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
-                }),
+                    then_expr: box Expression::Column(ref col),
+                    else_expr: Some(box Expression::Literal(ref else_val)),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),
@@ -1069,11 +1068,11 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Sum(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
+                    then_expr: box Expression::Column(ref col),
                     else_expr: None,
-                }),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),
@@ -1107,11 +1106,11 @@ impl SqlToMirConverter {
                 None,
             ),
             Count(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
-                    else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
-                }),
+                    then_expr: box Expression::Column(ref col),
+                    else_expr: Some(box Expression::Literal(ref else_val)),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),
@@ -1121,11 +1120,11 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Count(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
+                    then_expr: box Expression::Column(ref col),
                     else_expr: None,
-                }),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),
@@ -1150,11 +1149,11 @@ impl SqlToMirConverter {
                 None,
             ),
             Avg(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
-                    else_expr: Some(ColumnOrLiteral::Literal(ref else_val)),
-                }),
+                    then_expr: box Expression::Column(ref col),
+                    else_expr: Some(box Expression::Literal(ref else_val)),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),
@@ -1164,11 +1163,11 @@ impl SqlToMirConverter {
                 Some(condition),
             ),
             Avg(
-                box Expression::CaseWhen(CaseWhenExpression {
+                box Expression::CaseWhen {
                     ref condition,
-                    then_expr: ColumnOrLiteral::Column(ref col),
+                    then_expr: box Expression::Column(ref col),
                     else_expr: None,
-                }),
+                },
                 false,
             ) => mknode(
                 &Column::from(col),

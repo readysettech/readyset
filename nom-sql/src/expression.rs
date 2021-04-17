@@ -1,9 +1,13 @@
 use derive_more::From;
 use itertools::{Either, Itertools};
+use nom::{alt, named};
 use std::fmt::{self, Display};
 use std::iter;
 
-use crate::{ArithmeticExpression, CaseWhenExpression, Column, Literal, SqlType};
+use crate::arithmetic::arithmetic_expression;
+use crate::case::case_when;
+use crate::common::{column_function, column_identifier_no_alias, literal};
+use crate::{ArithmeticExpression, Column, ConditionExpression, Literal, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -105,10 +109,12 @@ pub enum Expression {
     /// Literal values
     Literal(Literal),
 
-    /// CASE WHEN expressions
-    ///
-    /// TODO(grfn): CaseWhenExpression should just be inlined here
-    CaseWhen(CaseWhenExpression),
+    /// CASE WHEN condition THEN then_expr ELSE else_expr
+    CaseWhen {
+        condition: ConditionExpression,
+        then_expr: Box<Expression>,
+        else_expr: Option<Box<Expression>>,
+    },
 
     /// A reference to a column
     ///
@@ -124,7 +130,25 @@ impl Display for Expression {
             Expression::Call(fe) => fe.fmt(f),
             Expression::Literal(l) => write!(f, "{}", l.to_string()),
             Expression::Column(col) => col.fmt(f),
-            Expression::CaseWhen(cw) => cw.fmt(f),
+            Expression::CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                write!(f, "CASE WHEN {} THEN {}", condition, then_expr)?;
+                if let Some(else_expr) = else_expr {
+                    write!(f, " ELSE {}", else_expr)?;
+                }
+                write!(f, " END")
+            }
         }
     }
 }
+
+named!(pub(crate) expression(&[u8]) -> Expression, alt!(
+    column_function => { |f| Expression::Call(f) } |
+    literal => { |l| Expression::Literal(l) } |
+    case_when |
+    arithmetic_expression => { |a| Expression::Arithmetic(a) } |
+    column_identifier_no_alias => { |c| Expression::Column(c) }
+));

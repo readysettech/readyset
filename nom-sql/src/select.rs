@@ -412,7 +412,6 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::case::{CaseWhenExpression, ColumnOrLiteral};
     use crate::column::Column;
     use crate::common::{
         BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
@@ -940,11 +939,11 @@ mod tests {
             operator: BinaryOperator::Greater,
         });
         let agg_expr = FunctionExpression::Count(
-            Box::new(Expression::CaseWhen(CaseWhenExpression {
-                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
+            Box::new(Expression::CaseWhen {
+                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: filter_cond,
-            })),
+            }),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -976,11 +975,11 @@ mod tests {
             operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            Box::new(Expression::CaseWhen(CaseWhenExpression {
-                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
+            Box::new(Expression::CaseWhen {
+                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: filter_cond,
-            })),
+            }),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -1013,11 +1012,11 @@ mod tests {
             operator: BinaryOperator::Equal,
         });
         let agg_expr = FunctionExpression::Sum(
-            Box::new(Expression::CaseWhen(CaseWhenExpression {
-                then_expr: ColumnOrLiteral::Column(Column::from("vote_id")),
-                else_expr: Some(ColumnOrLiteral::Literal(Literal::Integer(6))),
+            Box::new(Expression::CaseWhen {
+                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
+                else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
                 condition: filter_cond,
-            })),
+            }),
             false,
         );
         let expected_stmt = SelectStatement {
@@ -1060,11 +1059,11 @@ mod tests {
             operator: BinaryOperator::And,
         });
         let agg_expr = FunctionExpression::Count(
-            Box::new(Expression::CaseWhen(CaseWhenExpression {
-                then_expr: ColumnOrLiteral::Column(Column::from("votes.vote")),
+            Box::new(Expression::CaseWhen {
+                then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                 else_expr: None,
                 condition: filter_cond,
-            })),
+            }),
             false,
         );
         let expected_stmt = SelectStatement {

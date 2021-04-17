@@ -1,10 +1,9 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
-    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, FieldValueExpression, FunctionExpression, JoinConstraint,
-    JoinRightSide, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
+    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
+    FieldValueExpression, FunctionExpression, JoinConstraint, JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -119,38 +118,20 @@ fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Co
     }
 }
 
-fn rewrite_column_or_literal(
-    col_table_remap: &HashMap<String, String>,
-    col: &ColumnOrLiteral,
-) -> ColumnOrLiteral {
-    match col {
-        ColumnOrLiteral::Column(col) => {
-            ColumnOrLiteral::Column(rewrite_column(col_table_remap, col))
-        }
-        ColumnOrLiteral::Literal(lit) => ColumnOrLiteral::Literal(lit.clone()),
-    }
-}
-
-fn rewrite_case_when_expression(
-    col_table_remap: &HashMap<String, String>,
-    cwe: &CaseWhenExpression,
-) -> CaseWhenExpression {
-    CaseWhenExpression {
-        condition: rewrite_conditional(col_table_remap, &cwe.condition),
-        then_expr: rewrite_column_or_literal(col_table_remap, &cwe.then_expr),
-        else_expr: cwe
-            .else_expr
-            .as_ref()
-            .map(|e| rewrite_column_or_literal(col_table_remap, e)),
-    }
-}
-
 fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expression) -> Expression {
     match expr {
         Expression::Column(col) => Expression::Column(rewrite_column(col_table_remap, col)),
-        Expression::CaseWhen(cwe) => {
-            Expression::CaseWhen(rewrite_case_when_expression(col_table_remap, cwe))
-        }
+        Expression::CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
+        } => Expression::CaseWhen {
+            condition: rewrite_conditional(col_table_remap, &condition),
+            then_expr: Box::new(rewrite_expression(col_table_remap, &then_expr)),
+            else_expr: else_expr
+                .as_ref()
+                .map(|e| Box::new(rewrite_expression(col_table_remap, e))),
+        },
         Expression::Literal(_) => expr.clone(),
         Expression::Call(fun) => {
             Expression::Call(rewrite_function_expression(col_table_remap, fun))

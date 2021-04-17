@@ -1,9 +1,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, CaseWhenExpression, Column,
-    ColumnOrLiteral, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FunctionExpression, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
+    ConditionExpression, ConditionTree, Expression, FunctionExpression, SqlQuery, Table,
 };
 
 pub trait ReferredTables {
@@ -78,18 +77,17 @@ impl<'a> ReferredColumnsIter<'a> {
             Expression::Call(fexpr) => self.visit_function_expression(fexpr),
             Expression::Literal(_) => None,
             Expression::Column(col) => Some(Cow::Borrowed(col)),
-            Expression::CaseWhen(CaseWhenExpression {
+            Expression::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
-            }) => {
+            } => {
                 self.condition_expressions_to_visit.push(condition);
-                if let ColumnOrLiteral::Column(col) = then_expr {
-                    self.columns_to_visit.push(col);
-                }
-                match else_expr {
-                    Some(ColumnOrLiteral::Column(col)) => Some(Cow::Borrowed(col)),
-                    _ => None,
+                self.exprs_to_visit.push(then_expr);
+                if let Some(else_expr) = else_expr {
+                    self.visit_expr(else_expr)
+                } else {
+                    None
                 }
             }
         }

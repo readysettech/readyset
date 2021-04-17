@@ -15,8 +15,8 @@ use nom::{char, complete, do_parse, named, tag_no_case, IResult, InputLength};
 use std::fmt::{self, Display};
 
 use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
-use crate::case::case_when_column;
 use crate::column::Column;
+use crate::expression::expression;
 use crate::keywords::{escape_if_keyword, sql_keyword};
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
@@ -615,24 +615,11 @@ pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((type_identifier_first_half, type_identifier_second_half))(i)
 }
 
-// Parses the argument for an aggregation function
-//
-// TODO(grfn): Get rid of this, replace it with a general expression parser
-pub fn function_argument_parser(i: &[u8]) -> IResult<&[u8], Expression> {
-    alt((
-        map(case_when_column, Expression::CaseWhen),
-        map(literal, Expression::Literal),
-        map(column_function, Expression::Call),
-        map(column_identifier_no_alias, Expression::Column),
-    ))(i)
-}
-
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
 pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
     let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
-    let (remaining_input, (distinct, args)) =
-        tuple((distinct_parser, function_argument_parser))(i)?;
+    let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression))(i)?;
     Ok((remaining_input, (args, distinct.is_some())))
 }
 
@@ -659,7 +646,7 @@ named!(cast(&[u8]) -> FunctionExpression, do_parse!(
     complete!(tag_no_case!("cast"))
         >> multispace0
         >> complete!(char!('('))
-        >> arg: function_argument_parser
+        >> arg: expression
         >> multispace1
         >> complete!(tag_no_case!("as"))
         >> multispace1
@@ -706,10 +693,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
                 sql_identifier,
                 multispace0,
                 tag("("),
-                separated_list(
-                    tag(","),
-                    delimited(multispace0, function_argument_parser, multispace0),
-                ),
+                separated_list(tag(","), delimited(multispace0, expression, multispace0)),
                 tag(")"),
             )),
             |tuple| {
@@ -1224,7 +1208,8 @@ mod tests {
 
     #[test]
     fn nested_function_call() {
-        let (rem, res) = column_function(b"max(cast(foo as int))").unwrap();
+        let res = column_function(b"max(cast(foo as int))");
+        let (rem, res) = res.unwrap();
         assert!(rem.is_empty());
         assert_eq!(
             res,

@@ -1,7 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticItem, CaseWhenExpression, Column, ColumnOrLiteral,
-    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
-    FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
+    ArithmeticBase, ArithmeticItem, Column, ConditionExpression, ConditionTree, Expression,
+    FieldDefinitionExpression, FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery,
+    Table,
 };
 
 use crate::errors::ReadySetResult;
@@ -147,18 +147,18 @@ fn rewrite_selection(
                         match **f {
                             Avg(box Expression::Column(ref mut fe), _)
                             | Count(
-                                box Expression::CaseWhen(CaseWhenExpression {
-                                    then_expr: ColumnOrLiteral::Column(ref mut fe),
+                                box Expression::CaseWhen {
+                                    then_expr: box Expression::Column(ref mut fe),
                                     ..
-                                }),
+                                },
                                 _,
                             )
                             | Count(box Expression::Column(ref mut fe), _)
                             | Sum(
-                                box Expression::CaseWhen(CaseWhenExpression {
-                                    then_expr: ColumnOrLiteral::Column(ref mut fe),
+                                box Expression::CaseWhen {
+                                    then_expr: box Expression::Column(ref mut fe),
                                     ..
-                                }),
+                                },
                                 _,
                             )
                             | Sum(box Expression::Column(ref mut fe), _)
@@ -224,15 +224,15 @@ fn rewrite_selection(
                 match f.function {
                     Some(ref mut f) => match **f {
                         Count(
-                            box Expression::CaseWhen(CaseWhenExpression {
+                            box Expression::CaseWhen {
                                 ref mut condition, ..
-                            }),
+                            },
                             _,
                         )
                         | Sum(
-                            box Expression::CaseWhen(CaseWhenExpression {
+                            box Expression::CaseWhen {
                                 ref mut condition, ..
-                            }),
+                            },
                             _,
                         ) => {
                             *condition =
