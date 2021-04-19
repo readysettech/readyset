@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::str::FromStr;
 use thiserror::Error;
-use tokio::stream::StreamExt;
+use tokio_stream::StreamExt;
 use tracing::{error, info, trace};
 
 mod debezium_message_parser;
