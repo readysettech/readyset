@@ -743,19 +743,31 @@ impl QueryOperation {
                     GroupConcat => SqlType::Text,
                     _ => SqlType::Int(32),
                 });
-                let arg = Box::new(Expression::Column(Column {
+                let expr = Box::new(Expression::Column(Column {
                     name: col.into(),
                     alias: None,
                     table: Some(tbl.name.clone().into()),
                     function: None,
                 }));
                 let func = match agg {
-                    Count => FunctionExpression::Count(arg, false),
-                    Sum => FunctionExpression::Sum(arg, false),
-                    Avg => FunctionExpression::Avg(arg, false),
-                    GroupConcat => FunctionExpression::GroupConcat(arg, ", ".to_owned()),
-                    Max => FunctionExpression::Max(arg),
-                    Min => FunctionExpression::Min(arg),
+                    Count => FunctionExpression::Count {
+                        expr,
+                        distinct: false,
+                    },
+                    Sum => FunctionExpression::Sum {
+                        expr,
+                        distinct: false,
+                    },
+                    Avg => FunctionExpression::Avg {
+                        expr,
+                        distinct: false,
+                    },
+                    GroupConcat => FunctionExpression::GroupConcat {
+                        expr,
+                        separator: ", ".to_owned(),
+                    },
+                    Max => FunctionExpression::Max(expr),
+                    Min => FunctionExpression::Min(expr),
                 };
 
                 query.fields.push(FieldDefinitionExpression::Col(Column {

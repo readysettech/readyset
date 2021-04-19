@@ -908,8 +908,10 @@ mod tests {
         let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr =
-            FunctionExpression::Count(Box::new(Expression::Column(Column::from("vote_id"))), true);
+        let agg_expr = FunctionExpression::Count {
+            expr: Box::new(Expression::Column(Column::from("vote_id"))),
+            distinct: true,
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -938,14 +940,14 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(10.into())))),
             operator: BinaryOperator::Greater,
         });
-        let agg_expr = FunctionExpression::Count(
-            Box::new(Expression::CaseWhen {
+        let agg_expr = FunctionExpression::Count {
+            expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: filter_cond,
             }),
-            false,
-        );
+            distinct: false,
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -974,14 +976,14 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
             operator: BinaryOperator::Equal,
         });
-        let agg_expr = FunctionExpression::Sum(
-            Box::new(Expression::CaseWhen {
+        let agg_expr = FunctionExpression::Sum {
+            expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: filter_cond,
             }),
-            false,
-        );
+            distinct: false,
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1011,14 +1013,14 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(1.into())))),
             operator: BinaryOperator::Equal,
         });
-        let agg_expr = FunctionExpression::Sum(
-            Box::new(Expression::CaseWhen {
+        let agg_expr = FunctionExpression::Sum {
+            expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
                 condition: filter_cond,
             }),
-            false,
-        );
+            distinct: false,
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {
@@ -1058,14 +1060,14 @@ mod tests {
             })),
             operator: BinaryOperator::And,
         });
-        let agg_expr = FunctionExpression::Count(
-            Box::new(Expression::CaseWhen {
+        let agg_expr = FunctionExpression::Count {
+            expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                 else_expr: None,
                 condition: filter_cond,
             }),
-            false,
-        );
+            distinct: false,
+        };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::Col(Column {

@@ -83,15 +83,15 @@ impl CountStarRewrite for SqlQuery {
                     })?;
                 }
 
-                c.function = Some(Box::new(Count(
-                    Box::new(Expression::Column(Column {
+                c.function = Some(Box::new(Count {
+                    expr: Box::new(Expression::Column(Column {
                         name: bogo_column.clone(),
                         alias: None,
                         table: Some(bogo_table.name.clone()),
                         function: None,
                     })),
-                    false,
-                )));
+                    distinct: false,
+                }));
             }
             Ok(())
         };
@@ -158,10 +158,10 @@ mod tests {
                         name: String::from("count(*)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Count(
-                            Box::new(Expression::Column(Column::from("users.id"))),
-                            false,
-                        ))),
+                        function: Some(Box::new(FunctionExpression::Count {
+                            expr: Box::new(Expression::Column(Column::from("users.id"))),
+                            distinct: false,
+                        })),
                     })]
                 );
             }
@@ -194,10 +194,10 @@ mod tests {
                         name: String::from("count(*)"),
                         alias: None,
                         table: None,
-                        function: Some(Box::new(FunctionExpression::Count(
-                            Box::new(Expression::Column(Column::from("users.name"))),
-                            false,
-                        ))),
+                        function: Some(Box::new(FunctionExpression::Count {
+                            expr: Box::new(Expression::Column(Column::from("users.name"))),
+                            distinct: false,
+                        })),
                     })]
                 );
             }

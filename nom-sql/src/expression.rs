@@ -13,16 +13,25 @@ use crate::{ArithmeticExpression, Column, ConditionExpression, Literal, SqlType}
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
-    Avg(Box<Expression>, bool),
+    Avg {
+        expr: Box<Expression>,
+        distinct: bool,
+    },
 
-    /// `COUNT` aggregation. The boolean argument is `true` if `DISTINCT`
-    Count(Box<Expression>, bool),
+    /// `COUNT` aggregation
+    Count {
+        expr: Box<Expression>,
+        distinct: bool,
+    },
 
     /// `COUNT(*)` aggregation
     CountStar,
 
-    /// `SUM` aggregation. The boolean argument is `true` if `DISTINCT`
-    Sum(Box<Expression>, bool),
+    /// `SUM` aggregation
+    Sum {
+        expr: Box<Expression>,
+        distinct: bool,
+    },
 
     /// `MAX` aggregation
     Max(Box<Expression>),
@@ -31,7 +40,10 @@ pub enum FunctionExpression {
     Min(Box<Expression>),
 
     /// `GROUP_CONCAT` aggregation. The second argument is the separator
-    GroupConcat(Box<Expression>, String),
+    GroupConcat {
+        expr: Box<Expression>,
+        separator: String,
+    },
 
     /// `CAST(expression AS type)`.
     ///
@@ -50,12 +62,12 @@ impl FunctionExpression {
     /// Returns an iterator over all the direct arguments passed to the given function call expression
     pub fn arguments(&self) -> impl Iterator<Item = &Expression> {
         match self {
-            FunctionExpression::Avg(arg, _)
-            | FunctionExpression::Count(arg, _)
-            | FunctionExpression::Sum(arg, _)
+            FunctionExpression::Avg { expr: arg, .. }
+            | FunctionExpression::Count { expr: arg, .. }
+            | FunctionExpression::Sum { expr: arg, .. }
             | FunctionExpression::Max(arg)
             | FunctionExpression::Min(arg)
-            | FunctionExpression::GroupConcat(arg, _)
+            | FunctionExpression::GroupConcat { expr: arg, .. }
             | FunctionExpression::Cast(arg, _) => Either::Left(iter::once(arg.as_ref())),
             FunctionExpression::CountStar => Either::Right(Either::Left(iter::empty())),
             FunctionExpression::Call { arguments, .. } => {
@@ -68,17 +80,26 @@ impl FunctionExpression {
 impl Display for FunctionExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FunctionExpression::Avg(col, d) if *d => write!(f, "avg(distinct {})", col),
-            FunctionExpression::Count(col, d) if *d => write!(f, "count(distinct {})", col),
-            FunctionExpression::Sum(col, d) if *d => write!(f, "sum(distinct {})", col),
-            FunctionExpression::Avg(col, _) => write!(f, "avg({})", col),
-            FunctionExpression::Count(col, _) => write!(f, "count({})", col),
+            FunctionExpression::Avg {
+                expr,
+                distinct: true,
+            } => write!(f, "avg(distinct {})", expr),
+            FunctionExpression::Count {
+                expr,
+                distinct: true,
+            } => write!(f, "count(distinct {})", expr),
+            FunctionExpression::Sum {
+                expr,
+                distinct: true,
+            } => write!(f, "sum(distinct {})", expr),
+            FunctionExpression::Avg { expr, .. } => write!(f, "avg({})", expr),
+            FunctionExpression::Count { expr, .. } => write!(f, "count({})", expr),
             FunctionExpression::CountStar => write!(f, "count(*)"),
-            FunctionExpression::Sum(col, _) => write!(f, "sum({})", col),
+            FunctionExpression::Sum { expr, .. } => write!(f, "sum({})", expr),
             FunctionExpression::Max(col) => write!(f, "max({})", col),
             FunctionExpression::Min(col) => write!(f, "min({})", col),
-            FunctionExpression::GroupConcat(col, s) => {
-                write!(f, "group_concat({} separator '{}')", col, s)
+            FunctionExpression::GroupConcat { expr, separator } => {
+                write!(f, "group_concat({} separator '{}')", expr, separator)
             }
             FunctionExpression::Cast(arg, typ) => write!(f, "CAST({} AS {})", arg, typ),
             FunctionExpression::Call { name, arguments } => {

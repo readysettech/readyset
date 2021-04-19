@@ -130,19 +130,29 @@ pub(super) fn make_grouped(
             let computed_col = if is_reconcile {
                 let func = computed_col.function.as_ref().unwrap();
                 let new_func = match *func.deref() {
-                    Sum(box Expression::Column(ref col), b) => {
+                    Sum {
+                        expr: box Expression::Column(ref col),
+                        distinct,
+                    } => {
                         let colname = format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
-                        FunctionExpression::Sum(
-                            Box::new(Expression::Column(nom_sql::Column::from(colname.as_ref()))),
-                            b,
-                        )
+                        FunctionExpression::Sum {
+                            expr: Box::new(Expression::Column(nom_sql::Column::from(
+                                colname.as_ref(),
+                            ))),
+                            distinct,
+                        }
                     }
-                    Count(box Expression::Column(ref col), b) => {
+                    Count {
+                        expr: box Expression::Column(ref col),
+                        distinct,
+                    } => {
                         let colname = format!("{}.count({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Sum(
-                            Box::new(Expression::Column(nom_sql::Column::from(colname.as_ref()))),
-                            b,
-                        )
+                        FunctionExpression::Sum {
+                            expr: Box::new(Expression::Column(nom_sql::Column::from(
+                                colname.as_ref(),
+                            ))),
+                            distinct,
+                        }
                     }
                     Max(box Expression::Column(ref col)) => {
                         let colname = format!("{}.max({})", col.clone().table.unwrap(), col.name);

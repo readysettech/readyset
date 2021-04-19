@@ -1046,42 +1046,47 @@ impl SqlToMirConverter {
         match *func.deref() {
             // TODO: support more types of filter expressions
             // CH: https://app.clubhouse.io/readysettech/story/193
-            Sum(box Expression::Column(ref col), distinct) => mknode(
+            Sum {
+                expr: box Expression::Column(ref col),
+                distinct,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::SUM),
                 distinct,
                 None,
             ),
-            Sum(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: Some(box Expression::Literal(ref else_val)),
-                },
-                false,
-            ) => mknode(
+            Sum {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: Some(box Expression::Literal(ref else_val)),
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::SUM),
                 false,
                 Some(condition),
             ),
-            Sum(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: None,
-                },
-                false,
-            ) => mknode(
+            Sum {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: None,
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::SUM),
                 false,
                 Some(condition),
             ),
-            Sum(ref expr, distinct) => mknode(
+            Sum { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
@@ -1098,42 +1103,47 @@ impl SqlToMirConverter {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
-            Count(box Expression::Column(ref col), distinct) => mknode(
+            Count {
+                expr: box Expression::Column(ref col),
+                distinct,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::COUNT),
                 distinct,
                 None,
             ),
-            Count(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: Some(box Expression::Literal(ref else_val)),
-                },
-                false,
-            ) => mknode(
+            Count {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: Some(box Expression::Literal(ref else_val)),
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::COUNT),
                 false,
                 Some(condition),
             ),
-            Count(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: None,
-                },
-                false,
-            ) => mknode(
+            Count {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: None,
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::COUNT),
                 false,
                 Some(condition),
             ),
-            Count(ref expr, distinct) => mknode(
+            Count { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
@@ -1141,42 +1151,47 @@ impl SqlToMirConverter {
                 distinct,
                 None,
             ),
-            Avg(box Expression::Column(ref col), distinct) => mknode(
+            Avg {
+                expr: box Expression::Column(ref col),
+                distinct,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::Aggregation(Aggregation::AVG),
                 distinct,
                 None,
             ),
-            Avg(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: Some(box Expression::Literal(ref else_val)),
-                },
-                false,
-            ) => mknode(
+            Avg {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: Some(box Expression::Literal(ref else_val)),
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::AVG),
                 false,
                 Some(condition),
             ),
-            Avg(
-                box Expression::CaseWhen {
-                    ref condition,
-                    then_expr: box Expression::Column(ref col),
-                    else_expr: None,
-                },
-                false,
-            ) => mknode(
+            Avg {
+                expr:
+                    box Expression::CaseWhen {
+                        ref condition,
+                        then_expr: box Expression::Column(ref col),
+                        else_expr: None,
+                    },
+                distinct: false,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::AVG),
                 false,
                 Some(condition),
             ),
-            Avg(ref expr, distinct) => mknode(
+            Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
@@ -1216,14 +1231,20 @@ impl SqlToMirConverter {
                 false,
                 None,
             ),
-            GroupConcat(box Expression::Column(ref col), ref separator) => mknode(
+            GroupConcat {
+                expr: box Expression::Column(ref col),
+                ref separator,
+            } => mknode(
                 &Column::from(col),
                 None,
                 GroupedNodeType::GroupConcat(separator.clone()),
                 false,
                 None,
             ),
-            GroupConcat(ref expr, ref separator) => mknode(
+            GroupConcat {
+                ref expr,
+                ref separator,
+            } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,

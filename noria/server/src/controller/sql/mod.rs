@@ -1530,10 +1530,10 @@ mod tests {
             // added the aggregation and the edge view, and a reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::Column(Column::from("votes.userid"))),
-                false,
-            ));
+            let f = Box::new(FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
+                distinct: false,
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.aid")],
@@ -2348,10 +2348,10 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 6);
             // check project helper node
-            let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::Column(Column::from("votes.userid"))),
-                false,
-            ));
+            let f = Box::new(FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
+                distinct: false,
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[],
@@ -2404,10 +2404,10 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::Column(Column::from("votes.aid"))),
-                false,
-            ));
+            let f = Box::new(FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column::from("votes.aid"))),
+                distinct: false,
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2457,8 +2457,7 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::CaseWhen {
+            let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
@@ -2469,8 +2468,8 @@ mod tests {
                     then_expr: Box::new(Expression::Column(Column::from("votes.aid"))),
                     else_expr: None,
                 }),
-                false
-            ));
+                distinct: false
+ });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2520,8 +2519,7 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::CaseWhen {
+            let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
@@ -2532,8 +2530,8 @@ mod tests {
                     then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
                     else_expr: None,
                 }),
-                false
-            ));
+                distinct: false
+ });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2583,8 +2581,7 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::CaseWhen {
+            let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
                     condition: ConditionExpression::ComparisonOp(
                         ConditionTree {
                             operator: BinaryOperator::Equal,
@@ -2595,8 +2592,8 @@ mod tests {
                     then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
                     else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
                 }),
-                false
-            ));
+                distinct: false
+ });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2650,10 +2647,10 @@ mod tests {
             );
             assert!(res.is_ok());
             // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
-            let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::Column(Column::from("votes.sign"))),
-                false,
-            ));
+            let f = Box::new(FunctionExpression::Sum {
+                expr: Box::new(Expression::Column(Column::from("votes.sign"))),
+                distinct: false,
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
@@ -2745,10 +2742,10 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum(
-                Box::new(Expression::Column(Column::from("votes.sign"))),
-                false,
-            ));
+            let f = Box::new(FunctionExpression::Sum {
+                expr: Box::new(Expression::Column(Column::from("votes.sign"))),
+                distinct: false,
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid"), &Column::from("sum")],
@@ -2818,14 +2815,13 @@ mod tests {
                 })),
                 operator: BinaryOperator::And,
             });
-            let f = Box::new(FunctionExpression::Count(
-                Box::new(Expression::CaseWhen {
+            let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
                     condition: filter_cond,
                     then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                     else_expr: None,
                 }),
-                false
-            ));
+                distinct: false
+ });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.comment_id")],
