@@ -351,10 +351,10 @@ mod tests {
             name: "".into(), // must be present, but will be ignored
             alias: None,
             table: None,
-            function: Some(Box::new(FunctionExpression::Sum(
-                Box::new(Expression::Column(Column::from("mytab.foo"))),
-                false,
-            ))),
+            function: Some(Box::new(FunctionExpression::Sum {
+                expr: Box::new(Expression::Column(Column::from("mytab.foo"))),
+                distinct: false,
+            })),
         };
 
         assert_eq!(format!("{}", c1), "count(*) AS foo");

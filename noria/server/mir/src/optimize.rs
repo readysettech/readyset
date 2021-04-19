@@ -92,8 +92,8 @@ fn find_and_merge_filter_aggregates(q: &mut MirQuery) -> Vec<MirNodeRef> {
                     use nom_sql::FunctionExpression::{Count, Sum};
                     for (i, col) in child.columns.iter().enumerate() {
                         match col.function.as_deref() {
-                            Some(Count(arg, _)) | Some(Sum(arg, _)) => {
-                                if matches!(&**arg, Expression::Column(col) if col.name == on.name)
+                            Some(Count { expr, .. }) | Some(Sum { expr, .. }) => {
+                                if matches!(&**expr, Expression::Column(col) if col.name == on.name)
                                 {
                                     // this column may be the aggregation result
                                     // so if we're filtering on it, we're not a candidate

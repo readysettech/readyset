@@ -3,13 +3,13 @@ use nom_sql::{Expression, FunctionExpression};
 /// Returns true if the given [`FunctionExpression`] represents an aggregate function
 pub(crate) fn is_aggregate(function: &FunctionExpression) -> bool {
     match function {
-        FunctionExpression::Avg(_, _)
-        | FunctionExpression::Count(_, _)
+        FunctionExpression::Avg { .. }
+        | FunctionExpression::Count { .. }
         | FunctionExpression::CountStar
-        | FunctionExpression::Sum(_, _)
+        | FunctionExpression::Sum { .. }
         | FunctionExpression::Max(_)
         | FunctionExpression::Min(_)
-        | FunctionExpression::GroupConcat(_, _) => true,
+        | FunctionExpression::GroupConcat { .. } => true,
         FunctionExpression::Cast(_, _) => false,
         // For now, assume all "generic" function calls are not aggregates
         FunctionExpression::Call { .. } => false,

@@ -148,26 +148,29 @@ fn rewrite_function_expression(
     function: &FunctionExpression,
 ) -> FunctionExpression {
     match function {
-        FunctionExpression::Avg(arg, b) => {
-            FunctionExpression::Avg(Box::new(rewrite_expression(col_table_remap, arg)), *b)
-        }
-        FunctionExpression::Count(arg, b) => {
-            FunctionExpression::Count(Box::new(rewrite_expression(col_table_remap, arg)), *b)
-        }
+        FunctionExpression::Avg { expr, distinct } => FunctionExpression::Avg {
+            expr: Box::new(rewrite_expression(col_table_remap, expr)),
+            distinct: *distinct,
+        },
+        FunctionExpression::Count { expr, distinct } => FunctionExpression::Count {
+            expr: Box::new(rewrite_expression(col_table_remap, expr)),
+            distinct: *distinct,
+        },
         FunctionExpression::CountStar => FunctionExpression::CountStar,
-        FunctionExpression::Sum(arg, b) => {
-            FunctionExpression::Sum(Box::new(rewrite_expression(col_table_remap, arg)), *b)
-        }
+        FunctionExpression::Sum { expr, distinct } => FunctionExpression::Sum {
+            expr: Box::new(rewrite_expression(col_table_remap, expr)),
+            distinct: *distinct,
+        },
         FunctionExpression::Max(arg) => {
             FunctionExpression::Max(Box::new(rewrite_expression(col_table_remap, arg)))
         }
         FunctionExpression::Min(arg) => {
             FunctionExpression::Min(Box::new(rewrite_expression(col_table_remap, arg)))
         }
-        FunctionExpression::GroupConcat(arg, s) => FunctionExpression::GroupConcat(
-            Box::new(rewrite_expression(col_table_remap, arg)),
-            s.clone(),
-        ),
+        FunctionExpression::GroupConcat { expr, separator } => FunctionExpression::GroupConcat {
+            expr: Box::new(rewrite_expression(col_table_remap, expr)),
+            separator: separator.clone(),
+        },
         FunctionExpression::Cast(arg, t) => FunctionExpression::Cast(
             Box::new(rewrite_expression(col_table_remap, arg)),
             t.clone(),
@@ -520,29 +523,29 @@ mod tests {
             name: "count(t.id)".into(),
             table: None,
             alias: None,
-            function: Some(Box::new(FunctionExpression::Count(
-                Box::new(Expression::Column(Column {
+            function: Some(Box::new(FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("t".into()),
                     alias: None,
                     function: None,
                 })),
-                true,
-            ))),
+                distinct: true,
+            })),
         };
         let col_full = Column {
             name: "count(t.id)".into(),
             table: None,
             alias: None,
-            function: Some(Box::new(FunctionExpression::Count(
-                Box::new(Expression::Column(Column {
+            function: Some(Box::new(FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("PaperTag".into()),
                     alias: None,
                     function: None,
                 })),
-                true,
-            ))),
+                distinct: true,
+            })),
         };
         let q = SelectStatement {
             tables: vec![Table {

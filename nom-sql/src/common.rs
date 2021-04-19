@@ -661,13 +661,22 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
     alt((
         map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
         map(preceded(tag_no_case("count"), delim_fx_args), |args| {
-            FunctionExpression::Count(Box::new(args.0.clone()), args.1)
+            FunctionExpression::Count {
+                expr: Box::new(args.0.clone()),
+                distinct: args.1,
+            }
         }),
         map(preceded(tag_no_case("sum"), delim_fx_args), |args| {
-            FunctionExpression::Sum(Box::new(args.0.clone()), args.1)
+            FunctionExpression::Sum {
+                expr: Box::new(args.0.clone()),
+                distinct: args.1,
+            }
         }),
         map(preceded(tag_no_case("avg"), delim_fx_args), |args| {
-            FunctionExpression::Avg(Box::new(args.0.clone()), args.1)
+            FunctionExpression::Avg {
+                expr: Box::new(args.0.clone()),
+                distinct: args.1,
+            }
         }),
         map(preceded(tag_no_case("max"), delim_fx_args), |args| {
             FunctionExpression::Max(Box::new(args.0))
@@ -680,12 +689,15 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
             preceded(tag_no_case("group_concat"), delim_group_concat_fx),
             |spec| {
                 let (ref col, sep) = spec;
-                let sep = match sep {
+                let separator = match sep {
                     // default separator is a comma, see MySQL manual §5.7
                     None => String::from(","),
                     Some(s) => String::from_utf8(s).unwrap(),
                 };
-                FunctionExpression::GroupConcat(Box::new(Expression::Column(col.clone())), sep)
+                FunctionExpression::GroupConcat {
+                    expr: Box::new(Expression::Column(col.clone())),
+                    separator,
+                }
             },
         ),
         map(
@@ -1160,10 +1172,10 @@ mod tests {
     #[test]
     fn group_concat() {
         let qs = b"group_concat(x separator ', ')";
-        let expected = FunctionExpression::GroupConcat(
-            Box::new(Expression::Column(Column::from("x"))),
-            ", ".to_owned(),
-        );
+        let expected = FunctionExpression::GroupConcat {
+            expr: Box::new(Expression::Column(Column::from("x"))),
+            separator: ", ".to_owned(),
+        };
         let res = column_function(qs);
         assert_eq!(res.unwrap().1, expected);
     }

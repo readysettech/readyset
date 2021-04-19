@@ -100,13 +100,13 @@ impl<'a> ReferredColumnsIter<'a> {
         use FunctionExpression::*;
 
         match fexpr {
-            Avg(arg, _) => self.visit_expr(arg),
-            Count(arg, _) => self.visit_expr(arg),
+            Avg { expr, .. } => self.visit_expr(expr),
+            Count { expr, .. } => self.visit_expr(expr),
             CountStar => None,
-            Sum(arg, _) => self.visit_expr(arg),
+            Sum { expr, .. } => self.visit_expr(expr),
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
-            GroupConcat(arg, _) => self.visit_expr(arg),
+            GroupConcat { expr, .. } => self.visit_expr(expr),
             Cast(arg, _) => self.visit_expr(arg),
             Call { arguments, .. } => arguments.first().and_then(|first_arg| {
                 if arguments.len() >= 2 {
@@ -314,10 +314,10 @@ mod tests {
         #[test]
         fn aggregate_with_column() {
             assert_eq!(
-                Call(FunctionExpression::Sum(
-                    Box::new(Expression::Column(Column::from("test"))),
-                    false
-                ))
+                Call(FunctionExpression::Sum {
+                    expr: Box::new(Expression::Column(Column::from("test"))),
+                    distinct: false
+                })
                 .referred_columns()
                 .collect::<Vec<_>>(),
                 vec![Cow::Owned(Column::from("test"))]
@@ -346,16 +346,16 @@ mod tests {
         #[test]
         fn nested_function_call() {
             assert_eq!(
-                Call(FunctionExpression::Count(
-                    Box::new(Expression::Call(FunctionExpression::Call {
+                Call(FunctionExpression::Count {
+                    expr: Box::new(Expression::Call(FunctionExpression::Call {
                         name: "ifnull".to_owned(),
                         arguments: vec![
                             Expression::Column(Column::from("col1")),
                             Expression::Column(Column::from("col2")),
                         ]
                     })),
-                    false
-                ))
+                    distinct: false
+                })
                 .referred_columns()
                 .collect::<Vec<_>>(),
                 vec![

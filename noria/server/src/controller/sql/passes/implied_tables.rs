@@ -145,27 +145,41 @@ fn rewrite_selection(
                         // columns, but we have to peek inside the function to expand implied
                         // tables in its specification
                         match **f {
-                            Avg(box Expression::Column(ref mut fe), _)
-                            | Count(
-                                box Expression::CaseWhen {
-                                    then_expr: box Expression::Column(ref mut fe),
-                                    ..
-                                },
-                                _,
-                            )
-                            | Count(box Expression::Column(ref mut fe), _)
-                            | Sum(
-                                box Expression::CaseWhen {
-                                    then_expr: box Expression::Column(ref mut fe),
-                                    ..
-                                },
-                                _,
-                            )
-                            | Sum(box Expression::Column(ref mut fe), _)
+                            Avg {
+                                expr: box Expression::Column(ref mut fe),
+                                ..
+                            }
+                            | Count {
+                                expr:
+                                    box Expression::CaseWhen {
+                                        then_expr: box Expression::Column(ref mut fe),
+                                        ..
+                                    },
+                                ..
+                            }
+                            | Count {
+                                expr: box Expression::Column(ref mut fe),
+                                ..
+                            }
+                            | Sum {
+                                expr:
+                                    box Expression::CaseWhen {
+                                        then_expr: box Expression::Column(ref mut fe),
+                                        ..
+                                    },
+                                ..
+                            }
+                            | Sum {
+                                expr: box Expression::Column(ref mut fe),
+                                ..
+                            }
                             | Min(box Expression::Column(ref mut fe))
                             | Max(box Expression::Column(ref mut fe))
                             | Cast(box Expression::Column(ref mut fe), _)
-                            | GroupConcat(box Expression::Column(ref mut fe), _) => {
+                            | GroupConcat {
+                                expr: box Expression::Column(ref mut fe),
+                                ..
+                            } => {
                                 if fe.table.is_none() {
                                     fe.table = find_table(fe, tables_in_query);
                                 }
@@ -223,18 +237,20 @@ fn rewrite_selection(
                 // also need to expand any conditionals in the column, e.g. for filtered aggregations
                 match f.function {
                     Some(ref mut f) => match **f {
-                        Count(
-                            box Expression::CaseWhen {
-                                ref mut condition, ..
-                            },
-                            _,
-                        )
-                        | Sum(
-                            box Expression::CaseWhen {
-                                ref mut condition, ..
-                            },
-                            _,
-                        ) => {
+                        Count {
+                            expr:
+                                box Expression::CaseWhen {
+                                    ref mut condition, ..
+                                },
+                            ..
+                        }
+                        | Sum {
+                            expr:
+                                box Expression::CaseWhen {
+                                    ref mut condition, ..
+                                },
+                            ..
+                        } => {
                             *condition =
                                 rewrite_conditional(&expand_columns, condition.clone(), &tables);
                         }
