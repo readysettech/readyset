@@ -186,6 +186,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3670df70cbc01729f901f94c887814b3c68db038aad1329a418bae178bc5295c"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3548b8efc9f8e8a5a0a2808c5bd8451a9031b9e5b879a79590304ae928b0a70"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "async-task"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3456,7 +3477,7 @@ dependencies = [
  "slog",
  "slog-term",
  "tokio 1.5.0",
- "tokio-test",
+ "tokio-test 0.2.1",
  "tower-limit",
  "tower-service",
  "tower-util",
@@ -4462,6 +4483,7 @@ dependencies = [
  "postgres-types",
  "thiserror",
  "tokio 1.5.0",
+ "tokio-test 0.4.1",
  "tokio-util 0.6.6",
 ]
 
@@ -6326,6 +6348,19 @@ dependencies = [
  "bytes 0.5.6",
  "futures-core",
  "tokio 0.2.25",
+]
+
+[[package]]
+name = "tokio-test"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f58403903e94d4bc56805e46597fced893410b2e753e229d3f7f22423ea03f67"
+dependencies = [
+ "async-stream",
+ "bytes 1.0.1",
+ "futures-core",
+ "tokio 1.5.0",
+ "tokio-stream",
 ]
 
 [[package]]

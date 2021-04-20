@@ -45,6 +45,8 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> Codec<R> {
             .insert(statement_name.to_string(), types);
     }
 
+    /// Clear the data types of a prepared statement's parameters. This is typically requested
+    /// when the prepared statement is closed (ie deallocated).
     pub fn clear_statement_param_types(&mut self, statement_name: &str) {
         self.statement_param_types.remove(statement_name);
     }

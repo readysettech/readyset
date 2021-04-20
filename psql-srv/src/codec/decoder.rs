@@ -146,8 +146,11 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                     return Err(Error::IncorrectParameterCount(n_params));
                 }
                 let param_transfer_formats = match param_transfer_formats[..] {
+                    // If no format codes are provided, use the default format (`Text`).
                     [] => vec![Text; n_params],
+                    // If only one format code is provided, apply it to all parameters.
                     [f] => vec![f; n_params],
+                    // Otherwise use the format codes that have been provided, as is.
                     _ => {
                         if param_transfer_formats.len() == n_params {
                             param_transfer_formats
@@ -871,6 +874,39 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_bool() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(1); // size
+        buf.put_u8(true as u8); // value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::BOOL).unwrap(),
+            DataValue::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_decode_binary_char() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(6); // size
+        buf.extend_from_slice(b"mighty"); // value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
+            DataValue::Char(ArcCStr::try_from("mighty").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_decode_binary_varchar() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(6); // size
+        buf.extend_from_slice(b"mighty"); // value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
+            DataValue::Varchar(ArcCStr::try_from("mighty").unwrap())
+        );
+    }
+
+    #[test]
     fn test_decode_binary_int() {
         let mut buf = BytesMut::new();
         buf.put_i32(4); // size
@@ -893,13 +929,35 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_small_int() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(2); // size
+        buf.put_i16(0x1234); // value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::INT2).unwrap(),
+            DataValue::Smallint(0x1234)
+        );
+    }
+
+    #[test]
     fn test_decode_binary_double() {
         let mut buf = BytesMut::new();
         buf.put_i32(8); // size
-        buf.put_f64(0.123456789); // value
+        buf.put_f64(0.1234567890123456); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::FLOAT8).unwrap(),
-            DataValue::Double(0.123456789)
+            DataValue::Double(0.1234567890123456)
+        );
+    }
+
+    #[test]
+    fn test_decode_binary_real() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(4); // size
+        buf.put_f32(0.12345678); // value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
+            DataValue::Real(0.12345678)
         );
     }
 
@@ -927,13 +985,124 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_binary_varchar() {
+    fn test_decode_text_null() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(-1); // size
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INT4).unwrap(),
+            DataValue::Null
+        );
+    }
+
+    #[test]
+    fn test_decode_text_bool() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(1); // size
+        buf.extend_from_slice(b"t"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::BOOL).unwrap(),
+            DataValue::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_char() {
         let mut buf = BytesMut::new();
         buf.put_i32(6); // size
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
-            get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
+            get_text_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
+            DataValue::Char(ArcCStr::try_from("mighty").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_decode_text_varchar() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(6); // size
+        buf.extend_from_slice(b"mighty"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
             DataValue::Varchar(ArcCStr::try_from("mighty").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_decode_text_int() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(9); // size
+        buf.extend_from_slice(b"305419896"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INT4).unwrap(),
+            DataValue::Int(0x12345678)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_big_int() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(19); // size
+        buf.extend_from_slice(b"1311768467294899695"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INT8).unwrap(),
+            DataValue::Bigint(0x1234567890abcdef)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_small_int() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(4); // size
+        buf.extend_from_slice(b"4660"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INT2).unwrap(),
+            DataValue::Smallint(0x1234)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_double() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(18); // size
+        buf.extend_from_slice(b"0.1234567890123456"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::FLOAT8).unwrap(),
+            DataValue::Double(0.1234567890123456)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_real() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(10); // size
+        buf.extend_from_slice(b"0.12345678"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
+            DataValue::Real(0.12345678)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_text() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(6); // size
+        buf.extend_from_slice(b"mighty"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
+            DataValue::Text(ArcCStr::try_from("mighty").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamp() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(22); // size
+        buf.extend_from_slice(b"2020-01-02 03:04:05.66"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
+            DataValue::Timestamp(
+                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
+            )
         );
     }
 }

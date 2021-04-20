@@ -16,10 +16,10 @@ impl TryFrom<Value> for psql_srv::Value {
     }
 }
 
-struct SrvOneBackend;
+struct ServeOneBackend;
 
 #[async_trait]
-impl Backend for SrvOneBackend {
+impl Backend for ServeOneBackend {
     type Value = Value;
     type Row = Vec<Value>;
     type Resultset = Vec<Self::Row>;
@@ -64,6 +64,6 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:5432").await?;
     loop {
         let (socket, _) = listener.accept().await?;
-        run_backend(SrvOneBackend, socket).await;
+        run_backend(ServeOneBackend, socket).await;
     }
 }

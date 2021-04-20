@@ -1,6 +1,7 @@
 use arccstr::ArcCStr;
 use chrono::NaiveDateTime;
 
+/// A PostgreSQL data value that can be received from, or sent to, a PostgreSQL frontend.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,

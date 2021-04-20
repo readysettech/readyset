@@ -6,6 +6,7 @@ use crate::protocol::Protocol;
 use crate::Backend;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+/// A helper struct that can be used to run a `Protocol` on a `Backend` and `Channel`.
 pub struct Runner<B: Backend, C> {
     backend: B,
     channel: Channel<C, B::Row>,
@@ -13,6 +14,9 @@ pub struct Runner<B: Backend, C> {
 }
 
 impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
+    /// A simple run loop. For each `FrontendMessage` received on `channel`, use `protocol` to
+    /// generate a response. Then send the response. If an error occurs, use `protocol` to generate
+    /// an error response, then send the error response.
     pub async fn run(backend: B, byte_channel: C) {
         let mut runner = Runner {
             backend,
@@ -46,7 +50,7 @@ impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     }
 
     async fn handle_error(&mut self, error: Error) -> Result<(), Error> {
-        let response = self.protocol.on_error::<B, C>(error).await?;
+        let response = self.protocol.on_error::<B>(error).await?;
         self.channel.send(response).await?;
         Ok(())
     }

@@ -850,6 +850,44 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_bool() {
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::Bool(true), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(1); // length
+        exp.put_u8(1); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_char() {
+        let mut buf = BytesMut::new();
+        put_binary_value(
+            DataValue::Char(ArcCStr::try_from("some stuff").unwrap()),
+            &mut buf,
+        )
+        .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(10); // length
+        exp.extend_from_slice(b"some stuff"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_varchar() {
+        let mut buf = BytesMut::new();
+        put_binary_value(
+            DataValue::Varchar(ArcCStr::try_from("some stuff").unwrap()),
+            &mut buf,
+        )
+        .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(10); // length
+        exp.extend_from_slice(b"some stuff"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_int() {
         let mut buf = BytesMut::new();
         put_binary_value(DataValue::Int(0x1234567), &mut buf).unwrap();
@@ -870,12 +908,32 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_small_int() {
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::Smallint(0x1234), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(2); // length
+        exp.put_i16(0x1234); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_double() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Double(0.123456789), &mut buf).unwrap();
+        put_binary_value(DataValue::Double(0.1234567890123456), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
-        exp.put_f64(0.123456789); // value
+        exp.put_f64(0.1234567890123456); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_real() {
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::Real(0.12345678), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(4); // length
+        exp.put_f32(0.12345678); // value
         assert_eq!(buf, exp);
     }
 
@@ -905,9 +963,42 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_binary_varchar() {
+    fn test_encode_text_null() {
         let mut buf = BytesMut::new();
-        put_binary_value(
+        put_text_value(DataValue::Null, &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(-1); // null sentinel
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_bool() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Bool(true), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(1); // length
+        exp.extend_from_slice(b"t"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_char() {
+        let mut buf = BytesMut::new();
+        put_text_value(
+            DataValue::Char(ArcCStr::try_from("some stuff").unwrap()),
+            &mut buf,
+        )
+        .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(10); // length
+        exp.extend_from_slice(b"some stuff"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_varchar() {
+        let mut buf = BytesMut::new();
+        put_text_value(
             DataValue::Varchar(ArcCStr::try_from("some stuff").unwrap()),
             &mut buf,
         )
@@ -915,6 +1006,86 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_int() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Int(0x1234567), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(8); // length
+        exp.extend_from_slice(b"19088743"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_big_int() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Bigint(0x1234567890abcdef), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(19); // length
+        exp.extend_from_slice(b"1311768467294899695"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_small_int() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Smallint(0x1234), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(4); // length
+        exp.extend_from_slice(b"4660"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_double() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Double(0.1234567890123456), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(18); // size
+        exp.extend_from_slice(b"0.1234567890123456"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_real() {
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Real(0.12345678), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(10); // size
+        exp.extend_from_slice(b"0.12345678"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_text() {
+        let mut buf = BytesMut::new();
+        put_text_value(
+            DataValue::Text(ArcCStr::try_from("some text").unwrap()),
+            &mut buf,
+        )
+        .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(9); // length
+        exp.extend_from_slice(b"some text"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_timestamp() {
+        let mut buf = BytesMut::new();
+        put_text_value(
+            DataValue::Timestamp(
+                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.660", TIMESTAMP_FORMAT).unwrap(),
+            ),
+            &mut buf,
+        )
+        .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(23); // length
+        exp.extend_from_slice(b"2020-01-02 03:04:05.660"); // value
         assert_eq!(buf, exp);
     }
 }
