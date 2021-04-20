@@ -21,7 +21,7 @@ const SSL_RESPONSE_N: u8 = b'N';
 /// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein
 ///         a value of type `R` will, upon iteration, emit values that are convertable into type
 ///         `Value`, which can be serialized along with the rest of the `BackendMessage`.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BackendMessage<R> {
     AuthenticationOk,
     BindComplete,
@@ -67,7 +67,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> BackendMessage<R> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CommandCompleteTag {
     Delete(u64),
     Empty,
@@ -77,14 +77,14 @@ pub enum CommandCompleteTag {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ErrorSeverity {
     Error,
     Fatal,
     Panic,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FieldDescription {
     pub field_name: String,
     pub table_id: i32,
