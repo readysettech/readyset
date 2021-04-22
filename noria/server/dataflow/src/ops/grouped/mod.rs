@@ -55,7 +55,8 @@ pub trait GroupedOperation: fmt::Debug + Clone {
 
     /// Extract the aggregation value from a single record.
     /// Diff can be None if the record is filtered out by a CASE condition in the aggregator fn
-    fn to_diff(&self, record: &[DataType], is_positive: bool) -> Option<Self::Diff>;
+    fn to_diff(&self, record: &[DataType], is_positive: bool)
+        -> ReadySetResult<Option<Self::Diff>>;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
@@ -63,7 +64,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> DataType;
+    ) -> ReadySetResult<DataType>;
 
     fn description(&self, detailed: bool) -> String;
     fn over_columns(&self) -> Vec<usize>;
@@ -262,7 +263,7 @@ where
                 });
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _);
+                let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _)?;
                 match current {
                     Some(ref current) if new == **current => {
                         // no change
@@ -289,7 +290,7 @@ where
                 if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
                     handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..))?;
                 }
-                if let Some(diff) = self.inner.to_diff(&r[..], r.is_positive()) {
+                if let Some(diff) = self.inner.to_diff(&r[..], r.is_positive())? {
                     diffs.push(diff);
                 }
                 group_rs.push(r);

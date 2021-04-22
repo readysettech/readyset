@@ -3,6 +3,7 @@ use msql_srv::Column;
 use neon::{prelude::*, types::JsDate};
 use noria::{results::Results, DataType};
 use noria_client::backend::{error::Error, PrepareResult, QueryResult, SelectSchema};
+use std::convert::TryFrom;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
 where
@@ -81,27 +82,27 @@ where
     Ok(js_prepare_result)
 }
 
-fn convert_datum<'a, C>(cx: &mut C, d: &DataType) -> Handle<'a, JsValue>
+fn convert_datum<'a, C>(cx: &mut C, d: &DataType) -> NeonResult<Handle<'a, JsValue>>
 where
     C: Context<'a>,
 {
     match d {
-        DataType::None => cx.null().upcast::<JsValue>(),
-        DataType::Int(n) => cx.number(*n).upcast::<JsValue>(),
-        DataType::UnsignedInt(n) => cx.number(*n).upcast::<JsValue>(),
-        DataType::BigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
-        DataType::UnsignedBigInt(n) => cx.number(*n as f64).upcast::<JsValue>(),
+        DataType::None => Ok(cx.null().upcast::<JsValue>()),
+        DataType::Int(n) => Ok(cx.number(*n).upcast::<JsValue>()),
+        DataType::UnsignedInt(n) => Ok(cx.number(*n).upcast::<JsValue>()),
+        DataType::BigInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
+        DataType::UnsignedBigInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
         DataType::Real(_, _) => {
-            let n = f64::from(d);
-            cx.number(n).upcast::<JsValue>()
+            let n = f64::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
+            Ok(cx.number(n).upcast::<JsValue>())
         }
         DataType::Text(_) => {
-            let s = String::from(d);
-            cx.string(s).upcast::<JsValue>()
+            let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
+            Ok(cx.string(s).upcast::<JsValue>())
         }
         DataType::TinyText(_) => {
-            let s = String::from(d);
-            cx.string(s).upcast::<JsValue>()
+            let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
+            Ok(cx.string(s).upcast::<JsValue>())
         }
         DataType::Timestamp(_) => unimplemented!("Timestamp conversion to JS type"), // TODO: convert Timestamp DataType to JS: https://app.clubhouse.io/readysettech/story/390/implement-rust-timestamp-datatype-conversion-to-jsdate
         DataType::Time(_) => unimplemented!("Time conversion to JS type"),
@@ -127,7 +128,7 @@ where
                 if select_schema.use_bogo && col_name == "bogokey" {
                     continue;
                 }
-                let js_datum = convert_datum(cx, &row_vec[i]);
+                let js_datum = convert_datum(cx, &row_vec[i])?;
                 utils::set_jsval_field(cx, &js_current_row, col_name, js_datum)?;
                 js_data.set(cx, row_num as u32, js_current_row)?;
             }
@@ -229,9 +230,8 @@ where
             js_param.downcast_or_throw::<JsString, _>(cx)?.value(cx),
         ))
     } else if js_param.is_a::<JsNumber, _>(cx) {
-        Ok(DataType::from(
-            js_param.downcast_or_throw::<JsNumber, _>(cx)?.value(cx),
-        ))
+        DataType::try_from(js_param.downcast_or_throw::<JsNumber, _>(cx)?.value(cx))
+            .or_else(|e| cx.throw_error(e.to_string()))
     } else if js_param.is_a::<JsBoolean, _>(cx) {
         Ok(DataType::from(
             js_param.downcast_or_throw::<JsBoolean, _>(cx)?.value(cx),
@@ -239,7 +239,6 @@ where
     } else if js_param.is_a::<JsDate, _>(cx) {
         unimplemented!() // TODO: implement JsDate conversion to DataType: https://app.clubhouse.io/readysettech/story/387/implement-jsdate-conversion-to-rust-timestamp-datatype
     } else {
-        let e = cx.error("Unknown parameter type")?.upcast::<JsValue>();
-        cx.throw(e)
+        cx.throw_error("Unknown parameter type")
     }
 }

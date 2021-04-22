@@ -1,13 +1,14 @@
 use chrono::naive::NaiveDate;
 use chrono::naive::NaiveDateTime;
 use chrono::naive::NaiveTime;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
 use std::time;
 
 use super::Backend;
-use noria::DataType;
+use noria::{DataType, ReadySetResult};
 
 async fn populate(
     backend: &mut Backend,
@@ -130,7 +131,10 @@ pub async fn populate_authors(
     populate(backend, "author", records).await
 }
 
-pub async fn populate_cc_xacts(backend: &mut Backend, data_location: &str) -> usize {
+pub async fn populate_cc_xacts(
+    backend: &mut Backend,
+    data_location: &str,
+) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/cc_xacts.data", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -158,7 +162,7 @@ pub async fn populate_cc_xacts(backend: &mut Backend, data_location: &str) -> us
                 cx_name.into(),
                 cx_expire.into(),
                 cx_auth_id.into(),
-                cx_amt.into(),
+                DataType::try_from(cx_amt)?,
                 cx_xact_date.into(),
                 cx_co_id.into(),
             ]);
@@ -166,10 +170,13 @@ pub async fn populate_cc_xacts(backend: &mut Backend, data_location: &str) -> us
         s.clear();
     }
 
-    populate(backend, "cc_xacts", records).await
+    Ok(populate(backend, "cc_xacts", records).await)
 }
 
-pub async fn populate_countries(backend: &mut Backend, data_location: &str) -> usize {
+pub async fn populate_countries(
+    backend: &mut Backend,
+    data_location: &str,
+) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/countries.tsv", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -187,7 +194,7 @@ pub async fn populate_countries(backend: &mut Backend, data_location: &str) -> u
             records.push(vec![
                 co_id.into(),
                 co_name.into(),
-                co_exchange.into(),
+                DataType::try_from(co_exchange)?,
                 co_currency.into(),
             ]);
         }
@@ -196,10 +203,13 @@ pub async fn populate_countries(backend: &mut Backend, data_location: &str) -> u
 
     populate(backend, "ship_co", records.clone()).await;
     populate(backend, "bill_co", records.clone()).await;
-    populate(backend, "country", records).await
+    Ok(populate(backend, "country", records).await)
 }
 
-pub async fn populate_customers(backend: &mut Backend, data_location: &str) -> usize {
+pub async fn populate_customers(
+    backend: &mut Backend,
+    data_location: &str,
+) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/customers.tsv", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -240,9 +250,9 @@ pub async fn populate_customers(backend: &mut Backend, data_location: &str) -> u
                 c_last_login.into(),
                 c_login.into(),
                 c_expiration.into(),
-                c_discount.into(),
-                c_balance.into(),
-                c_ytd_pmt.into(),
+                DataType::try_from(c_discount)?,
+                DataType::try_from(c_balance)?,
+                DataType::try_from(c_ytd_pmt)?,
                 c_birthdate.into(),
                 c_data.into(),
             ]);
@@ -250,7 +260,7 @@ pub async fn populate_customers(backend: &mut Backend, data_location: &str) -> u
         s.clear();
     }
 
-    populate(backend, "customer", records).await
+    Ok(populate(backend, "customer", records).await)
 }
 
 pub async fn populate_items(
@@ -258,7 +268,7 @@ pub async fn populate_items(
     data_location: &str,
     write: f32,
     start: bool,
-) -> usize {
+) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/items.tsv", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -306,7 +316,7 @@ pub async fn populate_items(
                 i_related5.into(),
                 i_thumbnail.into(),
                 i_image.into(),
-                i_srp.into(),
+                DataType::try_from(i_srp)?,
                 i_cost.into(),
                 i_avail.into(),
                 i_stock.into(),
@@ -321,10 +331,10 @@ pub async fn populate_items(
 
     scale_records(&mut records, start, write);
 
-    populate(backend, "item", records).await
+    Ok(populate(backend, "item", records).await)
 }
 
-pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> usize {
+pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/orders.tsv", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -355,9 +365,9 @@ pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> usiz
                 o_id.into(),
                 o_c_id.into(),
                 o_date.into(),
-                o_sub_total.into(),
-                o_tax.into(),
-                o_total.into(),
+                DataType::try_from(o_sub_total)?,
+                DataType::try_from(o_tax)?,
+                DataType::try_from(o_total)?,
                 o_ship_type.into(),
                 o_ship_date.into(),
                 o_bill_addr_id.into(),
@@ -368,7 +378,7 @@ pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> usiz
         s.clear();
     }
 
-    populate(backend, "orders", records).await
+    Ok(populate(backend, "orders", records).await)
 }
 
 pub async fn populate_order_line(
@@ -376,7 +386,7 @@ pub async fn populate_order_line(
     data_location: &str,
     write: f32,
     start: bool,
-) -> usize {
+) -> ReadySetResult<usize> {
     let f = File::open(format!("{}/order_line.data", data_location)).unwrap();
     let mut reader = BufReader::new(f);
 
@@ -399,7 +409,7 @@ pub async fn populate_order_line(
                 ol_o_id.into(),
                 ol_i_id.into(),
                 ol_qty.into(),
-                ol_discount.into(),
+                DataType::try_from(ol_discount)?,
                 ol_comments.into(),
             ]);
         }
@@ -408,7 +418,7 @@ pub async fn populate_order_line(
 
     scale_records(&mut records, start, write);
 
-    populate(backend, "order_line", records).await
+    Ok(populate(backend, "order_line", records).await)
 }
 
 fn scale_records(records: &mut Vec<Vec<DataType>>, start: bool, write: f32) {

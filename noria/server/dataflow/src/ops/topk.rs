@@ -537,13 +537,15 @@ mod tests {
 
     #[test]
     fn it_forwards_reversed() {
+        use std::convert::TryFrom;
+
         let (mut g, _) = setup(true);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), (-12.123).into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), (0.0431).into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), (-0.082).into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), (5.601).into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), (-15.9).into()];
+        let r12: Vec<DataType> = vec![1.into(), "z".into(), DataType::try_from(-12.123).unwrap()];
+        let r10: Vec<DataType> = vec![2.into(), "z".into(), DataType::try_from(0.0431).unwrap()];
+        let r11: Vec<DataType> = vec![3.into(), "z".into(), DataType::try_from(-0.082).unwrap()];
+        let r5: Vec<DataType> = vec![4.into(), "z".into(), DataType::try_from(5.601).unwrap()];
+        let r15: Vec<DataType> = vec![5.into(), "z".into(), DataType::try_from(-15.9).unwrap()];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12.clone()].into());

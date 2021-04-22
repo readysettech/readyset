@@ -655,12 +655,12 @@ impl NoriaConnector {
                     .iter()
                     .position(|x| x.column == col.name)
                     .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
-                let value = String::from(
+                let value = String::try_from(
                     &key.remove(idx)
                         .coerce_to(&key_types.remove(idx))
                         .unwrap()
                         .into_owned(),
-                );
+                )?;
                 if !key.is_empty() {
                     // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                     keys.push(key);
@@ -697,11 +697,7 @@ impl NoriaConnector {
                     let k = key
                         .drain(..)
                         .zip(&key_types)
-                        .map(|(val, col_type)| {
-                            val.coerce_to(col_type)
-                                .map(Cow::into_owned)
-                                .map_err(|e| ReadySetError::ValueCoerce(e))
-                        })
+                        .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
                         .collect::<ReadySetResult<Vec<DataType>>>()?;
 
                     Ok((k, binop_to_use)
@@ -805,10 +801,10 @@ impl NoriaConnector {
         trace!("query::select::access view");
         let qname = self.get_or_create_view(&q, false).await?;
 
-        let keys: Vec<_> = use_params
+        let keys: Vec<Vec<DataType>> = use_params
             .into_iter()
-            .map(|l| vec1![l.to_datatype()].into())
-            .collect();
+            .map(|l| Ok(vec1![l.to_datatype()?].into()))
+            .collect::<Result<Vec<Vec<DataType>>, ReadySetError>>()?;
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");

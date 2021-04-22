@@ -2,6 +2,7 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 
+use crate::{unsupported, ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
 use std::borrow::Cow;
@@ -11,7 +12,6 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
 
 use proptest::prelude::{prop_oneof, Arbitrary};
-use thiserror::Error;
 
 const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
@@ -59,7 +59,7 @@ impl fmt::Display for DataType {
         match *self {
             DataType::None => write!(f, "NULL"),
             DataType::Text(..) | DataType::TinyText(..) => {
-                let text: &str = self.into();
+                let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
                 // TODO: do we really want to produce quoted strings?
                 write!(f, "\"{}\"", text)
             }
@@ -88,11 +88,11 @@ impl fmt::Debug for DataType {
         match *self {
             DataType::None => write!(f, "None"),
             DataType::Text(..) => {
-                let text: &str = self.into();
+                let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
                 write!(f, "Text({:?})", text)
             }
             DataType::TinyText(..) => {
-                let text: &str = self.into();
+                let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
                 write!(f, "TinyText({:?})", text)
             }
             DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
@@ -255,24 +255,27 @@ impl DataType {
     ///   DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
     /// );
     /// ```
-    pub fn coerce_to<'a>(&'a self, ty: &SqlType) -> Result<Cow<'a, Self>, ValueCoerceError> {
-        let mk_err = |message: String, source: Option<anyhow::Error>| ValueCoerceError {
-            value: self.clone(),
-            expected_type: ty.clone(),
-            // FIXME(eta): this source thing is less than ideal
-            message: format!(
-                "{}: {}",
-                message,
-                source
-                    .map(|x| x.to_string())
-                    .unwrap_or_else(|| "<empty>".into())
-            ),
+    pub fn coerce_to<'a>(&'a self, ty: &SqlType) -> ReadySetResult<Cow<'a, Self>> {
+        let mk_err = |message: String, source: Option<anyhow::Error>| {
+            ReadySetError::DataTypeConversionError {
+                val: format!("{:?}", self),
+                src_type: "DataType".to_string(),
+                target_type: format!("{:?}", ty),
+                details: format!(
+                    "Coercion Error (source SqlType inside an option is: {:?}): {}: {}",
+                    self.sql_type(),
+                    message,
+                    source
+                        .map(|x| x.to_string())
+                        .unwrap_or_else(|| "<empty>".into())
+                ),
+            }
         };
 
         macro_rules! convert_numeric {
             ($dt: expr, $source_ty: ty, $target_ty: ty) => {{
                 Ok(Cow::Owned(
-                    <$target_ty>::try_from(<$source_ty>::from($dt))
+                    <$target_ty>::try_from(<$source_ty>::try_from($dt)?)
                         .map_err(|e| {
                             mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                         })?
@@ -306,7 +309,7 @@ impl DataType {
             (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
             (_, Some(Real), Float | Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
-                let actual_len = <&str>::from(self).len();
+                let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= (*max_len).into() {
                     Ok(Cow::Borrowed(self))
                 } else {
@@ -321,7 +324,7 @@ impl DataType {
                 }
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(len)) => {
-                let actual_len = <&str>::from(self).len();
+                let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= usize::from(*len) {
                     Ok(Cow::Borrowed(self))
                 } else {
@@ -335,7 +338,7 @@ impl DataType {
                 }
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp) => {
-                NaiveDateTime::parse_from_str(self.into(), TIMESTAMP_FORMAT)
+                NaiveDateTime::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_FORMAT)
                     .map_err(|e| {
                         mk_err(
                             "Could not parse value as timestamp".to_owned(),
@@ -346,7 +349,7 @@ impl DataType {
                     .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Date) => {
-                let text: &str = self.into();
+                let text: &str = <&str>::try_from(self)?;
                 NaiveDate::parse_from_str(text, DATE_FORMAT)
                     .or_else(|_e| {
                         NaiveDateTime::parse_from_str(text, TIMESTAMP_FORMAT).map(|dt| dt.date())
@@ -358,7 +361,7 @@ impl DataType {
                     .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
-                match <&str>::from(self).parse() {
+                match <&str>::try_from(self)?.parse() {
                     Ok(t) => Ok(Cow::Owned(Self::Time(Arc::new(t)))),
                     Err(msql_srv::datatype::ConvertError::ParseError) => {
                         Ok(Cow::Owned(Self::Time(Arc::new(Default::default()))))
@@ -370,7 +373,7 @@ impl DataType {
                 }
             }
             (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
-                MysqlTime::try_from(<f64>::from(self))
+                MysqlTime::try_from(<f64>::try_from(self)?)
                     .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
                     .map(Arc::new)
                     .map(Self::Time)
@@ -388,7 +391,7 @@ impl DataType {
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
-            (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::from(self)))),
+            (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
             (Self::Real(n, 0), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(i32::try_from(*n).map_err(
                     |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
@@ -409,24 +412,36 @@ impl DataType {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
             )),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => <&str>::from(self)
-                .parse::<i8>()
-                .map(|x| (Cow::Owned(DataType::from(x))))
-                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Smallint(_)) => <&str>::from(self)
-                .parse::<i16>()
-                .map(|x| (Cow::Owned(DataType::from(x))))
-                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_)) => <&str>::from(self)
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
+                <&str>::try_from(self)?
+                    .parse::<i8>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Smallint(_)) => {
+                <&str>::try_from(self)?
+                    .parse::<i16>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_)) => <&str>::try_from(self)?
                 .parse::<i32>()
                 .map(|x| (Cow::Owned(DataType::from(x))))
                 .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_)) => <&str>::from(self)
-                .parse::<i64>()
-                .map(|x| (Cow::Owned(DataType::from(x))))
-                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_)) => {
+                <&str>::try_from(self)?
+                    .parse::<i64>()
+                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map_err(|e| {
+                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
+                    })
+            }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedTinyint(_)) => {
-                <&str>::from(self)
+                <&str>::try_from(self)?
                     .parse::<u8>()
                     .map(|x| (Cow::Owned(DataType::from(x))))
                     .map_err(|e| {
@@ -434,7 +449,7 @@ impl DataType {
                     })
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedSmallint(_)) => {
-                <&str>::from(self)
+                <&str>::try_from(self)?
                     .parse::<u16>()
                     .map(|x| (Cow::Owned(DataType::from(x))))
                     .map_err(|e| {
@@ -442,7 +457,7 @@ impl DataType {
                     })
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedInt(_)) => {
-                <&str>::from(self)
+                <&str>::try_from(self)?
                     .parse::<u32>()
                     .map(|x| (Cow::Owned(DataType::from(x))))
                     .map_err(|e| {
@@ -450,18 +465,14 @@ impl DataType {
                     })
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedBigint(_)) => {
-                <&str>::from(self)
+                <&str>::try_from(self)?
                     .parse::<u64>()
                     .map(|x| (Cow::Owned(DataType::from(x))))
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
             }
-            (_, Some(src_type), tgt_type) => Err(ValueCoerceError {
-                value: self.clone(),
-                expected_type: ty.clone(),
-                message: format!("Cannot coerce {:?} to {:?}", src_type, tgt_type),
-            }),
+            (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
         }
     }
 
@@ -521,8 +532,10 @@ impl PartialEq for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                let a: &str = self.into();
-                let b: &str = other.into();
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                let a: &str = <&str>::try_from(self).unwrap();
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                let b: &str = <&str>::try_from(other).unwrap();
                 a == b
             }
             (&DataType::BigInt(a), &DataType::BigInt(b)) => a == b,
@@ -541,8 +554,10 @@ impl PartialEq for DataType {
             | (&DataType::Int(..), &DataType::UnsignedInt(..))
             | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
             | (&DataType::Int(..), &DataType::BigInt(..)) => {
-                let a: i128 = self.into();
-                let b: i128 = other.into();
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                let a: i128 = <i128>::try_from(self).unwrap();
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
             }
             (&DataType::Real(ai, af), &DataType::Real(bi, bf)) => ai == bi && af == bf,
@@ -572,8 +587,10 @@ impl Ord for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.cmp(b),
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                let a: &str = self.into();
-                let b: &str = other.into();
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                let a: &str = <&str>::try_from(self).unwrap();
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                let b: &str = <&str>::try_from(other).unwrap();
                 a.cmp(&b)
             }
             (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
@@ -592,8 +609,10 @@ impl Ord for DataType {
             | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
             | (&DataType::UnsignedInt(..), &DataType::Int(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
-                let a: i128 = self.into();
-                let b: i128 = other.into();
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                let a: i128 = <i128>::try_from(self).unwrap();
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                let b: i128 = <i128>::try_from(other).unwrap();
                 a.cmp(&b)
             }
             (&DataType::Real(ai, af), &DataType::Real(ref bi, ref bf)) => {
@@ -624,11 +643,13 @@ impl Hash for DataType {
         match *self {
             DataType::None => {}
             DataType::Int(..) | DataType::BigInt(..) => {
-                let n: i64 = self.into();
+                // this unwrap should be safe because no error path in try_from for i64 (&i64) on Int and BigInt
+                let n: i64 = <i64>::try_from(self).unwrap();
                 n.hash(state)
             }
             DataType::UnsignedInt(..) | DataType::UnsignedBigInt(..) => {
-                let n: u64 = self.into();
+                // this unwrap should be safe because no error path in try_from for u64 (&u64) on UnsignedInt and UnsignedBigInt
+                let n: u64 = <u64>::try_from(self).unwrap();
                 n.hash(state)
             }
             DataType::Real(i, f) => {
@@ -636,7 +657,8 @@ impl Hash for DataType {
                 f.hash(state);
             }
             DataType::Text(..) | DataType::TinyText(..) => {
-                let t: &str = self.into();
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                let t: &str = <&str>::try_from(self).unwrap();
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
@@ -657,18 +679,25 @@ where
     }
 }
 
-impl From<i128> for DataType {
-    fn from(s: i128) -> Self {
+impl TryFrom<i128> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(s: i128) -> Result<Self, Self::Error> {
         if s >= std::i32::MIN.into() && s <= std::i32::MAX.into() {
-            DataType::Int(s as i32)
+            Ok(DataType::Int(s as i32))
         } else if s >= std::u32::MIN.into() && s <= std::u32::MAX.into() {
-            DataType::UnsignedInt(s as u32)
+            Ok(DataType::UnsignedInt(s as u32))
         } else if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
-            DataType::BigInt(s as i64)
+            Ok(DataType::BigInt(s as i64))
         } else if s >= std::u64::MIN.into() && s <= std::u64::MAX.into() {
-            DataType::UnsignedBigInt(s as u64)
+            Ok(DataType::UnsignedBigInt(s as u64))
         } else {
-            panic!("can't fit {} in a DataType", s)
+            Err(Self::Error::DataTypeConversionError {
+                val: s.to_string(),
+                src_type: "i128".to_string(),
+                target_type: "DataType".to_string(),
+                details: "".to_string(),
+            })
         }
     }
 }
@@ -727,18 +756,26 @@ impl From<usize> for DataType {
     }
 }
 
-impl From<f32> for DataType {
-    fn from(f: f32) -> Self {
-        Self::from(f as f64)
+impl TryFrom<f32> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(f: f32) -> Result<Self, Self::Error> {
+        Self::try_from(f as f64)
     }
 }
 
-impl From<f64> for DataType {
-    fn from(f: f64) -> Self {
-        if !f.is_finite() {
-            panic!();
-        }
+impl TryFrom<f64> for DataType {
+    type Error = ReadySetError;
 
+    fn try_from(f: f64) -> Result<Self, Self::Error> {
+        if !f.is_finite() {
+            return Err(Self::Error::DataTypeConversionError {
+                val: f.to_string(),
+                src_type: "f64".to_string(),
+                target_type: "DataType".to_string(),
+                details: "".to_string(),
+            });
+        }
         let mut i = f.trunc() as i64;
         let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
         if frac == 1_000_000_000 {
@@ -749,7 +786,7 @@ impl From<f64> for DataType {
             frac = 0;
         }
 
-        DataType::Real(i, frac)
+        Ok(DataType::Real(i, frac))
     }
 }
 
@@ -789,26 +826,28 @@ impl From<Literal> for DataType {
     }
 }
 
-impl From<DataType> for Literal {
-    fn from(dt: DataType) -> Self {
+impl TryFrom<DataType> for Literal {
+    type Error = ReadySetError;
+
+    fn try_from(dt: DataType) -> Result<Self, Self::Error> {
         match dt {
-            DataType::None => Literal::Null,
-            DataType::Int(i) => Literal::Integer(i as _),
-            DataType::UnsignedInt(i) => Literal::UnsignedInteger(i as _),
-            DataType::BigInt(i) => Literal::Integer(i),
-            DataType::UnsignedBigInt(i) => Literal::Integer(i as _),
-            DataType::Real(integral, fractional) => Literal::FixedPoint(Real {
+            DataType::None => Ok(Literal::Null),
+            DataType::Int(i) => Ok(Literal::Integer(i as _)),
+            DataType::UnsignedInt(i) => Ok(Literal::UnsignedInteger(i as _)),
+            DataType::BigInt(i) => Ok(Literal::Integer(i)),
+            DataType::UnsignedBigInt(i) => Ok(Literal::Integer(i as _)),
+            DataType::Real(integral, fractional) => Ok(Literal::FixedPoint(Real {
                 integral: integral as _,
                 fractional,
-            }),
-            DataType::Text(_) => Literal::String(dt.into()),
-            DataType::TinyText(_) => Literal::String(dt.into()),
-            DataType::Timestamp(_) => {
-                Literal::String(dt.coerce_to(&SqlType::Text).unwrap().as_ref().into())
-            }
-            DataType::Time(_) => {
-                Literal::String(dt.coerce_to(&SqlType::Text).unwrap().as_ref().into())
-            }
+            })),
+            DataType::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
+            DataType::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
+            DataType::Timestamp(_) => Ok(Literal::String(String::try_from(
+                dt.coerce_to(&SqlType::Text)?.as_ref(),
+            )?)),
+            DataType::Time(_) => Ok(Literal::String(String::try_from(
+                dt.coerce_to(&SqlType::Text)?.as_ref(),
+            )?)),
         }
     }
 }
@@ -837,29 +876,50 @@ impl From<NaiveDateTime> for DataType {
     }
 }
 
-impl<'a> From<&'a DataType> for NaiveDateTime {
-    fn from(data: &'a DataType) -> Self {
+impl<'a> TryFrom<&'a DataType> for NaiveDateTime {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Timestamp(ref dt) => *dt,
-            _ => panic!("attempted to convert a {:?} to a NaiveDateTime", data),
+            DataType::Timestamp(ref dt) => Ok(*dt),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "NaiveDateTime".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl<'a> From<&'a DataType> for NaiveDate {
-    fn from(data: &'a DataType) -> Self {
+impl<'a> TryFrom<&'a DataType> for NaiveDate {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Timestamp(ref dt) => dt.date(),
-            _ => panic!("attempted to convert a {:?} to a NaiveDate", data),
+            DataType::Timestamp(ref dt) => Ok(dt.date()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "NaiveDate".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl<'a> From<&'a DataType> for MysqlTime {
-    fn from(data: &'a DataType) -> Self {
+impl<'a> TryFrom<&'a DataType> for MysqlTime {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Time(ref mysql_time) => mysql_time.as_ref().clone(),
-            _ => panic!("attempted to convert a {:?} to a MysqlTime", data),
+            DataType::Time(ref mysql_time) => Ok(mysql_time.as_ref().clone()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "MysqlTime".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
@@ -868,188 +928,293 @@ impl<'a> From<&'a DataType> for MysqlTime {
 // because DataType variants (i.e. `Text` and `TinyText`) constructors are all
 // generated from valid UTF-8 strings, or the constructor fails (e.g. TryFrom &[u8]).
 // Thus, we can safely generate a &str from a DataType.
-impl<'a> From<&'a DataType> for &'a str {
-    fn from(data: &'a DataType) -> Self {
+impl<'a> TryFrom<&'a DataType> for &'a str {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Text(ref s) => s.to_str().unwrap(),
+            DataType::Text(ref s) => Ok(s.to_str().unwrap()),
             DataType::TinyText(ref bts) => {
                 if bts[TINYTEXT_WIDTH - 1] == 0 {
                     // NULL terminated CStr
                     use std::ffi::CStr;
                     let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
-                    CStr::from_bytes_with_nul(&bts[0..null])
+                    Ok(CStr::from_bytes_with_nul(&bts[0..null])
                         .unwrap()
                         .to_str()
-                        .unwrap()
+                        .unwrap())
                 } else {
                     // String is exactly eight bytes
-                    std::str::from_utf8(bts).unwrap()
+                    Ok(std::str::from_utf8(bts).unwrap())
                 }
             }
-            _ => panic!("attempted to convert a {:?} to a string", data),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "&str".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<DataType> for i128 {
-    fn from(data: DataType) -> Self {
-        (&data).into()
+impl TryFrom<DataType> for i128 {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        <i128>::try_from(&data)
     }
 }
 
-impl From<DataType> for i64 {
-    fn from(data: DataType) -> i64 {
-        (&data).into()
+impl TryFrom<DataType> for i64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<i64, Self::Error> {
+        <i64>::try_from(&data)
     }
 }
 
-impl From<&'_ DataType> for i128 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for i128 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::BigInt(s) => i128::from(s),
-            DataType::UnsignedBigInt(s) => i128::from(s),
-            DataType::Int(s) => i128::from(s),
-            DataType::UnsignedInt(s) => i128::from(s),
-            _ => panic!("attempted to convert a {:?} to an i128", data),
+            DataType::BigInt(s) => Ok(i128::from(s)),
+            DataType::UnsignedBigInt(s) => Ok(i128::from(s)),
+            DataType::Int(s) => Ok(i128::from(s)),
+            DataType::UnsignedInt(s) => Ok(i128::from(s)),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "i128".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<&'_ DataType> for i64 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for i64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
             DataType::UnsignedBigInt(s) => {
                 if s as i128 >= std::i64::MIN.into() && s as i128 <= std::i64::MAX.into() {
-                    s as i64
+                    Ok(s as i64)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an i64", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "i64".to_string(),
+                        details: "Out of bounds".to_string(),
+                    })
                 }
             }
-            DataType::BigInt(s) => s,
-            DataType::Int(s) => i64::from(s),
-            DataType::UnsignedInt(s) => i64::from(s),
-            _ => panic!("attempted to convert a {:?} to an i64", data),
+            DataType::BigInt(s) => Ok(s),
+            DataType::Int(s) => Ok(i64::from(s)),
+            DataType::UnsignedInt(s) => Ok(i64::from(s)),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "i64".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<DataType> for u64 {
-    fn from(data: DataType) -> Self {
-        (&data).into()
+impl TryFrom<DataType> for u64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        <u64>::try_from(&data)
     }
 }
 
-impl From<&'_ DataType> for u64 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for u64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::UnsignedBigInt(s) => s,
+            DataType::UnsignedBigInt(s) => Ok(s),
             DataType::BigInt(s) => {
                 if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
-                    s as u64
+                    Ok(s as u64)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to a u64", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "u64".to_string(),
+                        details: "Out of bounds".to_string(),
+                    })
                 }
             }
-            DataType::UnsignedInt(s) => u64::from(s),
+            DataType::UnsignedInt(s) => Ok(u64::from(s)),
             DataType::Int(s) => {
                 if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
-                    s as u64
+                    Ok(s as u64)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to a u64", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "u64".to_string(),
+                        details: "Out of bounds".to_string(),
+                    })
                 }
             }
-            _ => panic!("attempted to convert a {:?} to a u64", data),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "u64".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<DataType> for i32 {
-    fn from(data: DataType) -> Self {
-        (&data).into()
+impl TryFrom<DataType> for i32 {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        <i32>::try_from(&data)
     }
 }
 
-impl From<&'_ DataType> for i32 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for i32 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
             DataType::UnsignedBigInt(s) => {
                 if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    s as i32
+                    Ok(s as i32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "i32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
             DataType::BigInt(s) => {
                 if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    s as i32
+                    Ok(s as i32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "i32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
             DataType::UnsignedInt(s) => {
                 if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    s as i32
+                    Ok(s as i32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an i32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "i32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
-            DataType::Int(s) => s,
-            _ => panic!("attempted to convert a {:?} to a i32", data),
+            DataType::Int(s) => Ok(s),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "i32".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<DataType> for u32 {
-    fn from(data: DataType) -> Self {
-        (&data).into()
+impl TryFrom<DataType> for u32 {
+    type Error = ReadySetError;
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        <u32>::try_from(&data)
     }
 }
 
-impl From<&'_ DataType> for u32 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for u32 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
             DataType::UnsignedBigInt(s) => {
                 if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    s as u32
+                    Ok(s as u32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "u32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
             DataType::BigInt(s) => {
                 if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    s as u32
+                    Ok(s as u32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "u32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
-            DataType::UnsignedInt(s) => s,
+            DataType::UnsignedInt(s) => Ok(s),
             DataType::Int(s) => {
                 if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    s as u32
+                    Ok(s as u32)
                 } else {
-                    panic!("attempted to convert an out-of-bounds {:?} to an u32", data)
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "u32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
                 }
             }
-            _ => panic!("attempted to convert a {:?} to a i32", data),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "u32".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
 
-impl From<DataType> for f64 {
-    fn from(data: DataType) -> Self {
-        (&data).into()
+impl TryFrom<DataType> for f64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        <f64>::try_from(&data)
     }
 }
 
-impl From<&'_ DataType> for f64 {
-    fn from(data: &'_ DataType) -> Self {
+impl TryFrom<&'_ DataType> for f64 {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Real(i, f) => i as f64 + f64::from(f) / FLOAT_PRECISION,
-            DataType::UnsignedInt(i) => f64::from(i),
-            DataType::Int(i) => f64::from(i),
-            DataType::UnsignedBigInt(i) => i as f64,
-            DataType::BigInt(i) => i as f64,
-            _ => panic!("attempted to convert a {:?} to an f64", data),
+            DataType::Real(i, f) => Ok(i as f64 + f64::from(f) / FLOAT_PRECISION),
+            DataType::UnsignedInt(i) => Ok(f64::from(i)),
+            DataType::Int(i) => Ok(f64::from(i)),
+            DataType::UnsignedBigInt(i) => Ok(i as f64),
+            DataType::BigInt(i) => Ok(i as f64),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "f64".to_string(),
+                details: "".to_string(),
+            }),
         }
     }
 }
@@ -1060,16 +1225,20 @@ impl From<String> for DataType {
     }
 }
 
-impl From<&'_ DataType> for String {
-    fn from(dt: &DataType) -> Self {
-        let s: &str = dt.into();
-        s.into()
+impl TryFrom<&'_ DataType> for String {
+    type Error = ReadySetError;
+
+    fn try_from(dt: &DataType) -> Result<Self, Self::Error> {
+        let s: &str = <&str>::try_from(dt)?;
+        Ok(s.into())
     }
 }
 
-impl From<DataType> for String {
-    fn from(dt: DataType) -> Self {
-        (&dt).into()
+impl TryFrom<DataType> for String {
+    type Error = ReadySetError;
+
+    fn try_from(dt: DataType) -> Result<Self, Self::Error> {
+        String::try_from(&dt)
     }
 }
 
@@ -1080,7 +1249,7 @@ impl<'a> From<&'a str> for DataType {
 }
 
 impl<'a> TryFrom<&'a [u8]> for DataType {
-    type Error = &'static str;
+    type Error = ReadySetError;
 
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
         let len = b.len();
@@ -1095,14 +1264,19 @@ impl<'a> TryFrom<&'a [u8]> for DataType {
         } else {
             match ArcCStr::try_from(b) {
                 Ok(arc_c_str) => Ok(DataType::Text(arc_c_str)),
-                Err(_) => Err("Invalid utf-8 string"),
+                Err(_) => Err(Self::Error::DataTypeConversionError {
+                    val: format!("{:?}", b),
+                    src_type: "DataType".to_string(),
+                    target_type: "&[u8]".to_string(),
+                    details: "".to_string(),
+                }),
             }
         }
     }
 }
 
 impl TryFrom<mysql_common::value::Value> for DataType {
-    type Error = &'static str;
+    type Error = ReadySetError;
 
     fn try_from(v: mysql_common::value::Value) -> Result<Self, Self::Error> {
         use mysql_common::value::Value;
@@ -1110,10 +1284,10 @@ impl TryFrom<mysql_common::value::Value> for DataType {
         match v {
             Value::NULL => Ok(DataType::None),
             Value::Bytes(v) => DataType::try_from(&v[..]),
-            Value::Int(v) => Ok(v.into()),
-            Value::UInt(v) => Ok(v.into()),
-            Value::Float(v) => Ok(v.into()),
-            Value::Double(v) => Ok(v.into()),
+            Value::Int(v) => Ok(DataType::from(v)),
+            Value::UInt(v) => Ok(DataType::from(v)),
+            Value::Float(v) => DataType::try_from(v),
+            Value::Double(v) => DataType::try_from(v),
             Value::Date(year, month, day, hour, minutes, seconds, micros) => {
                 Ok(DataType::Timestamp(
                     NaiveDate::from_ymd(year.into(), month.into(), day.into()).and_hms_micro(
@@ -1124,7 +1298,9 @@ impl TryFrom<mysql_common::value::Value> for DataType {
                     ),
                 ))
             }
-            Value::Time(..) => Err("`mysql_common::value::Value::time` is not supported in Noria"),
+            Value::Time(..) => {
+                unsupported!("`mysql_common::value::Value::time` is not supported by ReadySet")
+            }
         }
     }
 }
@@ -1142,10 +1318,10 @@ macro_rules! arithmetic_operation (
 
             (&DataType::Int(a), &DataType::BigInt(b)) => (i64::from(a) $op b).into(),
             (&DataType::BigInt(a), &DataType::Int(b)) => (a $op i64::from(b)).into(),
-            (&DataType::Int(a), &DataType::UnsignedBigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
-            (&DataType::UnsignedBigInt(a), &DataType::Int(b)) => (i128::from(a) $op i128::from(b)).into(),
-            (&DataType::BigInt(a), &DataType::UnsignedBigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
-            (&DataType::UnsignedBigInt(a), &DataType::BigInt(b)) => (i128::from(a) $op i128::from(b)).into(),
+            (&DataType::Int(a), &DataType::UnsignedBigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
+            (&DataType::UnsignedBigInt(a), &DataType::Int(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
+            (&DataType::BigInt(a), &DataType::UnsignedBigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
+            (&DataType::UnsignedBigInt(a), &DataType::BigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedInt(b)) => (a $op u64::from(b)).into(),
             (&DataType::UnsignedInt(a), &DataType::UnsignedBigInt(b)) => (u64::from(a) $op b).into(),
 
@@ -1158,9 +1334,9 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Real(..), second @ &DataType::UnsignedInt(..)) |
             (first @ &DataType::Real(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Real(..), second @ &DataType::Real(..)) => {
-                let a: f64 = first.into();
-                let b: f64 = second.into();
-                (a $op b).into()
+                let a: f64 = f64::try_from(first)?;
+                let b: f64 = f64::try_from(second)?;
+                DataType::try_from(a $op b)?
             }
             (first, second) => panic!(
                 format!(
@@ -1175,34 +1351,34 @@ macro_rules! arithmetic_operation (
 );
 
 impl<'a, 'b> Add<&'b DataType> for &'a DataType {
-    type Output = DataType;
+    type Output = ReadySetResult<DataType>;
 
-    fn add(self, other: &'b DataType) -> DataType {
-        arithmetic_operation!(+, self, other)
+    fn add(self, other: &'b DataType) -> Self::Output {
+        Ok(arithmetic_operation!(+, self, other))
     }
 }
 
 impl<'a, 'b> Sub<&'b DataType> for &'a DataType {
-    type Output = DataType;
+    type Output = ReadySetResult<DataType>;
 
-    fn sub(self, other: &'b DataType) -> DataType {
-        arithmetic_operation!(-, self, other)
+    fn sub(self, other: &'b DataType) -> Self::Output {
+        Ok(arithmetic_operation!(-, self, other))
     }
 }
 
 impl<'a, 'b> Mul<&'b DataType> for &'a DataType {
-    type Output = DataType;
+    type Output = ReadySetResult<DataType>;
 
-    fn mul(self, other: &'b DataType) -> DataType {
-        arithmetic_operation!(*, self, other)
+    fn mul(self, other: &'b DataType) -> Self::Output {
+        Ok(arithmetic_operation!(*, self, other))
     }
 }
 
 impl<'a, 'b> Div<&'b DataType> for &'a DataType {
-    type Output = DataType;
+    type Output = ReadySetResult<DataType>;
 
-    fn div(self, other: &'b DataType) -> DataType {
-        arithmetic_operation!(/, self, other)
+    fn div(self, other: &'b DataType) -> Self::Output {
+        Ok(arithmetic_operation!(/, self, other))
     }
 }
 
@@ -1307,19 +1483,6 @@ impl Arbitrary for DataType {
     }
 }
 
-/// Errors that can occur when coercing a [`DataType`] to a different [`SqlType`] with
-/// [`DataType::coerce_to`]
-#[derive(Serialize, Deserialize, Debug, Error)]
-#[error("error coercing value {value:?} to {expected_type:?}: {message}")]
-pub struct ValueCoerceError {
-    /// The value that was being coerced
-    pub value: DataType,
-    /// The type that we were trying to coerce to
-    pub expected_type: SqlType,
-    /// A human-readable message for the error
-    pub message: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1373,7 +1536,7 @@ mod tests {
         let a = Value::Float(initial_float);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
-        let converted_float: f64 = a_dt.unwrap().into();
+        let converted_float: f64 = <f64>::try_from(a_dt.unwrap()).unwrap();
         assert_approx_eq!(converted_float, initial_float as f64);
 
         // Test Value::Date.
@@ -1392,9 +1555,9 @@ mod tests {
 
     #[test]
     fn real_to_string() {
-        let a: DataType = (2.5).into();
-        let b: DataType = (-2.01).into();
-        let c: DataType = (-0.012_345_678).into();
+        let a: DataType = DataType::try_from(2.5).unwrap();
+        let b: DataType = DataType::try_from(-2.01).unwrap();
+        let c: DataType = DataType::try_from(-0.012_345_678).unwrap();
         assert_eq!(a.to_string(), "2.500000000");
         assert_eq!(b.to_string(), "-2.010000000");
         assert_eq!(c.to_string(), "-0.012345678");
@@ -1404,53 +1567,125 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn real_to_float() {
         let original = 2.5;
-        let data_type: DataType = original.into();
-        let converted: f64 = (&data_type).into();
+        let data_type: DataType = DataType::try_from(original).unwrap();
+        let converted: f64 = <f64>::try_from(&data_type).unwrap();
         assert_eq!(original, converted);
     }
 
     #[test]
     fn add_data_types() {
-        assert_eq!(&DataType::from(1) + &DataType::from(2), 3.into());
-        assert_eq!(&DataType::from(1.5) + &DataType::from(2), (3.5).into());
-        assert_eq!(&DataType::from(2) + &DataType::from(1.5), (3.5).into());
-        assert_eq!(&DataType::from(1.5) + &DataType::from(2.5), (4.0).into());
-        assert_eq!(&DataType::BigInt(1) + &DataType::BigInt(2), 3.into());
-        assert_eq!(&DataType::from(1) + &DataType::BigInt(2), 3.into());
-        assert_eq!(&DataType::BigInt(2) + &DataType::from(1), 3.into());
+        assert_eq!((&DataType::from(1) + &DataType::from(2)).unwrap(), 3.into());
+        assert_eq!(
+            (&DataType::try_from(1.5).unwrap() + &DataType::from(2)).unwrap(),
+            DataType::try_from(3.5).unwrap()
+        );
+        assert_eq!(
+            (&DataType::from(2) + &DataType::try_from(1.5).unwrap()).unwrap(),
+            DataType::try_from(3.5).unwrap()
+        );
+        assert_eq!(
+            (&DataType::try_from(1.5).unwrap() + &DataType::try_from(2.5).unwrap()).unwrap(),
+            DataType::try_from(4.0).unwrap()
+        );
+        assert_eq!(
+            (&DataType::BigInt(1) + &DataType::BigInt(2)).unwrap(),
+            3.into()
+        );
+        assert_eq!(
+            (&DataType::from(1) + &DataType::BigInt(2)).unwrap(),
+            3.into()
+        );
+        assert_eq!(
+            (&DataType::BigInt(2) + &DataType::try_from(1).unwrap()).unwrap(),
+            3.into()
+        );
     }
 
     #[test]
     fn subtract_data_types() {
-        assert_eq!(&DataType::from(2) - &DataType::from(1), 1.into());
-        assert_eq!(&DataType::from(3.5) - &DataType::from(2), (1.5).into());
-        assert_eq!(&DataType::from(2) - &DataType::from(1.5), (0.5).into());
-        assert_eq!(&DataType::from(3.5) - &DataType::from(2.0), (1.5).into());
-        assert_eq!(&DataType::BigInt(1) - &DataType::BigInt(2), (-1).into());
-        assert_eq!(&DataType::from(1) - &DataType::BigInt(2), (-1).into());
-        assert_eq!(&DataType::BigInt(2) - &DataType::from(1), 1.into());
+        assert_eq!((&DataType::from(2) - &DataType::from(1)).unwrap(), 1.into());
+        assert_eq!(
+            (&DataType::try_from(3.5).unwrap() - &DataType::from(2)).unwrap(),
+            DataType::try_from(1.5).unwrap()
+        );
+        assert_eq!(
+            (&DataType::from(2) - &DataType::try_from(1.5).unwrap()).unwrap(),
+            DataType::try_from(0.5).unwrap()
+        );
+        assert_eq!(
+            (&DataType::try_from(3.5).unwrap() - &DataType::try_from(2.0).unwrap()).unwrap(),
+            DataType::try_from(1.5).unwrap()
+        );
+        assert_eq!(
+            (&DataType::BigInt(1) - &DataType::BigInt(2)).unwrap(),
+            (-1).into()
+        );
+        assert_eq!(
+            (&DataType::from(1) - &DataType::BigInt(2)).unwrap(),
+            (-1).into()
+        );
+        assert_eq!(
+            (&DataType::BigInt(2) - &DataType::from(1)).unwrap(),
+            1.into()
+        );
     }
 
     #[test]
     fn multiply_data_types() {
-        assert_eq!(&DataType::from(2) * &DataType::from(1), 2.into());
-        assert_eq!(&DataType::from(3.5) * &DataType::from(2), (7.0).into());
-        assert_eq!(&DataType::from(2) * &DataType::from(1.5), (3.0).into());
-        assert_eq!(&DataType::from(3.5) * &DataType::from(2.0), (7.0).into());
-        assert_eq!(&DataType::BigInt(1) * &DataType::BigInt(2), 2.into());
-        assert_eq!(&DataType::from(1) * &DataType::BigInt(2), 2.into());
-        assert_eq!(&DataType::BigInt(2) * &DataType::from(1), 2.into());
+        assert_eq!((&DataType::from(2) * &DataType::from(1)).unwrap(), 2.into());
+        assert_eq!(
+            (&DataType::try_from(3.5).unwrap() * &DataType::from(2)).unwrap(),
+            DataType::try_from(7.0).unwrap()
+        );
+        assert_eq!(
+            (&DataType::from(2) * &DataType::try_from(1.5).unwrap()).unwrap(),
+            DataType::try_from(3.0).unwrap()
+        );
+        assert_eq!(
+            (&DataType::try_from(3.5).unwrap() * &DataType::try_from(2.0).unwrap()).unwrap(),
+            DataType::try_from(7.0).unwrap()
+        );
+        assert_eq!(
+            (&DataType::BigInt(1) * &DataType::BigInt(2)).unwrap(),
+            2.into()
+        );
+        assert_eq!(
+            (&DataType::from(1) * &DataType::BigInt(2)).unwrap(),
+            2.into()
+        );
+        assert_eq!(
+            (&DataType::BigInt(2) * &DataType::from(1)).unwrap(),
+            2.into()
+        );
     }
 
     #[test]
     fn divide_data_types() {
-        assert_eq!(&DataType::from(2) / &DataType::from(1), 2.into());
-        assert_eq!(&DataType::from(7.5) / &DataType::from(2), (3.75).into());
-        assert_eq!(&DataType::from(7) / &DataType::from(2.5), (2.8).into());
-        assert_eq!(&DataType::from(3.5) / &DataType::from(2.0), (1.75).into());
-        assert_eq!(&DataType::BigInt(4) / &DataType::BigInt(2), 2.into());
-        assert_eq!(&DataType::from(4) / &DataType::BigInt(2), 2.into());
-        assert_eq!(&DataType::BigInt(4) / &DataType::from(2), 2.into());
+        assert_eq!((&DataType::from(2) / &DataType::from(1)).unwrap(), 2.into());
+        assert_eq!(
+            (&DataType::try_from(7.5).unwrap() / &DataType::from(2)).unwrap(),
+            DataType::try_from(3.75).unwrap()
+        );
+        assert_eq!(
+            (&DataType::from(7) / &DataType::try_from(2.5).unwrap()).unwrap(),
+            DataType::try_from(2.8).unwrap()
+        );
+        assert_eq!(
+            (&DataType::try_from(3.5).unwrap() / &DataType::try_from(2.0).unwrap()).unwrap(),
+            DataType::try_from(1.75).unwrap()
+        );
+        assert_eq!(
+            (&DataType::BigInt(4) / &DataType::BigInt(2)).unwrap(),
+            2.into()
+        );
+        assert_eq!(
+            (&DataType::from(4) / &DataType::BigInt(2)).unwrap(),
+            2.into()
+        );
+        assert_eq!(
+            (&DataType::BigInt(4) / &DataType::from(2)).unwrap(),
+            2.into()
+        );
     }
 
     #[test]
@@ -1465,7 +1700,7 @@ mod tests {
     fn data_type_debug() {
         let tiny_text: DataType = "hi".into();
         let text: DataType = "I contain ' and \"".into();
-        let real: DataType = (-0.05).into();
+        let real: DataType = DataType::try_from(-0.05).unwrap();
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
@@ -1484,7 +1719,7 @@ mod tests {
     fn data_type_display() {
         let tiny_text: DataType = "hi".into();
         let text: DataType = "this is a very long text indeed".into();
-        let real: DataType = (-0.05).into();
+        let real: DataType = DataType::try_from(-0.05).unwrap();
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
@@ -1505,8 +1740,8 @@ mod tests {
         let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
         let text: DataType = "this is a very long text indeed".into();
         let text2: DataType = "this is another long text".into();
-        let real: DataType = (-0.05).into();
-        let real2: DataType = (-0.06).into();
+        let real: DataType = DataType::try_from(-0.05).unwrap();
+        let real2: DataType = DataType::try_from(-0.06).unwrap();
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
         let shrt = DataType::Int(5);
@@ -1651,34 +1886,49 @@ mod tests {
         let ubigint_u64_max = DataType::UnsignedBigInt(std::u64::MAX);
 
         fn _data_type_conversion_test_eq_i32(d: &DataType) {
-            assert_eq!(i32::from(d) as i128, i128::from(d))
+            assert_eq!(
+                i32::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_i32_panic(d: &DataType) {
-            assert!(std::panic::catch_unwind(|| i32::from(d)).is_err())
+            assert!(std::panic::catch_unwind(|| i32::try_from(d).unwrap()).is_err())
         }
         fn _data_type_conversion_test_eq_i64(d: &DataType) {
-            assert_eq!(i64::from(d) as i128, i128::from(d))
+            assert_eq!(
+                i64::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_i64_panic(d: &DataType) {
-            assert!(std::panic::catch_unwind(|| i64::from(d)).is_err())
+            assert!(std::panic::catch_unwind(|| i64::try_from(d).unwrap()).is_err())
         }
         fn _data_type_conversion_test_eq_u32(d: &DataType) {
-            assert_eq!(u32::from(d) as i128, i128::from(d))
+            assert_eq!(
+                u32::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_u32_panic(d: &DataType) {
-            assert!(std::panic::catch_unwind(|| u32::from(d)).is_err())
+            assert!(std::panic::catch_unwind(|| u32::try_from(d).unwrap()).is_err())
         }
         fn _data_type_conversion_test_eq_u64(d: &DataType) {
-            assert_eq!(u64::from(d) as i128, i128::from(d))
+            assert_eq!(
+                u64::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_u64_panic(d: &DataType) {
-            assert!(std::panic::catch_unwind(|| u64::from(d)).is_err())
+            assert!(std::panic::catch_unwind(|| u64::try_from(d).unwrap()).is_err())
         }
         fn _data_type_conversion_test_eq_i128(d: &DataType) {
-            assert_eq!(i128::from(d) as i128, i128::from(d))
+            assert_eq!(
+                i128::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_i128_panic(d: &DataType) {
-            assert!(std::panic::catch_unwind(|| i128::from(d)).is_err())
+            assert!(std::panic::catch_unwind(|| i128::try_from(d).unwrap()).is_err())
         }
 
         _data_type_conversion_test_eq_i32_panic(&bigint_i64_min);
@@ -1776,7 +2026,7 @@ mod tests {
 
     #[proptest]
     fn data_type_string_conversion_roundtrip(s: String) {
-        assert_eq!(String::try_from(&DataType::from(s.clone())), Ok(s))
+        assert_eq!(String::try_from(&DataType::from(s.clone())).unwrap(), s)
     }
 
     #[test]
@@ -1803,8 +2053,8 @@ mod tests {
         let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
         let text: DataType = "this is a very long text indeed".into();
         let text2: DataType = "this is another long text".into();
-        let real: DataType = (-0.05).into();
-        let real2: DataType = (-0.06).into();
+        let real: DataType = DataType::try_from(-0.05).unwrap();
+        let real2: DataType = DataType::try_from(-0.06).unwrap();
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
         let shrt = DataType::Int(5);
@@ -2039,7 +2289,7 @@ mod tests {
         fn real_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
             let real = DataType::Real(whole_part.into(), 0);
             let result = real.coerce_to(&int_type).unwrap();
-            assert_eq!(i32::from(result.into_owned()), whole_part);
+            assert_eq!(i32::try_from(result.into_owned()).unwrap(), whole_part);
         }
 
         fn unsigned_type() -> impl Strategy<Value = SqlType> {
@@ -2056,7 +2306,7 @@ mod tests {
         fn real_to_unsigned(whole_part: u32, #[strategy(unsigned_type())] unsigned_type: SqlType) {
             let real = DataType::Real(whole_part as i64, 0);
             let result = real.coerce_to(&unsigned_type).unwrap();
-            assert_eq!(u32::from(result.into_owned()), whole_part);
+            assert_eq!(u32::try_from(result.into_owned()).unwrap(), whole_part);
         }
 
         #[proptest]
@@ -2065,7 +2315,10 @@ mod tests {
             let input = DataType::from(text.as_str());
             let intermediate = Char(u16::try_from(text.len()).unwrap());
             let result = input.coerce_to(&intermediate).unwrap();
-            assert_eq!(String::from(&result.into_owned()).as_str(), text.as_str());
+            assert_eq!(
+                String::try_from(&result.into_owned()).unwrap().as_str(),
+                text.as_str()
+            );
         }
     }
 }

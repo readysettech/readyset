@@ -1,7 +1,6 @@
 //! Error handling, definitions, and utilities
 
 use crate::channel::tcp::SendError;
-use crate::ValueCoerceError;
 use petgraph::graph::NodeIndex;
 use std::error::Error;
 use std::net::SocketAddr;
@@ -191,10 +190,6 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// An error occurred when coercing DataType values to a different type
-    #[error(transparent)]
-    ValueCoerce(ValueCoerceError),
-
     /// A user-provided SQL query referenced a function that does not exist
     #[error("Function {0} does not exist")]
     NoSuchFunction(String),
@@ -211,6 +206,40 @@ pub enum ReadySetError {
     /// A column couldn't be found.
     #[error("Column {0} not found in table or view")]
     NoSuchColumn(String),
+
+    /// Conversion to or from a [`DataType`](crate::DataType) failed.
+    #[error("DataType conversion error: Failed to convert {val} of type {src_type} to the type {target_type}: {details}")]
+    DataTypeConversionError {
+        /// Source value.
+        val: String,
+        /// Source type.
+        src_type: String,
+        /// Target type.
+        target_type: String,
+        /// More details about the nature of the error.
+        details: String,
+    },
+
+    /// Invalid index when evaluating a project expression.
+    #[error("Column index out-of-bounds while evaluating project expression: index was {0}")]
+    ProjectExpressionInvalidColumnIndex(usize),
+
+    /// Error in built-in function of expression projection
+    #[error("Error in project expression built-in function: {function}: {message}")]
+    ProjectExpressionBuiltInFunctionError {
+        /// The built-in function the error occured in.
+        function: String,
+        /// Details about the specific error.
+        message: String,
+    },
+
+    /// Error parsing a string into a NativeDateTime.
+    #[error("Error parsing a NativeDateTime from the string: {0}")]
+    NaiveDateTimeParseError(String),
+
+    /// Primary key is not on a primitive field.
+    #[error("Primary key must be on a primitive field")]
+    InvalidPrimaryKeyField,
 }
 
 impl ReadySetError {

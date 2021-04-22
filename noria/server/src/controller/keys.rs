@@ -288,6 +288,8 @@ mod tests {
 
     #[test]
     fn generated_cols() {
+        use std::convert::TryFrom;
+
         let (mut g, a, _) = bases();
 
         let x = g.add_node(node::Node::new(
@@ -296,7 +298,7 @@ mod tests {
             ops::NodeOperator::Project(ops::project::Project::new(
                 a,
                 &[0],
-                Some(vec![3.14.into()]),
+                Some(vec![DataType::try_from(3.14).unwrap()]),
                 None,
             )),
         ));

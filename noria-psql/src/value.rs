@@ -1,5 +1,5 @@
 use arccstr::ArcCStr;
-use noria::DataType;
+use noria::{DataType, ReadySetError};
 use psql_srv as ps;
 use std::convert::TryFrom;
 
@@ -20,8 +20,11 @@ impl TryFrom<Value> for ps::Value {
     fn try_from(v: Value) -> Result<Self, Self::Error> {
         let from_tiny_text = |v| {
             // TODO Avoid this allocation by adding a TinyText storage option in psql-srv.
-            ArcCStr::try_from(<&str>::from(v))
-                .map_err(|_| ps::Error::InternalError("unexpected nul within TinyText".to_string()))
+            ArcCStr::try_from(
+                <&str>::try_from(v)
+                    .map_err(|e: ReadySetError| ps::Error::InternalError(e.to_string()))?,
+            )
+            .map_err(|_| ps::Error::InternalError("unexpected nul within TinyText".to_string()))
         };
         match (v.col_type, v.value) {
             (ps::ColType::Char(_), DataType::Text(v)) => Ok(ps::Value::Char(v)),
@@ -34,7 +37,10 @@ impl TryFrom<Value> for ps::Value {
             }
             (ps::ColType::Int(_), DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (ps::ColType::Bigint(_), DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
-            (ps::ColType::Double, v @ DataType::Real(_, _)) => Ok(ps::Value::Double(v.into())),
+            (ps::ColType::Double, v @ DataType::Real(_, _)) => Ok(ps::Value::Double(
+                f64::try_from(v)
+                    .map_err(|e: ReadySetError| ps::Error::InternalError(e.to_string()))?,
+            )),
             (ps::ColType::Text, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (ps::ColType::Text, ref v @ DataType::TinyText(_)) => {
                 Ok(ps::Value::Text(from_tiny_text(v)?))

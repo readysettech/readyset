@@ -216,6 +216,7 @@ pub mod metrics;
 mod table;
 pub mod util;
 mod view;
+use std::convert::TryFrom;
 
 #[doc(hidden)]
 pub mod channel;
@@ -299,8 +300,7 @@ impl<T> From<T> for Tagged<T> {
 
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
-    DataType, Modification, Operation, TableOperation, ValueCoerceError, DATE_FORMAT,
-    TIMESTAMP_FORMAT, TIME_FORMAT,
+    DataType, Modification, Operation, TableOperation, DATE_FORMAT, TIMESTAMP_FORMAT, TIME_FORMAT,
 };
 pub use crate::map::Map;
 pub use crate::table::{Table, TableRequest};
@@ -366,6 +366,8 @@ pub struct ViewRequest {
 
 #[doc(hidden)]
 #[inline]
+// This function is intentionally designed to never error
+// TODO: implement sharding for remaining types: https://app.clubhouse.io/readysettech/story/168/sharding-by-certain-data-types-isn-t-supported
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {
         DataType::Int(n) => n as usize % shards,
@@ -375,8 +377,10 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         DataType::Text(..) | DataType::TinyText(..) | DataType::Timestamp(..) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
+            // this unwrap should be safe because there are no error paths with a Text, TinyText, nor Timestamp converting to Text
             let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
-            let s: &str = str_dt.as_ref().into();
+            // this unwrap should be safe because we just coerced dt to a text
+            let s: &str = <&str>::try_from(str_dt.as_ref()).unwrap();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
         }

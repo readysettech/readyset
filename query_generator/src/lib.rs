@@ -62,6 +62,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::hash::Hash;
 use std::iter;
 use std::str::FromStr;
@@ -105,7 +106,9 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::UnsignedTinyint(_) => 1u8.into(),
         SqlType::Smallint(_) => 1i16.into(),
         SqlType::UnsignedSmallint(_) => 1u16.into(),
-        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => 1.5.into(),
+        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
+            1.5.try_into().unwrap()
+        }
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
@@ -149,7 +152,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u8) -> DataType {
         SqlType::Smallint(_) => (2i16 + idx as i16).into(),
         SqlType::UnsignedSmallint(_) => (1u16 + idx as u16).into(),
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
-            (1.5 + idx as f64).into()
+            (1.5 + idx as f64).try_into().unwrap()
         }
         SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
             .and_hms(12, idx as _, 30)

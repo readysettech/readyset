@@ -1,6 +1,7 @@
 use chrono;
 use noria::DataType;
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::future::Future;
 use tower_util::ServiceExt;
 use trawler::{StoryId, UserId};
@@ -50,7 +51,7 @@ where
         let now = chrono::Local::now().naive_local();
         let mut tbl = c.table("read_ribbons").await?.ready_oneshot().await?;
         let row: Result<Vec<DataType>, anyhow::Error> = noria::row!(tbl,
-            "id" => (i64::from(uid) << 32) + Into::<i64>::into(&story),
+            "id" => (i64::from(uid) << 32) + <i64>::try_from(&story)?,
             "created_at" => now,
             "updated_at" => now,
             "user_id" => uid,

@@ -4,6 +4,7 @@ use mysql::Params;
 use serde_derive::Deserialize;
 
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::fmt::Write as FmtWrite;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -34,7 +35,7 @@ impl Type {
         match *self {
             Type::Int => i64::from_str(value).unwrap().into(),
             Type::Text => value.into(),
-            Type::Real => f64::from_str(value).unwrap().into(),
+            Type::Real => f64::from_str(value).unwrap().try_into().unwrap(),
             Type::Date => value.into(),
             Type::Timestamp => value.into(),
         }
@@ -311,7 +312,7 @@ async fn check_query(
                         DataType::UnsignedBigInt(i) => i.to_string(),
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
                         DataType::Text(_) | DataType::TinyText(_) => {
-                            let s: &str = (&v).into();
+                            let s: &str = (&v).try_into().unwrap();
                             s.to_string()
                         }
                         DataType::Timestamp(_) | DataType::Time(_) => unimplemented!(),

@@ -1,41 +1,15 @@
 use std::borrow::Cow;
 use std::fmt;
-use thiserror::Error;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
-use noria::{DataType, ReadySetError, ReadySetResult, ValueCoerceError};
+use noria::{DataType, ReadySetError, ReadySetResult};
+use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Add, Sub};
 use std::sync::Arc;
-
-#[derive(Debug, Error)]
-pub enum EvalError {
-    /// An index in a [`Column`](ProjectExpression::Column) was out-of-bounds for the source record
-    #[error("Column index out-of-bounds: {0}")]
-    InvalidColumnIndex(usize),
-
-    /// Error coercing a value, whether implicitly or as part of a [`Cast`](ProjectExpression::Cast)
-    #[error(transparent)]
-    CoerceError(#[from] ValueCoerceError),
-
-    /// Error calling a built-in function.
-    #[error(transparent)]
-    CallError(#[from] BuiltinFunctionError),
-}
-
-/// Errors that can occur when calling a builtin function.
-#[derive(Debug, Error)]
-#[error("error running function {function:?}: {message}")]
-pub struct BuiltinFunctionError {
-    /// The function that failed
-    pub function: String,
-    /// A human-readable message for the error
-    pub message: String,
-    source: Option<anyhow::Error>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuiltinFunction {
@@ -201,28 +175,30 @@ macro_rules! non_null {
 
 impl ProjectExpression {
     /// Evaluate a [`ProjectExpression`] given a source record to pull columns from
-    pub fn eval<'a>(&self, record: &'a [DataType]) -> Result<Cow<'a, DataType>, EvalError> {
+    pub fn eval<'a>(&self, record: &'a [DataType]) -> ReadySetResult<Cow<'a, DataType>> {
         use ProjectExpression::*;
 
         match self {
             Column(c) => record
                 .get(*c)
                 .map(Cow::Borrowed)
-                .ok_or(EvalError::InvalidColumnIndex(*c)),
+                .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*c)),
             Literal(dt) => Ok(Cow::Owned(dt.clone())),
             Op { op, left, right } => {
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
                 match op {
-                    ArithmeticOperator::Add => Ok(Cow::Owned(non_null!(left) + non_null!(right))),
+                    ArithmeticOperator::Add => {
+                        Ok(Cow::Owned((non_null!(left) + non_null!(right))?))
+                    }
                     ArithmeticOperator::Subtract => {
-                        Ok(Cow::Owned(non_null!(left) - non_null!(right)))
+                        Ok(Cow::Owned((non_null!(left) - non_null!(right))?))
                     }
                     ArithmeticOperator::Multiply => {
-                        Ok(Cow::Owned(non_null!(left) * non_null!(right)))
+                        Ok(Cow::Owned((non_null!(left) * non_null!(right))?))
                     }
                     ArithmeticOperator::Divide => {
-                        Ok(Cow::Owned(non_null!(left) / non_null!(right)))
+                        Ok(Cow::Owned((non_null!(left) / non_null!(right))?))
                     }
                 }
             }
@@ -239,9 +215,9 @@ impl ProjectExpression {
                     let param2_cast = try_cast_or_none!(param2, &SqlType::Text);
                     let param3_cast = try_cast_or_none!(param3, &SqlType::Text);
                     match convert_tz(
-                        &(param1_cast.as_ref().into()),
-                        param2_cast.as_ref().into(),
-                        param3_cast.as_ref().into(),
+                        &(NaiveDateTime::try_from(param1_cast.as_ref()))?,
+                        <&str>::try_from(param2_cast.as_ref())?,
+                        <&str>::try_from(param3_cast.as_ref())?,
                     ) {
                         Ok(v) => Ok(Cow::Owned(DataType::Timestamp(v))),
                         Err(_) => Ok(Cow::Owned(DataType::None)),
@@ -250,9 +226,9 @@ impl ProjectExpression {
                 BuiltinFunction::DayOfWeek(arg) => {
                     let param = arg.eval(record)?;
                     let param_cast = try_cast_or_none!(param, &SqlType::Date);
-                    Ok(Cow::Owned(DataType::Int(
-                        day_of_week(&(param_cast.as_ref().into())) as i32,
-                    )))
+                    Ok(Cow::Owned(DataType::Int(day_of_week(
+                        &(NaiveDate::try_from(param_cast.as_ref())?),
+                    ) as i32)))
                 }
                 BuiltinFunction::IfNull(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
@@ -266,9 +242,10 @@ impl ProjectExpression {
                 BuiltinFunction::Month(arg) => {
                     let param = arg.eval(record)?;
                     let param_cast = try_cast_or_none!(param, &SqlType::Date);
-                    Ok(Cow::Owned(DataType::UnsignedInt(
-                        month(&non_null!(param_cast).into()) as u32,
-                    )))
+                    Ok(Cow::Owned(DataType::UnsignedInt(month(
+                        &(NaiveDate::try_from(non_null!(param_cast))?),
+                    )
+                        as u32)))
                 }
                 BuiltinFunction::Timediff(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
@@ -287,13 +264,13 @@ impl ProjectExpression {
                     }
                     let time = if time_param1.is_datetime() {
                         timediff_datetimes(
-                            &(time_param1.as_ref().into()),
-                            &(time_param2.as_ref().into()),
+                            &(NaiveDateTime::try_from(time_param1.as_ref())?),
+                            &(NaiveDateTime::try_from(time_param2.as_ref())?),
                         )
                     } else {
                         timediff_times(
-                            &(time_param1.as_ref().into()),
-                            &(time_param2.as_ref().into()),
+                            &(MysqlTime::try_from(time_param1.as_ref())?),
+                            &(MysqlTime::try_from(time_param2.as_ref())?),
                         )
                     };
                     Ok(Cow::Owned(DataType::Time(Arc::new(time))))
@@ -308,13 +285,13 @@ impl ProjectExpression {
                     let time_param1 = get_time_or_default!(param1);
                     if time_param1.is_datetime() {
                         Ok(Cow::Owned(DataType::Timestamp(addtime_datetime(
-                            &(time_param1.as_ref().into()),
-                            &(time_param2.as_ref().into()),
+                            &(NaiveDateTime::try_from(time_param1.as_ref())?),
+                            &(MysqlTime::try_from(time_param2.as_ref())?),
                         ))))
                     } else {
                         Ok(Cow::Owned(DataType::Time(Arc::new(addtime_times(
-                            &(time_param1.as_ref().into()),
-                            &(time_param2.as_ref().into()),
+                            &(MysqlTime::try_from(time_param1.as_ref())?),
+                            &(MysqlTime::try_from(time_param2.as_ref())?),
                         )))))
                     }
                 }
@@ -353,31 +330,29 @@ pub fn convert_tz(
     datetime: &NaiveDateTime,
     src: &str,
     target: &str,
-) -> Result<NaiveDateTime, BuiltinFunctionError> {
-    let mk_err = |message: &str, source: Option<anyhow::Error>| BuiltinFunctionError {
+) -> ReadySetResult<NaiveDateTime> {
+    let mk_err = |message: &str| ReadySetError::ProjectExpressionBuiltInFunctionError {
         function: "convert_tz".to_owned(),
         message: message.to_owned(),
-        source,
     };
+
     let src_tz: Tz = src
         .parse()
-        .map_err(|_err: String| mk_err("Failed to parse the source timezone", None))?;
+        .map_err(|_| mk_err("Failed to parse the source timezone"))?;
     let target_tz: Tz = target
         .parse()
-        .map_err(|_err: String| mk_err("Failed to parse the target timezone", None))?;
+        .map_err(|_| mk_err("Failed to parse the target timezone"))?;
 
     let datetime_tz = match src_tz.from_local_datetime(datetime) {
         LocalResult::Single(dt) => dt,
         LocalResult::None => {
             return Err(mk_err(
                 "Failed to transform the datetime to a different timezone",
-                None,
             ))
         }
         LocalResult::Ambiguous(_, _) => {
             return Err(mk_err(
                 "Failed to transform the datetime to a different timezone",
-                None,
             ))
         }
     };
@@ -697,7 +672,11 @@ mod tests {
 
         let param2 = 3.57;
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval(&[
+                DataType::try_from(param1).unwrap(),
+                DataType::try_from(param2).unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (-param2 * 1_000_000_f64) as i64
             ))))
@@ -804,7 +783,7 @@ mod tests {
 
         let param2 = 3.57;
         assert_eq!(
-            dbg!(expr.eval(&[param1.into(), param2.into()])).unwrap(),
+            dbg!(expr.eval(&[param1.into(), DataType::try_from(param2).unwrap()])).unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))))
