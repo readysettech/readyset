@@ -133,13 +133,13 @@ struct AverageDataPair {
 }
 
 impl AverageDataPair {
-    fn apply_diff(&mut self, d: NumericalDiff) -> DataType {
+    fn apply_diff(&mut self, d: NumericalDiff) -> ReadySetResult<DataType> {
         if d.positive {
-            self.sum = &self.sum + &d.value;
-            self.count = &self.count + &DataType::Int(1);
+            self.sum = (&self.sum + &d.value)?;
+            self.count = (&self.count + &DataType::Int(1))?;
         } else {
-            self.sum = &self.sum - &d.value;
-            self.count = &self.count - &DataType::Int(1);
+            self.sum = (&self.sum - &d.value)?;
+            self.count = (&self.count - &DataType::Int(1))?;
         }
 
         // TODO: aggregators currently do not properly remove groups with 0 entries
@@ -147,7 +147,7 @@ impl AverageDataPair {
         if self.count > DataType::Int(0) {
             &self.sum / &self.count
         } else {
-            DataType::Real(0, 0)
+            Ok(DataType::Real(0, 0))
         }
     }
 }
@@ -177,22 +177,22 @@ impl GroupedOperation for Aggregator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Option<Self::Diff>> {
         let group_hash = self.group_hash(r);
         let passes_filter = self.filter.iter().all(|f| f.matches(r));
         if passes_filter {
-            Some(NumericalDiff {
+            Ok(Some(NumericalDiff {
                 // Assumption that THEN clause is the `over` column
                 value: r[self.over].clone(),
                 positive: pos,
                 group_hash,
-            })
+            }))
         } else {
-            self.over_else.as_ref().map(|else_val| NumericalDiff {
+            Ok(self.over_else.as_ref().map(|else_val| NumericalDiff {
                 value: DataType::from(else_val),
                 positive: pos,
                 group_hash,
-            })
+            }))
         }
     }
 
@@ -200,8 +200,8 @@ impl GroupedOperation for Aggregator {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> DataType {
-        let apply_count = |curr, diff: Self::Diff| -> DataType {
+    ) -> ReadySetResult<DataType> {
+        let apply_count = |curr, diff: Self::Diff| -> ReadySetResult<DataType> {
             if diff.positive {
                 &curr + &DataType::Int(1)
             } else {
@@ -209,7 +209,7 @@ impl GroupedOperation for Aggregator {
             }
         };
 
-        let apply_sum = |curr, diff: Self::Diff| -> DataType {
+        let apply_sum = |curr, diff: Self::Diff| -> ReadySetResult<DataType> {
             if diff.positive {
                 &curr + &diff.value
             } else {
@@ -217,7 +217,7 @@ impl GroupedOperation for Aggregator {
             }
         };
 
-        let apply_avg = |_curr, diff: Self::Diff| -> DataType {
+        let apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DataType> {
             self.count_sum_map
                 .borrow_mut()
                 .entry(diff.group_hash)
@@ -228,15 +228,16 @@ impl GroupedOperation for Aggregator {
                 .apply_diff(diff)
         };
 
-        let apply_diff = |curr: DataType, diff: Self::Diff| -> DataType {
-            match self.op {
-                Aggregation::COUNT => apply_count(curr, diff),
-                Aggregation::SUM => apply_sum(curr, diff),
-                Aggregation::AVG => apply_avg(curr, diff),
-            }
-        };
+        let apply_diff =
+            |curr: ReadySetResult<DataType>, diff: Self::Diff| -> ReadySetResult<DataType> {
+                match self.op {
+                    Aggregation::COUNT => apply_count(curr?, diff),
+                    Aggregation::SUM => apply_sum(curr?, diff),
+                    Aggregation::AVG => apply_avg(curr?, diff),
+                }
+            };
         diffs.fold(
-            current.unwrap_or(&DataType::Int(0)).deep_clone(),
+            Ok(current.unwrap_or(&DataType::Int(0)).deep_clone()),
             apply_diff,
         )
     }
@@ -623,6 +624,8 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn avg_of_integers_forwards() {
+        use std::convert::TryFrom;
+
         let mut c = setup(Aggregation::AVG, true);
 
         // Add Group=1, Value=2
@@ -635,7 +638,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (2.0).into());
+                assert_eq!(r[1], DataType::try_from(2.0).unwrap());
             }
             _ => unreachable!(),
         }
@@ -650,7 +653,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], (5.0).into());
+                assert_eq!(r[1], DataType::try_from(5.0).unwrap());
             }
             _ => unreachable!(),
         }
@@ -665,14 +668,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (2.0).into());
+                assert_eq!(r[1], DataType::try_from(2.0).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (2.5).into());
+                assert_eq!(r[1], DataType::try_from(2.5).unwrap());
             }
             _ => unreachable!(),
         }
@@ -687,14 +690,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (2.5).into());
+                assert_eq!(r[1], DataType::try_from(2.5).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (3.0).into());
+                assert_eq!(r[1], DataType::try_from(3.0).unwrap());
             }
             _ => unreachable!(),
         }
@@ -720,27 +723,27 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5);
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == (3.0).into()
+            r[0] == 1.into() && r[1] == DataType::try_from(3.0).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == (12.0).into()
+            r[0] == 1.into() && r[1] == DataType::try_from(12.0).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == (5.0).into()
+            r[0] == 2.into() && r[1] == DataType::try_from(5.0).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == (6.25).into()
+            r[0] == 2.into() && r[1] == DataType::try_from(6.25).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == (3.0).into()
+            r[0] == 3.into() && r[1] == DataType::try_from(3.0).unwrap()
         } else {
             false
         }));
@@ -752,10 +755,12 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn avg_of_decimals_forwards() {
+        use std::convert::TryFrom;
+
         let mut c = setup(Aggregation::AVG, true);
 
         // Add [1, 1.25]
-        let u: Record = vec![1.into(), (1.25).into()].into();
+        let u: Record = vec![1.into(), DataType::try_from(1.25).unwrap()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
@@ -764,13 +769,16 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (1.25).into());
+                assert_eq!(
+                    r[1],
+                    DataType::try_from(DataType::try_from(1.25).unwrap()).unwrap()
+                );
             }
             _ => unreachable!(),
         }
 
         // Add [2, 2.25]
-        let u: Record = vec![2.into(), (5.5).into()].into();
+        let u: Record = vec![2.into(), DataType::try_from(5.5).unwrap()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
@@ -779,14 +787,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], (5.5).into());
+                assert_eq!(r[1], DataType::try_from(5.5).unwrap());
             }
             _ => unreachable!(),
         }
 
         // Add [1,2.25]
         // Now: [1, 2.25], [1, 1.25]
-        let u: Record = vec![1.into(), (2.25).into()].into();
+        let u: Record = vec![1.into(), DataType::try_from(2.25).unwrap()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
@@ -795,20 +803,20 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (1.25).into());
+                assert_eq!(r[1], DataType::try_from(1.25).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (1.75).into());
+                assert_eq!(r[1], DataType::try_from(1.75).unwrap());
             }
             _ => unreachable!(),
         }
 
         // Remove [1, 1.25]
-        let u = (vec![1.into(), (1.25).into()], false);
+        let u = (vec![1.into(), DataType::try_from(1.25).unwrap()], false);
         let rs = c.narrow_one_row(u, true);
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
@@ -817,14 +825,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (1.75).into());
+                assert_eq!(r[1], DataType::try_from(1.75).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], (2.25).into());
+                assert_eq!(r[1], DataType::try_from(2.25).unwrap());
             }
             _ => unreachable!(),
         }
@@ -834,42 +842,42 @@ mod tests {
         // Group 2: (5.5/1) -> (10.5/2) = 5.25
         // Group 3: new 3
         let u = vec![
-            (vec![1.into(), (12.4).into()], true),
-            (vec![1.into(), (1.15).into()], true),
-            (vec![1.into(), (1.05).into()], true),
-            (vec![1.into(), (1.1).into()], true),
-            (vec![1.into(), (1.15).into()], false),
-            (vec![1.into(), (1.05).into()], false),
-            (vec![2.into(), (5.25).into()], true),
-            (vec![2.into(), (0.75).into()], true),
-            (vec![2.into(), (1.0).into()], false),
+            (vec![1.into(), DataType::try_from(12.4).unwrap()], true),
+            (vec![1.into(), DataType::try_from(1.15).unwrap()], true),
+            (vec![1.into(), DataType::try_from(1.05).unwrap()], true),
+            (vec![1.into(), DataType::try_from(1.1).unwrap()], true),
+            (vec![1.into(), DataType::try_from(1.15).unwrap()], false),
+            (vec![1.into(), DataType::try_from(1.05).unwrap()], false),
+            (vec![2.into(), DataType::try_from(5.25).unwrap()], true),
+            (vec![2.into(), DataType::try_from(0.75).unwrap()], true),
+            (vec![2.into(), DataType::try_from(1.0).unwrap()], false),
             (vec![3.into(), 3.into()], true),
         ];
 
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5);
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == (2.25).into()
+            r[0] == 1.into() && r[1] == DataType::try_from(2.25).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == (5.25).into()
+            r[0] == 1.into() && r[1] == DataType::try_from(5.25).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == (5.5).into()
+            r[0] == 2.into() && r[1] == DataType::try_from(5.5).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == (5.25).into()
+            r[0] == 2.into() && r[1] == DataType::try_from(5.25).unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == (3.0).into()
+            r[0] == 3.into() && r[1] == DataType::try_from(3.0).unwrap()
         } else {
             false
         }));
@@ -881,10 +889,12 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn avg_groups_by_multiple_columns() {
+        use std::convert::TryFrom;
+
         let mut c = setup_multicolumn(Aggregation::AVG, true);
 
         // Add Group=(1,1), Value=1.25
-        let u: Record = vec![1.into(), (1.25).into(), 1.into()].into();
+        let u: Record = vec![1.into(), DataType::try_from(1.25).unwrap(), 1.into()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
@@ -892,13 +902,13 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[2], (1.25).into());
+                assert_eq!(r[2], DataType::try_from(1.25).unwrap());
             }
             _ => unreachable!(),
         }
 
         // Add Group=(2,1), Value=5.5
-        let u: Record = vec![2.into(), (5.5).into(), 1.into()].into();
+        let u: Record = vec![2.into(), DataType::try_from(5.5).unwrap(), 1.into()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
@@ -906,13 +916,13 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[2], (5.5).into());
+                assert_eq!(r[2], DataType::try_from(5.5).unwrap());
             }
             _ => unreachable!(),
         }
 
         // Add Group=(1,1), Value=2.25
-        let u: Record = vec![1.into(), (2.25).into(), 1.into()].into();
+        let u: Record = vec![1.into(), DataType::try_from(2.25).unwrap(), 1.into()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
@@ -920,20 +930,23 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[2], (1.25).into());
+                assert_eq!(r[2], DataType::try_from(1.25).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[2], (1.75).into());
+                assert_eq!(r[2], DataType::try_from(1.75).unwrap());
             }
             _ => unreachable!(),
         }
 
         // Remove Group=(1,1), Value=1.25
-        let u = (vec![1.into(), (1.25).into(), 1.into()], false);
+        let u = (
+            vec![1.into(), DataType::try_from(1.25).unwrap(), 1.into()],
+            false,
+        );
         let rs = c.narrow_one_row(u, true);
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
@@ -941,14 +954,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[2], (1.75).into());
+                assert_eq!(r[2], DataType::try_from(1.75).unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[2], (2.25).into());
+                assert_eq!(r[2], DataType::try_from(2.25).unwrap());
             }
             _ => unreachable!(),
         }

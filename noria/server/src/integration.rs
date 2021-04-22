@@ -26,6 +26,7 @@ use crate::internal::DomainIndex;
 use chrono::NaiveDate;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,7 +132,9 @@ async fn it_works_basic() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
+    muta.insert(vec![id.clone(), DataType::try_from(2i32).unwrap()])
+        .await
+        .unwrap();
 
     // give it some time to propagate
     sleep().await;
@@ -143,7 +146,9 @@ async fn it_works_basic() {
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
+    mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
+        .await
+        .unwrap();
 
     // give it some time to propagate
     sleep().await;
@@ -154,9 +159,9 @@ async fn it_works_basic() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // check that looking up columns by name works
-    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap() == 1));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 2));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap() == 4));
+    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap().unwrap() == 1));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 2));
+    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 4));
     // same with index
     assert!(res.iter().all(|r| r["a"] == id));
     assert!(res.iter().any(|r| r["b"] == 2.into()));
@@ -526,7 +531,7 @@ async fn broad_recursing_upquery() {
     for i in 0..n {
         assert!(rows
             .iter()
-            .any(|row| row.get::<i32>("base_col").unwrap() == i));
+            .any(|row| row.get::<i32>("base_col").unwrap().unwrap() == i));
     }
 }
 
@@ -1523,8 +1528,8 @@ async fn it_works_with_join_arithmetic() {
     let mut price_mutator = g.table("Price").await.unwrap();
     let mut sales_mutator = g.table("Sales").await.unwrap();
     let mut getter = g.view("CarPrice").await.unwrap();
-    let id = 1;
-    let price = 123;
+    let id: i32 = 1;
+    let price: i32 = 123;
     let fraction = 0.7;
     car_mutator
         .insert(vec![id.into(), id.into()])
@@ -1535,7 +1540,11 @@ async fn it_works_with_join_arithmetic() {
         .await
         .unwrap();
     sales_mutator
-        .insert(vec![id.into(), id.into(), fraction.into()])
+        .insert(vec![
+            id.into(),
+            id.into(),
+            DataType::try_from(fraction).unwrap(),
+        ])
         .await
         .unwrap();
 
@@ -1545,7 +1554,10 @@ async fn it_works_with_join_arithmetic() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&[id.into()], true).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], (f64::from(price) * fraction).into());
+    assert_eq!(
+        result[0][1],
+        DataType::try_from(f64::from(price) * fraction).unwrap()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3237,13 +3249,13 @@ async fn union_basic() {
     .unwrap();
 
     let mut twos = g.table("twos").await.unwrap();
-    twos.insert_many((0..10).filter(|i| i % 2 == 0).map(|i| vec![i.into()]))
+    twos.insert_many((0..10).filter(|i: &i32| i % 2 == 0).map(|i| vec![i.into()]))
         .await
         .unwrap();
 
     let mut threes = g.table("threes").await.unwrap();
     threes
-        .insert_many((0..10).filter(|i| i % 3 == 0).map(|i| vec![i.into()]))
+        .insert_many((0..10).filter(|i: &i32| i % 3 == 0).map(|i| vec![i.into()]))
         .await
         .unwrap();
 
@@ -3258,10 +3270,10 @@ async fn union_basic() {
             .await
             .unwrap()
             .iter()
-            .map(|r| r.get("id").unwrap()),
+            .map(|r| r.get("id").unwrap().unwrap()),
     )
     .collect();
-    let expected_ids: Vec<i32> = (0..10).filter(|i| i % 2 == 0 || i % 3 == 0).collect();
+    let expected_ids: Vec<i32> = (0..10).filter(|i: &i32| i % 2 == 0 || i % 3 == 0).collect();
     assert_eq!(result_ids, expected_ids);
 }
 
@@ -3282,13 +3294,13 @@ async fn union_all_basic() {
     .unwrap();
 
     let mut twos = g.table("twos").await.unwrap();
-    twos.insert_many((0..10).filter(|i| i % 2 == 0).map(|i| vec![i.into()]))
+    twos.insert_many((0..10).filter(|i: &i32| i % 2 == 0).map(|i| vec![i.into()]))
         .await
         .unwrap();
 
     let mut threes = g.table("threes").await.unwrap();
     threes
-        .insert_many((0..10).filter(|i| i % 3 == 0).map(|i| vec![i.into()]))
+        .insert_many((0..10).filter(|i: &i32| i % 3 == 0).map(|i| vec![i.into()]))
         .await
         .unwrap();
 
@@ -3303,7 +3315,7 @@ async fn union_all_basic() {
             .await
             .unwrap()
             .iter()
-            .map(|r| r.get("id").unwrap()),
+            .map(|r| r.get("id").unwrap().unwrap()),
     )
     .collect();
     let expected_ids: Vec<i32> = sorted(
@@ -3611,11 +3623,11 @@ async fn test_join_across_shards() {
     // Check 'all_user_recs' results.
     let mut query = g.view("all_user_recs").await.unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0.into()], true)
+        .lookup(&[0i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("u").unwrap(), r.get("s").unwrap()))
+        .map(|r| (r.get("u").unwrap().unwrap(), r.get("s").unwrap().unwrap()))
         .sorted()
         .collect();
     let expected = vec![
@@ -3663,11 +3675,11 @@ async fn test_join_across_shards_with_param() {
     // Check 'user_recs' results.
     let mut query = g.view("user_recs").await.unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1.into()], true)
+        .lookup(&[1i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("u").unwrap(), r.get("s").unwrap()))
+        .map(|r| (r.get("u").unwrap().unwrap(), r.get("s").unwrap().unwrap()))
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
@@ -3706,11 +3718,16 @@ async fn test_join_with_reused_column_name() {
     // Check 'all_user_recs' results.
     let mut query = g.view("all_user_recs").await.unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0.into()], true)
+        .lookup(&[0i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("story").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("story").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     let expected = vec![
@@ -3756,11 +3773,16 @@ async fn test_join_with_reused_column_name_with_param() {
     // Check 'user_recs' results.
     let mut query = g.view("user_recs").await.unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1.into()], true)
+        .lookup(&[1i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("story").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("story").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
@@ -3791,13 +3813,17 @@ async fn self_join_basic() {
 
     let mut query = g.view("like_minded").await.unwrap();
     assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
-
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0.into()], true)
+        .lookup(&[0i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("agreer").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("agreer").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     let expected = vec![
@@ -3817,13 +3843,17 @@ async fn self_join_basic() {
 
     let mut query = g.view("follow_on").await.unwrap();
     assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
-
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0.into()], true)
+        .lookup(&[0i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("agreer").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("agreer").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     assert_eq!(results, expected);
@@ -3857,13 +3887,17 @@ async fn self_join_param() {
 
     let mut query = g.view("fof").await.unwrap();
     assert_eq!(query.columns(), vec!["user", "fof"]);
-
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1.into()], true)
+        .lookup(&[1i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("fof").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("fof").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 5)];
@@ -3877,11 +3911,16 @@ async fn self_join_param() {
     // assert_eq!(query.columns(), vec!["user", "fof"]);
 
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1.into()], true)
+        .lookup(&[1i32.into()], true)
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("user").unwrap(), r.get("fof").unwrap()))
+        .map(|r| {
+            (
+                r.get("user").unwrap().unwrap(),
+                r.get("fof").unwrap().unwrap(),
+            )
+        })
         .sorted()
         .collect();
     assert_eq!(results, expected);
@@ -4473,7 +4512,12 @@ async fn compound_join_key() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| (r["val_1"].clone().into(), r["val_2"].clone().into()))
+        .map(|r| {
+            (
+                <i32>::try_from(r["val_1"].clone()).unwrap(),
+                <i32>::try_from(r["val_2"].clone()).unwrap(),
+            )
+        })
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -4679,6 +4723,8 @@ async fn test_metrics_client() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
+    use std::convert::TryInto;
+
     let mut g = start_simple_logging("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
@@ -4713,9 +4759,9 @@ async fn overlapping_indices() {
         .into_iter()
         .map(|r| {
             (
-                r["sum(a)"].clone().into(),
-                r["id"].clone().into(),
-                r["b"].clone().into(),
+                r["sum(a)"].clone().try_into().unwrap(),
+                r["id"].clone().try_into().unwrap(),
+                r["b"].clone().try_into().unwrap(),
             )
         })
         .sorted()
@@ -4739,11 +4785,11 @@ async fn aggregate_after_filter_non_equality() {
     let mut q = g.view("filteragg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(4)],
-        vec![DataType::from(3), DataType::from(5)],
-        vec![DataType::from(4), DataType::from(7)],
-        vec![DataType::from(5), DataType::from(1)],
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(2i32), DataType::from(4i32)],
+        vec![DataType::from(3i32), DataType::from(5i32)],
+        vec![DataType::from(4i32), DataType::from(7i32)],
+        vec![DataType::from(5i32), DataType::from(1i32)],
     ])
     .await
     .unwrap();
@@ -4753,7 +4799,7 @@ async fn aggregate_after_filter_non_equality() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| i32::from(&r["s"]))
+        .map(|r| i32::try_from(&r["s"]).unwrap())
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![13]);

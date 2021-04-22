@@ -1,4 +1,6 @@
-use crate::data::*;
+use crate::errors::ReadySetError;
+use crate::{data::*, ReadySetResult};
+use std::convert::TryInto;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -86,14 +88,12 @@ impl<'a> ResultRow<'a> {
     /// Retrieve the field of the result by the given name as a `T`.
     ///
     /// Returns `None` if the given field does not exist.
-    ///
-    /// Panics if the value at the given field cannot be turned into a `T`.
-    pub fn get<T>(&self, field: &str) -> Option<T>
+    pub fn get<T>(&self, field: &str) -> Option<ReadySetResult<T>>
     where
-        &'a DataType: Into<T>,
+        &'a DataType: TryInto<T, Error = ReadySetError>,
     {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some((&self.result[index]).into())
+        Some((&self.result[index]).try_into())
     }
 }
 

@@ -29,6 +29,7 @@ use mysql_connector::MySqlConnector;
 use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria_connector::NoriaConnector;
+use std::convert::TryFrom;
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -69,14 +70,14 @@ async fn write_column<W: AsyncWrite + Unpin>(
             }
         }
         DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()).await,
-        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(dt.into()).await,
+        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(<&str>::try_from(dt)?).await,
         ref dt @ DataType::Real(_, _) => match cs.coltype {
             msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
                 let f = dt.to_string();
                 rw.write_col(f).await
             }
             msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                let f: f64 = dt.into();
+                let f: f64 = <f64>::try_from(dt)?;
                 rw.write_col(f).await
             }
             _ => internal!(),
@@ -741,8 +742,10 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        let datatype_params: Vec<DataType> =
-            params.into_iter().map(|p| p.value.to_datatype()).collect();
+        let datatype_params: Vec<DataType> = params
+            .into_iter()
+            .map(|p| p.value.to_datatype())
+            .collect::<Result<Vec<_>, _>>()?;
 
         let res = match self.execute(id, datatype_params).await {
             Ok(QueryResult::NoriaSelect {

@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -193,7 +194,7 @@ impl Generate {
                         .map(|mut row| {
                             columns
                                 .iter()
-                                .map(|col| row.remove(col).unwrap().into())
+                                .map(|col| row.remove(col).unwrap().try_into().unwrap())
                                 .collect()
                         })
                         .collect(),

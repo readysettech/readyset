@@ -80,8 +80,10 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::Int(v) => Ok((*v).into()),
             ps::Value::Bigint(v) => Ok((*v).into()),
             ps::Value::Smallint(_) => Err(ps::Error::Unsupported("Value Smallint".to_string())),
-            ps::Value::Double(v) => Ok((*v).into()),
-            ps::Value::Real(v) => Ok((*v).into()),
+            ps::Value::Double(v) => DataType::try_from(*v)
+                .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),
+            ps::Value::Real(v) => DataType::try_from(*v)
+                .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
             ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Timestamp(v) => Ok((*v).into()),
         }

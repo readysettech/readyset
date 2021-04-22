@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use crate::prelude::*;
 use noria::{invariant, ReadySetResult};
+use std::convert::TryFrom;
 
 /// Designator for what a given position in a group concat output should contain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +86,7 @@ impl GroupConcat {
         ))
     }
 
-    fn build(&self, rec: &[DataType]) -> String {
+    fn build(&self, rec: &[DataType]) -> ReadySetResult<String> {
         let mut s = String::with_capacity(self.slen);
         for tc in &self.components {
             match *tc {
@@ -94,7 +95,7 @@ impl GroupConcat {
                 }
                 TextComponent::Column(ref i) => match rec[*i] {
                     DataType::Text(..) | DataType::TinyText(..) => {
-                        let text: &str = (&rec[*i]).into();
+                        let text: &str = <&str>::try_from(&rec[*i])?;
                         s.push_str(text);
                     }
                     DataType::Int(ref n) => s.push_str(&n.to_string()),
@@ -109,7 +110,7 @@ impl GroupConcat {
             }
         }
 
-        s
+        Ok(s)
     }
 }
 
@@ -147,12 +148,12 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
-        let v = self.build(r);
+    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Option<Self::Diff>> {
+        let v = self.build(r)?;
         if pos {
-            Some(Modify::Add(v))
+            Ok(Some(Modify::Add(v)))
         } else {
-            Some(Modify::Remove(v))
+            Ok(Some(Modify::Remove(v)))
         }
     }
 
@@ -160,7 +161,7 @@ impl GroupedOperation for GroupConcat {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> DataType {
+    ) -> ReadySetResult<DataType> {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -172,7 +173,9 @@ impl GroupedOperation for GroupConcat {
 
         use std::borrow::Cow;
         let current: &str = match current {
-            Some(dt @ &DataType::Text(..)) | Some(dt @ &DataType::TinyText(..)) => dt.into(),
+            Some(dt @ &DataType::Text(..)) | Some(dt @ &DataType::TinyText(..)) => {
+                <&str>::try_from(dt)?
+            }
             None => "",
             _ => unreachable!(),
         };
@@ -206,7 +209,7 @@ impl GroupedOperation for GroupConcat {
         // we pushed one separator too many above
         let real_len = new.len() - self.separator.len();
         new.truncate(real_len);
-        new.into()
+        Ok(DataType::from(new))
     }
 
     fn description(&self, detailed: bool) -> String {

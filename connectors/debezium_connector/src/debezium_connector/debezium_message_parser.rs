@@ -1,9 +1,9 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use chrono::Duration;
 use chrono::NaiveDateTime;
 use msql_srv::MysqlTime;
 use nom_sql::{CreateTableStatement, SqlType};
-use noria::{DataType, Modification};
+use noria::{internal, DataType, Modification, ReadySetError, ReadySetResult};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -124,7 +124,7 @@ pub struct PrimitiveField {
     pub optional: bool,
 }
 
-pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
+pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> ReadySetResult<DataType> {
     let field_type = &f.typ;
     let semantic_type = &f.field;
     match v {
@@ -132,16 +132,16 @@ pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
         Value::Bool(v) => Ok(DataType::Int(*v as i32)),
         Value::String(v) => {
             if semantic_type == "io.debezium.time.ZonedTimestamp" {
-                Ok(DataType::Timestamp(NaiveDateTime::parse_from_str(
-                    v.as_str(),
-                    "%+",
-                )?))
+                Ok(DataType::Timestamp(
+                    NaiveDateTime::parse_from_str(v.as_str(), "%+")
+                        .map_err(|_| ReadySetError::NaiveDateTimeParseError(v.to_string()))?,
+                ))
             } else if (field_type == "bytes")
                 && (semantic_type == "org.apache.kafka.connect.data.Decimal")
             {
-                bail!("Set decimal.handling.mode to double in SQL Connector Conf.")
+                internal!("Set decimal.handling.mode to double in SQL Connector Conf.")
             } else {
-                Ok(DataType::try_from(v.as_str())?)
+                Ok(DataType::from(v.as_str()))
             }
         }
         Value::Number(v) => {
@@ -166,9 +166,9 @@ pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
             } else if field_type == "int64" {
                 Ok(DataType::BigInt(v.as_i64().unwrap()))
             } else if matches!(field_type.as_str(), "double" | "float32" | "float64") {
-                Ok(DataType::from(v.as_f64().unwrap()))
+                DataType::try_from(v.as_f64().unwrap())
             } else {
-                bail!("Type not implemented!")
+                internal!("Type not implemented!")
             }
         }
         _ => Ok(DataType::None),
@@ -176,11 +176,11 @@ pub fn field_to_datatype(f: &PrimitiveField, v: &Value) -> Result<DataType> {
 }
 
 impl EventKey {
-    pub fn get_pk_datatype(&self) -> Result<DataType> {
+    pub fn get_pk_datatype(&self) -> ReadySetResult<DataType> {
         let pk_field = &self.schema.fields[0];
         match pk_field {
             Field::PrimitiveField(f) => field_to_datatype(&f, &self.payload.fields[&f.field]),
-            _ => Err(anyhow!("Primary Key can only be a primitive field.")),
+            _ => Err(ReadySetError::InvalidPrimaryKeyField),
         }
     }
 }
@@ -197,17 +197,20 @@ fn coerce_value(
     val: &Value,
     field: &PrimitiveField,
     column_types: &HashMap<&str, &SqlType>,
-) -> Result<DataType> {
+) -> ReadySetResult<DataType> {
     let mut res = field_to_datatype(field, val)?;
     if let Some(sql_type) = column_types.get(field.field.as_str()) {
         res = match **sql_type {
-            SqlType::Timestamp => NaiveDateTime::parse_from_str((&res).into(), "%+")?.into(),
+            SqlType::Timestamp => {
+                let s = <&str>::try_from(&res)?;
+                NaiveDateTime::parse_from_str(s, "%+").map_err(|_| ReadySetError::NaiveDateTimeParseError(s.to_string()))?.into()
+            },
             SqlType::Date if res.is_integer() => NaiveDateTime::from_timestamp(0, 0)
-                .checked_add_signed(Duration::days(res.into()))
-                .ok_or_else(|| anyhow!("Numeric date value out of bounds"))?
+                .checked_add_signed(Duration::days(<i64>::try_from(res)?))
+                .ok_or_else(|| ReadySetError::NaiveDateTimeParseError("Error creating NaiveDateTime from timestamp: Numeric date value out of bounds".to_string()))?
                 .into(),
             SqlType::Time if res.is_integer() => {
-                MysqlTime::from_microseconds(i64::from(res) * 1000).into()
+                MysqlTime::from_microseconds(i64::try_from(res)? * 1000).into()
             }
             _ => res.coerce_to(sql_type)?.into_owned(),
         }
@@ -604,11 +607,11 @@ mod tests {
         );
         assert_eq!(
             test_json_to_datatype_helper("-4.14", "float32", ""),
-            DataType::from(-4.14)
+            DataType::try_from(-4.14).unwrap()
         );
         assert_eq!(
             test_json_to_datatype_helper("4.14", "float64", ""),
-            DataType::from(4.14)
+            DataType::try_from(4.14).unwrap()
         );
         assert!(matches!(
             test_json_to_datatype_helper("\"noria\"", "string", ""),

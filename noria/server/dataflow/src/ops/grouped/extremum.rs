@@ -3,6 +3,7 @@ use crate::ops::grouped::GroupedOperator;
 
 use crate::prelude::*;
 use noria::{invariant, ReadySetResult};
+use std::convert::TryFrom;
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -82,7 +83,7 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> Option<Self::Diff> {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Option<Self::Diff>> {
         let v = match r[self.over] {
             DataType::Int(n) => i128::from(n),
             DataType::UnsignedInt(n) => i128::from(n),
@@ -104,9 +105,9 @@ impl GroupedOperation for ExtremumOperator {
         };
 
         if pos {
-            Some(DiffType::Insert(v))
+            Ok(Some(DiffType::Insert(v)))
         } else {
-            Some(DiffType::Remove(v))
+            Ok(Some(DiffType::Remove(v)))
         }
     }
 
@@ -114,7 +115,7 @@ impl GroupedOperation for ExtremumOperator {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> DataType {
+    ) -> ReadySetResult<DataType> {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i128> = vec![];
@@ -164,7 +165,7 @@ impl GroupedOperation for ExtremumOperator {
         };
 
         if let Some(extreme) = extreme {
-            return extreme.into();
+            return DataType::try_from(extreme);
         }
 
         // TODO: handle this case by querying into the parent.

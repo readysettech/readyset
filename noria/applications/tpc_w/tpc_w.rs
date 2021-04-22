@@ -305,23 +305,27 @@ async fn main() {
     backend.prepop_counts.insert("addresses".into(), num_addr);
     let num_authors = populate_authors(&mut backend, &ploc, author_write, true).await;
     backend.prepop_counts.insert("authors".into(), num_authors);
-    let num_countries = populate_countries(&mut backend, &ploc).await;
+    let num_countries = populate_countries(&mut backend, &ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("countries".into(), num_countries);
-    let num_customers = populate_customers(&mut backend, &ploc).await;
+    let num_customers = populate_customers(&mut backend, &ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("customers".into(), num_customers);
-    let num_items = populate_items(&mut backend, &ploc, item_write, true).await;
+    let num_items = populate_items(&mut backend, &ploc, item_write, true)
+        .await
+        .unwrap();
     backend.prepop_counts.insert("items".into(), num_items);
-    let num_orders = populate_orders(&mut backend, &ploc).await;
+    let num_orders = populate_orders(&mut backend, &ploc).await.unwrap();
     backend.prepop_counts.insert("orders".into(), num_orders);
-    let num_cc_xacts = populate_cc_xacts(&mut backend, &ploc).await;
+    let num_cc_xacts = populate_cc_xacts(&mut backend, &ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("cc_xacts".into(), num_cc_xacts);
-    let num_order_line = populate_order_line(&mut backend, &ploc, order_line_write, true).await;
+    let num_order_line = populate_order_line(&mut backend, &ploc, order_line_write, true)
+        .await
+        .unwrap();
     backend
         .prepop_counts
         .insert("order_line".into(), num_order_line);
@@ -396,9 +400,13 @@ async fn main() {
     }
 
     match write_to {
-        "item" => populate_items(&mut backend, &ploc, write, false).await,
+        "item" => populate_items(&mut backend, &ploc, write, false)
+            .await
+            .unwrap(),
         "author" => populate_authors(&mut backend, &ploc, write, false).await,
-        "order_line" => populate_order_line(&mut backend, &ploc, write, false).await,
+        "order_line" => populate_order_line(&mut backend, &ploc, write, false)
+            .await
+            .unwrap(),
         _ => unreachable!(),
     };
 

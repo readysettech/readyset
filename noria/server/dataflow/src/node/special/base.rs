@@ -6,6 +6,7 @@ use noria::{Modification, Operation, TableOperation};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use vec_map::VecMap;
 
 /// Base is used to represent the root nodes of the Noria data flow graph.
@@ -247,11 +248,11 @@ impl Base {
                 match op {
                     Modification::Set(v) => future[col] = v,
                     Modification::Apply(op, v) => {
-                        let old: i128 = future[col].clone().into();
-                        let delta: i128 = v.into();
+                        let old: i128 = <i128>::try_from(future[col].clone())?;
+                        let delta: i128 = <i128>::try_from(v)?;
                         future[col] = match op {
-                            Operation::Add => (old + delta).into(),
-                            Operation::Sub => (old - delta).into(),
+                            Operation::Add => DataType::try_from(old + delta)?,
+                            Operation::Sub => DataType::try_from(old - delta)?,
                         };
                     }
                     Modification::None => {}
