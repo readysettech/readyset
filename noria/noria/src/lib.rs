@@ -367,8 +367,6 @@ pub struct ViewRequest {
 
 #[doc(hidden)]
 #[inline]
-// This function is intentionally designed to never error
-// TODO: implement sharding for remaining types: https://app.clubhouse.io/readysettech/story/168/sharding-by-certain-data-types-isn-t-supported
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {
         DataType::Int(n) => n as usize % shards,
@@ -387,8 +385,11 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         }
         // a bit hacky: send all NULL values to the first shard
         DataType::None => 0,
-        ref x => {
-            unimplemented!("asked to shard on value {:?}", x);
+        DataType::Real(_, _) | DataType::Time(_) => {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
+            dt.hash(&mut hasher);
+            hasher.finish() as usize % shards
         }
     }
 }
