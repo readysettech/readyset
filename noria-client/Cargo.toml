@@ -16,7 +16,7 @@ futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"
 mysql = "20.1.0"
-mysql_async = {git = "https://github.com/readysettech/mysql_async"}
+mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"} 
 nom-sql = { version =  "0.0.11", path = "../nom-sql" }
 regex = "1.0.0"
 tokio = { version = "1.5.0", features = ["signal", "rt-multi-thread", "time"] }

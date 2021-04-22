@@ -319,7 +319,19 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1374191e2dd25f9ae02e3aa95041ed5d747fc77b3c102b49fe2dd9a8117a6244"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.2.6",
+ "num-integer",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
+name = "bigdecimal"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc403c26e6b03005522e6e8053384c4e881dfe5b2bf041c0c2c49be33d64a539"
+dependencies = [
+ "num-bigint 0.3.2",
  "num-integer",
  "num-traits",
  "serde",
@@ -3016,30 +3028,30 @@ dependencies = [
 
 [[package]]
 name = "mysql_async"
-version = "0.25.1"
-source = "git+https://github.com/readysettech/mysql_async#bd50d06dce9ec51462ce6ee1ecba5ea58dea5f28"
+version = "0.27.0"
+source = "git+https://github.com/readysettech/mysql_async?tag=v0.27.1_gtid#a74291a5b4f5e92253bf49834dd5448733c0e850"
 dependencies = [
- "bytes 0.5.6",
- "crossbeam 0.7.3",
+ "bytes 1.0.1",
  "futures-core",
  "futures-sink",
  "futures-util",
  "lazy_static",
  "lru 0.6.5",
- "mio-named-pipes",
- "mysql_common 0.24.1",
+ "mio 0.7.10",
+ "mysql_common 0.26.0",
  "native-tls",
  "pem",
  "percent-encoding 2.1.0",
- "pin-project 0.4.27",
+ "pin-project 1.0.6",
  "serde",
  "serde_json",
  "thiserror",
- "tokio 0.2.25",
- "tokio-tls",
- "tokio-util 0.3.1",
+ "tokio 1.5.0",
+ "tokio-native-tls",
+ "tokio-util 0.6.6",
  "twox-hash",
  "url 2.2.1",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3049,7 +3061,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f3fa60743383c5e5719b68a134531074e83e550b97182e4a24ad5220a8e974"
 dependencies = [
  "base64 0.11.0",
- "bigdecimal",
+ "bigdecimal 0.1.2",
  "bitflags",
  "byteorder",
  "bytes 0.4.12",
@@ -3058,7 +3070,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "lexical 4.0.0",
- "num-bigint",
+ "num-bigint 0.2.6",
  "num-traits",
  "rand 0.7.3",
  "regex",
@@ -3079,7 +3091,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e3950cf532b88574a05c3fcd4f1b1e0cd0b84883462ae6811298fe7c3c92edc"
 dependencies = [
  "base64 0.11.0",
- "bigdecimal",
+ "bigdecimal 0.1.2",
  "bitflags",
  "byteorder",
  "bytes 0.5.6",
@@ -3088,7 +3100,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "lexical 4.0.0",
- "num-bigint",
+ "num-bigint 0.2.6",
  "num-traits",
  "rand 0.7.3",
  "regex",
@@ -3109,7 +3121,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c529a525c62e4788cff3a4557b652e2efd04eb3171da4ae2792031499f96442f"
 dependencies = [
  "base64 0.12.3",
- "bigdecimal",
+ "bigdecimal 0.1.2",
  "bitflags",
  "byteorder",
  "bytes 0.5.6",
@@ -3118,7 +3130,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "lexical 5.2.1",
- "num-bigint",
+ "num-bigint 0.2.6",
  "num-traits",
  "rand 0.7.3",
  "regex",
@@ -3139,7 +3151,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de63b87a5f24c5db252418a6f04abb2f62823bd838dc9b1d7fdb8ae972ef76cf"
 dependencies = [
  "base64 0.12.3",
- "bigdecimal",
+ "bigdecimal 0.1.2",
  "bitflags",
  "byteorder",
  "bytes 0.5.6",
@@ -3147,7 +3159,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "lexical 5.2.1",
- "num-bigint",
+ "num-bigint 0.2.6",
  "num-traits",
  "rand 0.7.3",
  "regex",
@@ -3156,6 +3168,35 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2 0.8.2",
+ "time 0.2.7",
+ "twox-hash",
+ "uuid 0.8.2",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3694c35738725021e85c7b644b94bdab050d4ea6acca2b5624287f41e2abc5a"
+dependencies = [
+ "base64 0.13.0",
+ "bigdecimal 0.2.0",
+ "bitflags",
+ "byteorder",
+ "bytes 1.0.1",
+ "chrono",
+ "flate2",
+ "lazy_static",
+ "lexical 5.2.1",
+ "num-bigint 0.3.2",
+ "num-traits",
+ "rand 0.8.3",
+ "regex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.9.3",
  "time 0.2.7",
  "twox-hash",
  "uuid 0.8.2",
@@ -3443,7 +3484,7 @@ dependencies = [
  "maplit",
  "msql-srv",
  "mysql 20.1.0",
- "mysql_async 0.25.1",
+ "mysql_async 0.27.0",
  "nom-sql",
  "noria",
  "noria-server",
@@ -3711,6 +3752,17 @@ name = "num-bigint"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "090c7f9998ee0ff65aa5b723e4009f7b217707f1fb5ea551329cc4d6231fb304"
+dependencies = [
+ "autocfg 1.0.1",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d0a3d5e207573f948a9e5376662aa743a2ea13f7c50a554d7af443a73fbfeba"
 dependencies = [
  "autocfg 1.0.1",
  "num-integer",
@@ -6822,6 +6874,9 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.2",
+]
 
 [[package]]
 name = "value-bag"
