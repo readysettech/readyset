@@ -1,7 +1,6 @@
-use mysql::consts::CapabilityFlags;
-use mysql_async::params::Params;
 use mysql_async::prelude::Queryable;
 use mysql_async::*;
+use mysql_async::{consts::CapabilityFlags, params::Params};
 
 use crate::backend::error::Error;
 use noria::{errors::internal_err, DataType};
