@@ -277,7 +277,9 @@ impl SqlIncorporator {
                     let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
                         OutputColumn::Expression(ref ec) => contains_aggregate(&ec.expression),
-                        OutputColumn::Data(ref dc) => !dc.function.iter().any(|f| is_aggregate(f)),
+                        OutputColumn::Data { column: ref dc, .. } => {
+                            !dc.function.iter().any(|f| is_aggregate(f))
+                        }
                     });
 
                     // The reuse implementation below may only be performed when all parameters
@@ -1156,7 +1158,11 @@ mod tests {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
-            OutputColumn::Data((*c).clone()).hash(&mut hasher);
+            OutputColumn::Data {
+                alias: c.name.clone(),
+                column: (*c).clone(),
+            }
+            .hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -1539,7 +1545,6 @@ mod tests {
                 &[&Column::from("votes.aid")],
                 &[&Column {
                     name: String::from("votes"),
-                    alias: Some(String::from("votes")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2357,7 +2362,6 @@ mod tests {
                 &[],
                 &[&Column {
                     name: String::from("count"),
-                    alias: Some(String::from("count")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2413,7 +2417,6 @@ mod tests {
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("count"),
-                    alias: Some(String::from("count")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2475,7 +2478,6 @@ mod tests {
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("count"),
-                    alias: Some(String::from("count")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2537,7 +2539,6 @@ mod tests {
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("sum"),
-                    alias: Some(String::from("sum")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2599,7 +2600,6 @@ mod tests {
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("sum"),
-                    alias: Some(String::from("sum")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2656,7 +2656,6 @@ mod tests {
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
                 &[&Column {
                     name: String::from("sum"),
-                    alias: Some(String::from("sum")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2751,7 +2750,6 @@ mod tests {
                 &[&Column::from("votes.userid"), &Column::from("sum")],
                 &[&Column {
                     name: String::from("sum"),
-                    alias: Some(String::from("sum")),
                     table: None,
                     function: Some(f),
                 }],
@@ -2798,7 +2796,7 @@ mod tests {
                 None,
                 mig,
             );
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "!{:?}.is_ok()", res);
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
@@ -2827,7 +2825,6 @@ mod tests {
                 &[&Column::from("votes.comment_id")],
                 &[&Column {
                     name: String::from("votes"),
-                    alias: Some(String::from("votes")),
                     table: None,
                     function: Some(f),
                 }],
@@ -3021,7 +3018,7 @@ mod tests {
                      WHERE f1.id = ?;";
 
             let res = inc.add_query(q, None, mig);
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "{}", res.as_ref().unwrap_err());
             let qfp = res.unwrap();
 
             // Check join node

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
-    ConditionExpression, ConditionTree, Expression, FunctionExpression, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionBase, ConditionExpression,
+    ConditionTree, Expression, FunctionExpression, SqlQuery, Table,
 };
 
 pub trait ReferredTables {
@@ -71,9 +71,7 @@ pub struct ReferredColumnsIter<'a> {
 impl<'a> ReferredColumnsIter<'a> {
     fn visit_expr(&mut self, expr: &'a Expression) -> Option<Cow<'a, Column>> {
         match expr {
-            Expression::Arithmetic(ArithmeticExpression { ari, .. }) => {
-                self.visit_arithmetic(ari).map(Cow::Borrowed)
-            }
+            Expression::Arithmetic(ari) => self.visit_arithmetic(ari).map(Cow::Borrowed),
             Expression::Call(fexpr) => self.visit_function_expression(fexpr),
             Expression::Literal(_) => None,
             Expression::Column(col) => Some(Cow::Borrowed(col)),
@@ -388,7 +386,6 @@ mod tests {
     fn find_funcalls_basic() {
         let col = Column {
             name: "test".to_string(),
-            alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::CountStar)),
         };

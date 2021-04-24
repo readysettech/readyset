@@ -11,10 +11,9 @@ use nom::combinator::{map, not, peek};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use nom::{char, complete, do_parse, named, tag_no_case, IResult, InputLength};
+use nom::{char, complete, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
 use std::fmt::{self, Display};
 
-use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
 use crate::column::Column;
 use crate::expression::expression;
 use crate::keywords::{escape_if_keyword, sql_keyword};
@@ -186,30 +185,6 @@ impl ToString for Literal {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct LiteralExpression {
-    pub value: Literal,
-    pub alias: Option<String>,
-}
-
-impl From<Literal> for LiteralExpression {
-    fn from(l: Literal) -> Self {
-        LiteralExpression {
-            value: l,
-            alias: None,
-        }
-    }
-}
-
-impl fmt::Display for LiteralExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.alias {
-            Some(ref alias) => write!(f, "{} AS {}", self.value.to_string(), alias),
-            None => write!(f, "{}", self.value.to_string()),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum BinaryOperator {
     And,
@@ -366,22 +341,54 @@ impl fmt::Display for TableKey {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
 pub enum FieldDefinitionExpression {
     All,
     AllInTable(String),
-    Col(Column),
-    Value(FieldValueExpression),
+    Expression {
+        expr: Expression,
+        alias: Option<String>,
+    },
+}
+
+/// Constructs a [`FieldDefinitionExpression::Expression`] without an alias
+impl From<Expression> for FieldDefinitionExpression {
+    fn from(expr: Expression) -> Self {
+        FieldDefinitionExpression::Expression { expr, alias: None }
+    }
+}
+
+/// Constructs a [`FieldDefinitionExpression::Expression`] based on an [`Expression::Column`] for
+/// the column and without an alias
+impl From<Column> for FieldDefinitionExpression {
+    fn from(col: Column) -> Self {
+        FieldDefinitionExpression::Expression {
+            expr: Expression::Column(col),
+            alias: None,
+        }
+    }
+}
+
+impl From<Literal> for FieldDefinitionExpression {
+    fn from(lit: Literal) -> Self {
+        FieldDefinitionExpression::from(Expression::Literal(lit))
+    }
 }
 
 impl Display for FieldDefinitionExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             FieldDefinitionExpression::All => write!(f, "*"),
             FieldDefinitionExpression::AllInTable(ref table) => {
                 write!(f, "{}.*", escape_if_keyword(table))
             }
-            FieldDefinitionExpression::Col(ref col) => write!(f, "{}", col),
-            FieldDefinitionExpression::Value(ref val) => write!(f, "{}", val),
+            FieldDefinitionExpression::Expression { expr, alias } => {
+                write!(f, "{}", expr)?;
+                if let Some(alias) = alias {
+                    write!(f, " AS {}", alias)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -389,21 +396,6 @@ impl Display for FieldDefinitionExpression {
 impl Default for FieldDefinitionExpression {
     fn default() -> FieldDefinitionExpression {
         FieldDefinitionExpression::All
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FieldValueExpression {
-    Arithmetic(ArithmeticExpression),
-    Literal(LiteralExpression),
-}
-
-impl Display for FieldValueExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            FieldValueExpression::Arithmetic(ref expr) => write!(f, "{}", expr),
-            FieldValueExpression::Literal(ref lit) => write!(f, "{}", lit),
-        }
     }
 }
 
@@ -725,13 +717,11 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
     alt((
         map(column_function, |f| Column {
             name: format!("{}", f),
-            alias: None,
             table: None,
             function: Some(Box::new(f)),
         }),
         map(table_parser, |tup| Column {
             name: str::from_utf8(tup.1).unwrap().to_string(),
-            alias: None,
             table: match tup.0 {
                 None => None,
                 Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
@@ -743,30 +733,15 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
 
 // Parses a SQL column identifier in the table.column format
 pub fn column_identifier(i: &[u8]) -> IResult<&[u8], Column> {
-    let col_func_no_table = map(pair(column_function, opt(as_alias)), |tup| Column {
-        name: match tup.1 {
-            None => format!("{}", tup.0),
-            Some(a) => String::from(a),
-        },
-        alias: match tup.1 {
-            None => None,
-            Some(a) => Some(String::from(a)),
-        },
+    let col_func_no_table = map(column_function, |func| Column {
+        name: func.to_string(),
         table: None,
-        function: Some(Box::new(tup.0)),
+        function: Some(Box::new(func)),
     });
     let col_w_table = map(
-        tuple((
-            opt(terminated(sql_identifier, tag("."))),
-            sql_identifier,
-            opt(as_alias),
-        )),
+        tuple((opt(terminated(sql_identifier, tag("."))), sql_identifier)),
         |tup| Column {
             name: str::from_utf8(tup.1).unwrap().to_string(),
-            alias: match tup.2 {
-                None => None,
-                Some(a) => Some(String::from(a)),
-            },
             table: match tup.0 {
                 None => None,
                 Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
@@ -845,25 +820,11 @@ pub fn as_alias(i: &[u8]) -> IResult<&[u8], &str> {
     )(i)
 }
 
-fn field_value_expr(i: &[u8]) -> IResult<&[u8], FieldValueExpression> {
-    alt((
-        map(literal, |l| {
-            FieldValueExpression::Literal(LiteralExpression {
-                value: l,
-                alias: None,
-            })
-        }),
-        map(arithmetic_expression, |ae| {
-            FieldValueExpression::Arithmetic(ae)
-        }),
-    ))(i)
-}
-
-fn assignment_expr(i: &[u8]) -> IResult<&[u8], (Column, FieldValueExpression)> {
+fn assignment_expr(i: &[u8]) -> IResult<&[u8], (Column, Expression)> {
     separated_pair(
         column_identifier_no_alias,
         delimited(multispace0, tag("="), multispace0),
-        field_value_expr,
+        expression,
     )(i)
 }
 
@@ -882,7 +843,7 @@ where
     delimited(multispace0, tag("="), multispace0)(i)
 }
 
-pub fn assignment_expr_list(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
+pub fn assignment_expr_list(i: &[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
     many1(terminated(assignment_expr, opt(ws_sep_comma)))(i)
 }
 
@@ -891,24 +852,30 @@ pub fn field_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
     many0(terminated(column_identifier_no_alias, opt(ws_sep_comma)))(i)
 }
 
+named!(
+    expression_field(&[u8]) -> FieldDefinitionExpression,
+    do_parse!(
+        expr: expression
+            >> alias: opt!(map!(as_alias, |a| a.to_owned()))
+            >> (FieldDefinitionExpression::Expression { expr, alias })
+    )
+);
+
 // Parse list of column/field definitions.
 pub fn field_definition_expr(i: &[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
-    many0(terminated(
-        alt((
-            map(tag("*"), |_| FieldDefinitionExpression::All),
-            map(terminated(table_reference, tag(".*")), |t| {
-                FieldDefinitionExpression::AllInTable(t.name)
-            }),
-            map(arithmetic_expression, |expr| {
-                FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(expr))
-            }),
-            map(literal_expression, |lit| {
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(lit))
-            }),
-            map(column_identifier, FieldDefinitionExpression::Col),
-        )),
+    terminated(
+        separated_list(
+            ws_sep_comma,
+            alt((
+                map(tag("*"), |_| FieldDefinitionExpression::All),
+                map(terminated(table_reference, tag(".*")), |t| {
+                    FieldDefinitionExpression::AllInTable(t.name)
+                }),
+                expression_field,
+            )),
+        ),
         opt(ws_sep_comma),
-    ))(i)
+    )(i)
 }
 
 // Parse list of table names.
@@ -1025,16 +992,6 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
             Literal::Placeholder(ItemPlaceholder::DollarNumber(value))
         }),
     ))(i)
-}
-
-pub fn literal_expression(i: &[u8]) -> IResult<&[u8], LiteralExpression> {
-    map(
-        pair(opt_delimited(tag("("), literal, tag(")")), opt(as_alias)),
-        |p| LiteralExpression {
-            value: p.0,
-            alias: (p.1).map(|a| a.to_string()),
-        },
-    )(i)
 }
 
 // Parse a list of values (e.g., for INSERT syntax).
@@ -1160,7 +1117,6 @@ mod tests {
         let res = column_identifier(qs);
         let expected = Column {
             name: String::from("max(addr_id)"),
-            alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Max(Box::new(
                 Expression::Column(Column::from("addr_id")),
@@ -1187,7 +1143,6 @@ mod tests {
             Box::new(Expression::Column(Column {
                 table: Some("lp".to_owned()),
                 name: "start_ddtm".to_owned(),
-                alias: None,
                 function: None,
             })),
             SqlType::Date,

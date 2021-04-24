@@ -1,5 +1,9 @@
+use nom_sql::ConditionBase::NestedSelect;
 use nom_sql::ConditionExpression::*;
-use nom_sql::{Column, ConditionBase, ConditionExpression, JoinRightSide, SqlQuery};
+use nom_sql::{
+    Column, ConditionBase, ConditionExpression, Expression, FieldDefinitionExpression,
+    JoinRightSide, SqlQuery,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum Subquery<'a> {
@@ -12,7 +16,6 @@ pub trait SubQueries {
 }
 
 fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subquery> {
-    use nom_sql::ConditionBase::NestedSelect;
     match *ce {
         ComparisonOp(ref mut ct) | LogicalOp(ref mut ct) => {
             let lb = extract_subqueries_from_condition(&mut *ct.left);
@@ -47,15 +50,12 @@ fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subque
 pub fn field_with_table_name(name: String, column: Column) -> ConditionBase {
     ConditionBase::Field(Column {
         name: column.name.clone(),
-        alias: column.alias.clone(),
         table: Some(name),
-        function: column.function.clone(),
+        function: column.function,
     })
 }
 
 pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
-    use nom_sql::ConditionBase::NestedSelect;
-    use nom_sql::FieldDefinitionExpression;
     let (sq, column);
     match *cond {
         NestedSelect(ref bst) => {
@@ -63,11 +63,14 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
             column = bst
                 .fields
                 .iter()
-                .map(|fe| match *fe {
-                    FieldDefinitionExpression::Col(ref c) => c.clone(),
+                .map(|fe| match fe {
+                    FieldDefinitionExpression::Expression {
+                        expr: Expression::Column(c),
+                        ..
+                    } => c.clone(),
                     _ => unreachable!(),
                 })
-                .nth(0)
+                .next()
                 .unwrap();
         }
         _ => unreachable!(),
@@ -111,7 +114,7 @@ mod tests {
         // select userid from role where type=1
         let sq = SelectStatement {
             tables: vec![Table::from("role")],
-            fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
+            fields: vec![FieldDefinitionExpression::from(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
                 left: wrap(Field(Column::from("type"))),
@@ -125,7 +128,7 @@ mod tests {
         // select pid from post where author in (select userid from role where type=1)
         let st = SelectStatement {
             tables: vec![Table::from("post")],
-            fields: vec![FieldDefinitionExpression::Col(Column::from("pid"))],
+            fields: vec![FieldDefinitionExpression::from(Column::from("pid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: BinaryOperator::In,
                 left: wrap(Field(Column::from("author"))),
@@ -145,7 +148,7 @@ mod tests {
         // select userid from role where type=1
         let mut q = SqlQuery::Select(SelectStatement {
             tables: vec![Table::from("role")],
-            fields: vec![FieldDefinitionExpression::Col(Column::from("userid"))],
+            fields: vec![FieldDefinitionExpression::from(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
                 left: wrap(Field(Column::from("type"))),
@@ -174,9 +177,9 @@ mod tests {
                 Table::from("votes"),
             ],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("users.name")),
-                FieldDefinitionExpression::Col(Column::from("articles.title")),
-                FieldDefinitionExpression::Col(Column::from("votes.uid")),
+                FieldDefinitionExpression::from(Column::from("users.name")),
+                FieldDefinitionExpression::from(Column::from("articles.title")),
+                FieldDefinitionExpression::from(Column::from("votes.uid")),
             ],
             where_clause: Some(LogicalOp(ConditionTree {
                 left: Box::new(ComparisonOp(ConditionTree {

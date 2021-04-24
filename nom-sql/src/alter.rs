@@ -219,7 +219,6 @@ mod tests {
             definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                 column: Column {
                     name: "c".into(),
-                    alias: None,
                     table: None,
                     function: None,
                 },
@@ -245,7 +244,6 @@ mod tests {
             definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                 column: Column {
                     name: "c".into(),
-                    alias: None,
                     table: None,
                     function: None,
                 },
@@ -271,7 +269,6 @@ mod tests {
                 AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "c".into(),
-                        alias: None,
                         table: None,
                         function: None,
                     },
@@ -282,7 +279,6 @@ mod tests {
                 AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "d".into(),
-                        alias: None,
                         table: None,
                         function: None,
                     },

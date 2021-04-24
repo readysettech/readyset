@@ -1,6 +1,6 @@
 use nom_sql::{
     Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, SqlQuery, Table,
+    FieldDefinitionExpression, FunctionExpression, SqlQuery, Table,
 };
 
 use crate::errors::{internal_err, ReadySetResult};
@@ -64,16 +64,12 @@ impl CountStarRewrite for SqlQuery {
     ) -> ReadySetResult<SqlQuery> {
         use nom_sql::FunctionExpression::*;
 
-        let rewrite_count_star = |c: &mut Column,
+        let rewrite_count_star = |f: &mut FunctionExpression,
                                   tables: &Vec<Table>,
                                   avoid_columns: &Vec<Column>|
          -> ReadySetResult<_> {
             invariant!(!tables.is_empty());
-            if c.function
-                .as_ref()
-                .map(|v| **v == CountStar)
-                .unwrap_or(false)
-            {
+            if *f == CountStar {
                 let bogo_table = &tables[0];
                 let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
                 let mut bogo_column = schema_iter.next().unwrap();
@@ -83,15 +79,14 @@ impl CountStarRewrite for SqlQuery {
                     })?;
                 }
 
-                c.function = Some(Box::new(Count {
+                *f = Count {
                     expr: Box::new(Expression::Column(Column {
                         name: bogo_column.clone(),
-                        alias: None,
                         table: Some(bogo_table.name.clone()),
                         function: None,
                     })),
                     distinct: false,
-                }));
+                };
             }
             Ok(())
         };
@@ -113,10 +108,11 @@ impl CountStarRewrite for SqlQuery {
                         | FieldDefinitionExpression::AllInTable(_) => {
                             internal!("Must apply StarExpansion pass before CountStarRewrite")
                         }
-                        FieldDefinitionExpression::Value(_) => (),
-                        FieldDefinitionExpression::Col(ref mut c) => {
-                            rewrite_count_star(c, &tables, &avoid_cols)?
-                        }
+                        FieldDefinitionExpression::Expression {
+                            expr: Expression::Call(ref mut f),
+                            ..
+                        } => rewrite_count_star(f, &tables, &avoid_cols)?,
+                        _ => {}
                     }
                 }
                 // TODO: also expand function columns within WHERE clause
@@ -154,15 +150,12 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::Col(Column {
-                        name: String::from("count(*)"),
-                        alias: None,
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Count {
+                    vec![FieldDefinitionExpression::from(Expression::Call(
+                        FunctionExpression::Count {
                             expr: Box::new(Expression::Column(Column::from("users.id"))),
                             distinct: false,
-                        })),
-                    })]
+                        }
+                    ))]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up
@@ -190,15 +183,12 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::Col(Column {
-                        name: String::from("count(*)"),
-                        alias: None,
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Count {
+                    vec![FieldDefinitionExpression::from(Expression::Call(
+                        FunctionExpression::Count {
                             expr: Box::new(Expression::Column(Column::from("users.name"))),
                             distinct: false,
-                        })),
-                    })]
+                        }
+                    ))]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up

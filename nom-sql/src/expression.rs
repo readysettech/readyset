@@ -4,10 +4,10 @@ use nom::{alt, named};
 use std::fmt::{self, Display};
 use std::iter;
 
-use crate::arithmetic::arithmetic_expression;
+use crate::arithmetic::arithmetic;
 use crate::case::case_when;
 use crate::common::{column_function, column_identifier_no_alias, literal};
-use crate::{ArithmeticExpression, Column, ConditionExpression, Literal, SqlType};
+use crate::{Arithmetic, Column, ConditionExpression, Literal, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -120,7 +120,7 @@ pub enum Expression {
     /// Arithmetic expressions
     ///
     /// TODO(grfn): Eventually, the members of ArithmeticExpression should be inlined here
-    Arithmetic(ArithmeticExpression),
+    Arithmetic(Arithmetic),
 
     /// Function call expressions
     ///
@@ -167,9 +167,9 @@ impl Display for Expression {
 }
 
 named!(pub(crate) expression(&[u8]) -> Expression, alt!(
+    arithmetic => { |a| Expression::Arithmetic(a) } |
     column_function => { |f| Expression::Call(f) } |
     literal => { |l| Expression::Literal(l) } |
     case_when |
-    arithmetic_expression => { |a| Expression::Arithmetic(a) } |
     column_identifier_no_alias => { |c| Expression::Column(c) }
 ));

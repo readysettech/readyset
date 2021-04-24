@@ -362,7 +362,7 @@ mod tests {
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
-            .map(|c| FieldDefinitionExpression::Col(Column::from(*c)))
+            .map(|c| FieldDefinitionExpression::from(Column::from(*c)))
             .collect()
     }
 
@@ -1023,7 +1023,6 @@ mod tests {
                         Expression::Column(Column::from("bar")),
                     ],
                 })),
-                alias: None,
             }))),
             min: Box::new(Base(Literal(1.into()))),
             max: Box::new(Base(Literal(2.into()))),

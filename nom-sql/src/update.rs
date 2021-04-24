@@ -2,13 +2,12 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use crate::column::Column;
-use crate::common::{
-    assignment_expr_list, statement_terminator, table_reference, FieldValueExpression,
-};
+use crate::common::{assignment_expr_list, statement_terminator, table_reference};
 use crate::condition::ConditionExpression;
 use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
+use crate::Expression;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
@@ -17,7 +16,7 @@ use nom::IResult;
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
     pub table: Table,
-    pub fields: Vec<(Column, FieldValueExpression)>,
+    pub fields: Vec<(Column, Expression)>,
     pub where_clause: Option<ConditionExpression>,
 }
 
@@ -68,11 +67,11 @@ pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+    use crate::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
     use crate::column::Column;
-    use crate::common::{BinaryOperator, ItemPlaceholder, Literal, LiteralExpression, Real};
+    use crate::common::{BinaryOperator, ItemPlaceholder, Literal, Real};
     use crate::condition::ConditionBase::*;
-    use crate::condition::ConditionExpression::*;
+    use crate::condition::ConditionExpression::{Base, ComparisonOp};
     use crate::condition::ConditionTree;
     use crate::table::Table;
 
@@ -86,16 +85,8 @@ mod tests {
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    (
-                        Column::from("id"),
-                        FieldValueExpression::Literal(LiteralExpression::from(Literal::from(42))),
-                    ),
-                    (
-                        Column::from("name"),
-                        FieldValueExpression::Literal(LiteralExpression::from(Literal::from(
-                            "test",
-                        ))),
-                    ),
+                    (Column::from("id"), Expression::Literal(42.into())),
+                    (Column::from("name"), Expression::Literal("test".into())),
                 ],
                 ..Default::default()
             }
@@ -118,15 +109,10 @@ mod tests {
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    (
-                        Column::from("id"),
-                        FieldValueExpression::Literal(LiteralExpression::from(Literal::from(42))),
-                    ),
+                    (Column::from("id"), Expression::Literal(Literal::from(42)),),
                     (
                         Column::from("name"),
-                        FieldValueExpression::Literal(LiteralExpression::from(Literal::from(
-                            "test",
-                        ))),
+                        Expression::Literal(Literal::from("test",)),
                     ),
                 ],
                 where_clause: expected_where_cond,
@@ -162,12 +148,10 @@ mod tests {
                 table: Table::from("stories"),
                 fields: vec![(
                     Column::from("hotness"),
-                    FieldValueExpression::Literal(LiteralExpression::from(Literal::FixedPoint(
-                        Real {
-                            integral: -19216,
-                            fractional: 5479744,
-                        }
-                    ),)),
+                    Expression::Literal(Literal::FixedPoint(Real {
+                        integral: -19216,
+                        fractional: 5479744,
+                    }),),
                 ),],
                 where_clause: expected_where_cond,
                 ..Default::default()
@@ -187,19 +171,17 @@ mod tests {
             )))),
             operator: BinaryOperator::Equal,
         }));
-        let expected_ae = ArithmeticExpression::new(
-            ArithmeticOperator::Add,
-            ArithmeticBase::Column(Column::from("karma")),
-            ArithmeticBase::Scalar(1.into()),
-            None,
-        );
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![(
                     Column::from("karma"),
-                    FieldValueExpression::Arithmetic(expected_ae),
+                    Expression::Arithmetic(Arithmetic {
+                        op: ArithmeticOperator::Add,
+                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("karma"))),
+                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                    }),
                 ),],
                 where_clause: expected_where_cond,
                 ..Default::default()
@@ -212,19 +194,17 @@ mod tests {
         let qstring = "UPDATE users SET karma = karma + 1;";
 
         let res = updating(qstring.as_bytes());
-        let expected_ae = ArithmeticExpression::new(
-            ArithmeticOperator::Add,
-            ArithmeticBase::Column(Column::from("karma")),
-            ArithmeticBase::Scalar(1.into()),
-            None,
-        );
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![(
                     Column::from("karma"),
-                    FieldValueExpression::Arithmetic(expected_ae),
+                    Expression::Arithmetic(Arithmetic {
+                        op: ArithmeticOperator::Add,
+                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("karma"))),
+                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                    }),
                 ),],
                 ..Default::default()
             }

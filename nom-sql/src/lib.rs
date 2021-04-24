@@ -16,8 +16,7 @@ pub use self::arithmetic::{
 };
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
-    BinaryOperator, FieldDefinitionExpression, FieldValueExpression, ItemPlaceholder, Literal,
-    LiteralExpression, Real, SqlType, TableKey,
+    BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal, Real, SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};

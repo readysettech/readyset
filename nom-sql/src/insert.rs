@@ -5,10 +5,11 @@ use std::str;
 use crate::column::Column;
 use crate::common::{
     assignment_expr_list, field_list, schema_table_reference, statement_terminator, value_list,
-    ws_sep_comma, FieldValueExpression, Literal,
+    ws_sep_comma, Literal,
 };
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
+use crate::Expression;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::many1;
@@ -21,7 +22,7 @@ pub struct InsertStatement {
     pub fields: Option<Vec<Column>>,
     pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
-    pub on_duplicate: Option<Vec<(Column, FieldValueExpression)>>,
+    pub on_duplicate: Option<Vec<(Column, Expression)>>,
 }
 
 impl fmt::Display for InsertStatement {
@@ -69,7 +70,7 @@ fn data(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
     delimited(tag("("), value_list, preceded(tag(")"), opt(ws_sep_comma)))(i)
 }
 
-fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, FieldValueExpression)>> {
+fn on_duplicate(i: &[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
     preceded(
         multispace0,
         preceded(
@@ -116,7 +117,7 @@ pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+    use crate::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
     use crate::column::Column;
     use crate::common::ItemPlaceholder;
     use crate::table::Table;
@@ -251,12 +252,6 @@ mod tests {
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
         let res = insertion(qstring.as_bytes());
-        let expected_ae = ArithmeticExpression::new(
-            ArithmeticOperator::Add,
-            ArithmeticBase::Column(Column::from("value")),
-            ArithmeticBase::Scalar(1.into()),
-            None,
-        );
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -268,7 +263,11 @@ mod tests {
                 ]],
                 on_duplicate: Some(vec![(
                     Column::from("value"),
-                    FieldValueExpression::Arithmetic(expected_ae),
+                    Expression::Arithmetic(Arithmetic {
+                        op: ArithmeticOperator::Add,
+                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("value"))),
+                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                    }),
                 ),]),
                 ..Default::default()
             }

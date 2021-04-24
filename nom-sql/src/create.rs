@@ -871,7 +871,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("users".into()),
-            alias: None,
             function: None,
         };
         assert_eq!(

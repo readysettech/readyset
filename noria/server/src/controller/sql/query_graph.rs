@@ -1,7 +1,6 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticItem, BinaryOperator, Column, ConditionBase, ConditionExpression,
-    ConditionTree, Expression, FieldDefinitionExpression, FieldValueExpression, JoinConstraint,
-    JoinOperator, JoinRightSide, Literal, Table,
+    BinaryOperator, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FieldDefinitionExpression, JoinConstraint, JoinOperator, JoinRightSide, Literal, Table,
 };
 use nom_sql::{OrderType, SelectStatement};
 
@@ -32,7 +31,7 @@ pub struct ExpressionColumn {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OutputColumn {
-    Data(Column),
+    Data { alias: String, column: Column },
     Literal(LiteralColumn),
     Expression(ExpressionColumn),
 }
@@ -45,11 +44,15 @@ impl Ord for OutputColumn {
                 ref table,
                 ..
             })
-            | OutputColumn::Data(Column {
-                ref name,
-                ref table,
+            | OutputColumn::Data {
+                column:
+                    Column {
+                        ref name,
+                        ref table,
+                        ..
+                    },
                 ..
-            })
+            }
             | OutputColumn::Literal(LiteralColumn {
                 ref name,
                 ref table,
@@ -60,11 +63,15 @@ impl Ord for OutputColumn {
                     table: ref other_table,
                     ..
                 })
-                | OutputColumn::Data(Column {
-                    name: ref other_name,
-                    table: ref other_table,
+                | OutputColumn::Data {
+                    column:
+                        Column {
+                            name: ref other_name,
+                            table: ref other_table,
+                            ..
+                        },
                     ..
-                })
+                }
                 | OutputColumn::Literal(LiteralColumn {
                     name: ref other_name,
                     table: ref other_table,
@@ -92,11 +99,15 @@ impl PartialOrd for OutputColumn {
                 ref table,
                 ..
             })
-            | OutputColumn::Data(Column {
-                ref name,
-                ref table,
+            | OutputColumn::Data {
+                column:
+                    Column {
+                        ref name,
+                        ref table,
+                        ..
+                    },
                 ..
-            })
+            }
             | OutputColumn::Literal(LiteralColumn {
                 ref name,
                 ref table,
@@ -107,11 +118,15 @@ impl PartialOrd for OutputColumn {
                     table: ref other_table,
                     ..
                 })
-                | OutputColumn::Data(Column {
-                    name: ref other_name,
-                    table: ref other_table,
+                | OutputColumn::Data {
+                    column:
+                        Column {
+                            name: ref other_name,
+                            table: ref other_table,
+                            ..
+                        },
                     ..
-                })
+                }
                 | OutputColumn::Literal(LiteralColumn {
                     name: ref other_name,
                     table: ref other_table,
@@ -539,7 +554,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 .fields
                 .iter()
                 .map(|field| {
-                    Ok(match *field {
+                    Ok(match field {
                         // unreachable because SQL rewrite passes will have expanded these already
                         FieldDefinitionExpression::All => {
                             internal!("* should have been expanded already")
@@ -549,28 +564,39 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         }
                         // No need to do anything for literals and arithmetic expressions here, as they
                         // aren't associated with a relation (and thus have no QGN)
-                        FieldDefinitionExpression::Value(_) => None,
-                        FieldDefinitionExpression::Col(ref c) => {
-                            match c.table.as_ref() {
-                                None => {
-                                    match c.function {
-                                        // XXX(malte): don't drop aggregation columns
-                                        Some(_) => None,
-                                        None => internal!(
-                                            "No table name set for column {} on {}",
-                                            c.name,
-                                            rel
-                                        ),
-                                    }
-                                }
-                                Some(t) => {
-                                    if *t == rel {
-                                        Some(c.clone())
-                                    } else {
-                                        None
-                                    }
+                        FieldDefinitionExpression::Expression {
+                            expr: Expression::Literal(_) | Expression::Arithmetic(_),
+                            ..
+                        } => None,
+                        // XXX(malte): don't drop aggregation columns
+                        FieldDefinitionExpression::Expression {
+                            expr:
+                                Expression::Call(_)
+                                | Expression::Column(Column {
+                                    function: Some(_), ..
+                                }),
+                            ..
+                        } => None,
+                        FieldDefinitionExpression::Expression {
+                            expr: Expression::Column(c),
+                            ..
+                        } => match c.table.as_ref() {
+                            None => internal!("No table name set for column {} on {}", c.name, rel),
+                            Some(t) => {
+                                if *t == rel {
+                                    Some(c.clone())
+                                } else {
+                                    None
                                 }
                             }
+                        },
+                        FieldDefinitionExpression::Expression {
+                            expr: Expression::CaseWhen { .. },
+                            ..
+                        } => {
+                            unsupported!(
+                                "Projecting CASE WHEN expressions is not currently supported"
+                            )
                         }
                     })
                 })
@@ -792,7 +818,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // the parameter column is included in the projected columns of the output, but
                     // we also separately register it as a parameter so that we can set keys
                     // correctly on the leaf view
-                    rel.parameters.push((column.clone(), operator.clone()));
+                    rel.parameters.push((column.clone(), operator));
                 }
             }
         }
@@ -801,73 +827,73 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         qg.global_predicates = global_predicates;
     }
 
-    // Adds a computed column to the query graph if the given column has a function:
-    let add_computed_column =
-        |query_graph: &mut QueryGraph, column: &Column| -> ReadySetResult<()> {
-            match &column.function {
-                Some(f) if is_aggregate(f) => {
-                    let nn = new_node(String::from("computed_columns"), vec![], st)?;
-                    // add a special node representing the computed columns; if it already
-                    // exists, add another computed column to it
-                    let n = query_graph
-                        .relations
-                        .entry(String::from("computed_columns"))
-                        .or_insert(nn);
-
-                    n.columns.push(column.clone());
-                }
-                _ => (), // we've already dealt with this column as part of some relation
-            }
-            Ok(())
-        };
-
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
-        match *field {
+        match field {
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
                 internal!("Stars should have been expanded by now!")
             }
-            FieldDefinitionExpression::Value(FieldValueExpression::Literal(ref l)) => {
-                qg.columns.push(OutputColumn::Literal(LiteralColumn {
-                    name: match l.alias {
-                        Some(ref a) => a.to_string(),
-                        None => l.value.to_string(),
-                    },
-                    table: None,
-                    value: l.value.clone(),
-                }));
-            }
-            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref a)) => {
-                if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.left {
-                    add_computed_column(&mut qg, c)?;
-                }
-
-                if let ArithmeticItem::Base(ArithmeticBase::Column(ref c)) = a.ari.right {
-                    add_computed_column(&mut qg, c)?;
-                }
-
-                qg.columns.push(OutputColumn::Expression(ExpressionColumn {
-                    name: a.alias.clone().unwrap_or_else(|| a.to_string()),
-                    table: None,
-                    expression: Expression::Arithmetic(a.clone()),
-                }));
-            }
-            FieldDefinitionExpression::Col(ref c) => {
-                add_computed_column(&mut qg, c)?;
-                qg.columns.push(if let Some(function) = &c.function {
-                    if is_aggregate(function) {
-                        OutputColumn::Data(c.clone())
-                    } else {
-                        OutputColumn::Expression(ExpressionColumn {
-                            name: c.alias.clone().unwrap_or_else(|| c.name.clone()),
+            FieldDefinitionExpression::Expression { expr, alias } => {
+                let name = alias.clone().unwrap_or_else(|| expr.to_string());
+                match expr {
+                    Expression::Literal(l) => {
+                        qg.columns.push(OutputColumn::Literal(LiteralColumn {
+                            name,
                             table: None,
-                            expression: Expression::Call((**function).clone()),
-                        })
+                            value: l.clone(),
+                        }))
                     }
-                } else {
-                    OutputColumn::Data(c.clone())
-                });
+                    Expression::Arithmetic(ari) => {
+                        // TODO(grfn): Add computed columns for arithmetic on aggregates
+
+                        qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                            name,
+                            table: None,
+                            expression: Expression::Arithmetic(ari.clone()),
+                        }));
+                    }
+                    Expression::Column(c) => {
+                        qg.columns.push(OutputColumn::Data {
+                            alias: alias.clone().unwrap_or_else(|| c.name.clone()),
+                            column: c.clone(),
+                        });
+                    }
+                    Expression::Call(function) => {
+                        if is_aggregate(function) {
+                            let column = Column {
+                                name: name.clone(),
+                                table: None,
+                                function: Some(Box::new(function.clone())),
+                            };
+
+                            let nn = new_node(String::from("computed_columns"), vec![], st)?;
+                            // add a special node representing the computed columns; if it already
+                            // exists, add another computed column to it
+                            let n = qg
+                                .relations
+                                .entry(String::from("computed_columns"))
+                                .or_insert(nn);
+
+                            n.columns.push(column.clone());
+
+                            // TODO(grfn/celine): Make this an Expression, not a column
+                            qg.columns.push(OutputColumn::Data {
+                                alias: name,
+                                column,
+                            })
+                        } else {
+                            qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                                name,
+                                table: None,
+                                expression: Expression::Call((*function).clone()),
+                            }))
+                        };
+                    }
+                    Expression::CaseWhen { .. } => {
+                        unsupported!("Projecting CASE WHEN expressions is not currently supported")
+                    }
+                };
             }
         }
     }

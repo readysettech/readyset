@@ -1,7 +1,7 @@
 use nom_sql::{
-    ArithmeticBase, ArithmeticItem, Column, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, FieldValueExpression, JoinRightSide, SelectStatement, SqlQuery,
-    Table,
+    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionExpression, ConditionTree,
+    Expression, FieldDefinitionExpression, FunctionExpression, JoinRightSide, SelectStatement,
+    SqlQuery, Table,
 };
 
 use crate::errors::ReadySetResult;
@@ -15,48 +15,98 @@ pub trait ImpliedTableExpansion {
     ) -> ReadySetResult<SqlQuery>;
 }
 
-fn rewrite_conditional<F>(
-    expand_columns: &F,
-    ce: ConditionExpression,
-    avail_tables: &[Table],
-) -> ConditionExpression
+fn rewrite_arithmetic<F>(expand_columns: &F, ari: &mut Arithmetic, avail_tables: &[Table])
 where
-    F: Fn(Column, &[Table]) -> Column,
+    F: Fn(&mut Column, &[Table]),
+{
+    if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = ari.left {
+        expand_columns(c, &avail_tables);
+    }
+
+    if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = ari.right {
+        expand_columns(c, &avail_tables);
+    }
+}
+
+fn rewrite_conditional<F>(expand_columns: &F, ce: &mut ConditionExpression, avail_tables: &[Table])
+where
+    F: Fn(&mut Column, &[Table]),
 {
     use nom_sql::ConditionBase::*;
     use nom_sql::ConditionExpression::*;
 
-    let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
-        let new_ce = match *bce {
-            Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
-            Base(b) => Base(b),
-            x => rewrite_conditional(expand_columns, x, avail_tables),
-        };
-        Box::new(new_ce)
-    };
-
     match ce {
-        ComparisonOp(ct) => {
-            let l = translate_ct_arm(ct.left);
-            let r = translate_ct_arm(ct.right);
-            let rewritten_ct = ConditionTree {
-                operator: ct.operator,
-                left: l,
-                right: r,
-            };
-            ComparisonOp(rewritten_ct)
+        ComparisonOp(ConditionTree { left, right, .. })
+        | LogicalOp(ConditionTree { left, right, .. }) => {
+            rewrite_conditional(expand_columns, left, avail_tables);
+            rewrite_conditional(expand_columns, right, avail_tables);
         }
-        LogicalOp(ConditionTree {
-            operator,
-            left,
-            right,
-        }) => LogicalOp(ConditionTree {
-            operator,
-            left: Box::new(rewrite_conditional(expand_columns, *left, avail_tables)),
-            right: Box::new(rewrite_conditional(expand_columns, *right, avail_tables)),
-        }),
-        Bracketed(ce) => rewrite_conditional(expand_columns, *ce, avail_tables),
-        x => x,
+        Bracketed(ce) => {
+            rewrite_conditional(expand_columns, ce, avail_tables);
+        }
+        NegationOp(box ce) => {
+            rewrite_conditional(expand_columns, ce, avail_tables);
+        }
+        ExistsOp(_) => {}
+        Base(Field(f)) => {
+            expand_columns(f, avail_tables);
+        }
+        Base(_) => {}
+        Arithmetic(ari) => {
+            rewrite_arithmetic(expand_columns, &mut ari.ari, avail_tables);
+        }
+        Between { operand, min, max } => {
+            rewrite_conditional(expand_columns, operand, avail_tables);
+            rewrite_conditional(expand_columns, min, avail_tables);
+            rewrite_conditional(expand_columns, max, avail_tables);
+        }
+    }
+}
+
+fn rewrite_expression<F>(expand_columns: &F, expr: &mut Expression, avail_tables: &[Table])
+where
+    F: Fn(&mut Column, &[Table]),
+{
+    match expr {
+        Expression::Arithmetic(ari) => {
+            rewrite_arithmetic(expand_columns, ari, avail_tables);
+        }
+        Expression::Call(f)
+        | Expression::Column(Column {
+            function: Some(box f),
+            ..
+        }) => match f {
+            FunctionExpression::CountStar => {}
+            FunctionExpression::Avg { box expr, .. }
+            | FunctionExpression::Count { box expr, .. }
+            | FunctionExpression::Sum { box expr, .. }
+            | FunctionExpression::Max(box expr)
+            | FunctionExpression::Min(box expr)
+            | FunctionExpression::GroupConcat { box expr, .. }
+            | FunctionExpression::Cast(box expr, _) => {
+                rewrite_expression(expand_columns, expr, avail_tables);
+            }
+            FunctionExpression::Call { arguments, .. } => {
+                for expr in arguments.iter_mut() {
+                    rewrite_expression(expand_columns, expr, avail_tables);
+                }
+            }
+        },
+        Expression::Literal(_) => {}
+        Expression::CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            rewrite_conditional(expand_columns, condition, avail_tables);
+            rewrite_expression(expand_columns, then_expr, avail_tables);
+            if let Some(else_expr) = else_expr {
+                rewrite_expression(expand_columns, else_expr, avail_tables);
+            }
+        }
+        Expression::Column(col) => {
+            expand_columns(col, avail_tables);
+        }
     }
 }
 
@@ -84,7 +134,6 @@ fn rewrite_selection(
     write_schemas: &HashMap<String, Vec<String>>,
 ) -> ReadySetResult<SelectStatement> {
     use nom_sql::FunctionExpression::*;
-    use nom_sql::{GroupByClause, OrderClause};
 
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
@@ -136,75 +185,71 @@ fn rewrite_selection(
     // Traverses a query and calls `find_table` on any column that has no explicit table set,
     // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
     // which can use the simpler `set_table`.
-    let expand_columns = |mut f: Column, tables_in_query: &[Table]| -> Column {
-        f.table = match f.table {
-            None => {
-                match f.function {
-                    Some(ref mut f) => {
-                        // There is no implied table (other than "self") for anonymous function
-                        // columns, but we have to peek inside the function to expand implied
-                        // tables in its specification
-                        match **f {
-                            Avg {
-                                expr: box Expression::Column(ref mut fe),
-                                ..
+    let expand_columns = |col: &mut Column, tables_in_query: &[Table]| {
+        if col.table.is_none() {
+            col.table = match col.function {
+                Some(ref mut f) => {
+                    // There is no implied table (other than "self") for anonymous function
+                    // columns, but we have to peek inside the function to expand implied
+                    // tables in its specification
+                    match **f {
+                        Avg {
+                            expr: box Expression::Column(ref mut fe),
+                            ..
+                        }
+                        | Count {
+                            expr:
+                                box Expression::CaseWhen {
+                                    then_expr: box Expression::Column(ref mut fe),
+                                    ..
+                                },
+                            ..
+                        }
+                        | Count {
+                            expr: box Expression::Column(ref mut fe),
+                            ..
+                        }
+                        | Sum {
+                            expr:
+                                box Expression::CaseWhen {
+                                    then_expr: box Expression::Column(ref mut fe),
+                                    ..
+                                },
+                            ..
+                        }
+                        | Sum {
+                            expr: box Expression::Column(ref mut fe),
+                            ..
+                        }
+                        | Min(box Expression::Column(ref mut fe))
+                        | Max(box Expression::Column(ref mut fe))
+                        | Cast(box Expression::Column(ref mut fe), _)
+                        | GroupConcat {
+                            expr: box Expression::Column(ref mut fe),
+                            ..
+                        } => {
+                            if fe.table.is_none() {
+                                fe.table = find_table(fe, tables_in_query);
                             }
-                            | Count {
-                                expr:
-                                    box Expression::CaseWhen {
-                                        then_expr: box Expression::Column(ref mut fe),
-                                        ..
-                                    },
-                                ..
-                            }
-                            | Count {
-                                expr: box Expression::Column(ref mut fe),
-                                ..
-                            }
-                            | Sum {
-                                expr:
-                                    box Expression::CaseWhen {
-                                        then_expr: box Expression::Column(ref mut fe),
-                                        ..
-                                    },
-                                ..
-                            }
-                            | Sum {
-                                expr: box Expression::Column(ref mut fe),
-                                ..
-                            }
-                            | Min(box Expression::Column(ref mut fe))
-                            | Max(box Expression::Column(ref mut fe))
-                            | Cast(box Expression::Column(ref mut fe), _)
-                            | GroupConcat {
-                                expr: box Expression::Column(ref mut fe),
-                                ..
-                            } => {
-                                if fe.table.is_none() {
-                                    fe.table = find_table(fe, tables_in_query);
-                                }
-                            }
-                            Call {
-                                ref mut arguments, ..
-                            } => {
-                                for arg in arguments.iter_mut() {
-                                    if let Expression::Column(ref mut fe) = arg {
-                                        if fe.table.is_none() {
-                                            fe.table = find_table(fe, tables_in_query);
-                                        }
+                        }
+                        Call {
+                            ref mut arguments, ..
+                        } => {
+                            for arg in arguments.iter_mut() {
+                                if let Expression::Column(ref mut fe) = arg {
+                                    if fe.table.is_none() {
+                                        fe.table = find_table(fe, tables_in_query);
                                     }
                                 }
                             }
-                            _ => {}
                         }
-                        None
+                        _ => {}
                     }
-                    None => find_table(&f, tables_in_query),
+                    None
                 }
+                None => find_table(&col, tables_in_query),
             }
-            Some(x) => Some(x),
-        };
-        f
+        }
     };
 
     let mut tables: Vec<Table> = sq.tables.clone();
@@ -222,76 +267,31 @@ fn rewrite_selection(
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
                 internal!("Must apply StarExpansion pass before ImpliedTableExpansion")
             }
-            FieldDefinitionExpression::Value(FieldValueExpression::Literal(_)) => (),
-            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ref mut e)) => {
-                if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = e.ari.left {
-                    *c = expand_columns(c.clone(), &tables);
-                }
-
-                if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = e.ari.right {
-                    *c = expand_columns(c.clone(), &tables);
-                }
-            }
-            FieldDefinitionExpression::Col(ref mut f) => {
-                *f = expand_columns(f.clone(), &tables);
-                // also need to expand any conditionals in the column, e.g. for filtered aggregations
-                match f.function {
-                    Some(ref mut f) => match **f {
-                        Count {
-                            expr:
-                                box Expression::CaseWhen {
-                                    ref mut condition, ..
-                                },
-                            ..
-                        }
-                        | Sum {
-                            expr:
-                                box Expression::CaseWhen {
-                                    ref mut condition, ..
-                                },
-                            ..
-                        } => {
-                            *condition =
-                                rewrite_conditional(&expand_columns, condition.clone(), &tables);
-                        }
-                        _ => {}
-                    },
-                    None => {}
-                }
+            FieldDefinitionExpression::Expression { ref mut expr, .. } => {
+                rewrite_expression(&expand_columns, expr, &tables);
             }
         }
     }
     // Expand within WHERE clause
-    sq.where_clause = match sq.where_clause {
-        None => None,
-        Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
-    };
+    if let Some(wc) = &mut sq.where_clause {
+        rewrite_conditional(&expand_columns, wc, &tables);
+    }
     // Expand within GROUP BY clause
-    sq.group_by = match sq.group_by {
-        None => None,
-        Some(gbc) => Some(GroupByClause {
-            columns: gbc
-                .columns
-                .into_iter()
-                .map(|f| expand_columns(f, &tables))
-                .collect(),
-            having: match gbc.having {
-                None => None,
-                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
-            },
-        }),
-    };
+    if let Some(gbc) = &mut sq.group_by {
+        for col in &mut gbc.columns {
+            expand_columns(col, &tables)
+        }
+        if let Some(hc) = &mut gbc.having {
+            rewrite_conditional(&expand_columns, hc, &tables)
+        }
+    }
+
     // Expand within ORDER BY clause
-    sq.order = match sq.order {
-        None => None,
-        Some(oc) => Some(OrderClause {
-            columns: oc
-                .columns
-                .into_iter()
-                .map(|(f, o)| (expand_columns(f, &tables), o))
-                .collect(),
-        }),
-    };
+    if let Some(oc) = &mut sq.order {
+        for (col, _) in &mut oc.columns {
+            expand_columns(col, &tables);
+        }
+    }
 
     Ok(sq)
 }
@@ -329,7 +329,8 @@ impl ImpliedTableExpansion for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::ImpliedTableExpansion;
-    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery, Table};
+    use maplit::hashmap;
+    use nom_sql::{parse_query, Column, FieldDefinitionExpression, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]
@@ -346,8 +347,8 @@ mod tests {
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("name")),
-                FieldDefinitionExpression::Col(Column::from("title")),
+                FieldDefinitionExpression::from(Column::from("name")),
+                FieldDefinitionExpression::from(Column::from("title")),
             ],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
@@ -372,8 +373,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::Col(Column::from("users.name")),
-                        FieldDefinitionExpression::Col(Column::from("articles.title")),
+                        FieldDefinitionExpression::from(Column::from("users.name")),
+                        FieldDefinitionExpression::from(Column::from("articles.title")),
                     ]
                 );
                 assert_eq!(
@@ -388,5 +389,43 @@ mod tests {
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn in_where() {
+        let orig = parse_query("SELECT name FROM users WHERE id = ?").unwrap();
+        let expected = parse_query("SELECT users.name FROM users WHERE users.id = ?").unwrap();
+        let schema = hashmap! {
+            "users".into() => vec![
+                "id".into(),
+                "name".into(),
+            ]
+        };
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn case_when() {
+        let orig = parse_query(
+            "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count
+             FROM votes GROUP BY votes.userid",
+        )
+        .unwrap();
+        let expected = parse_query(
+            "SELECT COUNT(CASE WHEN votes.aid = 5 THEN votes.aid END) AS count
+             FROM votes GROUP BY votes.userid",
+        )
+        .unwrap();
+        let schema = hashmap! {
+            "votes".into() => vec![
+                "aid".into(),
+                "userid".into(),
+            ]
+        };
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected);
     }
 }

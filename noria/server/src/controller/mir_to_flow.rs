@@ -1,6 +1,6 @@
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, BinaryOperator,
-    ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
+    Arithmetic, ArithmeticBase, ArithmeticItem, BinaryOperator, ColumnConstraint,
+    ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
 };
 use std::collections::HashMap;
 
@@ -889,9 +889,7 @@ fn generate_project_expression(
     expr: Expression,
 ) -> ReadySetResult<ProjectExpression> {
     match expr {
-        Expression::Arithmetic(ArithmeticExpression { ari, .. }) => {
-            arithmetic_to_project_expression(parent, &ari)
-        }
+        Expression::Arithmetic(ari) => arithmetic_to_project_expression(parent, &ari),
         Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(ProjectExpression::Cast(
             Box::new(generate_project_expression(parent, (*arg).into())?),
             ty,
@@ -943,9 +941,11 @@ fn make_project_node(
             parent
                 .borrow()
                 .find_source_for_child_column(c, table_mapping)
-                .unwrap()
+                .ok_or_else(|| {
+                    internal_err(format!("could not find source for child column: {:?}", c))
+                })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 

@@ -90,7 +90,7 @@ fn value_columns_needed_for_predicates(
                 },
                 oc.clone(),
             )),
-            OutputColumn::Data(_) => None,
+            OutputColumn::Data { .. } => None,
         })
         .filter(|(c, _)| pred_columns.contains(c))
         .collect()
@@ -1777,7 +1777,7 @@ impl SqlToMirConverter {
                     OutputColumn::Expression(ref ac) => {
                         Some((ac.name.clone(), ac.expression.clone()))
                     }
-                    OutputColumn::Data(_) => None,
+                    OutputColumn::Data { .. } => None,
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
@@ -1785,7 +1785,7 @@ impl SqlToMirConverter {
                 .iter()
                 .filter_map(|&(_, ref oc)| match oc {
                     OutputColumn::Expression(_) => None,
-                    OutputColumn::Data(_) => None,
+                    OutputColumn::Data { .. } => None,
                     OutputColumn::Literal(ref lc) => {
                         Some((lc.name.clone(), DataType::from(&lc.value)))
                     }
@@ -2214,7 +2214,10 @@ impl SqlToMirConverter {
                     .iter()
                     .filter_map(|oc| match *oc {
                         OutputColumn::Expression(_) => None,
-                        OutputColumn::Data(ref c) => Some(Column::from(c)),
+                        OutputColumn::Data {
+                            ref column,
+                            alias: ref name,
+                        } => Some(Column::from(column).aliased_as(name.clone())),
                         OutputColumn::Literal(_) => None,
                     })
                     .collect()
@@ -2243,7 +2246,7 @@ impl SqlToMirConverter {
                             None
                         }
                     }
-                    OutputColumn::Data(_) => None,
+                    OutputColumn::Data { .. } => None,
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
@@ -2252,7 +2255,7 @@ impl SqlToMirConverter {
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Expression(_) => None,
-                    OutputColumn::Data(_) => None,
+                    OutputColumn::Data { .. } => None,
                     OutputColumn::Literal(ref lc) => {
                         if !already_computed.contains(oc) {
                             Some((lc.name.clone(), DataType::from(&lc.value)))

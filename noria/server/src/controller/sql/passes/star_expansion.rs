@@ -1,6 +1,8 @@
-use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
+use nom_sql::{Column, Expression, FieldDefinitionExpression, SqlQuery};
 
+use itertools::Either;
 use std::collections::HashMap;
+use std::iter;
 use std::mem;
 
 pub trait StarExpansion {
@@ -16,10 +18,11 @@ impl StarExpansion for SqlQuery {
                 .unwrap_or_else(|| panic!("table name `{}` does not exist", table_name))
                 .clone()
                 .into_iter()
-                .map(move |f| {
-                    FieldDefinitionExpression::Col(Column::from(
+                .map(move |f| FieldDefinitionExpression::Expression {
+                    expr: Expression::Column(Column::from(
                         format!("{}.{}", table_name, f).as_ref(),
-                    ))
+                    )),
+                    alias: None,
                 })
         };
 
@@ -28,22 +31,17 @@ impl StarExpansion for SqlQuery {
             sq.fields = old_fields
                 .into_iter()
                 .flat_map(|field| match field {
-                    FieldDefinitionExpression::All => {
-                        let v: Vec<_> = sq
-                            .tables
+                    FieldDefinitionExpression::All => Either::Left(
+                        sq.tables
                             .iter()
                             .map(|t| t.name.clone())
-                            .flat_map(&expand_table)
-                            .collect();
-                        v.into_iter()
-                    }
+                            .flat_map(&expand_table),
+                    ),
                     FieldDefinitionExpression::AllInTable(t) => {
-                        let v: Vec<_> = expand_table(t).collect();
-                        v.into_iter()
+                        Either::Right(Either::Left(expand_table(t)))
                     }
-                    e @ FieldDefinitionExpression::Value(_) => vec![e].into_iter(),
-                    FieldDefinitionExpression::Col(c) => {
-                        vec![FieldDefinitionExpression::Col(c)].into_iter()
+                    e @ FieldDefinitionExpression::Expression { .. } => {
+                        Either::Right(Either::Right(iter::once(e)))
                     }
                 })
                 .collect();
@@ -83,8 +81,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.tag_id")),
                     ]
                 );
             }
@@ -114,10 +112,10 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
-                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
-                        FieldDefinitionExpression::Col(Column::from("Users.name")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::from(Column::from("Users.uid")),
+                        FieldDefinitionExpression::from(Column::from("Users.name")),
                     ]
                 );
             }
@@ -150,12 +148,12 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
-                        FieldDefinitionExpression::Col(Column::from("Users.name")),
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.paper_id")),
-                        FieldDefinitionExpression::Col(Column::from("PaperTag.tag_id")),
-                        FieldDefinitionExpression::Col(Column::from("Users.uid")),
-                        FieldDefinitionExpression::Col(Column::from("Users.name")),
+                        FieldDefinitionExpression::from(Column::from("Users.uid")),
+                        FieldDefinitionExpression::from(Column::from("Users.name")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.paper_id")),
+                        FieldDefinitionExpression::from(Column::from("PaperTag.tag_id")),
+                        FieldDefinitionExpression::from(Column::from("Users.uid")),
+                        FieldDefinitionExpression::from(Column::from("Users.name")),
                     ]
                 );
             }
