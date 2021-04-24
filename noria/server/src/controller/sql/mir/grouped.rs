@@ -172,7 +172,6 @@ pub(super) fn make_grouped(
                 nom_sql::Column {
                     function: Some(Box::new(new_func)),
                     name: computed_col.name.clone(),
-                    alias: computed_col.alias.clone(),
                     table: computed_col.table.clone(),
                 }
             } else {

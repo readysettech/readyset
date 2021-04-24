@@ -50,7 +50,6 @@ mod tests {
     fn it_displays() {
         let c1 = Column {
             name: String::from("foo"),
-            alias: None,
             table: None,
             function: None,
         };

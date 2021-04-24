@@ -132,8 +132,9 @@ pub fn compound_selection(i: &[u8]) -> IResult<&[u8], CompoundSelectStatement> {
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{FieldDefinitionExpression, FieldValueExpression, Literal};
+    use crate::common::{FieldDefinitionExpression, Literal};
     use crate::table::Table;
+    use crate::Expression;
 
     #[test]
     fn union() {
@@ -145,18 +146,16 @@ mod tests {
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(
-                    Literal::Integer(1).into(),
-                )),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
             ],
             ..Default::default()
         };
         let second_select = SelectStatement {
             tables: vec![Table::from("Rating")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Col(Column::from("stars")),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Column::from("stars")),
             ],
             ..Default::default()
         };
@@ -212,30 +211,24 @@ mod tests {
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(
-                    Literal::Integer(1).into(),
-                )),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
             ],
             ..Default::default()
         };
         let second_select = SelectStatement {
             tables: vec![Table::from("Rating")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Col(Column::from("stars")),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Column::from("stars")),
             ],
             ..Default::default()
         };
         let third_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(
-                    Literal::Integer(42).into(),
-                )),
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(
-                    Literal::Integer(5).into(),
-                )),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(42).into())),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(5).into())),
             ],
             ..Default::default()
         };
@@ -261,18 +254,16 @@ mod tests {
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Value(FieldValueExpression::Literal(
-                    Literal::Integer(1).into(),
-                )),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
             ],
             ..Default::default()
         };
         let second_select = SelectStatement {
             tables: vec![Table::from("Rating")],
             fields: vec![
-                FieldDefinitionExpression::Col(Column::from("id")),
-                FieldDefinitionExpression::Col(Column::from("stars")),
+                FieldDefinitionExpression::from(Column::from("id")),
+                FieldDefinitionExpression::from(Column::from("stars")),
             ],
             ..Default::default()
         };

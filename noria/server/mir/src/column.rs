@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::mem;
 
 use nom_sql::{self, FunctionExpression};
 
@@ -34,25 +35,25 @@ impl Column {
     pub fn add_alias(&mut self, alias: &Column) {
         self.aliases.push(alias.clone());
     }
+
+    pub fn aliased_as(mut self, alias: String) -> Self {
+        let name = mem::replace(&mut self.name, alias);
+        self.aliases.push(Column {
+            name,
+            table: self.table.clone(),
+            aliases: vec![],
+            function: self.function.clone(),
+        });
+        self
+    }
 }
 
 impl From<nom_sql::Column> for Column {
     fn from(c: nom_sql::Column) -> Column {
         Column {
-            aliases: match &c.alias {
-                Some(_) => vec![Column::from(nom_sql::Column {
-                    name: c.name.to_owned(),
-                    table: c.table.clone(),
-                    alias: None,
-                    function: c.function.clone(),
-                })],
-                None => vec![],
-            },
             table: c.table,
-            name: match c.alias {
-                Some(a) => a,
-                None => c.name,
-            },
+            aliases: vec![],
+            name: c.name,
             function: c.function,
         }
     }
@@ -61,20 +62,9 @@ impl From<nom_sql::Column> for Column {
 impl<'a> From<&'a nom_sql::Column> for Column {
     fn from(c: &'a nom_sql::Column) -> Column {
         Column {
-            aliases: match c.alias {
-                Some(_) => vec![Column::from(nom_sql::Column {
-                    name: c.name.to_owned(),
-                    table: c.table.clone(),
-                    alias: None,
-                    function: c.function.clone(),
-                })],
-                None => vec![],
-            },
+            aliases: vec![],
             table: c.table.clone(),
-            name: match c.alias {
-                Some(ref a) => a.clone(),
-                None => c.name.clone(),
-            },
+            name: c.name.clone(),
             function: c.function.clone(),
         }
     }
@@ -159,27 +149,6 @@ mod tests {
                 name: "col".into(),
                 function: None,
                 aliases: vec![],
-            }
-        );
-
-        let nsc_with_alias = nom_sql::Column {
-            name: "colwa".into(),
-            table: Some("t".into()),
-            alias: Some("al".into()),
-            function: None,
-        };
-        assert_eq!(
-            Column::from(nsc_with_alias),
-            Column {
-                table: Some("t".into()),
-                name: "al".into(),
-                function: None,
-                aliases: vec![Column {
-                    table: Some("t".into()),
-                    name: "colwa".into(),
-                    function: None,
-                    aliases: vec![],
-                }],
             }
         );
     }

@@ -1561,6 +1561,7 @@ async fn it_works_with_join_arithmetic() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn it_works_with_function_arithmetic() {
     let mut g = start_simple("it_works_with_function_arithmetic").await;
     let sql = "
@@ -3870,7 +3871,7 @@ async fn self_join_param() {
          VIEW fof2: SELECT u1.id AS user, u2.friend AS fof \
              FROM users u1 \
              JOIN users u2 ON (u1.friend = u2.id);
-             QUERY follow_on: SELECT * FROM fof2 WHERE user = ?;",
+         QUERY follow_on: SELECT * FROM fof2 WHERE user = ?;",
     )
     .await
     .unwrap();
@@ -4808,7 +4809,7 @@ async fn overlapping_indices() {
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
     g.install_recipe(
         "CREATE TABLE test (id int, a int, b int);
-         VIEW overlapping: SELECT SUM(a), id FROM test WHERE b = ? ORDER BY id LIMIT 2;",
+         VIEW overlapping: SELECT SUM(a) as s, id FROM test WHERE b = ? ORDER BY id LIMIT 2;",
     )
     .await
     .unwrap();
@@ -4830,14 +4831,13 @@ async fn overlapping_indices() {
     .await
     .unwrap();
 
-    let res = q
-        .lookup(&[3i32.into()], true)
-        .await
-        .unwrap()
+    let rows = q.lookup(&[3i32.into()], true).await.unwrap();
+
+    let res = rows
         .into_iter()
         .map(|r| {
             (
-                r["sum(a)"].clone().try_into().unwrap(),
+                r["s"].clone().try_into().unwrap(),
                 r["id"].clone().try_into().unwrap(),
                 r["b"].clone().try_into().unwrap(),
             )

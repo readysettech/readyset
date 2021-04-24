@@ -2,8 +2,8 @@ use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
     Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
-    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
-    FieldValueExpression, FunctionExpression, JoinConstraint, JoinRightSide, SqlQuery, Table,
+    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression, FunctionExpression,
+    JoinConstraint, JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -112,7 +112,6 @@ fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Co
     });
     Column {
         name: col.name.clone(),
-        alias: col.alias.clone(),
         table,
         function,
     }
@@ -136,10 +135,9 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
         Expression::Call(fun) => {
             Expression::Call(rewrite_function_expression(col_table_remap, fun))
         }
-        Expression::Arithmetic(ae) => Expression::Arithmetic(ArithmeticExpression {
-            ari: rewrite_arithmetic(col_table_remap, &ae.ari),
-            alias: ae.alias.clone(),
-        }),
+        Expression::Arithmetic(ari) => {
+            Expression::Arithmetic(rewrite_arithmetic(col_table_remap, &ari))
+        }
     }
 }
 
@@ -216,8 +214,11 @@ fn rewrite_field(
     field: &FieldDefinitionExpression,
 ) -> FieldDefinitionExpression {
     match field {
-        FieldDefinitionExpression::Col(col) => {
-            FieldDefinitionExpression::Col(rewrite_column(col_table_remap, col))
+        FieldDefinitionExpression::Expression { expr, alias } => {
+            FieldDefinitionExpression::Expression {
+                expr: rewrite_expression(col_table_remap, expr),
+                alias: alias.clone(),
+            }
         }
         FieldDefinitionExpression::AllInTable(t) => {
             if col_table_remap.contains_key(t) {
@@ -226,15 +227,7 @@ fn rewrite_field(
                 FieldDefinitionExpression::AllInTable(t.clone())
             }
         }
-        FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(ae)) => {
-            FieldDefinitionExpression::Value(FieldValueExpression::Arithmetic(
-                ArithmeticExpression {
-                    ari: rewrite_arithmetic(col_table_remap, &ae.ari),
-                    alias: ae.alias.clone(),
-                },
-            ))
-        }
-        f => f.clone(),
+        FieldDefinitionExpression::All => FieldDefinitionExpression::All,
     }
 }
 
@@ -458,7 +451,7 @@ mod tests {
                 alias: Some(String::from("t")),
                 schema: None,
             }],
-            fields: vec![FieldDefinitionExpression::Col(Column::from("t.id"))],
+            fields: vec![FieldDefinitionExpression::from(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
@@ -477,7 +470,7 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::Col(Column::from("PaperTag.id"))]
+                    vec![FieldDefinitionExpression::from(Column::from("PaperTag.id"))]
                 );
                 assert_eq!(
                     tq.where_clause,
@@ -522,12 +515,10 @@ mod tests {
         let col_small = Column {
             name: "count(t.id)".into(),
             table: None,
-            alias: None,
             function: Some(Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("t".into()),
-                    alias: None,
                     function: None,
                 })),
                 distinct: true,
@@ -536,12 +527,10 @@ mod tests {
         let col_full = Column {
             name: "count(t.id)".into(),
             table: None,
-            alias: None,
             function: Some(Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column {
                     name: "id".into(),
                     table: Some("PaperTag".into()),
-                    alias: None,
                     function: None,
                 })),
                 distinct: true,
@@ -553,7 +542,7 @@ mod tests {
                 alias: Some(String::from("t")),
                 schema: None,
             }],
-            fields: vec![FieldDefinitionExpression::Col(col_small.clone())],
+            fields: vec![FieldDefinitionExpression::from(col_small.clone())],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: BinaryOperator::Equal,
                 left: wrap(ConditionBase::Field(col_small.clone())),
@@ -572,7 +561,7 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::Col(col_full.clone())]
+                    vec![FieldDefinitionExpression::from(col_full.clone())]
                 );
                 assert_eq!(
                     tq.where_clause,
@@ -621,8 +610,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::Col(Column::from("__query_name__t1.id")),
-                        FieldDefinitionExpression::Col(Column::from("__query_name__t2.name"))
+                        FieldDefinitionExpression::from(Column::from("__query_name__t1.id")),
+                        FieldDefinitionExpression::from(Column::from("__query_name__t2.name"))
                     ]
                 );
                 assert_eq!(

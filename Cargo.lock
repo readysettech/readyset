@@ -1206,7 +1206,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio 0.2.25",
+ "tokio 1.5.0",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]

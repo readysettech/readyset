@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
-    BinaryOperator, Column, ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree,
-    CreateTableStatement, FieldValueExpression, Literal, LiteralExpression, SelectStatement,
-    SqlQuery, TableKey, UpdateStatement,
+    Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator, BinaryOperator, Column,
+    ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
+    Expression, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
@@ -329,11 +328,7 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
         }
         SqlQuery::Update(ref query) => {
             let field_params = query.fields.iter().filter_map(|f| {
-                if let FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder(_),
-                    alias: None,
-                }) = f.1
-                {
+                if let Expression::Literal(Literal::Placeholder(_)) = f.1 {
                     Some(&f.0)
                 } else {
                     None
@@ -412,10 +407,7 @@ where
             .position(|&(ref f, _)| f.name == field.column.name)
         {
             match q.fields.swap_remove(sets).1 {
-                FieldValueExpression::Literal(LiteralExpression {
-                    value: Literal::Placeholder(_),
-                    alias: None,
-                }) => {
+                Expression::Literal(Literal::Placeholder(_)) => {
                     let v = params
                         .as_mut()
                         .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
@@ -425,10 +417,7 @@ where
                         })?;
                     updates.push((i, Modification::Set(v)));
                 }
-                FieldValueExpression::Literal(LiteralExpression {
-                    value: ref v,
-                    alias: None,
-                }) => {
+                Expression::Literal(ref v) => {
                     updates.push((
                         i,
                         Modification::Set(
@@ -439,19 +428,15 @@ where
                         ),
                     ));
                 }
-                FieldValueExpression::Arithmetic(ref ae) => {
+                Expression::Arithmetic(ref ae) => {
                     // we only support "column = column +/- literal"
                     // TODO(grfn): Handle nested arithmetic
                     // (https://app.clubhouse.io/readysettech/story/41)
                     match ae {
-                        ArithmeticExpression {
-                            ari:
-                                Arithmetic {
-                                    op,
-                                    left: ArithmeticItem::Base(ArithmeticBase::Column(ref c)),
-                                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(ref l)),
-                                },
-                            alias: None,
+                        Arithmetic {
+                            op,
+                            left: ArithmeticItem::Base(ArithmeticBase::Column(ref c)),
+                            right: ArithmeticItem::Base(ArithmeticBase::Scalar(ref l)),
                         } => {
                             invariant_eq!(c, &field.column);
                             match op {
@@ -519,7 +504,6 @@ mod tests {
             .map(|k| Column {
                 name: String::from(k),
                 table: Some(String::from("T")),
-                alias: None,
                 function: None,
             })
             .collect();

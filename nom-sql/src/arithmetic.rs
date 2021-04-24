@@ -180,7 +180,7 @@ pub fn arithmetic_base(i: &[u8]) -> IResult<&[u8], ArithmeticBase> {
     ))(i)
 }
 
-fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
+pub(crate) fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
     let res = expr(i)?;
     match res.1 {
         ArithmeticItem::Base(ArithmeticBase::Column(_))
@@ -305,7 +305,6 @@ mod tests {
                 Subtract,
                 ABColumn(Column {
                     name: String::from("max(foo)"),
-                    alias: None,
                     table: None,
                     function: Some(Box::new(FunctionExpression::Max(Box::new(
                         Expression::Column("foo".into()),

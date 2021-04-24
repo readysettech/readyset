@@ -71,9 +71,9 @@ use strum_macros::EnumIter;
 
 use nom_sql::{
     BinaryOperator, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FieldValueExpression,
-    FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
-    Literal, LiteralExpression, SelectStatement, SqlType, Table, TableKey,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+    SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
 
@@ -192,7 +192,6 @@ impl From<ColumnName> for Column {
     fn from(name: ColumnName) -> Self {
         Self {
             name: name.into(),
-            alias: None,
             table: None,
             function: None,
         }
@@ -748,7 +747,6 @@ impl QueryOperation {
                 });
                 let expr = Box::new(Expression::Column(Column {
                     name: col.into(),
-                    alias: None,
                     table: Some(tbl.name.clone().into()),
                     function: None,
                 }));
@@ -773,12 +771,14 @@ impl QueryOperation {
                     Min => FunctionExpression::Min(expr),
                 };
 
-                query.fields.push(FieldDefinitionExpression::Col(Column {
-                    name: alias.clone(),
-                    alias: Some(alias),
-                    table: None,
-                    function: Some(Box::new(func)),
-                }))
+                query.fields.push(FieldDefinitionExpression::Expression {
+                    alias: Some(alias.clone()),
+                    expr: Expression::Column(Column {
+                        name: alias.clone(),
+                        table: None,
+                        function: Some(Box::new(func)),
+                    }),
+                })
             }
 
             QueryOperation::Filter(filter) => {
@@ -807,7 +807,7 @@ impl QueryOperation {
                     right,
                 });
 
-                query.fields.push(FieldDefinitionExpression::Col(Column {
+                query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(tbl.name.clone().into()),
                     ..col.into()
                 }));
@@ -856,23 +856,20 @@ impl QueryOperation {
                     )),
                 });
 
-                query.fields.push(FieldDefinitionExpression::Col(Column {
+                query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(left_table_name.into()),
                     ..left_projected.into()
                 }));
-                query.fields.push(FieldDefinitionExpression::Col(Column {
+                query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(right_table_name.into()),
                     ..right_projected.into()
                 }));
             }
 
             QueryOperation::ProjectLiteral => {
-                query.fields.push(FieldDefinitionExpression::Value(
-                    FieldValueExpression::Literal(LiteralExpression {
-                        value: Literal::Integer(1),
-                        alias: None,
-                    }),
-                ));
+                query
+                    .fields
+                    .push(FieldDefinitionExpression::from(Literal::Integer(1)));
             }
 
             QueryOperation::SingleParameter => {

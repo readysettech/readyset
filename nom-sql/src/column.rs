@@ -19,7 +19,6 @@ use crate::{common::type_identifier, Real};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
-    pub alias: Option<String>,
     pub table: Option<String>,
     pub function: Option<Box<FunctionExpression>>,
 }
@@ -38,9 +37,6 @@ impl fmt::Display for Column {
         } else {
             write!(f, "{}", escape_if_keyword(&self.name))?;
         }
-        if let Some(ref alias) = self.alias {
-            write!(f, " AS {}", escape_if_keyword(alias))?;
-        }
         Ok(())
     }
 }
@@ -50,13 +46,11 @@ impl<'a> From<&'a str> for Column {
         match c.find('.') {
             None => Column {
                 name: String::from(c),
-                alias: None,
                 table: None,
                 function: None,
             },
             Some(i) => Column {
                 name: String::from(&c[i + 1..]),
-                alias: None,
                 table: Some(String::from(&c[0..i])),
                 function: None,
             },
@@ -326,7 +320,6 @@ mod tests {
             c,
             Column {
                 name: String::from("col"),
-                alias: None,
                 table: Some(String::from("table")),
                 function: None,
             }
@@ -335,21 +328,13 @@ mod tests {
 
     #[test]
     fn print_function_column() {
-        let c1 = Column {
-            name: "".into(), // must be present, but will be ignored
-            alias: Some("foo".into()),
-            table: None,
-            function: Some(Box::new(FunctionExpression::CountStar)),
-        };
         let c2 = Column {
             name: "".into(), // must be present, but will be ignored
-            alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::CountStar)),
         };
         let c3 = Column {
             name: "".into(), // must be present, but will be ignored
-            alias: None,
             table: None,
             function: Some(Box::new(FunctionExpression::Sum {
                 expr: Box::new(Expression::Column(Column::from("mytab.foo"))),
@@ -357,7 +342,6 @@ mod tests {
             })),
         };
 
-        assert_eq!(format!("{}", c1), "count(*) AS foo");
         assert_eq!(format!("{}", c2), "count(*)");
         assert_eq!(format!("{}", c3), "sum(mytab.foo)");
     }
@@ -372,7 +356,6 @@ mod tests {
             ColumnSpecification {
                 column: Column {
                     name: "created_at".to_owned(),
-                    alias: None,
                     table: None,
                     function: None
                 },
