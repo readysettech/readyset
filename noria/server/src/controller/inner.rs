@@ -944,17 +944,18 @@ impl ControllerInner {
             .collect()
     }
 
-    fn find_view_for(
+    fn find_readers_for(
         &self,
         node: NodeIndex,
         name: &str,
         workers: &[SocketAddr],
-    ) -> Option<NodeIndex> {
+    ) -> Vec<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
+        let mut nodes: Vec<NodeIndex> = Vec::new();
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
             if self.ingredients[child]
@@ -963,7 +964,7 @@ impl ControllerInner {
                 && self.ingredients[child].name() == name
             {
                 if workers.is_empty() {
-                    return Some(child);
+                    nodes.push(child);
                 } else {
                     let domain = self.ingredients[child].domain();
                     for worker in workers {
@@ -973,13 +974,13 @@ impl ControllerInner {
                             .map(|dh| dh.assigned_to_worker(worker))
                             .unwrap_or(false)
                         {
-                            return Some(child);
+                            nodes.push(child);
                         }
                     }
                 }
             }
         }
-        None
+        nodes
     }
 
     /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
@@ -1006,23 +1007,29 @@ impl ControllerInner {
             None => name,
             Some(alias) => alias,
         };
-        if let Some(r) = self.find_view_for(node, name, &workers) {
+
+        let readers = self.find_readers_for(node, name, &workers);
+        if readers.is_empty() {
+            return Ok(None);
+        }
+
+        let mut replicas: Vec<ViewReplica> = Vec::new();
+        for r in readers {
             let domain = self.ingredients[r].domain();
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.view_schema(r)?;
             let shards = (0..self.domains[&domain].shards())
                 .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)])
                 .collect();
-
-            Ok(Some(ViewBuilder {
+            replicas.push(ViewReplica {
                 node: r,
                 columns,
                 schema,
                 shards,
-            }))
-        } else {
-            Ok(None)
+            });
         }
+
+        Ok(Some(ViewBuilder { replicas }))
     }
 
     fn view_schema(

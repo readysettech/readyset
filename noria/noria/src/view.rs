@@ -372,6 +372,15 @@ pub enum ReadReply<D = ReadReplyBatch> {
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
+    /// Set of replicas for a view, this will only include one element
+    /// if there is no reader replication.
+    pub replicas: Vec<ViewReplica>,
+}
+
+/// TODO: Add this comment.
+#[doc(hidden)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ViewReplica {
     pub node: NodeIndex,
     pub columns: Vec<String>,
     pub schema: Option<Vec<ColumnSpecification>>,
@@ -382,10 +391,13 @@ impl ViewBuilder {
     /// Build a `View` out of a `ViewBuilder`
     #[doc(hidden)]
     pub fn build(&self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>) -> View {
-        let node = self.node;
-        let columns = self.columns.clone();
-        let shards = self.shards.clone();
-        let schema = self.schema.clone();
+        // TODO(justin): Replace this with replica selection based on location.
+        let replica = &self.replicas[0];
+
+        let node = replica.node;
+        let columns = replica.columns.clone();
+        let shards = replica.shards.clone();
+        let schema = replica.schema.clone();
 
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());

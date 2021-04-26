@@ -320,6 +320,7 @@ use std::net::SocketAddr;
 pub mod builders {
     pub use super::table::TableBuilder;
     pub use super::view::ViewBuilder;
+    pub use super::view::ViewReplica;
 }
 
 /// Types used when debugging Noria.
