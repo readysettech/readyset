@@ -19,7 +19,7 @@ use noria::{
     metrics::client::MetricsClient,
     metrics::recorded,
     metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
-    DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator,
+    DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
 use crate::internal::DomainIndex;
@@ -4672,6 +4672,84 @@ async fn reader_replication() {
             assert!(domain_nodes.contains(node))
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_view_includes_replicas() {
+    let authority = Arc::new(LocalAuthority::new());
+    let cluster_name = "view_includes_replicas";
+
+    let mut w1 = build_custom(
+        cluster_name,
+        Some(DEFAULT_SHARDING),
+        false,
+        true,
+        authority.clone(),
+    )
+    .await;
+
+    let instances_standalone = w1.get_instances().await.unwrap();
+    assert_eq!(1usize, instances_standalone.len());
+
+    let w1_addr: SocketAddr = instances_standalone[0].0;
+
+    let _w2 = build_custom(
+        "view_includes_replicas",
+        Some(DEFAULT_SHARDING),
+        false,
+        false,
+        authority.clone(),
+    )
+    .await;
+
+    while w1.get_instances().await.unwrap().len() < 2 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let instances_cluster = w1.get_instances().await.unwrap();
+
+    let w2_addr = instances_cluster
+        .iter()
+        .map(|(addr, _, _)| addr)
+        .find(|&&addr| addr != w1_addr)
+        .unwrap()
+        .clone();
+
+    w1.install_recipe(
+        "
+      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
+      QUERY q:
+        SELECT *
+        FROM t1;",
+    )
+    .await
+    .unwrap();
+
+    // No replication, verify that only one replica is returned in
+    // the view_builder.
+    let request = ViewRequest {
+        name: "q".into(),
+        workers: vec![],
+    };
+    let q = w1.view_builder(request).await.unwrap();
+    assert_eq!(q.replicas.len(), 1);
+
+    // Replicate the reader for `q`.
+    let repl_result = w1
+        .replicate_readers(vec!["q".to_owned()], Some(w2_addr))
+        .await
+        .unwrap();
+
+    let readers = repl_result.new_readers;
+    assert!(readers.contains_key("q"));
+
+    // Check that two replicas are returned in the view_builder.
+    let request = ViewRequest {
+        name: "q".into(),
+        workers: vec![],
+    };
+    let q = w1.view_builder(request).await.unwrap();
+    assert_eq!(q.replicas.len(), 2);
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {

@@ -312,36 +312,49 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         self.request_view(request)
     }
 
+    /// Obtain a 'ViewBuilder' for a specific view that allows you to build a view.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    /// This is made public for inspection in integration tests and is not meant to be
+    /// used to construct views, instead use `view`, which calls this method.
+    pub async fn view_builder<'a>(
+        &'a mut self,
+        view_request: ViewRequest,
+    ) -> ReadySetResult<ViewBuilder> {
+        let body: hyper::body::Bytes = self
+            .handle
+            .ready()
+            .await
+            .map_err(rpc_err!("ControllerHandle::view_builder"))?
+            .call(ControllerRequest::new("view_builder", &view_request).unwrap())
+            .await
+            .map_err(rpc_err!("ControllerHandle::view_builder"))?;
+
+        match serde_json::from_slice::<ReadySetResult<Option<ViewBuilder>>>(&body)?
+            .map_err(|e| rpc_err_no_downcast("ControllerHandle::view_builder", e))?
+        {
+            Some(vb) => Ok(vb),
+            None => {
+                if view_request.workers.is_empty() {
+                    Err(ReadySetError::ViewNotFound(view_request.name))
+                } else {
+                    Err(ReadySetError::ViewNotFoundInWorkers {
+                        name: view_request.name,
+                        workers: view_request.workers,
+                    })
+                }
+            }
+        }
+    }
+
     fn request_view<'a>(
         &'a mut self,
         view_request: ViewRequest,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
         let views = self.views.clone();
         async move {
-            let body: hyper::body::Bytes = self
-                .handle
-                .ready()
-                .await
-                .map_err(rpc_err!("ControllerHandle::request_view"))?
-                .call(ControllerRequest::new("view_builder", &view_request).unwrap())
-                .await
-                .map_err(rpc_err!("ControllerHandle::request_view"))?;
-
-            match serde_json::from_slice::<ReadySetResult<Option<ViewBuilder>>>(&body)?
-                .map_err(|e| rpc_err_no_downcast("ControllerHandle::request_view", e))?
-            {
-                Some(vb) => Ok(vb.build(views)),
-                None => {
-                    if view_request.workers.is_empty() {
-                        Err(ReadySetError::ViewNotFound(view_request.name))
-                    } else {
-                        Err(ReadySetError::ViewNotFoundInWorkers {
-                            name: view_request.name,
-                            workers: view_request.workers,
-                        })
-                    }
-                }
-            }
+            let view_builder = self.view_builder(view_request).await?;
+            Ok(view_builder.build(views))
         }
     }
 
