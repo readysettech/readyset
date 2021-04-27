@@ -1,21 +1,13 @@
 use std::{fmt, str};
 
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, tag_no_case},
-    character::complete::{multispace0, multispace1},
-    combinator::{map, opt},
-    lib::std::fmt::Formatter,
-    multi::many0,
-    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
-    Err::Error,
-    IResult,
-};
+use nom::character::complete::multispace0;
+use nom::lib::std::fmt::Formatter;
+use nom::{alt, char, complete, do_parse, many0, map, tuple};
+use nom::{named, preceded};
+use pratt::{Affix, Associativity, PrattParser, Precedence};
 
-use crate::{
-    column::Column,
-    common::{column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType},
-};
+use crate::expression::simple_expr;
+use crate::Expression;
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
@@ -26,33 +18,10 @@ pub enum ArithmeticOperator {
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum ArithmeticBase {
-    Column(Column),
-    Scalar(Literal),
-    Bracketed(Box<Arithmetic>),
-}
-
-#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum ArithmeticItem {
-    Base(ArithmeticBase),
-    Expr(Box<Arithmetic>),
-}
-
-#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Arithmetic {
     pub op: ArithmeticOperator,
-    pub left: ArithmeticItem,
-    pub right: ArithmeticItem,
-}
-
-impl Arithmetic {
-    pub fn new(op: ArithmeticOperator, left: ArithmeticBase, right: ArithmeticBase) -> Self {
-        Self {
-            op,
-            left: ArithmeticItem::Base(left),
-            right: ArithmeticItem::Base(right),
-        }
-    }
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
 }
 
 impl fmt::Display for ArithmeticOperator {
@@ -66,145 +35,139 @@ impl fmt::Display for ArithmeticOperator {
     }
 }
 
-impl fmt::Display for ArithmeticBase {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ArithmeticBase::Column(ref col) => write!(f, "{}", col),
-            ArithmeticBase::Scalar(ref lit) => write!(f, "{}", lit.to_string()),
-            ArithmeticBase::Bracketed(ref ari) => write!(f, "({})", ari),
-        }
-    }
-}
-
-impl fmt::Display for ArithmeticItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ArithmeticItem::Base(ref b) => write!(f, "{}", b),
-            ArithmeticItem::Expr(ref expr) => write!(f, "{}", expr),
-        }
-    }
-}
-
 impl fmt::Display for Arithmetic {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.left, self.op, self.right)
+        write!(f, "({} {} {})", self.left, self.op, self.right)
     }
 }
 
-fn arithmetic_cast_helper(i: &[u8]) -> IResult<&[u8], (ArithmeticBase, Option<SqlType>)> {
-    let (remaining_input, (_, _, _, _, a_base, _, _, _, _sign, sql_type, _, _)) = tuple((
-        tag_no_case("cast"),
-        multispace0,
-        tag("("),
-        multispace0,
-        // TODO(malte): should be arbitrary expr
-        arithmetic_base,
-        multispace1,
-        tag_no_case("as"),
-        multispace1,
-        opt(terminated(tag_no_case("signed"), multispace1)),
-        type_identifier,
-        multispace0,
-        tag(")"),
-    ))(i)?;
-
-    Ok((remaining_input, (a_base, Some(sql_type))))
+#[derive(Debug)]
+enum TokenTree {
+    Infix(ArithmeticOperator),
+    Primary(Expression),
+    Group(Vec<TokenTree>),
 }
 
-pub fn arithmetic_cast(i: &[u8]) -> IResult<&[u8], (ArithmeticBase, Option<SqlType>)> {
-    alt((arithmetic_cast_helper, map(arithmetic_base, |v| (v, None))))(i)
-}
+named!(infix(&[u8]) -> TokenTree, complete!(map!(alt!(
+    char!('+') => { |_| ArithmeticOperator::Add } |
+    char!('-') => { |_| ArithmeticOperator::Subtract } |
+    char!('*') => { |_| ArithmeticOperator::Multiply } |
+    char!('/') => { |_| ArithmeticOperator::Divide }
+), TokenTree::Infix)));
 
-pub fn add_sub_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
-    alt((
-        map(tag("+"), |_| ArithmeticOperator::Add),
-        map(tag("-"), |_| ArithmeticOperator::Subtract),
-    ))(i)
-}
+named!(primary(&[u8]) -> TokenTree, alt!(
+    do_parse!(
+        multispace0 >>
+            char!('(') >>
+            multispace0 >>
+            group: token_tree >>
+            multispace0 >>
+            char!(')') >>
+            (TokenTree::Group(group))
+    ) |
+    preceded!(multispace0, simple_expr) => { |s| TokenTree::Primary(s) }
+));
 
-pub fn mul_div_operator(i: &[u8]) -> IResult<&[u8], ArithmeticOperator> {
-    alt((
-        map(tag("*"), |_| ArithmeticOperator::Multiply),
-        map(tag("/"), |_| ArithmeticOperator::Divide),
-    ))(i)
-}
+named!(rest(&[u8]) -> Vec<(TokenTree, TokenTree)>, many0!(tuple!(
+    preceded!(multispace0, infix),
+    primary
+)));
 
-// Base case for nested arithmetic expressions: column name or literal.
-pub fn arithmetic_base(i: &[u8]) -> IResult<&[u8], ArithmeticBase> {
-    alt((
-        map(integer_literal, ArithmeticBase::Scalar),
-        map(column_identifier_no_alias, ArithmeticBase::Column),
-        map(
-            delimited(
-                terminated(tag("("), multispace0),
-                arithmetic,
-                preceded(multispace0, tag(")")),
-            ),
-            |ari| ArithmeticBase::Bracketed(Box::new(ari)),
-        ),
-    ))(i)
-}
-
-pub(crate) fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
-    let res = expr(i)?;
-    match res.1 {
-        ArithmeticItem::Base(ArithmeticBase::Column(_))
-        | ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => {
-            Err(Error((i, nom::error::ErrorKind::Tag)))
-        } // no operator
-        ArithmeticItem::Base(ArithmeticBase::Bracketed(expr)) => Ok((res.0, *expr)),
-        ArithmeticItem::Expr(expr) => Ok((res.0, *expr)),
-    }
-}
-
-fn expr(i: &[u8]) -> IResult<&[u8], ArithmeticItem> {
-    map(pair(term, many0(expr_rest)), |(item, rs)| {
-        rs.into_iter().fold(item, |acc, (o, r)| {
-            ArithmeticItem::Expr(Box::new(Arithmetic {
-                op: o,
-                left: acc,
-                right: r,
-            }))
+named!(token_tree(&[u8]) -> Vec<TokenTree>, do_parse!(
+    primary: primary
+        >> rest: rest
+        >> ({
+            let mut res = Vec::with_capacity(1 + rest.len() * 2);
+            res.push(primary);
+            for (infix, primary) in rest {
+                res.push(infix);
+                res.push(primary);
+            }
+            res
         })
-    })(i)
+));
+
+struct ExprParser;
+
+impl<I> PrattParser<I> for ExprParser
+where
+    I: Iterator<Item = TokenTree>,
+{
+    type Error = pratt::NoError;
+    type Input = TokenTree;
+    type Output = Expression;
+
+    fn query(&mut self, input: &Self::Input) -> Result<Affix, Self::Error> {
+        use ArithmeticOperator::*;
+        use TokenTree::*;
+
+        Ok(match input {
+            Infix(Add) => Affix::Infix(Precedence(6), Associativity::Left),
+            Infix(Subtract) => Affix::Infix(Precedence(6), Associativity::Left),
+            Infix(Multiply) => Affix::Infix(Precedence(7), Associativity::Left),
+            Infix(Divide) => Affix::Infix(Precedence(7), Associativity::Left),
+            Primary(_) => Affix::Nilfix,
+            Group(_) => Affix::Nilfix,
+        })
+    }
+
+    fn primary(&mut self, input: Self::Input) -> Result<Self::Output, Self::Error> {
+        use TokenTree::*;
+
+        Ok(match input {
+            Primary(expr) => expr,
+            // unwrap: ok because there are no errors possible
+            Group(group) => self.parse(&mut group.into_iter()).unwrap(),
+            _ => unreachable!("Invalid fixity for non-primary token"),
+        })
+    }
+
+    fn infix(
+        &mut self,
+        lhs: Self::Output,
+        op: Self::Input,
+        rhs: Self::Output,
+    ) -> Result<Self::Output, Self::Error> {
+        let op = match op {
+            TokenTree::Infix(op) => op,
+            _ => unreachable!("Invalid fixity for infix op"),
+        };
+        Ok(Expression::Arithmetic(Arithmetic {
+            op,
+            left: Box::new(lhs),
+            right: Box::new(rhs),
+        }))
+    }
+
+    fn prefix(
+        &mut self,
+        _op: Self::Input,
+        _rhs: Self::Output,
+    ) -> Result<Self::Output, Self::Error> {
+        unreachable!("No prefix operators yet")
+    }
+
+    fn postfix(
+        &mut self,
+        _lhs: Self::Output,
+        _op: Self::Input,
+    ) -> Result<Self::Output, Self::Error> {
+        unreachable!("No postfix operators yet")
+    }
 }
 
-fn expr_rest(i: &[u8]) -> IResult<&[u8], (ArithmeticOperator, ArithmeticItem)> {
-    separated_pair(preceded(multispace0, add_sub_operator), multispace0, term)(i)
-}
-
-fn term(i: &[u8]) -> IResult<&[u8], ArithmeticItem> {
-    map(pair(arithmetic_cast, many0(term_rest)), |(b, rs)| {
-        rs.into_iter()
-            .fold(ArithmeticItem::Base(b.0), |acc, (o, r)| {
-                ArithmeticItem::Expr(Box::new(Arithmetic {
-                    op: o,
-                    left: acc,
-                    right: r,
-                }))
-            })
-    })(i)
-}
-
-fn term_rest(i: &[u8]) -> IResult<&[u8], (ArithmeticOperator, ArithmeticItem)> {
-    separated_pair(
-        preceded(multispace0, mul_div_operator),
-        multispace0,
-        map(arithmetic_cast, |b| ArithmeticItem::Base(b.0)),
-    )(i)
-}
+named!(pub(crate) arithmetic(&[u8]) -> Expression, map!(token_tree, |tt| {
+    ExprParser.parse(&mut tt.into_iter()).unwrap()
+}));
 
 #[cfg(test)]
 mod tests {
-    use crate::arithmetic::{
-        ArithmeticBase::Scalar,
-        ArithmeticOperator::{Add, Divide, Multiply, Subtract},
-    };
-    use crate::{Expression, FunctionExpression};
+    use crate::arithmetic::ArithmeticOperator::{Add, Divide, Multiply, Subtract};
+    use crate::Expression;
 
     use super::*;
-    use nom::error::ErrorKind;
     use nom::AsBytes;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn nested_arithmetic() {
@@ -216,65 +179,74 @@ mod tests {
             "3 * (1 + 2)",
         ];
 
-        let expects =
-            [
-                Arithmetic::new(Add, Scalar(1.into()), Scalar(1.into())),
-                Arithmetic {
-                    op: Subtract,
-                    left: ArithmeticItem::Expr(Box::new(Arithmetic::new(
-                        Add,
-                        Scalar(1.into()),
-                        Scalar(2.into()),
-                    ))),
-                    right: ArithmeticItem::Base(Scalar(3.into())),
-                },
-                Arithmetic {
+        let expects = [
+            Arithmetic {
+                op: Add,
+                left: Box::new(Expression::Literal(1.into())),
+                right: Box::new(Expression::Literal(1.into())),
+            },
+            Arithmetic {
+                op: Subtract,
+                left: Box::new(Expression::Arithmetic(Arithmetic {
                     op: Add,
-                    left: ArithmeticItem::Base(Scalar(1.into())),
-                    right: ArithmeticItem::Expr(Box::new(Arithmetic::new(
-                        Multiply,
-                        Scalar(2.into()),
-                        Scalar(3.into()),
-                    ))),
-                },
-                Arithmetic {
-                    op: Subtract,
-                    left: ArithmeticItem::Expr(Box::new(Arithmetic::new(
-                        Multiply,
-                        Scalar(2.into()),
-                        Scalar(3.into()),
-                    ))),
-                    right: ArithmeticItem::Expr(Box::new(Arithmetic::new(
-                        Divide,
-                        Scalar(1.into()),
-                        Scalar(3.into()),
-                    ))),
-                },
-                Arithmetic {
+                    left: Box::new(Expression::Literal(1.into())),
+                    right: Box::new(Expression::Literal(2.into())),
+                })),
+                right: Box::new(Expression::Literal(3.into())),
+            },
+            Arithmetic {
+                op: Add,
+                left: Box::new(Expression::Literal(1.into())),
+                right: Box::new(Expression::Arithmetic(Arithmetic {
                     op: Multiply,
-                    left: ArithmeticItem::Base(Scalar(3.into())),
-                    right: ArithmeticItem::Base(ArithmeticBase::Bracketed(Box::new(
-                        Arithmetic::new(Add, Scalar(1.into()), Scalar(2.into())),
-                    ))),
-                },
-            ];
+                    left: Box::new(Expression::Literal(2.into())),
+                    right: Box::new(Expression::Literal(3.into())),
+                })),
+            },
+            Arithmetic {
+                op: Subtract,
+                left: Box::new(Expression::Arithmetic(Arithmetic {
+                    op: Multiply,
+                    left: Box::new(Expression::Literal(2.into())),
+                    right: Box::new(Expression::Literal(3.into())),
+                })),
+                right: Box::new(Expression::Arithmetic(Arithmetic {
+                    op: Divide,
+                    left: Box::new(Expression::Literal(1.into())),
+                    right: Box::new(Expression::Literal(3.into())),
+                })),
+            },
+            Arithmetic {
+                op: Multiply,
+                left: Box::new(Expression::Literal(3.into())),
+                right: Box::new(Expression::Arithmetic(Arithmetic {
+                    op: Add,
+                    left: Box::new(Expression::Literal(1.into())),
+                    right: Box::new(Expression::Literal(2.into())),
+                })),
+            },
+        ];
 
-        for (i, e) in qs.iter().enumerate() {
-            let res = arithmetic(e.as_bytes());
+        for (src, expected) in qs.iter().zip(&expects) {
+            let res = arithmetic(src.as_bytes());
             let ari = res.unwrap().1;
-            assert_eq!(ari, expects[i]);
-            assert_eq!(format!("{}", ari), qs[i]);
+            let expected = Expression::Arithmetic(expected.clone());
+            assert_eq!(ari, expected);
+            let res2 = arithmetic(ari.to_string().as_bytes()).unwrap().1;
+            assert_eq!(res2, expected);
         }
     }
 
     #[test]
-    fn arithmetic_scalar() {
-        let qs = "56";
-        let res = arithmetic(qs.as_bytes());
-        assert!(res.is_err());
+    fn arithmetic_with_column() {
+        let res = arithmetic(b"x + 3");
         assert_eq!(
-            nom::Err::Error((qs.as_bytes(), ErrorKind::Tag)),
-            res.err().unwrap()
-        );
+            res.unwrap().1,
+            Expression::Arithmetic(Arithmetic {
+                op: Add,
+                left: Box::new(Expression::Column("x".into())),
+                right: Box::new(Expression::Literal(3.into()))
+            })
+        )
     }
 }

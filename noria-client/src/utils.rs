@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator, BinaryOperator, Column,
-    ColumnConstraint, ConditionBase, ConditionExpression, ConditionTree, CreateTableStatement,
-    Expression, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
+    Arithmetic, ArithmeticOperator, BinaryOperator, Column, ColumnConstraint, ConditionBase,
+    ConditionExpression, ConditionTree, CreateTableStatement, Expression, Literal, SelectStatement,
+    SqlQuery, TableKey, UpdateStatement,
 };
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
@@ -435,8 +435,8 @@ where
                     match ae {
                         Arithmetic {
                             op,
-                            left: ArithmeticItem::Base(ArithmeticBase::Column(ref c)),
-                            right: ArithmeticItem::Base(ArithmeticBase::Scalar(ref l)),
+                            left: box Expression::Column(ref c),
+                            right: box Expression::Literal(ref l),
                         } => {
                             invariant_eq!(c, &field.column);
                             match op {

@@ -1,10 +1,9 @@
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticItem, BinaryOperator, ColumnConstraint,
-    ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
+    Arithmetic, BinaryOperator, ColumnConstraint, ColumnSpecification, Expression,
+    FunctionExpression, Literal, OrderType,
 };
 use std::collections::HashMap;
 
-use super::sql::query_utils::is_aggregate;
 use crate::controller::Migration;
 use crate::errors::internal_err;
 use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
@@ -830,57 +829,15 @@ fn make_latest_node(
     Ok(FlowNode::New(na))
 }
 
-/// Converts a nom_sql ArithmeticItem into a ProjectExpression
-/// TODO(grfn): the mismatch here between the nom-sql ast structure and our
-/// ProjectExpression's ast structure is a little akward, we should update
-/// nom-sql's to be more in-line eventually
-fn arithmetic_item_to_project_expression(
-    parent: &MirNodeRef,
-    arithmetic_item: &ArithmeticItem,
-) -> ReadySetResult<ProjectExpression> {
-    match arithmetic_item {
-        ArithmeticItem::Base(ArithmeticBase::Column(nom_sql::Column {
-            function: Some(function),
-            ..
-        }))
-            // We don't want to turn aggregate functions into project expressions, since project
-            // expressions don't know how to handle them - instead, we leave them as columns so we
-            // can reference the result in the parent. I don't like that this is how this has to
-            // happen.
-            if !is_aggregate(function) => {
-                generate_project_expression(parent, Expression::Call(*(*function).clone()))
-            }
-        ArithmeticItem::Base(ArithmeticBase::Column(ref column)) => {
-            let column_id = parent
-                .borrow()
-                .column_id_for_column(&Column::from(column), None);
-            Ok(ProjectExpression::Column(column_id))
-        }
-        ArithmeticItem::Base(ArithmeticBase::Scalar(ref literal)) => {
-            Ok(ProjectExpression::Literal(literal.into()))
-        }
-        ArithmeticItem::Base(ArithmeticBase::Bracketed(ref arithmetic)) => {
-            arithmetic_to_project_expression(parent, arithmetic)
-        }
-        ArithmeticItem::Expr(arithmetic) => arithmetic_to_project_expression(parent, arithmetic),
-    }
-}
-
 /// Converts a nom_sql Expression into a ProjectExpression
 fn arithmetic_to_project_expression(
     parent: &MirNodeRef,
-    arithmetic: &Arithmetic,
+    arithmetic: Arithmetic,
 ) -> ReadySetResult<ProjectExpression> {
     Ok(ProjectExpression::Op {
         op: arithmetic.op.clone(),
-        left: Box::new(arithmetic_item_to_project_expression(
-            parent,
-            &arithmetic.left,
-        )?),
-        right: Box::new(arithmetic_item_to_project_expression(
-            parent,
-            &arithmetic.right,
-        )?),
+        left: Box::new(generate_project_expression(parent, *arithmetic.left)?),
+        right: Box::new(generate_project_expression(parent, *arithmetic.right)?),
     })
 }
 
@@ -889,7 +846,7 @@ fn generate_project_expression(
     expr: Expression,
 ) -> ReadySetResult<ProjectExpression> {
     match expr {
-        Expression::Arithmetic(ari) => arithmetic_to_project_expression(parent, &ari),
+        Expression::Arithmetic(ari) => arithmetic_to_project_expression(parent, ari),
         Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(ProjectExpression::Cast(
             Box::new(generate_project_expression(parent, (*arg).into())?),
             ty,

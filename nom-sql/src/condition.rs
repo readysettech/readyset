@@ -2,12 +2,11 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
 
-use crate::arithmetic::arithmetic;
 use crate::column::Column;
 use crate::common::{
     binary_comparison_operator, column_identifier, literal, value_list, BinaryOperator, Literal,
 };
-use crate::Arithmetic;
+use crate::{Arithmetic, Expression};
 
 use crate::select::{nested_selection, SelectStatement};
 use nom::branch::alt;
@@ -312,6 +311,15 @@ fn predicate(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
     alt((simple_expr, nested_exists))(i)
 }
 
+fn arithmetic(i: &[u8]) -> IResult<&[u8], Arithmetic> {
+    match crate::arithmetic::arithmetic(i)? {
+        (i, Expression::Arithmetic(ari)) => Ok((i, ari)),
+        // NOTE(grfn): This is a hack, and won't be necessary once we merge ConditionExpression and
+        // Expression
+        _ => Err(nom::Err::Error((i, nom::error::ErrorKind::Tag))),
+    }
+}
+
 named!(
     simple_expr<ConditionExpression>,
     alt!(
@@ -351,10 +359,8 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use crate::ArithmeticItem;
-
     use super::*;
-    use crate::arithmetic::{ArithmeticBase, ArithmeticOperator};
+    use crate::arithmetic::ArithmeticOperator;
     use crate::column::Column;
     use crate::common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
     use crate::{Expression, FunctionExpression};
@@ -436,12 +442,13 @@ mod tests {
     }
 
     fn x_operator_value(op: ArithmeticOperator, value: Literal) -> ConditionExpression {
-        ConditionExpression::Arithmetic(Box::new(Arithmetic::new(
+        ConditionExpression::Arithmetic(Box::new(Arithmetic {
             op,
-            ArithmeticBase::Column(Column::from("x")),
-            ArithmeticBase::Scalar(value),
-        )))
+            left: Box::new(Expression::Column(Column::from("x"))),
+            right: Box::new(Expression::Literal(value)),
+        }))
     }
+
     #[test]
     fn simple_arithmetic_expression() {
         let cond = "x + 3";
@@ -1040,14 +1047,14 @@ mod tests {
             min: Box::new(Bracketed(Box::new(ConditionExpression::Arithmetic(
                 Box::new(Arithmetic {
                     op: ArithmeticOperator::Add,
-                    left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(1))),
-                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(2))),
+                    left: Box::new(Expression::Literal(Literal::Integer(1))),
+                    right: Box::new(Expression::Literal(Literal::Integer(2))),
                 }),
             )))),
             max: Box::new(ConditionExpression::Arithmetic(Box::new(Arithmetic {
                 op: ArithmeticOperator::Add,
-                left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(3))),
-                right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(5))),
+                left: Box::new(Expression::Literal(Literal::Integer(3))),
+                right: Box::new(Expression::Literal(Literal::Integer(5))),
             }))),
         };
         let (remaining, result) = condition_expr(qs).unwrap();
