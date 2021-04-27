@@ -11,9 +11,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate pretty_assertions;
 
-pub use self::arithmetic::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, ArithmeticOperator,
-};
+pub use self::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
     BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal, Real, SqlType, TableKey,

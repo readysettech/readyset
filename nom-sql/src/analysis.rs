@@ -134,9 +134,7 @@ impl<'a> ReferredColumnsIter<'a> {
             ConditionExpression::Base(ConditionBase::NestedSelect(_)) => {
                 unimplemented!("Nested selects are not implemented yet")
             }
-            ConditionExpression::Arithmetic(ae) => {
-                self.visit_arithmetic(&ae.ari).map(Cow::Borrowed)
-            }
+            ConditionExpression::Arithmetic(ari) => self.visit_arithmetic(&ari).map(Cow::Borrowed),
             ConditionExpression::Bracketed(ce) => self.visit_condition_expression(ce),
             ConditionExpression::Between { operand, min, max } => {
                 self.condition_expressions_to_visit.push(operand);
@@ -262,8 +260,8 @@ pub fn find_function_calls<'a>(out: &mut Vec<&'a Column>, ce: &'a ConditionExpre
                 }
             }
         }
-        ConditionExpression::Arithmetic(ref ae) => {
-            on_arithmetic(out, &ae.ari);
+        ConditionExpression::Arithmetic(ref ari) => {
+            on_arithmetic(out, &ari);
         }
         ConditionExpression::Between {
             ref operand,
