@@ -14,9 +14,7 @@ use nom::{
 
 use crate::{
     column::Column,
-    common::{
-        as_alias, column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType,
-    },
+    common::{column_identifier_no_alias, integer_literal, type_identifier, Literal, SqlType},
 };
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -57,30 +55,6 @@ impl Arithmetic {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct ArithmeticExpression {
-    pub ari: Arithmetic,
-    pub alias: Option<String>,
-}
-
-impl ArithmeticExpression {
-    pub fn new(
-        op: ArithmeticOperator,
-        left: ArithmeticBase,
-        right: ArithmeticBase,
-        alias: Option<String>,
-    ) -> Self {
-        Self {
-            ari: Arithmetic {
-                op,
-                left: ArithmeticItem::Base(left),
-                right: ArithmeticItem::Base(right),
-            },
-            alias,
-        }
-    }
-}
-
 impl fmt::Display for ArithmeticOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -114,15 +88,6 @@ impl fmt::Display for ArithmeticItem {
 impl fmt::Display for Arithmetic {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{} {} {}", self.left, self.op, self.right)
-    }
-}
-
-impl fmt::Display for ArithmeticExpression {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.alias {
-            Some(ref alias) => write!(f, "{} AS {}", self.ari, alias),
-            None => write!(f, "{}", self.ari),
-        }
     }
 }
 
@@ -229,16 +194,6 @@ fn term_rest(i: &[u8]) -> IResult<&[u8], (ArithmeticOperator, ArithmeticItem)> {
     )(i)
 }
 
-// Parse simple arithmetic expressions combining literals, and columns and literals.
-pub fn arithmetic_expression(i: &[u8]) -> IResult<&[u8], ArithmeticExpression> {
-    map(pair(arithmetic, opt(as_alias)), |(ari, opt_alias)| {
-        ArithmeticExpression {
-            ari,
-            alias: opt_alias.map(String::from),
-        }
-    })(i)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::arithmetic::{
@@ -250,151 +205,6 @@ mod tests {
     use super::*;
     use nom::error::ErrorKind;
     use nom::AsBytes;
-
-    #[test]
-    fn it_parses_arithmetic_expressions() {
-        use super::{
-            ArithmeticBase::{Column as ABColumn, Scalar},
-            ArithmeticOperator::*,
-        };
-
-        let lit_ae = [
-            "5 + 42",
-            "5+42",
-            "5 * 42",
-            "5 - 42",
-            "5 / 42",
-            "2 * 10 AS twenty ",
-        ];
-
-        // N.B. trailing space in "5 + foo " is required because `sql_identifier`'s keyword
-        // detection requires a follow-up character (in practice, there always is one because we
-        // use semicolon-terminated queries).
-        let col_lit_ae = [
-            "foo+5",
-            "foo + 5",
-            "5 + foo ",
-            "foo * bar AS foobar",
-            "MAX(foo)-3333",
-        ];
-
-        let expected_lit_ae = [
-            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into()), None),
-            ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into()), None),
-            ArithmeticExpression::new(Multiply, Scalar(5.into()), Scalar(42.into()), None),
-            ArithmeticExpression::new(Subtract, Scalar(5.into()), Scalar(42.into()), None),
-            ArithmeticExpression::new(Divide, Scalar(5.into()), Scalar(42.into()), None),
-            ArithmeticExpression::new(
-                Multiply,
-                Scalar(2.into()),
-                Scalar(10.into()),
-                Some(String::from("twenty")),
-            ),
-        ];
-        let expected_col_lit_ae = [
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
-            ArithmeticExpression::new(Add, Scalar(5.into()), ABColumn("foo".into()), None),
-            ArithmeticExpression::new(
-                Multiply,
-                ABColumn("foo".into()),
-                ABColumn("bar".into()),
-                Some(String::from("foobar")),
-            ),
-            ArithmeticExpression::new(
-                Subtract,
-                ABColumn(Column {
-                    name: String::from("max(foo)"),
-                    table: None,
-                    function: Some(Box::new(FunctionExpression::Max(Box::new(
-                        Expression::Column("foo".into()),
-                    )))),
-                }),
-                Scalar(3333.into()),
-                None,
-            ),
-        ];
-
-        for (i, e) in lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, expected_lit_ae[i]);
-        }
-
-        for (i, e) in col_lit_ae.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, expected_col_lit_ae[i]);
-        }
-    }
-
-    #[test]
-    fn it_displays_arithmetic_expressions() {
-        use super::{
-            ArithmeticBase::{Column as ABColumn, Scalar},
-            ArithmeticOperator::*,
-        };
-
-        let expressions = [
-            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into()), None),
-            ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
-            ArithmeticExpression::new(
-                Multiply,
-                ABColumn("foo".into()),
-                ABColumn("bar".into()),
-                None,
-            ),
-            ArithmeticExpression::new(Divide, Scalar(10.into()), Scalar(2.into()), None),
-            ArithmeticExpression::new(
-                Add,
-                Scalar(10.into()),
-                Scalar(2.into()),
-                Some(String::from("bob")),
-            ),
-        ];
-
-        let expected_strings = ["foo + 5", "5 - foo", "foo * bar", "10 / 2", "10 + 2 AS bob"];
-        for (i, e) in expressions.iter().enumerate() {
-            assert_eq!(expected_strings[i], format!("{}", e));
-        }
-    }
-
-    #[test]
-    fn it_parses_arithmetic_casts() {
-        use super::{
-            ArithmeticBase::{Column as ABColumn, Scalar},
-            ArithmeticOperator::*,
-        };
-
-        let exprs = [
-            "CAST(`t`.`foo` AS signed int) + CAST(`t`.`bar` AS signed int) ",
-            "CAST(5 AS bigint) - foo ",
-            "CAST(5 AS bigint) - foo AS 5_minus_foo",
-        ];
-
-        // XXX(malte): currently discards the cast and type information!
-        let expected = [
-            ArithmeticExpression::new(
-                Add,
-                ABColumn(Column::from("t.foo")),
-                ABColumn(Column::from("t.bar")),
-                None,
-            ),
-            ArithmeticExpression::new(Subtract, Scalar(5.into()), ABColumn("foo".into()), None),
-            ArithmeticExpression::new(
-                Subtract,
-                Scalar(5.into()),
-                ABColumn("foo".into()),
-                Some("5_minus_foo".into()),
-            ),
-        ];
-
-        for (i, e) in exprs.iter().enumerate() {
-            let res = arithmetic_expression(e.as_bytes());
-            assert!(res.is_ok(), "{} failed to parse", e);
-            assert_eq!(res.unwrap().1, expected[i]);
-        }
-    }
 
     #[test]
     fn nested_arithmetic() {

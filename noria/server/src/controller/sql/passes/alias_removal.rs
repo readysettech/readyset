@@ -1,9 +1,9 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticExpression, ArithmeticItem, Column, ConditionBase,
-    ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression, FunctionExpression,
-    JoinConstraint, JoinRightSide, SqlQuery, Table,
+    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionBase, ConditionExpression,
+    ConditionTree, Expression, FieldDefinitionExpression, FunctionExpression, JoinConstraint,
+    JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -75,11 +75,8 @@ fn rewrite_conditional(
             min: translate_ct_arm(min.clone()),
             max: translate_ct_arm(max.clone()),
         },
-        ConditionExpression::Arithmetic(ae) => {
-            ConditionExpression::Arithmetic(Box::new(ArithmeticExpression {
-                ari: rewrite_arithmetic(col_table_remap, &ae.ari),
-                alias: ae.alias.clone(),
-            }))
+        ConditionExpression::Arithmetic(ari) => {
+            ConditionExpression::Arithmetic(Box::new(rewrite_arithmetic(col_table_remap, &ari)))
         }
         x => x.clone(),
     }

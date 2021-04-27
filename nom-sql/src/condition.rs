@@ -2,11 +2,12 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::str;
 
-use crate::arithmetic::{arithmetic_expression, ArithmeticExpression};
+use crate::arithmetic::arithmetic;
 use crate::column::Column;
 use crate::common::{
     binary_comparison_operator, column_identifier, literal, value_list, BinaryOperator, Literal,
 };
+use crate::Arithmetic;
 
 use crate::select::{nested_selection, SelectStatement};
 use nom::branch::alt;
@@ -95,7 +96,7 @@ pub enum ConditionExpression {
     NegationOp(Box<ConditionExpression>),
     ExistsOp(Box<SelectStatement>),
     Base(ConditionBase),
-    Arithmetic(Box<ArithmeticExpression>),
+    Arithmetic(Box<Arithmetic>),
     Bracketed(Box<ConditionExpression>),
     Between {
         operand: Box<ConditionExpression>,
@@ -316,14 +317,14 @@ named!(
     alt!(
         delimited!(
             terminated!(tag!("("), multispace0),
-            arithmetic_expression,
+            arithmetic,
             preceded!(multispace0, tag!(")"))
         ) => { |e|
           ConditionExpression::Bracketed(Box::new(ConditionExpression::Arithmetic(Box::new(
             e,
           ))))
         } |
-        arithmetic_expression => { |e| ConditionExpression::Arithmetic(Box::new(e)) } |
+        arithmetic => { |e| ConditionExpression::Arithmetic(Box::new(e)) } |
         literal => { |lit| ConditionExpression::Base(ConditionBase::Literal(lit)) } |
         column_identifier => { |f| ConditionExpression::Base(ConditionBase::Field(f)) } |
         delimited!(tag!("("), nested_selection, tag!(")")) => {
@@ -358,7 +359,7 @@ mod tests {
     use crate::common::{BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal};
     use crate::{Expression, FunctionExpression};
     use ConditionBase::*;
-    use ConditionExpression::*;
+    use ConditionExpression::{Base, Between, Bracketed};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -435,11 +436,10 @@ mod tests {
     }
 
     fn x_operator_value(op: ArithmeticOperator, value: Literal) -> ConditionExpression {
-        ConditionExpression::Arithmetic(Box::new(ArithmeticExpression::new(
+        ConditionExpression::Arithmetic(Box::new(Arithmetic::new(
             op,
             ArithmeticBase::Column(Column::from("x")),
             ArithmeticBase::Scalar(value),
-            None,
         )))
     }
     #[test]
@@ -1037,23 +1037,17 @@ mod tests {
         let qs = b"foo between (1 + 2) and 3 + 5";
         let expected = Between {
             operand: Box::new(Base(Field("foo".into()))),
-            min: Box::new(Bracketed(Box::new(Arithmetic(Box::new(
-                ArithmeticExpression {
-                    ari: crate::arithmetic::Arithmetic {
-                        op: ArithmeticOperator::Add,
-                        left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(1))),
-                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(2))),
-                    },
-                    alias: None,
-                },
-            ))))),
-            max: Box::new(Arithmetic(Box::new(ArithmeticExpression {
-                ari: crate::arithmetic::Arithmetic {
+            min: Box::new(Bracketed(Box::new(ConditionExpression::Arithmetic(
+                Box::new(Arithmetic {
                     op: ArithmeticOperator::Add,
-                    left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(3))),
-                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(5))),
-                },
-                alias: None,
+                    left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(1))),
+                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(2))),
+                }),
+            )))),
+            max: Box::new(ConditionExpression::Arithmetic(Box::new(Arithmetic {
+                op: ArithmeticOperator::Add,
+                left: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(3))),
+                right: ArithmeticItem::Base(ArithmeticBase::Scalar(Literal::Integer(5))),
             }))),
         };
         let (remaining, result) = condition_expr(qs).unwrap();

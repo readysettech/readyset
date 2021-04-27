@@ -53,7 +53,7 @@ where
         }
         Base(_) => {}
         Arithmetic(ari) => {
-            rewrite_arithmetic(expand_columns, &mut ari.ari, avail_tables);
+            rewrite_arithmetic(expand_columns, ari, avail_tables);
         }
         Between { operand, min, max } => {
             rewrite_conditional(expand_columns, operand, avail_tables);
