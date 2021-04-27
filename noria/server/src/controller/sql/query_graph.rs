@@ -13,7 +13,7 @@ use std::vec::Vec;
 use std::{cmp::Ordering, num::NonZeroU64};
 use std::{collections::HashMap, convert::TryInto};
 
-use super::query_utils::is_aggregate;
+use super::query_utils::{is_aggregate, map_aggregates};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -829,6 +829,23 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
+    let add_computed_column = |qg: &mut QueryGraph, function, name| {
+        let column = Column {
+            name,
+            table: None,
+            function: Some(Box::new(function)),
+        };
+
+        // add a special node representing the computed columns; if it already
+        // exists, add another computed column to it
+        let n = qg
+            .relations
+            .entry("computed_columns".to_owned())
+            .or_insert_with(|| new_node("computed_columns".to_owned(), vec![], st).unwrap());
+        n.columns.push(column.clone());
+        column
+    };
+
     for field in st.fields.iter() {
         match field {
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
@@ -844,54 +861,31 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                             value: l.clone(),
                         }))
                     }
-                    Expression::Arithmetic(ari) => {
-                        // TODO(grfn): Add computed columns for arithmetic on aggregates
-
-                        qg.columns.push(OutputColumn::Expression(ExpressionColumn {
-                            name,
-                            table: None,
-                            expression: Expression::Arithmetic(ari.clone()),
-                        }));
-                    }
                     Expression::Column(c) => {
                         qg.columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or_else(|| c.name.clone()),
                             column: c.clone(),
                         });
                     }
-                    Expression::Call(function) => {
-                        if is_aggregate(function) {
-                            let column = Column {
-                                name: name.clone(),
-                                table: None,
-                                function: Some(Box::new(function.clone())),
-                            };
-
-                            let nn = new_node(String::from("computed_columns"), vec![], st)?;
-                            // add a special node representing the computed columns; if it already
-                            // exists, add another computed column to it
-                            let n = qg
-                                .relations
-                                .entry(String::from("computed_columns"))
-                                .or_insert(nn);
-
-                            n.columns.push(column.clone());
-
-                            // TODO(grfn/celine): Make this an Expression, not a column
-                            qg.columns.push(OutputColumn::Data {
-                                alias: name,
-                                column,
-                            })
-                        } else {
-                            qg.columns.push(OutputColumn::Expression(ExpressionColumn {
-                                name,
-                                table: None,
-                                expression: Expression::Call((*function).clone()),
-                            }))
-                        };
+                    Expression::Call(function) if is_aggregate(function) => {
+                        let column = add_computed_column(&mut qg, function.clone(), name.clone());
+                        qg.columns.push(OutputColumn::Data {
+                            alias: name,
+                            column,
+                        })
                     }
-                    Expression::CaseWhen { .. } => {
-                        unsupported!("Projecting CASE WHEN expressions is not currently supported")
+                    _ => {
+                        let mut expr = expr.clone();
+                        let aggs = map_aggregates(&mut expr);
+                        for (agg, name) in aggs {
+                            add_computed_column(&mut qg, agg, name);
+                        }
+
+                        qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                            name,
+                            table: None,
+                            expression: expr,
+                        }))
                     }
                 };
             }

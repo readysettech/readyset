@@ -1574,7 +1574,6 @@ async fn it_works_with_join_arithmetic() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn it_works_with_function_arithmetic() {
     let mut g = start_simple("it_works_with_function_arithmetic").await;
     let sql = "
