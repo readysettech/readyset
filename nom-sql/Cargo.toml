@@ -16,6 +16,7 @@ serde_derive = "1.0"
 nom = "5.0.1"
 itertools = "0.10.0"
 derive_more = "0.99.13"
+pratt = "0.3.0"
 
 [dev-dependencies]
 pretty_assertions = "0.5.1"

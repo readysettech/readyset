@@ -117,7 +117,7 @@ pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
+    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
     use crate::common::ItemPlaceholder;
     use crate::table::Table;
@@ -265,8 +265,8 @@ mod tests {
                     Column::from("value"),
                     Expression::Arithmetic(Arithmetic {
                         op: ArithmeticOperator::Add,
-                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("value"))),
-                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                        left: Box::new(Expression::Column(Column::from("value"))),
+                        right: Box::new(Expression::Literal(1.into())),
                     }),
                 ),]),
                 ..Default::default()

@@ -119,7 +119,7 @@ impl Display for FunctionExpression {
 pub enum Expression {
     /// Arithmetic expressions
     ///
-    /// TODO(grfn): Eventually, the members of ArithmeticExpression should be inlined here
+    /// TODO(grfn): Eventually, the members of Arithmetic should be inlined here
     Arithmetic(Arithmetic),
 
     /// Function call expressions
@@ -167,9 +167,29 @@ impl Display for Expression {
 }
 
 named!(pub(crate) expression(&[u8]) -> Expression, alt!(
-    arithmetic => { |a| Expression::Arithmetic(a) } |
+    arithmetic |
     column_function => { |f| Expression::Call(f) } |
     literal => { |l| Expression::Literal(l) } |
     case_when |
     column_identifier_no_alias => { |c| Expression::Column(c) }
 ));
+
+// Expressions without arithmetic
+named!(pub(crate) simple_expr(&[u8]) -> Expression, alt!(
+    column_function => { |f| Expression::Call(f) } |
+    literal => { |l| Expression::Literal(l) } |
+    case_when |
+    column_identifier_no_alias => { |c| Expression::Column(c) }
+));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_then_column() {
+        let (rem, res) = expression(b"x y").unwrap();
+        assert_eq!(res, Expression::Column("x".into()));
+        assert_eq!(rem, b" y");
+    }
+}

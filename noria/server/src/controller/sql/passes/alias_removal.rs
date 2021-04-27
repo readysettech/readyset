@@ -1,9 +1,8 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionBase, ConditionExpression,
-    ConditionTree, Expression, FieldDefinitionExpression, FunctionExpression, JoinConstraint,
-    JoinRightSide, SqlQuery, Table,
+    Arithmetic, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FieldDefinitionExpression, FunctionExpression, JoinConstraint, JoinRightSide, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -180,29 +179,14 @@ fn rewrite_function_expression(
     }
 }
 
-fn rewrite_arithmetic_item(
-    col_table_remap: &HashMap<String, String>,
-    arithmetic_item: &ArithmeticItem,
-) -> ArithmeticItem {
-    match arithmetic_item {
-        ArithmeticItem::Base(ArithmeticBase::Column(col)) => {
-            ArithmeticItem::Base(ArithmeticBase::Column(rewrite_column(col_table_remap, col)))
-        }
-        ArithmeticItem::Base(ArithmeticBase::Bracketed(ari)) | ArithmeticItem::Expr(ari) => {
-            ArithmeticItem::Expr(Box::new(rewrite_arithmetic(col_table_remap, ari)))
-        }
-        ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => arithmetic_item.clone(),
-    }
-}
-
 fn rewrite_arithmetic(
     col_table_remap: &HashMap<String, String>,
     arithmetic: &Arithmetic,
 ) -> Arithmetic {
     Arithmetic {
-        left: rewrite_arithmetic_item(col_table_remap, &arithmetic.left),
+        left: Box::new(rewrite_expression(col_table_remap, &arithmetic.left)),
         op: arithmetic.op,
-        right: rewrite_arithmetic_item(col_table_remap, &arithmetic.right),
+        right: Box::new(rewrite_expression(col_table_remap, &arithmetic.right)),
     }
 }
 

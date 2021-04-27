@@ -3389,6 +3389,7 @@ dependencies = [
  "derive_more",
  "itertools 0.10.0",
  "nom 5.1.2",
+ "pratt",
  "pretty_assertions 0.5.1",
  "serde",
  "serde_derive",
@@ -4348,6 +4349,12 @@ name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
+
+[[package]]
+name = "pratt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bbc12f7936a7b195790dd6d9b982b66c54f45ff6766decf25c44cac302dce"
 
 [[package]]
 name = "pretty_assertions"

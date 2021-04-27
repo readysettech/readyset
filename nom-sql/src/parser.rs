@@ -133,7 +133,7 @@ mod tests {
         let qstring3 = "SELECT name, password FROM users AS u WHERE user_id = '1'";
         let qstring4 =
             "SELECT name, password FROM users AS u WHERE user = 'aaa' AND password = 'xxx'";
-        let qstring5 = "SELECT name * 2 AS double_name FROM users";
+        let qstring5 = "SELECT (name * 2) AS double_name FROM users";
 
         let res0 = parse_query(qstring0);
         let res1 = parse_query(qstring1);

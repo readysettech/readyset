@@ -1,7 +1,6 @@
 use nom_sql::{
-    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionExpression, ConditionTree,
-    Expression, FieldDefinitionExpression, FunctionExpression, JoinRightSide, SelectStatement,
-    SqlQuery, Table,
+    Arithmetic, Column, ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
+    FunctionExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use crate::errors::ReadySetResult;
@@ -19,13 +18,8 @@ fn rewrite_arithmetic<F>(expand_columns: &F, ari: &mut Arithmetic, avail_tables:
 where
     F: Fn(&mut Column, &[Table]),
 {
-    if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = ari.left {
-        expand_columns(c, &avail_tables);
-    }
-
-    if let ArithmeticItem::Base(ArithmeticBase::Column(ref mut c)) = ari.right {
-        expand_columns(c, &avail_tables);
-    }
+    rewrite_expression(expand_columns, &mut ari.left, avail_tables);
+    rewrite_expression(expand_columns, &mut ari.right, avail_tables);
 }
 
 fn rewrite_conditional<F>(expand_columns: &F, ce: &mut ConditionExpression, avail_tables: &[Table])

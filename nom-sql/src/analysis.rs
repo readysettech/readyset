@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    Arithmetic, ArithmeticBase, ArithmeticItem, Column, ConditionBase, ConditionExpression,
-    ConditionTree, Expression, FunctionExpression, SqlQuery, Table,
+    Arithmetic, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
+    FunctionExpression, SqlQuery, Table,
 };
 
 pub trait ReferredTables {
@@ -71,7 +71,7 @@ pub struct ReferredColumnsIter<'a> {
 impl<'a> ReferredColumnsIter<'a> {
     fn visit_expr(&mut self, expr: &'a Expression) -> Option<Cow<'a, Column>> {
         match expr {
-            Expression::Arithmetic(ari) => self.visit_arithmetic(ari).map(Cow::Borrowed),
+            Expression::Arithmetic(ari) => self.visit_arithmetic(ari),
             Expression::Call(fexpr) => self.visit_function_expression(fexpr),
             Expression::Literal(_) => None,
             Expression::Column(col) => Some(Cow::Borrowed(col)),
@@ -134,7 +134,7 @@ impl<'a> ReferredColumnsIter<'a> {
             ConditionExpression::Base(ConditionBase::NestedSelect(_)) => {
                 unimplemented!("Nested selects are not implemented yet")
             }
-            ConditionExpression::Arithmetic(ari) => self.visit_arithmetic(&ari).map(Cow::Borrowed),
+            ConditionExpression::Arithmetic(ari) => self.visit_arithmetic(&ari),
             ConditionExpression::Bracketed(ce) => self.visit_condition_expression(ce),
             ConditionExpression::Between { operand, min, max } => {
                 self.condition_expressions_to_visit.push(operand);
@@ -144,22 +144,9 @@ impl<'a> ReferredColumnsIter<'a> {
         }
     }
 
-    fn visit_arithmetic_item(&mut self, ai: &'a ArithmeticItem) -> Option<&'a Column> {
-        match ai {
-            ArithmeticItem::Base(ArithmeticBase::Column(col)) => Some(col),
-            ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => None,
-            ArithmeticItem::Base(ArithmeticBase::Bracketed(ari)) | ArithmeticItem::Expr(ari) => {
-                self.visit_arithmetic(ari)
-            }
-        }
-    }
-
-    fn visit_arithmetic(&mut self, ari: &'a Arithmetic) -> Option<&'a Column> {
-        if let Some(col) = self.visit_arithmetic_item(&ari.left) {
-            self.columns_to_visit.push(col)
-        }
-
-        self.visit_arithmetic_item(&ari.right)
+    fn visit_arithmetic(&mut self, ari: &'a Arithmetic) -> Option<Cow<'a, Column>> {
+        self.exprs_to_visit.push(&ari.left);
+        self.visit_expr(&ari.right)
     }
 
     fn finished(&self) -> bool {
@@ -182,7 +169,7 @@ impl<'a> Iterator for ReferredColumnsIter<'a> {
                 .or_else(|| {
                     self.arithmetic_to_visit
                         .pop()
-                        .and_then(|ari| self.visit_arithmetic(ari).map(Cow::Borrowed))
+                        .and_then(|ari| self.visit_arithmetic(ari))
                 })
                 .or_else(|| {
                     self.condition_expressions_to_visit
@@ -226,25 +213,35 @@ impl ReferredColumns for ConditionExpression {
 
 /// Recursively traverses `ce`, a [`ConditionExpression`], to find all function calls inside,
 /// putting found function calls into `out`.
-pub fn find_function_calls<'a>(out: &mut Vec<&'a Column>, ce: &'a ConditionExpression) {
-    fn on_arithmetic<'a>(out: &mut Vec<&'a Column>, ari: &'a Arithmetic) {
-        for item in &[&ari.left, &ari.right] {
-            match **item {
-                ArithmeticItem::Base(ArithmeticBase::Column(ref col)) => {
-                    if col.function.is_some() {
-                        out.push(col);
-                    }
-                }
-                ArithmeticItem::Base(ArithmeticBase::Scalar(_)) => {}
-                ArithmeticItem::Base(ArithmeticBase::Bracketed(ref ari)) => {
-                    on_arithmetic(out, &*ari);
-                }
-                ArithmeticItem::Expr(ref ari) => {
-                    on_arithmetic(out, &*ari);
+pub fn find_function_calls<'a>(out: &mut Vec<&'a FunctionExpression>, ce: &'a ConditionExpression) {
+    fn on_expr<'a>(out: &mut Vec<&'a FunctionExpression>, expr: &'a Expression) {
+        match expr {
+            Expression::Arithmetic(ari) => {
+                on_expr(out, &ari.left);
+                on_expr(out, &ari.right);
+            }
+            Expression::Call(f)
+            | Expression::Column(Column {
+                function: Some(box f),
+                ..
+            }) => {
+                out.push(f);
+            }
+            Expression::CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                find_function_calls(out, condition);
+                on_expr(out, then_expr);
+                if let Some(else_expr) = else_expr {
+                    on_expr(out, else_expr);
                 }
             }
+            Expression::Literal(_) | Expression::Column(_) => {}
         }
     }
+
     match *ce {
         ConditionExpression::ComparisonOp(ref ct) | ConditionExpression::LogicalOp(ref ct) => {
             find_function_calls(out, &ct.left);
@@ -255,13 +252,14 @@ pub fn find_function_calls<'a>(out: &mut Vec<&'a Column>, ce: &'a ConditionExpre
         }
         ConditionExpression::Base(ref cb) => {
             if let ConditionBase::Field(ref c) = cb {
-                if c.function.is_some() {
-                    out.push(c);
+                if let Some(function) = &c.function {
+                    out.push(function);
                 }
             }
         }
         ConditionExpression::Arithmetic(ref ari) => {
-            on_arithmetic(out, &ari);
+            on_expr(out, &ari.left);
+            on_expr(out, &ari.right);
         }
         ConditionExpression::Between {
             ref operand,
@@ -382,13 +380,13 @@ mod tests {
 
     #[test]
     fn find_funcalls_basic() {
-        let col = Column {
-            name: "test".to_string(),
-            table: None,
-            function: Some(Box::new(FunctionExpression::CountStar)),
-        };
+        let func = FunctionExpression::CountStar;
         let cexpr = ConditionExpression::ComparisonOp(ConditionTree {
-            left: Box::new(ConditionExpression::Base(ConditionBase::Field(col.clone()))),
+            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+                name: "test".to_string(),
+                table: None,
+                function: Some(Box::new(FunctionExpression::CountStar)),
+            }))),
             operator: BinaryOperator::Greater,
             right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
                 Literal::Integer(0),
@@ -396,6 +394,6 @@ mod tests {
         });
         let mut out = vec![];
         find_function_calls(&mut out, &cexpr);
-        assert_eq!(out, vec![&col]);
+        assert_eq!(out, vec![&func]);
     }
 }

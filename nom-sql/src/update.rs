@@ -67,7 +67,7 @@ pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
+    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
     use crate::common::{BinaryOperator, ItemPlaceholder, Literal, Real};
     use crate::condition::ConditionBase::*;
@@ -179,8 +179,8 @@ mod tests {
                     Column::from("karma"),
                     Expression::Arithmetic(Arithmetic {
                         op: ArithmeticOperator::Add,
-                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("karma"))),
-                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                        left: Box::new(Expression::Column(Column::from("karma"))),
+                        right: Box::new(Expression::Literal(1.into())),
                     }),
                 ),],
                 where_clause: expected_where_cond,
@@ -202,8 +202,8 @@ mod tests {
                     Column::from("karma"),
                     Expression::Arithmetic(Arithmetic {
                         op: ArithmeticOperator::Add,
-                        left: ArithmeticItem::Base(ArithmeticBase::Column(Column::from("karma"))),
-                        right: ArithmeticItem::Base(ArithmeticBase::Scalar(1.into())),
+                        left: Box::new(Expression::Column(Column::from("karma"))),
+                        right: Box::new(Expression::Literal(1.into())),
                     }),
                 ),],
                 ..Default::default()

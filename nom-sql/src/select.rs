@@ -412,7 +412,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticBase, ArithmeticItem, ArithmeticOperator};
+    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
     use crate::common::{
         BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal, SqlType,
@@ -1373,14 +1373,10 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Arithmetic(
                 Arithmetic {
                     op: ArithmeticOperator::Subtract,
-                    left: ArithmeticItem::Base(ArithmeticBase::Column(Column {
-                        name: String::from("max(o_id)"),
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Max(Box::new(
-                            Expression::Column("o_id".into()),
-                        )))),
-                    })),
-                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(3333.into())),
+                    left: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
+                        Expression::Column("o_id".into()),
+                    )))),
+                    right: Box::new(Expression::Literal(3333.into())),
                 },
             ))],
             ..Default::default()
@@ -1400,14 +1396,10 @@ mod tests {
                 alias: Some(String::from("double_max")),
                 expr: Expression::Arithmetic(Arithmetic {
                     op: ArithmeticOperator::Multiply,
-                    left: ArithmeticItem::Base(ArithmeticBase::Column(Column {
-                        name: String::from("max(o_id)"),
-                        table: None,
-                        function: Some(Box::new(FunctionExpression::Max(Box::new(
-                            Expression::Column("o_id".into()),
-                        )))),
-                    })),
-                    right: ArithmeticItem::Base(ArithmeticBase::Scalar(2.into())),
+                    left: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
+                        Expression::Column("o_id".into()),
+                    )))),
+                    right: Box::new(Expression::Literal(2.into())),
                 }),
             }],
             ..Default::default()
