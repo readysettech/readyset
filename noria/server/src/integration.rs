@@ -4136,6 +4136,8 @@ async fn same_table_columns_inequal() {
     .await
     .unwrap();
 
+    sleep().await;
+
     let mut q = g.view("q").await.unwrap();
     let res = q.lookup(&[0i32.into()], true).await.unwrap();
     assert_eq!(
@@ -4261,6 +4263,8 @@ async fn cast_projection() {
         .await
         .unwrap();
 
+    sleep().await;
+
     let mut view = g.view("user").await.unwrap();
 
     let result = view
@@ -4292,6 +4296,8 @@ async fn aggregate_expression() {
     t.insert_many(vec![vec![DataType::from("100")], vec![DataType::from("5")]])
         .await
         .unwrap();
+
+    sleep().await;
 
     let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
 
@@ -4335,6 +4341,8 @@ async fn post_join_filter() {
     ])
     .await
     .unwrap();
+
+    sleep().await;
 
     let mut res: Vec<_> = q.lookup(&[0.into()], true).await.unwrap().into();
     res.sort();
@@ -4388,6 +4396,8 @@ async fn duplicate_column_names() {
     .await
     .unwrap();
 
+    sleep().await;
+
     let mut res: Vec<_> = q.lookup(&[0.into()], true).await.unwrap().into();
     res.sort();
 
@@ -4426,6 +4436,8 @@ async fn filter_on_expression() {
     .await
     .unwrap();
 
+    sleep().await;
+
     let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
 
     assert_eq!(&res["id"], &DataType::from(1));
@@ -4446,8 +4458,6 @@ async fn compound_join_key() {
     )
     .await
     .unwrap();
-
-    eprintln!("{}", g.graphviz().await.unwrap());
 
     let mut t1 = g.table("t1").await.unwrap();
     let mut t2 = g.table("t2").await.unwrap();
@@ -4508,6 +4518,8 @@ async fn compound_join_key() {
     .await
     .unwrap();
 
+    sleep().await;
+
     let res = q
         .lookup(&[0i32.into()], true)
         .await
@@ -4550,7 +4562,8 @@ async fn left_join_null() {
     .unwrap();
     t2.insert_many(vec![vec![DataType::from(3)]]).await.unwrap();
 
-    eprintln!("{}", g.graphviz().await.unwrap());
+    sleep().await;
+
     let res = q
         .lookup(&[0.into()], true)
         .await
@@ -4831,6 +4844,8 @@ async fn overlapping_indices() {
     .await
     .unwrap();
 
+    sleep().await;
+
     let rows = q.lookup(&[3i32.into()], true).await.unwrap();
 
     let res = rows
@@ -4871,6 +4886,8 @@ async fn aggregate_after_filter_non_equality() {
     ])
     .await
     .unwrap();
+
+    sleep().await;
 
     let res = q
         .lookup(&[0i32.into()], true)
