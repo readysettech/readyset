@@ -52,14 +52,16 @@ struct Worker {
     healthy: bool,
     last_heartbeat: time::Instant,
     sender: TcpSender<CoordinationMessage>,
+    region: Option<String>,
 }
 
 impl Worker {
-    fn new(sender: TcpSender<CoordinationMessage>) -> Self {
+    fn new(sender: TcpSender<CoordinationMessage>, region: Option<String>) -> Self {
         Worker {
             healthy: true,
             last_heartbeat: time::Instant::now(),
             sender,
+            region,
         }
     }
 }

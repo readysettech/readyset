@@ -17,6 +17,7 @@ pub struct Builder {
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     log: slog::Logger,
+    region: Option<String>,
 }
 impl Default for Builder {
     fn default() -> Self {
@@ -27,6 +28,7 @@ impl Default for Builder {
             log: slog::Logger::root(slog::Discard, o!()),
             memory_limit: None,
             memory_check_frequency: None,
+            region: None,
         }
     }
 }
@@ -115,6 +117,11 @@ impl Builder {
         self.config.domain_config.aggressively_update_state_sizes = value;
     }
 
+    /// Sets the region that the work is located in.
+    pub fn set_region(&mut self, region: String) {
+        self.region = Some(region);
+    }
+
     /// Start a server instance and return a handle to it.
     ///
     /// The second item of the returned tuple is a future that resolves when Noria is idle.
@@ -131,6 +138,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             ref log,
+            ref region,
         } = *self;
 
         let config = config.clone();
@@ -144,6 +152,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             log,
+            region.clone(),
         )
     }
 

@@ -319,8 +319,7 @@ use std::net::SocketAddr;
 #[doc(hidden)]
 pub mod builders {
     pub use super::table::TableBuilder;
-    pub use super::view::ViewBuilder;
-    pub use super::view::ViewReplica;
+    pub use super::view::{ReplicaShard, ViewBuilder, ViewReplica};
 }
 
 /// Types used when debugging Noria.

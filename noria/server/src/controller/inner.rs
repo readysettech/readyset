@@ -322,17 +322,19 @@ impl ControllerInner {
     }
 
     pub(super) fn handle_register(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
-        let (remote, read_listen_addr, controller_addr) = if let CoordinationPayload::Register {
-            addr: remote,
-            read_listen_addr,
-            controller_addr,
-            ..
-        } = msg.payload
-        {
-            (remote, read_listen_addr, controller_addr)
-        } else {
-            unreachable!();
-        };
+        let (remote, read_listen_addr, controller_addr, region) =
+            if let CoordinationPayload::Register {
+                addr: remote,
+                read_listen_addr,
+                controller_addr,
+                region,
+                ..
+            } = msg.payload
+            {
+                (remote, read_listen_addr, controller_addr, region)
+            } else {
+                unreachable!();
+            };
 
         info!(
             self.log,
@@ -340,7 +342,7 @@ impl ControllerInner {
         );
 
         let sender = TcpSender::connect(&remote)?;
-        let ws = Worker::new(sender);
+        let ws = Worker::new(sender, region);
         self.workers.insert(msg.source, ws);
         self.read_addrs.insert(msg.source, read_listen_addr);
         self.external_addrs.insert(msg.source, controller_addr);
@@ -1020,7 +1022,12 @@ impl ControllerInner {
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.view_schema(r)?;
             let shards = (0..self.domains[&domain].shards())
-                .map(|i| self.read_addrs[&self.domains[&domain].assignment(i)])
+                .map(|i| ReplicaShard {
+                    addr: self.read_addrs[&self.domains[&domain].assignment(i)],
+                    region: self.workers[&self.domains[&domain].assignment(i)]
+                        .region
+                        .clone(),
+                })
                 .collect();
             replicas.push(ViewReplica {
                 node: r,

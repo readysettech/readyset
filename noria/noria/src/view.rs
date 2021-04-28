@@ -384,7 +384,17 @@ pub struct ViewReplica {
     pub node: NodeIndex,
     pub columns: Vec<String>,
     pub schema: Option<Vec<ColumnSpecification>>,
-    pub shards: Vec<SocketAddr>,
+    pub shards: Vec<ReplicaShard>,
+}
+
+/// A shard of a reader replica.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplicaShard {
+    /// The address of the worker where the shard lives in.
+    pub addr: SocketAddr,
+    /// The region of a shard, as specified by the argument `region`
+    /// by the noria-server, where the shard lives in.
+    pub region: Option<String>,
 }
 
 impl ViewBuilder {
@@ -402,21 +412,21 @@ impl ViewBuilder {
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());
 
-        for (shardi, &addr) in shards.iter().enumerate() {
+        for (shardi, shard) in shards.iter().enumerate() {
             use std::collections::hash_map::Entry;
 
-            addrs.push(addr);
+            addrs.push(shard.addr);
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
             let mut rpcs = rpcs.lock().unwrap();
-            let s = match rpcs.entry((addr, shardi)) {
+            let s = match rpcs.entry((shard.addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
                         ConcurrencyLimit::new(
-                            Balance::new(make_views_discover(addr)),
+                            Balance::new(make_views_discover(shard.addr)),
                             crate::PENDING_LIMIT,
                         ),
                         crate::BUFFER_TO_POOL,
@@ -424,7 +434,7 @@ impl ViewBuilder {
                     use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(
                         "view_worker",
-                        addr = %addr,
+                        addr = %shard.addr,
                         shard = shardi
                     )));
                     h.insert(c.clone());

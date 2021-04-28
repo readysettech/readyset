@@ -54,6 +54,7 @@ pub(super) async fn main(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
+    region: Option<String>,
 ) -> Result<(), ReadySetError> {
     // shared df state
     let coord = Arc::new(ChannelCoordinator::new());
@@ -152,6 +153,7 @@ pub(super) async fn main(
                     external_addr,
                     external_controller_addr,
                     rep_rx,
+                    region.clone(),
                 )
                 .await;
 
@@ -194,6 +196,7 @@ async fn listen_df<'a>(
     external_addr: IpAddr,
     external_controller_addr: SocketAddr,
     mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
+    region: Option<String>,
 ) -> Result<(), anyhow::Error> {
     // first, try to connect to controller
     let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
@@ -266,6 +269,7 @@ async fn listen_df<'a>(
             read_listen_addr: raddr,
             controller_addr: external_controller_addr,
             log_files,
+            region,
         });
 
         // start sending heartbeats
