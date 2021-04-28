@@ -1,4 +1,5 @@
 use crate::utils;
+use chrono::NaiveDateTime;
 use msql_srv::Column;
 use neon::{prelude::*, types::JsDate};
 use noria::{results::Results, DataType};
@@ -104,7 +105,11 @@ where
             let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
             Ok(cx.string(s).upcast::<JsValue>())
         }
-        DataType::Timestamp(_) => unimplemented!("Timestamp conversion to JS type"), // TODO: convert Timestamp DataType to JS: https://app.clubhouse.io/readysettech/story/390/implement-rust-timestamp-datatype-conversion-to-jsdate
+        // NOTE: making a js date object from the naive timestamp *assuming* it was created in the *UTC* timezone
+        DataType::Timestamp(t) => Ok(cx
+            .date(t.timestamp_millis() as f64)
+            .or_else(|e| cx.throw_error(e.to_string()))?
+            .upcast::<JsValue>()),
         DataType::Time(_) => unimplemented!("Time conversion to JS type"),
     }
 }
@@ -237,7 +242,16 @@ where
             js_param.downcast_or_throw::<JsBoolean, _>(cx)?.value(cx),
         ))
     } else if js_param.is_a::<JsDate, _>(cx) {
-        unimplemented!() // TODO: implement JsDate conversion to DataType: https://app.clubhouse.io/readysettech/story/387/implement-jsdate-conversion-to-rust-timestamp-datatype
+        // NOTE: a neon developer confirmed the `value` function on a JsDate always gives milliseconds in UTC
+        // because it returns the ECMAScript *time value* defined here: https://262.ecma-international.org/11.0/#sec-time-values-and-time-range
+        let millis = js_param.downcast_or_throw::<JsDate, _>(cx)?.value(cx);
+        if f64::is_nan(millis) {
+            return cx.throw_error("Date input must be a valid javascript date");
+        }
+        Ok(DataType::Timestamp(NaiveDateTime::from_timestamp(
+            millis as i64 / 1000i64,
+            ((millis as i64 % 1000i64) * 1000000i64) as u32,
+        )))
     } else {
         cx.throw_error("Unknown parameter type")
     }
