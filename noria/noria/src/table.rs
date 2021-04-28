@@ -99,10 +99,10 @@ macro_rules! row {
                         .ok_or_else(|| $crate::errors::internal_err("field name appears twice -- should be caught by match"))?;
                     if let Some(ref schema) = schema {
                         if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
-                            Err($crate::errors::ReadySetError::TableError {
+                            return Err(($crate::errors::ReadySetError::TableError {
                                  name: $tbl.table_name().into(),
                                  source: Box::new($crate::errors::ReadySetError::NonNullable { col: col.into() })
-                            })?
+                            }).into())
                         }
                     }
                 },)|+
@@ -129,10 +129,10 @@ macro_rules! row {
                     }
 
                     if !allow_null && row[coli].is_none() {
-                       Err($crate::errors::ReadySetError::TableError {
+                       return Err(($crate::errors::ReadySetError::TableError {
                             name: $tbl.table_name().into(),
                             source: Box::new($crate::errors::ReadySetError::ColumnRequired { col: cname.into() })
-                       })?
+                       }).into())
                     }
                 }
                 _ => { /* leave column value as None */ }
@@ -840,17 +840,17 @@ impl Table {
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
-        if !(!self.key.is_empty() && self.key_is_primary) {
+        if self.key.is_empty() || !self.key_is_primary {
             unsupported!("update operations can only be applied to base nodes with key columns")
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
-                Err(table_err(
+                return Err(table_err(
                     self.table_name(),
                     ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                ))?;
+                ));
             }
             set[coli] = m;
         }
@@ -873,17 +873,17 @@ impl Table {
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
-        if !(!self.key.is_empty() && self.key_is_primary) {
+        if self.key.is_empty() || !self.key_is_primary {
             unsupported!("update operations can only be applied to base nodes with key columns")
         }
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
             if coli >= self.columns.len() {
-                Err(table_err(
+                return Err(table_err(
                     self.table_name(),
                     ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                ))?;
+                ));
             }
             set[coli] = m;
         }

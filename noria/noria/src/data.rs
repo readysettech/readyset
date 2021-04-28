@@ -913,7 +913,7 @@ impl<'a> TryFrom<&'a DataType> for MysqlTime {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Time(ref mysql_time) => Ok(mysql_time.as_ref().clone()),
+            DataType::Time(ref mysql_time) => Ok(*mysql_time.as_ref()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1547,7 +1547,7 @@ mod tests {
 
         // Test Value::Date.
         let ts = NaiveDate::from_ymd(1111, 1, 11).and_hms_micro(2, 3, 4, 5);
-        let a = Value::from(ts.clone());
+        let a = Value::from(ts);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(a_dt.unwrap(), DataType::Timestamp(ts));

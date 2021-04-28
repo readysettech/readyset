@@ -139,7 +139,7 @@ impl<T: Serialize> TcpSender<T> {
         }
     }
 
-    pub fn reader<'a>(&'a mut self) -> impl io::Read + 'a {
+    pub fn reader(&mut self) -> impl io::Read + '_ {
         &mut self.stream
     }
 }

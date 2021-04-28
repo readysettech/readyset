@@ -220,7 +220,7 @@ impl TryFrom<(Vec<DataType>, BinaryOperator)> for KeyComparison {
             Less => (Bound::Unbounded, Bound::Excluded(value)),
             LessOrEqual => (Bound::Unbounded, Bound::Included(value)),
             Equal => return Ok(value.into()),
-            _ => Err("bad binop!".to_string())?,
+            _ => return Err("bad binop!".to_string()),
         };
         Ok(KeyComparison::Range(inner))
     }
@@ -595,7 +595,7 @@ impl Service<ViewQuery> for View {
     }
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
-        let ni = self.node.clone();
+        let ni = self.node;
         let span = if crate::trace_next_op() {
             Some(tracing::trace_span!(
                 "view-request",
@@ -630,7 +630,7 @@ impl Service<ViewQuery> for View {
                             _ => unreachable!(),
                         }
                     })
-                    .map_err(move |e| view_err(ni.clone(), e)),
+                    .map_err(move |e| view_err(ni, e)),
             );
         }
 
@@ -697,7 +697,7 @@ impl Service<ViewQuery> for View {
                                 _ => unreachable!(),
                             }
                         })
-                        .map_err(move |e| view_err(ni.clone(), e))
+                        .map_err(move |e| view_err(ni, e))
                 })
                 .collect::<FuturesUnordered<_>>()
                 .try_concat()
@@ -850,7 +850,7 @@ impl View {
     ) -> ReadySetResult<Results> {
         // TODO: Optimized version of this function?
         let key = Vec1::try_from_vec(key.into())
-            .map_err(|_| view_err(self.node.clone(), ReadySetError::EmptyKey))?;
+            .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
@@ -887,7 +887,7 @@ impl View {
     ) -> ReadySetResult<Option<Row>> {
         // TODO: Optimized version of this function?
         let key = Vec1::try_from_vec(key.into())
-            .map_err(|_| view_err(self.node.clone(), ReadySetError::EmptyKey))?;
+            .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;

@@ -94,11 +94,7 @@ where
 impl<T> LocalOrNot<T> {
     #[doc(hidden)]
     pub fn is_local(&self) -> bool {
-        if let LocalOrNotInner::Local(..) = self.0 {
-            true
-        } else {
-            false
-        }
+        matches!(self.0, LocalOrNotInner::Local(..))
     }
 
     /// Creates a new LocalOrNot object based on the destinations

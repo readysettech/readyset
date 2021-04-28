@@ -221,7 +221,7 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
 
         // we've got to be a bit careful here, as the nodes may come in any order
         // we therefore sort them first
-        let sorted = BTreeMap::from_iter(iter.into_iter().map(|(ni, v)| (ni.id(), v)));
+        let sorted: BTreeMap<_, _> = iter.into_iter().map(|(ni, v)| (ni.id(), v)).collect();
 
         // no entries -- fine
         if sorted.is_empty() {

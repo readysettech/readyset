@@ -56,12 +56,12 @@ impl PartialEq<&'_ Vec<Vec<DataType>>> for Results {
 /// If you want to also perform type conversion, use [`ResultRow::get`].
 #[derive(PartialEq, Eq)]
 pub struct ResultRow<'a> {
-    result: &'a Vec<DataType>,
+    result: &'a [DataType],
     columns: &'a [String],
 }
 
 impl<'a> ResultRow<'a> {
-    fn new(row: &'a Vec<DataType>, columns: &'a [String]) -> Self {
+    fn new(row: &'a [DataType], columns: &'a [String]) -> Self {
         Self {
             result: row,
             columns,

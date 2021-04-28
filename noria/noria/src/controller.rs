@@ -116,7 +116,7 @@ where
                     hyper::StatusCode::INTERNAL_SERVER_ERROR => {
                         let body = String::from_utf8_lossy(&*body);
                         let err: ReadySetError = serde_json::from_str(&body)?;
-                        Err(err)?
+                        return Err(err);
                     }
                     s => {
                         if s == hyper::StatusCode::SERVICE_UNAVAILABLE {
@@ -341,10 +341,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     /// This is made public for inspection in integration tests and is not meant to be
     /// used to construct views, instead use `view`, which calls this method.
-    pub async fn view_builder<'a>(
-        &'a mut self,
-        view_request: ViewRequest,
-    ) -> ReadySetResult<ViewBuilder> {
+    pub async fn view_builder(&mut self, view_request: ViewRequest) -> ReadySetResult<ViewBuilder> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -371,10 +368,10 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         }
     }
 
-    fn request_view<'a>(
-        &'a mut self,
+    fn request_view(
+        &mut self,
         view_request: ViewRequest,
-    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
+    ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let views = self.views.clone();
         async move {
             let view_builder = self.view_builder(view_request).await?;
