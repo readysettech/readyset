@@ -74,6 +74,12 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// (e.g. SUM can be either int or float)
     /// Other operators like Count (int) and Concat (text) always have the same column type.
     fn output_col_type(&self) -> Option<SqlType>;
+
+    /// Returns the empty value for this aggregate, if any. Groups that have the empty value in
+    /// their output column will be omitted from results
+    fn empty_value(&self) -> Option<DataType> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,10 +281,12 @@ where
                             out.push(Record::Negative(old.into_owned()));
                         }
 
-                        // emit positive, which is group + new.
-                        let mut rec = group;
-                        rec.push(new);
-                        out.push(Record::Positive(rec));
+                        // emit positive, which is group + new, unless it's the empty value
+                        if !inner.empty_value().contains(&new) {
+                            let mut rec = group;
+                            rec.push(new);
+                            out.push(Record::Positive(rec));
+                        }
                     }
                 }
                 Ok(())

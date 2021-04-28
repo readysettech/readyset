@@ -250,6 +250,10 @@ impl GroupedOperation for GroupConcat {
     fn output_col_type(&self) -> Option<nom_sql::SqlType> {
         Some(nom_sql::SqlType::Text)
     }
+
+    fn empty_value(&self) -> Option<DataType> {
+        Some("".into())
+    }
 }
 
 #[cfg(test)]

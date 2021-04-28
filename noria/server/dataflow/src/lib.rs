@@ -4,7 +4,8 @@
     iter_order_by,
     trait_alias,
     btree_drain_filter,
-    or_patterns
+    or_patterns,
+    option_result_contains
 )]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.

@@ -291,6 +291,13 @@ impl GroupedOperation for Aggregator {
             _ => None, // Sum can be either an int or float.
         }
     }
+
+    fn empty_value(&self) -> Option<DataType> {
+        match self.op {
+            Aggregation::COUNT => Some(0.into()),
+            _ => None,
+        }
+    }
 }
 
 // TODO: These unit tests are lengthy, repetitive, and hard to read.
@@ -485,6 +492,22 @@ mod tests {
         } else {
             false
         }));
+    }
+
+    #[test]
+    fn count_empty_group() {
+        let mut c = setup(Aggregation::COUNT, true);
+
+        let u = Record::from(vec![1.into(), 1.into()]);
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs, vec![Record::Positive(vec![1.into(), 1.into()])].into());
+
+        let del = Record::Negative(vec![1.into(), 1.into()]);
+        let del_res = c.narrow_one(del, true);
+        assert_eq!(
+            del_res,
+            vec![Record::Negative(vec![1.into(), 1.into()])].into()
+        );
     }
 
     /// Testing SUM emits correct records with single column group and single over column
@@ -1147,16 +1170,7 @@ mod tests {
 
         // this should get filtered out
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 1);
-        let mut rs = rs.into_iter();
-
-        match rs.next().unwrap() {
-            Record::Positive(r) => {
-                assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 0.into());
-            }
-            _ => unreachable!(),
-        }
+        assert_eq!(rs.len(), 0);
 
         let u: Record = vec![2.into(), 2.into()].into();
 
@@ -1230,25 +1244,11 @@ mod tests {
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 3); // +- for 1, + for 3
+        assert_eq!(rs.len(), 1); // +- for 1, + for 3
 
-        // group 1 lost 0 and gained 1
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == 0.into()
-        } else {
-            false
-        }));
+        // group 1 gained 1
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             r[0] == 1.into() && r[1] == 1.into()
-        } else {
-            false
-        }));
-
-        // group 2 lost 1 and gained 1
-
-        // group 3 lost 0 and gained 1
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == 0.into()
         } else {
             false
         }));
@@ -1261,19 +1261,9 @@ mod tests {
 
         let u: Record = vec![1.into(), 1.into(), 2.into()].into();
 
-        // first row filtered, so should emit 0 for the group (1, 2)
+        // first row filtered, so should emit no row for the group (1, 2)
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 1);
-        let mut rs = rs.into_iter();
-
-        match rs.next().unwrap() {
-            Record::Positive(r) => {
-                assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 2.into());
-                assert_eq!(r[2], 0.into());
-            }
-            _ => unreachable!(),
-        }
+        assert_eq!(rs.len(), 0);
 
         let u: Record = vec![2.into(), 2.into(), 2.into()].into();
 
