@@ -108,6 +108,8 @@ build {
 
   provisioner "shell" {
     inline = [
+      "sudo apt-get update",
+      "sudo apt-get install -y locales-all",
       "sudo mv /tmp/noria-server /bin/noria-server",
       "sudo chmod +x /bin/noria-server",
       "sudo chown root:root /bin/noria-server",

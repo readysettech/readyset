@@ -114,7 +114,7 @@ build {
   provisioner "shell" {
     inline = [
       "sudo apt-get update",
-      "sudo apt-get install -y default-jre-headless",
+      "sudo apt-get install -y default-jre-headless locales-all",
       "sudo useradd -m -d /opt/kafka kafka",
       "sudo curl -sLo /tmp/kafka.tgz https://archive.apache.org/dist/kafka/${var.kafka_version}/kafka_${var.scala_version}-${var.kafka_version}.tgz",
       "sudo su kafka -c 'tar -zxvf /tmp/kafka.tgz --strip 1 -C /opt/kafka'",

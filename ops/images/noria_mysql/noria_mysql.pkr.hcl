@@ -108,6 +108,8 @@ build {
 
   provisioner "shell" {
     inline = [
+      "sudo apt-get update",
+      "sudo apt-get install -y locales-all",
       "sudo mv /tmp/noria-mysql /bin/noria-mysql",
       "sudo chmod +x /bin/noria-mysql",
       "sudo chown root:root /bin/noria-mysql",

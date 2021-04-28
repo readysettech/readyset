@@ -100,7 +100,7 @@ build {
     inline = [
       "sudo apt-get update",
       "sudo apt-get upgrade -y",
-      "sudo apt-get install -y zookeeperd",
+      "sudo apt-get install -y zookeeperd locales-all",
       "sudo systemctl enable zookeeper"
     ]
   }

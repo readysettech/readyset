@@ -108,6 +108,8 @@ build {
 
   provisioner "shell" {
     inline = [
+      "sudo apt-get update",
+      "sudo apt-get install -y locales-all",
       "sudo mv /tmp/debezium_connector /bin/debezium_connector",
       "sudo chmod +x /bin/debezium_connector",
       "sudo chown root:root /bin/debezium_connector",
