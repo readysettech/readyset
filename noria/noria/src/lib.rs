@@ -355,14 +355,26 @@ pub struct ReaderReplicationResult {
     pub new_readers: HashMap<String, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
+/// Filters that can be used to filter the type of
+/// view returned.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ViewFilter {
+    /// Pool of worker addresses. If the pool is not empty, this will
+    /// look for a view reader in the pool.
+    Workers(Vec<SocketAddr>),
+    /// Region to request the view from.
+    // TODO(justin): This parameter is currently not supported and
+    // is a no-op.
+    Region(String),
+}
+
 /// Represents a request for a view.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ViewRequest {
     /// Name of the view being requested.
     pub name: String,
-    /// Pool of worker addresses. If the pool is not empty, this will
-    /// look for a view reader in the pool.
-    pub workers: Vec<SocketAddr>,
+    /// Filter to be applied when searching for a view.
+    pub filter: Option<ViewFilter>,
 }
 
 #[doc(hidden)]

@@ -377,7 +377,7 @@ pub struct ViewBuilder {
     pub replicas: Vec<ViewReplica>,
 }
 
-/// TODO: Add this comment.
+/// A reader replica for a view.
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewReplica {

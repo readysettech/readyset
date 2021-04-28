@@ -4743,7 +4743,7 @@ async fn test_view_includes_replicas() {
     // the view_builder.
     let request = ViewRequest {
         name: "q".into(),
-        workers: vec![],
+        filter: None,
     };
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 1);
@@ -4760,7 +4760,7 @@ async fn test_view_includes_replicas() {
     // Check that two replicas are returned in the view_builder.
     let request = ViewRequest {
         name: "q".into(),
-        workers: vec![],
+        filter: None,
     };
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 2);
