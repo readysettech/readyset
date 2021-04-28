@@ -2,7 +2,7 @@ use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 
-use crate::{unsupported, ReadySetError, ReadySetResult};
+use crate::{ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
 use std::borrow::Cow;
@@ -1294,12 +1294,18 @@ impl TryFrom<mysql_common::value::Value> for DataType {
                         hour.into(),
                         minutes.into(),
                         seconds.into(),
-                        micros.into(),
+                        micros,
                     ),
                 ))
             }
-            Value::Time(..) => {
-                unsupported!("`mysql_common::value::Value::time` is not supported by ReadySet")
+            Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
+                Ok(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                    !neg,
+                    <u16>::try_from(hours as u32 + days * 24u32).unwrap_or(u16::MAX),
+                    minutes,
+                    seconds,
+                    microseconds.into(),
+                ))))
             }
         }
     }
@@ -1550,7 +1556,11 @@ mod tests {
         // noria::DataType has no `Time` representation.
         let a = Value::Time(true, 0, 0, 0, 0, 0);
         let a_dt = DataType::try_from(a);
-        assert!(a_dt.is_err());
+        assert!(a_dt.is_ok());
+        assert_eq!(
+            a_dt.unwrap(),
+            DataType::Time(Arc::new(MysqlTime::from_microseconds(0)))
+        )
     }
 
     #[test]
