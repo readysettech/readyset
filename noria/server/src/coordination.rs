@@ -29,6 +29,8 @@ pub enum CoordinationPayload {
         controller_addr: SocketAddr,
         /// Which log files are stored locally on the worker.
         log_files: Vec<String>,
+        /// The region that the worker is located in.
+        region: Option<String>,
     },
     /// Worker going offline.
     Deregister,

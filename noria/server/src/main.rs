@@ -155,6 +155,12 @@ If specified, overrides the value of --external-address"))
                 .takes_value(false)
                 .help("Verbose log output."),
         )
+        .arg(
+            Arg::with_name("region")
+            .default_value("")
+            .env("NORIA_REGION")
+            .help("The region the worker is hosted in. Required to route view requests to specific regions."),
+        )
         .get_matches();
 
     let log = noria_server::logger_pls();
@@ -204,6 +210,10 @@ If specified, overrides the value of --external-address"))
     }
     if matches.is_present("noreuse") {
         builder.set_reuse(ReuseConfigType::NoReuse);
+    }
+
+    if let Some(r) = matches.value_of("region") {
+        builder.set_region(r.into());
     }
 
     let mut persistence_params = noria_server::PersistenceParameters::new(

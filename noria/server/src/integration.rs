@@ -62,7 +62,15 @@ pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
 }
 
 async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
-    build_custom(prefix, sharding, log, true, Arc::new(LocalAuthority::new())).await
+    build_custom(
+        prefix,
+        sharding,
+        log,
+        true,
+        Arc::new(LocalAuthority::new()),
+        None,
+    )
+    .await
 }
 
 async fn build_custom(
@@ -71,6 +79,7 @@ async fn build_custom(
     log: bool,
     controller: bool,
     authority: Arc<LocalAuthority>,
+    region: Option<String>,
 ) -> Handle<LocalAuthority> {
     use crate::logger_pls;
     let mut builder = Builder::default();
@@ -79,6 +88,10 @@ async fn build_custom(
     }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
+
+    if region.is_some() {
+        builder.set_region(region.unwrap());
+    }
     if controller {
         builder
             .start_local_custom(authority.clone())
@@ -4584,6 +4597,7 @@ async fn reader_replication() {
         false,
         true,
         authority.clone(),
+        None,
     )
     .await;
 
@@ -4598,6 +4612,7 @@ async fn reader_replication() {
         false,
         false,
         authority.clone(),
+        None,
     )
     .await;
 
@@ -4699,6 +4714,7 @@ async fn test_view_includes_replicas() {
         false,
         true,
         authority.clone(),
+        Some("r1".into()),
     )
     .await;
 
@@ -4713,6 +4729,7 @@ async fn test_view_includes_replicas() {
         false,
         false,
         authority.clone(),
+        Some("r1".into()),
     )
     .await;
 
@@ -4748,6 +4765,10 @@ async fn test_view_includes_replicas() {
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 1);
 
+    let shards = &q.replicas[0].shards;
+    assert_eq!(shards.len(), 1);
+    assert_eq!(shards[0].region, Some("r1".to_string()));
+
     // Replicate the reader for `q`.
     let repl_result = w1
         .replicate_readers(vec!["q".to_owned()], Some(w2_addr))
@@ -4764,6 +4785,10 @@ async fn test_view_includes_replicas() {
     };
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 2);
+    // Verify that each replica has one shard and that it's region was
+    // set appropriately.
+    assert_eq!(q.replicas[0].shards[0].region, Some("r1".to_string()));
+    assert_eq!(q.replicas[1].shards[0].region, Some("r1".to_string()));
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
