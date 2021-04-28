@@ -407,7 +407,6 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             for<'de> R: Deserialize<'de>,
             A: Authority + 'static,
         {
-            eprintln!("sending RPC to {}", path);
             let body: hyper::body::Bytes = ch
                 .handle
                 .ready()
