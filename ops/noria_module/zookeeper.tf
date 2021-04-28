@@ -21,7 +21,7 @@ data "aws_ami" "zookeeper" {
 resource "aws_security_group" "zookeeper" {
   name        = "zookeeper"
   description = "Allow connection to zookeeper"
-  vpc_id      = var.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Zookeeper Peerport"
@@ -73,7 +73,7 @@ resource "aws_instance" "zookeeper" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.zookeeper.id],
-    var.extra_security_groups,
+    local.extra_security_groups,
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 

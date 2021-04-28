@@ -1,17 +1,35 @@
-variable "vpc_id" {
-  type        = string
-  description = "ID of the VPC to deploy all resources into"
-}
+#---------------------------------------------------------------------------------------------------------------------#
+# Required variables
+#---------------------------------------------------------------------------------------------------------------------#
 
-variable "deployment" {
+variable "aws_region" {
   type        = string
-  default     = "noria"
-  description = "Unique identifier for the name of the Noria deployment"
+  description = "AWS Region where to deploy resources (e.g us-west-2)."
+
+  validation {
+    condition     = can(regex("(us(-gov)?|ap|ca|cn|eu|sa)-(central|(north|south)?(east|west)?)-\\d", var.aws_region))
+    error_message = "The aws_region variable value is not a valid AWS Region name."
+  }
 }
 
 variable "readyset_version" {
   type        = string
   description = "Readyset version to deploy (This is a required field, please ask for the latest version)."
+}
+
+variable "key_name" {
+  type        = string
+  description = "Name of the EC2 key pair to use when provisioning instances"
+}
+
+#---------------------------------------------------------------------------------------------------------------------#
+# Optional variables
+#---------------------------------------------------------------------------------------------------------------------#
+
+variable "deployment" {
+  type        = string
+  default     = "noria"
+  description = "Unique identifier for the name of the Noria deployment"
 }
 
 variable "zookeeper_instance_type" {
@@ -84,11 +102,6 @@ variable "zookeeper_disk_kms_key_id" {
   type        = string
   default     = ""
   description = "ARN for the KMS key ID to use to encrypt the zookeeper volume. Ignored if encrypt_zookeeper_disk = false."
-}
-
-variable "key_name" {
-  type        = string
-  description = "Name of the EC2 key pair to use when provisioning instances"
 }
 
 variable "extra_security_groups" {
@@ -173,4 +186,39 @@ variable "tables" {
   type        = list(string)
   default     = []
   description = "List of tables to replicate from RDS"
+}
+
+variable "setup_id" {
+  type        = string
+  default     = ""
+  description = "ID of the setup, 5 characters and no special symbols. (Useful for identifying resources)."
+
+  validation {
+    condition     = can(regex("[[:alnum:]]{5}", var.setup_id)) || length(var.setup_id) == 0
+    error_message = "The setup_id variable value needs to be an alphanumeric string of 5 characters (Without special symbols)."
+  }
+}
+
+variable "vpc_cidr" {
+  type        = string
+  default     = "10.0.0.0/16"
+  description = "The CIDR block for the VPC."
+}
+
+variable "vpc_private_subnets" {
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  description = "A list of private subnets inside the VPC."
+}
+
+variable "vpc_public_subnets" {
+  type        = list(string)
+  default     = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+  description = "A list of public subnets inside the VPC."
+}
+
+variable "allow_ssh" {
+  type        = bool
+  default     = false
+  description = "Allow SSH connections from 0.0.0.0/0."
 }

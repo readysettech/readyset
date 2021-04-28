@@ -27,7 +27,7 @@ resource "aws_security_group" "kafka" {
   count       = local.rds_connector_count
   name        = "kafka"
   description = "Allow connection to kafka"
-  vpc_id      = var.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Kafka"
@@ -62,7 +62,7 @@ resource "aws_instance" "kafka" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.kafka[0].id],
-    var.extra_security_groups
+    local.extra_security_groups
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 
@@ -99,7 +99,7 @@ resource "aws_security_group" "debezium" {
   count       = local.rds_connector_count
   name        = "debezium"
   description = "Allow connection to debezium"
-  vpc_id      = var.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Debezium"
@@ -139,7 +139,7 @@ resource "aws_instance" "debezium" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.debezium[0].id],
-    var.extra_security_groups
+    local.extra_security_groups
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 
@@ -175,7 +175,7 @@ resource "aws_security_group" "debezium_connector" {
   count       = local.rds_connector_count
   name        = "debezium-connector"
   description = "Noria Debezium Connector"
-  vpc_id      = var.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   egress {
     from_port   = 0
@@ -202,7 +202,7 @@ resource "aws_instance" "debezium_connector" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.debezium_connector[0].id],
-    var.extra_security_groups
+    local.extra_security_groups
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 

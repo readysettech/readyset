@@ -21,7 +21,7 @@ data "aws_ami" "noria_server" {
 resource "aws_security_group" "noria_server" {
   name        = "noria_server"
   description = "Allow connection to noria server"
-  vpc_id      = var.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Noria leader"
@@ -76,7 +76,7 @@ resource "aws_instance" "noria_server" {
   subnet_id = local.subnet_id
   vpc_security_group_ids = concat(
     [aws_security_group.noria_server.id],
-    var.extra_security_groups
+    local.extra_security_groups
   )
   associate_public_ip_address = var.associate_public_ip_addresses
 

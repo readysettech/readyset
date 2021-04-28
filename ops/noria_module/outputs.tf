@@ -62,3 +62,8 @@ output "debezium_connect_security_group_id" {
   value       = aws_security_group.debezium.*.id
   description = "ID of the security group created for the Debezium Connect instance. This security group must have access to port 3306 of the RDS DB instance, if specified."
 }
+
+output "vpc_id" {
+  value       = module.vpc.vpc_id
+  description = "The ID of the VPC created in the provided AWS Region."
+}

@@ -30,18 +30,22 @@ in the variable `extra_security_groups`
 |------|---------|
 | terraform | >= 0.14.7 |
 | aws | >= 3.33.0 |
+| random | >= 3.1.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | aws | >= 3.33.0 |
+| random | >= 3.1.0 |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| allow\_ssh | Allow SSH connections from 0.0.0.0/0. | `bool` | `false` | no |
 | associate\_public\_ip\_addresses | Whether or not to associate a public IP address with all provisioned instances | `bool` | `true` | no |
+| aws\_region | AWS Region where to deploy resources (e.g us-west-2). | `string` | n/a | yes |
 | db\_host | Hostname of the MySQL database to replicate to Noria | `string` | `""` | no |
 | db\_name | Name of the MySQL database to replicate to Noria | `string` | `""` | no |
 | db\_password | Password for the MySQL user to use to connect to RDS | `string` | `""` | no |
@@ -66,8 +70,11 @@ in the variable `extra_security_groups`
 | noria\_shards | Number of shards to use in Noria (0 = disable sharding) | `number` | `0` | no |
 | rds\_instance\_id | ID of the RDS instance to stream writes from. Required if enable\_rds\_connector is true | `string` | `""` | no |
 | readyset\_version | Readyset version to deploy (This is a required field, please ask for the latest version). | `string` | n/a | yes |
+| setup\_id | ID of the setup, 5 characters and no special symbols. (Useful for identifying resources). | `string` | `""` | no |
 | tables | List of tables to replicate from RDS | `list(string)` | `[]` | no |
-| vpc\_id | ID of the VPC to deploy all resources into | `string` | n/a | yes |
+| vpc\_cidr | The CIDR block for the VPC. | `string` | `"10.0.0.0/16"` | no |
+| vpc\_private\_subnets | A list of private subnets inside the VPC. | `list(string)` | <pre>[<br>  "10.0.1.0/24",<br>  "10.0.2.0/24",<br>  "10.0.3.0/24"<br>]</pre> | no |
+| vpc\_public\_subnets | A list of public subnets inside the VPC. | `list(string)` | <pre>[<br>  "10.0.101.0/24",<br>  "10.0.102.0/24",<br>  "10.0.103.0/24"<br>]</pre> | no |
 | zookeeper\_disk\_kms\_key\_id | ARN for the KMS key ID to use to encrypt the zookeeper volume. Ignored if encrypt\_zookeeper\_disk = false. | `string` | `""` | no |
 | zookeeper\_disk\_size\_gb | Size of the disk, in gigabytes, to provision for persisting Zookeeper state | `number` | `200` | no |
 | zookeeper\_instance\_type | EC2 instance type to use for the Zookeeper instance(s) | `string` | `"m5.large"` | no |
@@ -87,6 +94,7 @@ in the variable `extra_security_groups`
 | noria\_mysql\_public\_ip | Noria MySQL instance public IP. |
 | noria\_server\_private\_ip | Noria server instance private IP. |
 | noria\_server\_public\_ip | Noria server instance public IP. |
+| vpc\_id | The ID of the VPC created in the provided AWS Region. |
 | zookeeper\_private\_ip | Zookeper instance private IP. |
 | zookeeper\_public\_ip | Zookeper instance public IP. |
 
