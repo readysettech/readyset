@@ -69,7 +69,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let permissive = parse_arg!("permissive", false, JsBoolean);
     let read_your_write = parse_arg!("readYourWrite", false, JsBoolean);
 
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
     let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
