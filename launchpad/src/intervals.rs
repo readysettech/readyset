@@ -388,6 +388,11 @@ where
     }
 }
 
+/// A pair of (lower, upper) [bound][0]s on `T`
+///
+/// [0]: std::ops::Bound
+pub type BoundPair<T> = (Bound<T>, Bound<T>);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -54,7 +54,7 @@ impl Reader {
             writer: self.writer.take(),
             state: self.state.clone(),
             for_node: self.for_node,
-            operator: self.operator.clone(),
+            operator: self.operator,
         }
     }
 

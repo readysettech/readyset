@@ -86,7 +86,7 @@ impl TopK {
         k: usize,
     ) -> Self {
         let mut group_by = group_by;
-        group_by.sort();
+        group_by.sort_unstable();
 
         TopK {
             src: src.into(),
@@ -112,7 +112,7 @@ impl TopK {
 
     /// Calculate a hash for the columns we are grouping by out of the given record, for use in
     /// `self.extra_records`
-    fn group_hash<'rec, R>(&self, rec: &'rec R) -> GroupHash
+    fn group_hash<R>(&self, rec: &R) -> GroupHash
     where
         R: Index<usize, Output = DataType> + ?Sized,
     {
@@ -176,9 +176,10 @@ impl Ingredient for TopK {
         rs.sort_by(|l, r| self.group_cmp(l, r));
 
         let us = self.us.unwrap();
-        let db: &Box<dyn State> = state
+        let db: &dyn State = state
             .get(*us)
-            .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?;
+            .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?
+            .as_ref();
 
         let mut out = Vec::new();
         let mut grp = Vec::new();
@@ -271,9 +272,7 @@ impl Ingredient for TopK {
                         // If we're fully materialized, save records beyond k into `extra_records`
                         // so we can use them if we ever receive a negative.
                         let mut extra_records = self.extra_records.borrow_mut();
-                        let entry = extra_records
-                            .entry(self.group_hash(&(*r)))
-                            .or_insert(Vec::new());
+                        let entry = extra_records.entry(self.group_hash(&(*r))).or_default();
                         entry.push(r.into());
                         // TODO(grfn): Sorting here every step of the way is not optimal, we should
                         // make some sort of btree here wrapping a type with an (unsafe) reference
@@ -429,15 +428,15 @@ mod tests {
         let r10b: Vec<DataType> = vec![6.into(), "z".into(), 10.into()];
         let r10c: Vec<DataType> = vec![7.into(), "z".into(), 10.into()];
 
-        g.narrow_one_row(r12.clone(), true);
-        g.narrow_one_row(r11.clone(), true);
-        g.narrow_one_row(r5.clone(), true);
-        g.narrow_one_row(r10b.clone(), true);
-        g.narrow_one_row(r10c.clone(), true);
+        g.narrow_one_row(r12, true);
+        g.narrow_one_row(r11, true);
+        g.narrow_one_row(r5, true);
+        g.narrow_one_row(r10b, true);
+        g.narrow_one_row(r10c, true);
         assert_eq!(g.states[ni].rows(), 3);
 
-        g.narrow_one_row(r15.clone(), true);
-        g.narrow_one_row(r10.clone(), true);
+        g.narrow_one_row(r15, true);
+        g.narrow_one_row(r10, true);
         assert_eq!(g.states[ni].rows(), 3);
     }
 
@@ -452,15 +451,15 @@ mod tests {
         let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
 
         let a = g.narrow_one_row(r12.clone(), true);
-        assert_eq!(a, vec![r12.clone()].into());
+        assert_eq!(a, vec![r12].into());
 
         let a = g.narrow_one_row(r10.clone(), true);
         assert_eq!(a, vec![r10.clone()].into());
 
         let a = g.narrow_one_row(r11.clone(), true);
-        assert_eq!(a, vec![r11.clone()].into());
+        assert_eq!(a, vec![r11].into());
 
-        let a = g.narrow_one_row(r5.clone(), true);
+        let a = g.narrow_one_row(r5, true);
         assert_eq!(a.len(), 0);
 
         let a = g.narrow_one_row(r15.clone(), true);
@@ -480,10 +479,10 @@ mod tests {
         let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
 
         // fill topk
-        g.narrow_one_row(r12.clone(), true);
+        g.narrow_one_row(r12, true);
         g.narrow_one_row(r10.clone(), true);
-        g.narrow_one_row(r11.clone(), true);
-        g.narrow_one_row(r5.clone(), true);
+        g.narrow_one_row(r11, true);
+        g.narrow_one_row(r5, true);
         g.narrow_one_row(r15.clone(), true);
 
         // [5, z, 15]
@@ -498,7 +497,7 @@ mod tests {
             delta.iter().any(|r| r == &(r10.clone(), true).into()),
             "a = {:?} does not contain ({:?}, true)",
             &delta,
-            r10.clone()
+            r10
         );
     }
 
@@ -514,10 +513,10 @@ mod tests {
 
         // fill topk
         g.narrow_one_row(r12.clone(), true);
-        g.narrow_one_row(r10.clone(), true);
-        g.narrow_one_row(r11.clone(), true);
+        g.narrow_one_row(r10, true);
+        g.narrow_one_row(r11, true);
         g.narrow_one_row(r5.clone(), true);
-        g.narrow_one_row(r15.clone(), true);
+        g.narrow_one_row(r15, true);
 
         // [4, z, 5]
         // [2, z, 10]
@@ -531,7 +530,7 @@ mod tests {
             delta.iter().any(|r| r == &(r12.clone(), true).into()),
             "a = {:?} does not contain ({:?}, true)",
             &delta,
-            r12.clone()
+            r12
         );
     }
 
@@ -548,15 +547,15 @@ mod tests {
         let r15: Vec<DataType> = vec![5.into(), "z".into(), DataType::try_from(-15.9).unwrap()];
 
         let a = g.narrow_one_row(r12.clone(), true);
-        assert_eq!(a, vec![r12.clone()].into());
+        assert_eq!(a, vec![r12].into());
 
         let a = g.narrow_one_row(r10.clone(), true);
         assert_eq!(a, vec![r10.clone()].into());
 
         let a = g.narrow_one_row(r11.clone(), true);
-        assert_eq!(a, vec![r11.clone()].into());
+        assert_eq!(a, vec![r11].into());
 
-        let a = g.narrow_one_row(r5.clone(), true);
+        let a = g.narrow_one_row(r5, true);
         assert_eq!(a.len(), 0);
 
         let a = g.narrow_one_row(r15.clone(), true);
@@ -623,9 +622,9 @@ mod tests {
         let r4a: Vec<DataType> = vec![4.into(), "z".into(), 10.into()];
         let r4b: Vec<DataType> = vec![4.into(), "z".into(), 11.into()];
 
-        g.narrow_one_row(r1.clone(), true);
-        g.narrow_one_row(r2.clone(), true);
-        g.narrow_one_row(r3.clone(), true);
+        g.narrow_one_row(r1, true);
+        g.narrow_one_row(r2, true);
+        g.narrow_one_row(r3, true);
 
         // a positive for a row not in the Top-K should not change the Top-K and shouldn't emit
         // anything
@@ -639,16 +638,13 @@ mod tests {
         // [3, z, 10]
 
         let emit = g.narrow_one(
-            vec![Record::Negative(r4.clone()), Record::Positive(r4a.clone())],
+            vec![Record::Negative(r4), Record::Positive(r4a.clone())],
             true,
         );
         // nothing should have been emitted, as [4, z, 10] doesn't enter Top-K
         assert_eq!(emit, Vec::<Record>::new().into());
 
-        let emit = g.narrow_one(
-            vec![Record::Negative(r4a.clone()), Record::Positive(r4b.clone())],
-            true,
-        );
+        let emit = g.narrow_one(vec![Record::Negative(r4a), Record::Positive(r4b)], true);
 
         // now [4, z, 11] is in, BUT we still only keep 3 elements
         // and have to remove one of the existing ones

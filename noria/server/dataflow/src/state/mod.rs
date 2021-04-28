@@ -175,7 +175,7 @@ impl<'a> RecordResult<'a> {
     {
         match *self {
             RecordResult::Borrowed(ref rs) => {
-                if rs.len() > 0 {
+                if !rs.is_empty() {
                     *self = RecordResult::References(rs.iter().filter(|x| func(x)).collect());
                 }
             }
@@ -292,7 +292,7 @@ impl<'a> RangeLookupResult<'a> {
     }
 
     /// Convert this RangeLookupResult into a [`Result<RecordResult<'a>, Misses>`]
-    pub fn as_result(self) -> Result<RecordResult<'a>, Misses> {
+    pub fn into_result(self) -> Result<RecordResult<'a>, Misses> {
         match self {
             Self::Some(records) => Ok(records),
             Self::Missing(misses) => Err(misses),

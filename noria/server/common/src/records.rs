@@ -18,11 +18,7 @@ impl Record {
     }
 
     pub fn is_positive(&self) -> bool {
-        if let Record::Positive(..) = *self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Record::Positive(..))
     }
 
     pub fn extract(self) -> (Vec<DataType>, bool) {

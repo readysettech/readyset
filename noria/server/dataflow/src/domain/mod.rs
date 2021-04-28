@@ -70,10 +70,10 @@ enum DomainMode {
 
 impl PartialEq for DomainMode {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&DomainMode::Forwarding, &DomainMode::Forwarding) => true,
-            _ => false,
-        }
+        matches!(
+            (self, other),
+            (&DomainMode::Forwarding, &DomainMode::Forwarding)
+        )
     }
 }
 
@@ -350,9 +350,10 @@ impl Domain {
                 miss_columns
             );
         }
-        return Ok(());
+        Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn on_replay_miss(
         &mut self,
         miss_in: LocalNodeIndex,
@@ -382,7 +383,7 @@ impl Domain {
         let mut redundant = false;
         let redo = Redo {
             tag: needed_for,
-            replay_key: replay_key.clone(),
+            replay_key,
             unishard: was_single_shard,
             requesting_shard,
         };
@@ -512,7 +513,7 @@ impl Domain {
                 // would have hit the if further up
                 internal!();
             };
-            return Ok(());
+            Ok(())
         } else {
             internal!("asked to replay along non-existing path");
         }
@@ -555,12 +556,10 @@ impl Domain {
                         requests_satisfied = tags
                             .iter()
                             .filter(|tag| {
-                                if let TriggerEndpoint::End { .. } = self.replay_paths[tag].trigger
-                                {
-                                    true
-                                } else {
-                                    false
-                                }
+                                matches!(
+                                    self.replay_paths[tag].trigger,
+                                    TriggerEndpoint::End { .. }
+                                )
                             })
                             .count();
                     }
@@ -1684,13 +1683,13 @@ impl Domain {
                                     Default::default()
                                 };
 
-                                if time.is_some() && ptime.is_some() {
+                                if let (Some(time), Some(ptime)) = (time, ptime) {
                                     Some((
                                         node_index,
                                         noria::debug::stats::NodeStats {
                                             desc: format!("{:?}", n),
-                                            process_time: time.unwrap(),
-                                            process_ptime: ptime.unwrap(),
+                                            process_time: time,
+                                            process_ptime: ptime,
                                             mem_size,
                                             materialized: mat_state,
                                             probe_result,
@@ -1841,7 +1840,7 @@ impl Domain {
         Ok(())
     }
 
-    fn seed_row<'a>(&self, source: LocalNodeIndex, row: Cow<'a, [DataType]>) -> Record {
+    fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> Record {
         if let Some(&(start, ref defaults)) = self.ingress_inject.get(source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());
@@ -2066,7 +2065,7 @@ impl Domain {
                         .ok_or_else(|| vec![key.clone()]),
                     KeyComparison::Range(range) => state
                         .lookup_range(&cols[..], &RangeKey::from(range))
-                        .as_result()
+                        .into_result()
                         .map_err(|misses| {
                             misses
                                 .into_iter()
@@ -2700,7 +2699,7 @@ impl Domain {
 
                         // we're all good -- continue propagating
                         if m.as_ref().unwrap().is_empty() {
-                            if let &Packet::ReplayPiece {
+                            if let Packet::ReplayPiece {
                                 context: ReplayPieceContext::Regular { last: false },
                                 ..
                             } = m.as_deref().unwrap()
@@ -2865,7 +2864,7 @@ impl Domain {
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay
                         .into_iter()
-                        .filter_map(|tagged_replay_key| {
+                        .filter(|tagged_replay_key| {
                             let left = {
                                 let left = waiting.holes.get_mut(&tagged_replay_key).unwrap();
                                 *left -= 1;
@@ -2878,12 +2877,12 @@ impl Domain {
 
                                 // we've filled all holes that prevented the replay previously!
                                 waiting.holes.remove(&tagged_replay_key);
-                                Some(tagged_replay_key)
+                                true
                             } else {
                                 trace!(self.log, "filled hole for key, not triggering replay";
                                    "k" => ?tagged_replay_key,
                                    "left" => left);
-                                None
+                                false
                             }
                         })
                         .collect();
@@ -2928,7 +2927,7 @@ impl Domain {
                     .push_back(Box::new(Packet::Finish(tag, ni)));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn finish_replay(
@@ -3095,7 +3094,7 @@ impl Domain {
                     }
                 }
             }
-            return Ok(());
+            Ok(())
         }
 
         fn walk_path(
@@ -3160,7 +3159,7 @@ impl Domain {
                     // rather than emptying out one node completely.
                     // -1* so we sort in descending order
                     // TODO: be smarter than 3 here
-                    candidates.sort_unstable_by_key(|&(_, s)| -1 * (s as i64));
+                    candidates.sort_unstable_by_key(|&(_, s)| -(s as i64));
                     candidates.truncate(3);
 
                     // don't evict from tiny things (< 10% of max)
@@ -3270,7 +3269,7 @@ impl Domain {
                     .iter()
                     .position(|ps| ps.node == dst)
                     .ok_or_else(|| internal_err("got eviction for non-local node"))?;
-                walk_path(&path[i..], &mut keys, tag, self.shard, &mut self.nodes, ex)?;
+                walk_path(&path[i..], &mut keys, tag, self.shard, &self.nodes, ex)?;
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
@@ -3297,7 +3296,7 @@ impl Domain {
                                 &self.replay_paths,
                                 self.shard,
                                 &mut self.state,
-                                &mut self.nodes,
+                                &self.nodes,
                             )?;
                         }
                     }
@@ -3309,7 +3308,7 @@ impl Domain {
             }
         };
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn id(&self) -> (Index, usize) {
@@ -3413,7 +3412,7 @@ impl Domain {
                     .map(|(_, &(first, _, _))| {
                         self.replay_batch_timeout
                             .checked_sub(now.duration_since(first))
-                            .unwrap_or(time::Duration::from_millis(0))
+                            .unwrap_or_else(|| time::Duration::from_millis(0))
                     })
                     .min();
                 let opt2 = self.group_commit_queues.duration_until_flush();

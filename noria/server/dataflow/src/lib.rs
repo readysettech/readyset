@@ -58,10 +58,7 @@ pub enum Sharding {
 
 impl Sharding {
     pub fn is_none(&self) -> bool {
-        match *self {
-            Sharding::None | Sharding::ForcedNone => true,
-            _ => false,
-        }
+        matches!(*self, Sharding::None | Sharding::ForcedNone)
     }
 
     pub fn shards(&self) -> Option<usize> {

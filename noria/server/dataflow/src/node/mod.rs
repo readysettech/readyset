@@ -3,7 +3,7 @@ use crate::ops;
 use crate::prelude::*;
 use noria::consistency::Timestamp;
 use noria::ReadySetError;
-use petgraph;
+
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
@@ -259,6 +259,7 @@ impl Node {
         }
     }
 
+    #[allow(clippy::result_unit_err)]
     pub fn with_reader_mut<'a, F, R>(&'a mut self, f: F) -> Result<R, ()>
     where
         F: FnOnce(&'a mut special::Reader) -> R,
@@ -270,6 +271,7 @@ impl Node {
         }
     }
 
+    #[allow(clippy::result_unit_err)]
     pub fn with_reader<'a, F, R>(&'a self, f: F) -> Result<R, ()>
     where
         F: FnOnce(&'a special::Reader) -> R,
@@ -409,82 +411,43 @@ impl Node {
 // is this or that?
 impl Node {
     pub fn is_dropped(&self) -> bool {
-        if let NodeType::Dropped = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Dropped)
     }
 
     pub fn is_egress(&self) -> bool {
-        if let NodeType::Egress { .. } = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Egress { .. })
     }
 
     pub fn is_reader(&self) -> bool {
-        if let NodeType::Reader { .. } = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Reader { .. })
     }
 
     pub fn is_ingress(&self) -> bool {
-        if let NodeType::Ingress = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Ingress)
     }
 
     pub fn is_sender(&self) -> bool {
-        match self.inner {
-            NodeType::Egress { .. } | NodeType::Sharder(..) => true,
-            _ => false,
-        }
+        matches!(self.inner, NodeType::Egress { .. } | NodeType::Sharder(..))
     }
 
     pub fn is_internal(&self) -> bool {
-        if let NodeType::Internal(..) = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Internal(..))
     }
 
     pub fn is_source(&self) -> bool {
-        if let NodeType::Source { .. } = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Source { .. })
     }
 
     pub fn is_sharder(&self) -> bool {
-        if let NodeType::Sharder { .. } = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Sharder { .. })
     }
 
     pub fn is_base(&self) -> bool {
-        if let NodeType::Base(..) = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Base(..))
     }
 
     pub fn is_union(&self) -> bool {
-        if let NodeType::Internal(NodeOperator::Union(_)) = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, NodeType::Internal(NodeOperator::Union(_)))
     }
 
     pub fn is_shard_merger(&self) -> bool {

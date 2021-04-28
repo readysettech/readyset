@@ -134,7 +134,9 @@ impl State for PersistentState {
                 Bound::Included(mut k) => {
                     // Rocksdb's iterate_upper_bound is exclusive, so add 1 to the last byte of the
                     // end value so we get our inclusive last key
-                    k.last_mut().map(|byte| *byte += 1);
+                    if let Some(byte) = k.last_mut() {
+                        *byte += 1;
+                    }
                     opts.set_iterate_upper_bound(k);
                 }
                 _ => {}
@@ -348,23 +350,25 @@ impl PersistentState {
                 _directory: directory,
             };
 
-            if primary_key.is_some() && state.indices.is_empty() {
-                // This is the first time we're initializing this PersistentState,
-                // so persist the primary key index right away.
-                state
-                    .db
-                    .as_mut()
-                    .unwrap()
-                    .create_cf("0", &state.db_opts)
-                    .unwrap();
+            if let Some(pk) = primary_key {
+                if state.indices.is_empty() {
+                    // This is the first time we're initializing this PersistentState,
+                    // so persist the primary key index right away.
+                    state
+                        .db
+                        .as_mut()
+                        .unwrap()
+                        .create_cf("0", &state.db_opts)
+                        .unwrap();
 
-                let persistent_index = PersistentIndex {
-                    column_family: "0".to_string(),
-                    columns: primary_key.unwrap().to_vec(),
-                };
+                    let persistent_index = PersistentIndex {
+                        column_family: "0".to_string(),
+                        columns: pk.to_vec(),
+                    };
 
-                state.indices.push(persistent_index);
-                state.persist_meta();
+                    state.indices.push(persistent_index);
+                    state.persist_meta();
+                }
             }
 
             state
@@ -670,7 +674,7 @@ impl PersistentState {
 // when we reached the end, and could then with certainty say whether we'd already
 // prefix transformed this key before or not
 // (without including the byte size of Vec<DataType>).
-fn prefix_transform<'a>(key: &'a [u8]) -> &'a [u8] {
+fn prefix_transform(key: &[u8]) -> &[u8] {
     // We'll have to make sure this isn't the META_KEY even when we're filtering it out
     // in Self::in_domain_fn, as the SliceTransform is used to make hashed keys for our
     // HashLinkedList memtable factory.
@@ -886,7 +890,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        state.process_records(&mut vec![(first.clone(), false)].into(), None);
+        state.process_records(&mut vec![(first, false)].into(), None);
         match state.lookup(&[0], &KeyType::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);

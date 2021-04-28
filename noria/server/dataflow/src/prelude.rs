@@ -1,9 +1,9 @@
-/// This module defines crate-local *and* public type exports.
-///
-/// It is expected that files within the dataflow crate have use prelude::* at the top, and the
-/// same applies to external users of the dataflow crate. Therefore, pay attention to whether `pub`
-/// or `crate` is used.
-use petgraph;
+//! This module defines crate-local *and* public type exports.
+//!
+//! It is expected that files within the dataflow crate have use prelude::* at the top, and the
+//! same applies to external users of the dataflow crate. Therefore, pay attention to whether `pub`
+//! or `crate` is used.
+
 use std::cell;
 use std::collections::HashMap;
 

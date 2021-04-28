@@ -71,7 +71,7 @@ impl Clone for Union {
             replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
 
-            me: self.me.clone(),
+            me: self.me,
         }
     }
 }
@@ -126,11 +126,7 @@ impl Union {
     }
 
     pub fn is_shard_merger(&self) -> bool {
-        if let Emit::AllFrom(..) = self.emit {
-            true
-        } else {
-            false
-        }
+        matches!(self.emit, Emit::AllFrom(..))
     }
 }
 
@@ -326,7 +322,7 @@ impl Ingredient for Union {
                 // and the buffered upquery responses in the inner loop, or the other way around.
                 // since iterating over the buffered upquery respones includes a btree loopup, we
                 // want to do fewer of those, so we do those in the outer loop.
-                let mut replays = self.replay_pieces.iter_mut();
+                let replays = self.replay_pieces.iter_mut();
                 let mut replay_key = None;
                 let mut last_tag = None;
 
@@ -337,7 +333,7 @@ impl Ingredient for Union {
                     from.id()
                 };
 
-                while let Some((&(tag, ref replaying_key, _), ref mut pieces)) = replays.next() {
+                for (&(tag, ref replaying_key, _), ref mut pieces) in replays {
                     invariant!(
                         !pieces.buffered.is_empty(),
                         "empty pieces bucket left in replay pieces"

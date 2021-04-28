@@ -62,13 +62,13 @@ pub(crate) struct Miss {
 }
 
 impl Miss {
-    pub(crate) fn replay_key<'a>(&'a self) -> Option<KeyComparison> {
+    pub(crate) fn replay_key(&self) -> Option<KeyComparison> {
         self.replay_cols
             .as_ref()
             .map(|cols| self.record.project_key(cols))
     }
 
-    pub(crate) fn lookup_key<'a>(&'a self) -> KeyComparison {
+    pub(crate) fn lookup_key(&self) -> KeyComparison {
         self.record.project_key(&self.lookup_cols[..])
     }
 }
@@ -283,9 +283,9 @@ where
     ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         states
             .get(parent)
-            .and_then(move |state| match state.lookup(columns, key) {
-                LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter()) as Box<_>)),
-                LookupResult::Missing => Some(None),
+            .map(move |state| match state.lookup(columns, key) {
+                LookupResult::Some(rs) => Some(Box::new(rs.into_iter()) as Box<_>),
+                LookupResult::Missing => None,
             })
             .or_else(|| {
                 // this is a long-shot.

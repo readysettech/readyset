@@ -248,16 +248,16 @@ mod tests {
 
         let result = vec![(vec![1.into(), "a".into()], true)].into();
         rw.seed(src, src_a1.clone());
-        let rs = rw.one_row(src, src_a1.clone(), false);
+        let rs = rw.one_row(src, src_a1, false);
         assert_eq!(rs, result);
 
         rw.seed(should_rw, rw2.clone());
-        rw.one_row(should_rw, rw2.clone(), false);
+        rw.one_row(should_rw, rw2, false);
 
         // forward [2, b] to src; should be rewritten and produce [2, "NONE"].
         let result = vec![(vec![2.into(), "NONE".into()], true)].into();
         rw.seed(src, src_b2.clone());
-        let rs = rw.one_row(src, src_b2.clone(), false);
+        let rs = rw.one_row(src, src_b2, false);
         assert_eq!(rs, result);
 
         // forward 1 to signal; should produce Positive([1, "NONE"]) and Negative([1, "a"]).
@@ -267,7 +267,7 @@ mod tests {
         ]
         .into();
         rw.seed(should_rw, rw1.clone());
-        let rs = rw.one_row(should_rw, rw1.clone(), false);
+        let rs = rw.one_row(should_rw, rw1, false);
         assert_eq!(rs, result);
     }
 }

@@ -198,9 +198,9 @@ where
 
         // find the current value for this group
         let us = self.us.unwrap();
-        let db = state.get(*us).ok_or(internal_err(
-            "grouped operators must have their own state materialized",
-        ))?;
+        let db = state.get(*us).ok_or_else(|| {
+            internal_err("grouped operators must have their own state materialized")
+        })?;
 
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
@@ -263,7 +263,7 @@ where
                 });
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = inner.apply(current.as_ref().map(|v| &**v), &mut diffs as &mut _)?;
+                let new = inner.apply(current.as_deref(), &mut diffs as &mut _)?;
                 match current {
                     Some(ref current) if new == **current => {
                         // no change

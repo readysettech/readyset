@@ -64,7 +64,7 @@ impl Ingredient for Latest {
         let us = self.us.unwrap();
         let db = state
             .get(*us)
-            .ok_or(internal_err("latest must have its own state materialized"))?;
+            .ok_or_else(|| internal_err("latest must have its own state materialized"))?;
 
         let mut misses = Vec::new();
         let mut lookups = Vec::new();

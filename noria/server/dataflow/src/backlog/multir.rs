@@ -1,6 +1,6 @@
 use ahash::RandomState;
 use common::DataType;
-use launchpad::intervals::BoundFunctor;
+use launchpad::intervals::{BoundFunctor, BoundPair};
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use reader_map::{
@@ -9,7 +9,7 @@ use reader_map::{
 };
 use std::convert::{TryFrom, TryInto};
 use std::mem;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
@@ -69,20 +69,17 @@ pub enum LookupError {
     /// A single-keyed range query missed
     ///
     /// Second field contains the metadata of the handle
-    MissRangeSingle(Vec<(Bound<DataType>, Bound<DataType>)>, i64),
+    MissRangeSingle(Vec<BoundPair<DataType>>, i64),
 
     /// A double-keyed range query missed
     ///
     /// Second field contains the metadata of the handle
-    MissRangeDouble(
-        Vec<(Bound<(DataType, DataType)>, Bound<(DataType, DataType)>)>,
-        i64,
-    ),
+    MissRangeDouble(Vec<BoundPair<(DataType, DataType)>>, i64),
 
     /// A many-keyed range query missed
     ///
     /// Second field contains the metadata of the handle
-    MissRangeMany(Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>, i64),
+    MissRangeMany(Vec<BoundPair<Vec<DataType>>>, i64),
 }
 
 impl LookupError {
@@ -188,7 +185,9 @@ impl Handle {
                 assert_eq!(key.len(), 1);
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
-                let v = map.get(&key[0]).ok_or(MissPointSingle(key[0].clone(), m))?;
+                let v = map
+                    .get(&key[0])
+                    .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
                 Ok((then(v), m))
             }
             Handle::Double(ref h) => {
@@ -199,7 +198,7 @@ impl Handle {
                     let m = *map.meta();
                     let v = map
                         .get(&tuple_key)
-                        .ok_or(MissPointDouble(tuple_key.clone(), m))?;
+                        .ok_or_else(|| MissPointDouble(tuple_key.clone(), m))?;
                     mem::forget(tuple_key);
                     Ok((then(v), m))
                 }
@@ -207,7 +206,7 @@ impl Handle {
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
-                let v = map.get(key).ok_or(MissPointMany(key.into(), m))?;
+                let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
                 Ok((then(v), m))
             }
         }

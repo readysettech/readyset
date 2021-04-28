@@ -8,7 +8,7 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
-use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::{BoundAsRef, BoundFunctor, BoundPair};
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
@@ -96,8 +96,6 @@ type Discover =
 
 pub(crate) type ViewRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>, Tagged<ReadQuery>>;
-
-pub(crate) type BoundPair<T> = (Bound<T>, Bound<T>);
 
 /// Representation for a comparison predicate against a set of keys
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
