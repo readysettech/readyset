@@ -163,7 +163,6 @@ impl GroupedOperation for GroupConcat {
         diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> ReadySetResult<DataType> {
         use std::collections::BTreeSet;
-        use std::iter::FromIterator;
 
         // updating the value is a bit tricky because we want to retain ordering of the
         // elements. we therefore need to first split the value, add the new ones,
@@ -182,11 +181,10 @@ impl GroupedOperation for GroupConcat {
         let clen = current.len();
 
         // TODO this is not particularly robust, and requires a non-empty separator
-        let mut current = BTreeSet::from_iter(
-            current
-                .split_terminator(&self.separator)
-                .map(|s| Cow::Borrowed(s)),
-        );
+        let mut current: BTreeSet<_> = current
+            .split_terminator(&self.separator)
+            .map(Cow::Borrowed)
+            .collect();
         for diff in diffs {
             match diff {
                 Modify::Add(s) => {
@@ -229,7 +227,7 @@ impl GroupedOperation for GroupConcat {
 
         // Sort group by columns for consistent output.
         let mut group_cols = self.group.clone();
-        group_cols.sort();
+        group_cols.sort_unstable();
         let group_cols = group_cols
             .iter()
             .map(ToString::to_string)

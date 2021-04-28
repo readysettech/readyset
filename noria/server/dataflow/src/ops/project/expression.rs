@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn eval_call_day_of_week() {
         let expr = Call(BuiltinFunction::DayOfWeek(Box::new(Column(0))));
-        let expected = Cow::Owned(DataType::Int(2).into());
+        let expected = Cow::Owned(DataType::Int(2));
 
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
 
@@ -521,7 +521,7 @@ mod tests {
             Box::new(Column(0)),
             Box::new(Column(1)),
         ));
-        let value = Cow::Owned(DataType::Int(2).into());
+        let value = Cow::Owned(DataType::Int(2));
 
         assert_eq!(expr.eval(&[DataType::None, 2.into()]).unwrap(), value);
         assert_eq!(expr.eval(&[2.into(), 3.into()]).unwrap(), value);
@@ -546,7 +546,7 @@ mod tests {
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
         );
-        let expected = 10 as u32;
+        let expected = 10_u32;
         assert_eq!(
             expr.eval(&[datetime.into()]).unwrap(),
             Cow::Owned(expected.into())

@@ -206,7 +206,7 @@ impl State for MemoryState {
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         #[allow(clippy::ptr_arg)]
-        fn fix<'a>(rs: &'a Rows) -> impl Iterator<Item = Vec<DataType>> + 'a {
+        fn fix(rs: &Rows) -> impl Iterator<Item = Vec<DataType>> + '_ {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 

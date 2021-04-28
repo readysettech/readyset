@@ -246,25 +246,25 @@ impl GroupedOperation for Aggregator {
         if !detailed {
             let filter_str = self.filter.as_ref().map(|_| "σ").unwrap_or("");
 
-            return String::from(match self.op {
+            return match self.op {
                 Aggregation::COUNT => format!("+{}", filter_str),
                 Aggregation::SUM => format!("𝛴{}", filter_str),
                 Aggregation::AVG => format!("Avg{}", filter_str),
-            });
+            };
         }
 
         let inner_str = self
             .filter
             .as_ref()
             .map(|_| format!("σ({})", self.over))
-            .unwrap_or(self.over.to_string());
+            .unwrap_or_else(|| self.over.to_string());
         let op_string = match self.op {
             Aggregation::COUNT => format!(
                 "|{}|",
                 self.filter
                     .as_ref()
                     .map(|_| inner_str)
-                    .unwrap_or(String::from("*"))
+                    .unwrap_or_else(|| String::from("*"))
             ),
 
             Aggregation::SUM => format!("𝛴({})", inner_str),

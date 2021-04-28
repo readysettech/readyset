@@ -346,7 +346,25 @@ impl Ingredient for Join {
                     )
                     .unwrap();
 
-                if rc.is_none() {
+                if let Some(rc) = rc {
+                    if replay_key_cols.is_some() {
+                        lookups.push(Lookup {
+                            on: *self.right,
+                            cols: self.on_right(),
+                            key: prev_join_key
+                                .clone()
+                                .into_iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .try_into()
+                                .map_err(|_| internal_err("Empty join key"))?,
+                        });
+                    }
+
+                    let rc = rc.count();
+                    old_right_count = Some(rc);
+                    new_right_count = Some(rc);
+                } else {
                     // we got something from right, but that row's key is not in right??
                     //
                     // this *can* happen! imagine if you have two partial indices on right,
@@ -362,24 +380,6 @@ impl Ingredient for Join {
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
                     continue;
-                } else {
-                    if replay_key_cols.is_some() {
-                        lookups.push(Lookup {
-                            on: *self.right,
-                            cols: self.on_right(),
-                            key: prev_join_key
-                                .clone()
-                                .into_iter()
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .try_into()
-                                .map_err(|_| internal_err("Empty join key"))?,
-                        });
-                    }
-
-                    let rc = rc.unwrap().count();
-                    old_right_count = Some(rc);
-                    new_right_count = Some(rc);
                 }
             }
 

@@ -108,15 +108,11 @@ impl Ingredient for Trigger {
 
         let keys = trigger_keys
             .iter()
-            .filter_map(|k| match db.lookup(&[self.key], &KeyType::Single(&k)) {
-                LookupResult::Some(rs) => {
-                    if rs.is_empty() {
-                        Some(k)
-                    } else {
-                        None
-                    }
-                }
-                LookupResult::Missing => None, // FIXME(eta): should return internal!()
+            // FIXME(eta): should return internal!() if Missing
+            .filter(|k| {
+                matches!(db.lookup(&[self.key], &KeyType::Single(&k)),
+                    LookupResult::Some(rs) if rs.is_empty()
+                )
             })
             .cloned()
             .collect();

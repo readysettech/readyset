@@ -82,7 +82,7 @@ impl GroupCommitQueueSet {
                 self.params
                     .flush_timeout
                     .checked_sub(p.0.elapsed())
-                    .unwrap_or(time::Duration::from_millis(0))
+                    .unwrap_or_else(|| time::Duration::from_millis(0))
             })
             .min()
     }

@@ -425,7 +425,7 @@ impl Node {
                     .and_modify(|e| {
                         *e = Timestamp::join(e, &timestamp);
                     })
-                    .or_insert(timestamp.clone());
+                    .or_insert_with(|| timestamp.clone());
 
                 // Calculate the minimum timestamp over all timestamps for each parent
                 // of the node. If the node does not have a timestamp for any parent,

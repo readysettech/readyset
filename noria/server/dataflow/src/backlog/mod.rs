@@ -8,6 +8,7 @@ use noria::KeyComparison;
 use rand::prelude::*;
 use reader_map::refs::Values;
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 use vec1::Vec1;
@@ -274,13 +275,17 @@ impl WriteHandle {
         I: IntoIterator<Item = Record>,
     {
         let mem_delta = self.handle.add(&self.key[..], self.cols, rs);
-        if mem_delta > 0 {
-            self.mem_size += mem_delta as usize;
-        } else if mem_delta < 0 {
-            self.mem_size = self
-                .mem_size
-                .checked_sub(mem_delta.checked_abs().unwrap() as usize)
-                .unwrap();
+        match mem_delta.cmp(&0) {
+            Ordering::Greater => {
+                self.mem_size += mem_delta as usize;
+            }
+            Ordering::Less => {
+                self.mem_size = self
+                    .mem_size
+                    .checked_sub(mem_delta.checked_abs().unwrap() as usize)
+                    .unwrap();
+            }
+            _ => {}
         }
     }
     pub(crate) fn set_timestamp(&mut self, t: Timestamp) {
@@ -535,7 +540,7 @@ mod tests {
         let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
         w.swap();
-        w.add(vec![Record::Positive(b.clone())]);
+        w.add(vec![Record::Positive(b)]);
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
@@ -557,7 +562,7 @@ mod tests {
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.swap();
-        w.add(vec![Record::Positive(c.clone())]);
+        w.add(vec![Record::Positive(c)]);
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 2);
         assert!(
@@ -651,7 +656,7 @@ mod tests {
         w.add(vec![
             Record::Negative(a.clone()),
             Record::Positive(c.clone()),
-            Record::Negative(c.clone()),
+            Record::Negative(c),
         ]);
         w.swap();
 

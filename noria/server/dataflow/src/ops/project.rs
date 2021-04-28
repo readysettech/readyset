@@ -137,40 +137,35 @@ impl Ingredient for Project {
         }
 
         self.lookup(*self.src, &*in_cols, key, nodes, states)
-            .and_then(|result| match result {
-                Some(rs) => {
-                    let r = match emit {
-                        Some(emit) => Box::new(rs.map(move |r| {
-                            let mut new_r = Vec::with_capacity(r.len());
-                            let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
-                                e.iter()
-                                    .map(|expr| expr.eval(&r).unwrap().into_owned())
-                                    .collect()
-                            } else {
-                                vec![]
-                            };
+            .map(|result| {
+                result.map(|rs| match emit {
+                    Some(emit) => Box::new(rs.map(move |r| {
+                        let mut new_r = Vec::with_capacity(r.len());
+                        let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
+                            e.iter()
+                                .map(|expr| expr.eval(&r).unwrap().into_owned())
+                                .collect()
+                        } else {
+                            vec![]
+                        };
 
-                            new_r.extend(
-                                r.into_owned()
-                                    .into_iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| emit.iter().any(|e| e == i))
-                                    .map(|(_, c)| c),
-                            );
+                        new_r.extend(
+                            r.into_owned()
+                                .into_iter()
+                                .enumerate()
+                                .filter(|(i, _)| emit.iter().any(|e| e == i))
+                                .map(|(_, c)| c),
+                        );
 
-                            new_r.append(&mut expr);
-                            if let Some(ref a) = additional {
-                                new_r.append(&mut a.clone());
-                            }
+                        new_r.append(&mut expr);
+                        if let Some(ref a) = additional {
+                            new_r.append(&mut a.clone());
+                        }
 
-                            Cow::from(new_r)
-                        })) as Box<_>,
-                        None => Box::new(rs) as Box<_>,
-                    };
-
-                    Some(Some(r))
-                }
-                None => Some(None),
+                        Cow::from(new_r)
+                    })) as Box<_>,
+                    None => Box::new(rs) as Box<_>,
+                })
             })
     }
 

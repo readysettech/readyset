@@ -49,21 +49,21 @@ impl FilterVec {
             static ref ESC_RE: Regex = Regex::new("([<>])").unwrap();
         }
         self.iter()
-            .filter_map(|(i, ref cond)| match *cond {
-                FilterCondition::Comparison(ref op, ref x) => Some(format!(
+            .map(|(i, ref cond)| match *cond {
+                FilterCondition::Comparison(ref op, ref x) => format!(
                     "f{} {} {}",
                     i,
                     ESC_RE.replace_all(&format!("{}", op), "\\$1").to_string(),
                     x
-                )),
-                FilterCondition::In(ref xs) => Some(format!(
+                ),
+                FilterCondition::In(ref xs) => format!(
                     "f{} IN ({})",
                     i,
                     xs.iter()
                         .map(|d| format!("{}", d))
                         .collect::<Vec<_>>()
                         .join(", ")
-                )),
+                ),
             })
             .collect::<Vec<_>>()
             .as_slice()
@@ -186,17 +186,11 @@ impl Ingredient for Filter {
         states: &'a StateMap,
     ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         self.lookup(*self.src, columns, key, nodes, states)
-            .and_then(|result| {
+            .map(|result| {
                 let f = self.filter.clone();
                 let filter = move |r: &[DataType]| f.matches(r);
 
-                match result {
-                    Some(rs) => {
-                        let r = Box::new(rs.filter(move |r| filter(r))) as Box<_>;
-                        Some(Some(r))
-                    }
-                    None => Some(None),
-                }
+                result.map(|rs| Box::new(rs.filter(move |r| filter(r))) as Box<_>)
             })
     }
 
@@ -299,7 +293,7 @@ mod tests {
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         left = vec![2.into(), "b".into()];
-        assert!(g.narrow_one_row(left.clone(), false).is_empty());
+        assert!(g.narrow_one_row(left, false).is_empty());
     }
 
     #[test]
@@ -391,7 +385,7 @@ mod tests {
         left = vec![2.into(), 2.into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
         left = vec![2.into(), "b".into()];
-        assert_eq!(g.narrow_one_row(left.clone(), false), Records::default());
+        assert_eq!(g.narrow_one_row(left, false), Records::default());
     }
 
     #[test]
