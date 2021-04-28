@@ -7,7 +7,7 @@ use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
 use crate::debug::info::{DomainKey, GraphInfo};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
-use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewRequest};
+use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequest};
 use dataflow::prelude::*;
 use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
 use futures_util::stream::StreamExt;
@@ -948,7 +948,7 @@ impl ControllerInner {
         &self,
         node: NodeIndex,
         name: &str,
-        workers: &[SocketAddr],
+        filter: &Option<ViewFilter>,
     ) -> Vec<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
@@ -963,11 +963,11 @@ impl ControllerInner {
                 .unwrap_or(false)
                 && self.ingredients[child].name() == name
             {
-                if workers.is_empty() {
-                    nodes.push(child);
-                } else {
+                // Check for any filter requirements we can satisfy when
+                // traversing the data flow graph, `filter`.
+                if let Some(ViewFilter::Workers(w)) = filter {
                     let domain = self.ingredients[child].domain();
-                    for worker in workers {
+                    for worker in w {
                         if self
                             .domains
                             .get(&domain)
@@ -977,6 +977,8 @@ impl ControllerInner {
                             nodes.push(child);
                         }
                     }
+                } else {
+                    nodes.push(child);
                 }
             }
         }
@@ -989,7 +991,6 @@ impl ControllerInner {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
         let name = view_req.name.as_str();
-        let workers = view_req.workers;
         let node = match self.recipe.node_addr_for(name) {
             Ok(ni) => ni,
             Err(_) => {
@@ -1008,7 +1009,7 @@ impl ControllerInner {
             Some(alias) => alias,
         };
 
-        let readers = self.find_readers_for(node, name, &workers);
+        let readers = self.find_readers_for(node, name, &view_req.filter);
         if readers.is_empty() {
             return Ok(None);
         }
@@ -1245,7 +1246,7 @@ impl ControllerInner {
                 // TODO: can this move to the client entirely?
                 let view_req = ViewRequest {
                     name: g.clone(),
-                    workers: vec![],
+                    filter: None,
                 };
                 let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a

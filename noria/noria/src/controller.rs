@@ -7,7 +7,7 @@ use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
     rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetResult,
-    ViewRequest,
+    ViewFilter, ViewRequest,
 };
 use futures_util::future;
 use petgraph::graph::NodeIndex;
@@ -286,10 +286,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         assert_infrequent::at_most(200);
 
         let name = name.to_string();
-        let request = ViewRequest {
-            name,
-            workers: vec![],
-        };
+        let request = ViewRequest { name, filter: None };
         self.request_view(request)
     }
 
@@ -308,7 +305,34 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         assert_infrequent::at_most(200);
 
         let name = name.to_string();
-        let request = ViewRequest { name, workers };
+        let request = ViewRequest {
+            name,
+            filter: Some(ViewFilter::Workers(workers)),
+        };
+        self.request_view(request)
+    }
+
+    /// Obtain a `View` from a named region, that allows you to query the given external view.
+    /// If there is no worker with a replica in the region, a `View` from the first replica
+    /// found is returned.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn view_from_region<'a>(
+        &'a mut self,
+        name: &str,
+        region: String,
+    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
+        // This call attempts to detect if this function is being called in a loop. If this is
+        // getting false positives, then it is safe to increase the allowed hit count, however, the
+        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
+        #[cfg(debug_assertions)]
+        assert_infrequent::at_most(200);
+
+        let name = name.to_string();
+        let request = ViewRequest {
+            name,
+            filter: Some(ViewFilter::Region(region)),
+        };
         self.request_view(request)
     }
 
@@ -334,16 +358,16 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .map_err(|e| rpc_err_no_downcast("ControllerHandle::view_builder", e))?
         {
             Some(vb) => Ok(vb),
-            None => {
-                if view_request.workers.is_empty() {
-                    Err(ReadySetError::ViewNotFound(view_request.name))
-                } else {
-                    Err(ReadySetError::ViewNotFoundInWorkers {
+            None => match view_request.filter {
+                Some(f) => match f {
+                    ViewFilter::Workers(w) => Err(ReadySetError::ViewNotFoundInWorkers {
                         name: view_request.name,
-                        workers: view_request.workers,
-                    })
-                }
-            }
+                        workers: w,
+                    }),
+                    ViewFilter::Region(_) => Err(ReadySetError::ViewNotFound(view_request.name)),
+                },
+                None => Err(ReadySetError::ViewNotFound(view_request.name)),
+            },
         }
     }
 
