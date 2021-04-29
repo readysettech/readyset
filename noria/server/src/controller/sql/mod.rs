@@ -628,11 +628,7 @@ impl SqlIncorporator {
         );
 
         // run MIR-level optimizations
-        let (mut mir, nodes_added) = og_mir.optimize(table_mapping.as_ref(), sec);
-        // update mir_converter with the nodes added. Note (jamb): we never remove the nodes removed
-        // by the optimizations, but they do get disconnected pointer-wise, so I think it's fine.
-        // (If we ever want to fix this, it's also relevant to the place below that calls optimize.)
-        self.mir_converter.add_nodes(nodes_added);
+        let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
@@ -793,9 +789,7 @@ impl SqlIncorporator {
             new_query_mir.to_graphviz().unwrap()
         );
 
-        let (new_opt_mir, new_nodes) = new_query_mir.optimize(table_mapping.as_ref(), sec);
-        self.mir_converter.add_nodes(new_nodes);
-
+        let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
         trace!(
             self.log,
             "Optimized MIR:\n{}",
@@ -817,15 +811,12 @@ impl SqlIncorporator {
             }
         }
 
-        let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
-
         // traverse universe subgraph and update table names for
         // internal consistency using the table mapping as guidance
         if sec {
             match table_mapping {
                 Some(ref x) => {
-                    post_reuse_opt_mir =
-                        post_reuse_opt_mir.make_universe_naming_consistent(x, base_name);
+                    reused_mir = reused_mir.make_universe_naming_consistent(x, base_name);
                 }
                 None => {
                     panic!("Missing table mapping when reconciling universe table names!");
@@ -833,14 +824,7 @@ impl SqlIncorporator {
             }
         }
 
-        trace!(
-            self.log,
-            "Post-reuse optimized MIR:\n{}",
-            post_reuse_opt_mir.to_graphviz().unwrap()
-        );
-
-        let qfp =
-            mir_query_to_flow_parts(&mut post_reuse_opt_mir, &mut mig, table_mapping.as_ref())?;
+        let qfp = mir_query_to_flow_parts(&mut reused_mir, &mut mig, table_mapping.as_ref())?;
 
         info!(
             self.log,
@@ -848,7 +832,7 @@ impl SqlIncorporator {
         );
 
         // register local state
-        self.register_query(query_name, Some(qg), &post_reuse_opt_mir, universe);
+        self.register_query(query_name, Some(qg), &reused_mir, universe);
 
         Ok(qfp)
     }
