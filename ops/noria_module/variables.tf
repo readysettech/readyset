@@ -223,7 +223,7 @@ variable "allow_ssh" {
   description = "Allow SSH connections from 0.0.0.0/0."
 }
 
-variable "readyset_server_clients" {
+variable "readyset_server_clients_subnets" {
   type        = list(string)
   default     = []
   description = "List of subnets that are allowed to connect to Readyset server."

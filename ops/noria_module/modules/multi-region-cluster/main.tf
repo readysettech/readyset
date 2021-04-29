@@ -13,10 +13,10 @@ module "readyset_primary" {
   vpc_private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   vpc_public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
-  allow_ssh                 = true
-  mysql_allowed_cidr_blocks = ["0.0.0.0/0"]
-  readyset_server_clients   = ["10.1.0.0/16"]
-  zookeeper_clients_subnets = ["10.1.0.0/16"]
+  allow_ssh                       = true
+  mysql_allowed_cidr_blocks       = ["0.0.0.0/0"]
+  readyset_server_clients_subnets = ["10.0.0.0/16", "10.1.0.0/16"]
+  zookeeper_clients_subnets       = ["10.0.0.0/16", "10.1.0.0/16"]
 }
 
 module "readyset_secondary" {
@@ -34,10 +34,10 @@ module "readyset_secondary" {
   vpc_private_subnets = ["10.1.1.0/24", "10.1.2.0/24", "10.1.3.0/24"]
   vpc_public_subnets  = ["10.1.101.0/24", "10.1.102.0/24", "10.1.103.0/24"]
 
-  allow_ssh                 = true
-  mysql_allowed_cidr_blocks = ["0.0.0.0/0"]
-  readyset_server_clients   = ["10.0.0.0/16"]
-  zookeeper_clients_subnets = ["10.0.0.0/16"]
+  allow_ssh                       = true
+  mysql_allowed_cidr_blocks       = ["0.0.0.0/0"]
+  readyset_server_clients_subnets = ["10.0.0.0/16", "10.1.0.0/16"]
+  zookeeper_clients_subnets       = ["10.0.0.0/16", "10.1.0.0/16"]
 }
 
 module "vpc_peering" {

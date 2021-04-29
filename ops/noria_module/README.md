@@ -69,7 +69,7 @@ in the variable `extra_security_groups`
 | noria\_server\_instance\_type | EC2 instance type to use for the Noria server instance(s) | `string` | `"m5.2xlarge"` | no |
 | noria\_shards | Number of shards to use in Noria (0 = disable sharding) | `number` | `0` | no |
 | rds\_instance\_id | ID of the RDS instance to stream writes from. Required if enable\_rds\_connector is true | `string` | `""` | no |
-| readyset\_server\_clients | List of subnets that are allowed to connect to Readyset server. | `list(string)` | `[]` | no |
+| readyset\_server\_clients\_subnets | List of subnets that are allowed to connect to Readyset server. | `list(string)` | `[]` | no |
 | readyset\_version | Readyset version to deploy (This is a required field, please ask for the latest version). | `string` | n/a | yes |
 | setup\_id | ID of the setup, 5 characters and no special symbols. (Useful for identifying resources). | `string` | `""` | no |
 | tables | List of tables to replicate from RDS | `list(string)` | `[]` | no |
