@@ -13,7 +13,6 @@ pub use column::Column;
 
 mod column;
 pub mod node;
-mod optimize;
 pub mod query;
 pub mod reuse;
 mod rewrite;

@@ -157,15 +157,6 @@ impl SqlToMirConverter {
             })
     }
 
-    pub fn add_nodes(&mut self, nodes: Vec<MirNodeRef>) {
-        for node in nodes {
-            let node_id = (String::from(node.borrow().name()), self.schema_version);
-            self.nodes.entry(node_id).or_insert_with(|| node.clone());
-            self.current
-                .insert(String::from(node.borrow().name()), self.schema_version);
-        }
-    }
-
     fn logical_op_to_conditions(
         &self,
         ct: &ConditionTree,
