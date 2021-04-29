@@ -1,6 +1,6 @@
 use crate::column::Column;
-use crate::node::MirNode;
 use crate::node::node_inner::MirNodeInner;
+use crate::node::MirNode;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
 
@@ -224,11 +224,11 @@ pub fn merge_mir_for_queries(
 mod tests {
     use nom_sql::{self, BinaryOperator, ColumnSpecification, SqlType};
 
-    use crate::node::MirNode;
+    use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;
+    use crate::node::MirNode;
+    use crate::reuse::merge_mir_for_queries;
     use crate::MirNodeRef;
-
-    use super::*;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {

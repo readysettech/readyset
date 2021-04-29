@@ -240,6 +240,10 @@ pub enum ReadySetError {
     /// Primary key is not on a primitive field.
     #[error("Primary key must be on a primitive field")]
     InvalidPrimaryKeyField,
+
+    /// An unsupported conditional combo in MIR.
+    #[error("Unsupported conditional in MIR")]
+    MirUnsupportedCondition(),
 }
 
 impl ReadySetError {

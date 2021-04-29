@@ -1,17 +1,17 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Error, Formatter};
-use std::rc::Rc;
-
-use petgraph::graph::NodeIndex;
 
 use dataflow::ops;
 use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::ColumnSpecification;
+use petgraph::graph::NodeIndex;
 
-use crate::{FlowNode, MirNodeRef};
+use std::rc::Rc;
+
 use crate::column::Column;
+use crate::{FlowNode, MirNodeRef};
 
 pub mod node_inner;
 
@@ -218,7 +218,7 @@ impl MirNode {
             self.columns.len()
         };
 
-        self.inner.insert_column(pos, c);
+        self.inner.insert_column(c);
 
         pos
     }
@@ -428,7 +428,7 @@ impl MirNode {
 
     /// Produce a compact, human-readable description of this node; analogous to the method of the
     /// same name on `Ingredient`.
-    fn description(&self) -> String {
+    pub(crate) fn description(&self) -> String {
         format!(
             "{}: {} / {} columns",
             self.versioned_name(),
@@ -476,14 +476,12 @@ impl Debug for MirNode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     mod find_source_for_child_column {
         use nom_sql::{ColumnSpecification, SqlType};
 
-        use crate::Column;
-        use crate::node::MirNode;
         use crate::node::node_inner::MirNodeInner;
+        use crate::node::MirNode;
+        use crate::Column;
 
         // tests the simple case where the child column has no alias, therefore mapping to the parent
         // column with the same name
@@ -639,14 +637,24 @@ mod tests {
     }
 
     mod add_column {
-        use dataflow::ops::filter::FilterCondition;
-        use dataflow::ops::filter::Value;
+        use crate::node::node_inner::MirNodeInner;
+        use crate::node::MirNode;
+        use crate::Column;
+        use crate::MirNodeRef;
         use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
-        use nom_sql::BinaryOperator;
+        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, Literal};
 
-        use super::*;
+        fn setup_filter(cond: (usize, ConditionExpression)) -> MirNodeRef {
+            let cols: Vec<nom_sql::Column> = vec!["x".into(), "agg".into()];
 
-        fn setup_filter(cond: (usize, FilterCondition)) -> MirNodeRef {
+            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                    cols[cond.0].clone(),
+                ))),
+                right: Box::new(cond.1.clone()),
+            });
+
             let parent = MirNode::new(
                 "parent",
                 0,
@@ -666,7 +674,8 @@ mod tests {
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Filter {
-                    conditions: vec![cond],
+                    conditions: condition_expression,
+                    remapped_exprs_to_parent_names: None,
                 },
                 vec![parent],
                 vec![],
@@ -677,8 +686,18 @@ mod tests {
         fn filter_reorders_condition_lhs() {
             let node = setup_filter((
                 1,
-                FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(1.into())),
+                ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(1))),
             ));
+
+            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
+                    "agg".into(),
+                ))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Integer(1),
+                ))),
+            });
 
             node.borrow_mut().add_column("y".into());
 
@@ -687,8 +706,8 @@ mod tests {
                 vec![Column::from("x"), Column::from("y"), Column::from("agg")]
             );
             match &node.borrow().inner {
-                MirNodeInner::Filter { conditions } => {
-                    assert_eq!(conditions[0].0, 2);
+                MirNodeInner::Filter { conditions, .. } => {
+                    assert_eq!(&condition_expression, conditions);
                 }
                 _ => unreachable!(),
             };
@@ -698,8 +717,14 @@ mod tests {
         fn filter_reorders_condition_comparison_rhs() {
             let node = setup_filter((
                 0,
-                FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(1)),
+                ConditionExpression::Base(ConditionBase::Field("y".into())),
             ));
+
+            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field("x".into()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Field("y".into()))),
+            });
 
             node.borrow_mut().add_column("y".into());
 
@@ -708,11 +733,8 @@ mod tests {
                 vec![Column::from("x"), Column::from("y"), Column::from("agg")]
             );
             match &node.borrow().inner {
-                MirNodeInner::Filter { conditions } => {
-                    assert_eq!(
-                        conditions[0].1,
-                        FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(2))
-                    );
+                MirNodeInner::Filter { conditions, .. } => {
+                    assert_eq!(&condition_expression, conditions);
                 }
                 _ => unreachable!(),
             };

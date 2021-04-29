@@ -1,14 +1,14 @@
-use std::fmt::{Debug, Error, Formatter};
-
-use common::DataType;
-use dataflow::ops::filter;
-use dataflow::ops::filter::FilterCondition;
-use dataflow::ops::grouped::aggregate::Aggregation;
-use dataflow::ops::grouped::extremum::Extremum;
-use nom_sql::{BinaryOperator, ColumnSpecification, Expression, Literal, OrderType};
-
 use crate::node::BaseNodeAdaptation;
 use crate::{Column, MirNodeRef};
+use common::DataType;
+use dataflow::ops::grouped::aggregate::Aggregation;
+use dataflow::ops::grouped::extremum::Extremum;
+use nom_sql::{
+    BinaryOperator, ColumnSpecification, ConditionExpression, Expression, FunctionExpression,
+    Literal, OrderType,
+};
+use std::collections::HashMap;
+use std::fmt::{self, Debug, Formatter};
 
 pub enum MirNodeInner {
     /// over column, group_by columns
@@ -31,7 +31,11 @@ pub enum MirNodeInner {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: Vec<(usize, FilterCondition)>,
+        conditions: ConditionExpression,
+        // Maps the Columns that contained function calls into the
+        // names of the projected columns that contain the evaluated results.
+        // This is the 2nd return value of `project_expressions`.
+        remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
     },
     /// filter condition and grouping
     // FilterAggregation Mir Node type still exists, due to optimization and rewrite logic
@@ -41,7 +45,11 @@ pub enum MirNodeInner {
         group_by: Vec<Column>,
         // kind is same as a normal aggregation (sum, count, avg)
         kind: Aggregation,
-        conditions: Vec<(usize, FilterCondition)>,
+        conditions: ConditionExpression,
+        // Maps the Columns that contained function calls into the
+        // names of the projected columns that contain the evaluated results.
+        // This is the 2nd return value of `project_expressions`.
+        remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
     },
     /// over column, separator
     GroupConcat {
@@ -118,7 +126,7 @@ impl MirNodeInner {
         format!("{:?}", self)
     }
 
-    pub(crate) fn insert_column(&mut self, pos: usize, c: Column) {
+    pub(crate) fn insert_column(&mut self, c: Column) {
         match *self {
             MirNodeInner::Aggregation {
                 ref mut group_by, ..
@@ -130,25 +138,6 @@ impl MirNodeInner {
                 ref mut group_by, ..
             } => {
                 group_by.push(c);
-            }
-            MirNodeInner::Filter { ref mut conditions } => {
-                // If we've added a column before the column index referenced in any of our
-                // conditions, shift those over
-                //
-                // TODO(grfn): This is really brittle, and would be a lot easier if filters in MIR
-                // used names instead of indices
-                for (c, val) in conditions.iter_mut() {
-                    if *c >= pos {
-                        *c += 1;
-                    }
-
-                    match val {
-                        FilterCondition::Comparison(_, filter::Value::Column(c)) if *c >= pos => {
-                            *c += 1
-                        }
-                        FilterCondition::Comparison(_, _) | FilterCondition::In(_) => {}
-                    }
-                }
             }
             MirNodeInner::FilterAggregation {
                 ref mut group_by, ..
@@ -271,8 +260,15 @@ impl MirNodeInner {
             },
             MirNodeInner::Filter {
                 conditions: ref our_conditions,
+                remapped_exprs_to_parent_names: ref our_remapped_exprs_to_parent_names,
             } => match *other {
-                MirNodeInner::Filter { ref conditions } => our_conditions == conditions,
+                MirNodeInner::Filter {
+                    ref conditions,
+                    ref remapped_exprs_to_parent_names,
+                } => {
+                    our_conditions == conditions
+                        && our_remapped_exprs_to_parent_names == remapped_exprs_to_parent_names
+                }
                 _ => false,
             },
             MirNodeInner::FilterAggregation {
@@ -281,6 +277,7 @@ impl MirNodeInner {
                 group_by: ref our_group_by,
                 kind: ref our_kind,
                 conditions: ref our_conditions,
+                remapped_exprs_to_parent_names: ref our_remapped_exprs_to_parent_names,
             } => match *other {
                 MirNodeInner::FilterAggregation {
                     ref on,
@@ -288,12 +285,14 @@ impl MirNodeInner {
                     ref group_by,
                     ref kind,
                     ref conditions,
+                    ref remapped_exprs_to_parent_names,
                 } => {
                     our_on == on
                         && our_else_on == else_on
                         && our_group_by == group_by
                         && our_kind == kind
                         && our_conditions == conditions
+                        && our_remapped_exprs_to_parent_names == remapped_exprs_to_parent_names
                 }
                 _ => false,
             },
@@ -422,7 +421,7 @@ impl MirNodeInner {
 }
 
 impl Debug for MirNodeInner {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         match *self {
             MirNodeInner::Aggregation {
                 ref on,
@@ -474,37 +473,8 @@ impl Debug for MirNodeInner {
                     .join(", ");
                 write!(f, "{} γ[{}]", op_string, group_cols)
             }
-            MirNodeInner::Filter { ref conditions } => {
-                use regex::Regex;
-
-                let escape = |s: &str| {
-                    Regex::new("([<>])")
-                        .unwrap()
-                        .replace_all(s, "\\$1")
-                        .to_string()
-                };
-                write!(
-                    f,
-                    "σ[{}]",
-                    conditions
-                        .iter()
-                        .filter_map(|(i, ref cond)| match *cond {
-                            FilterCondition::Comparison(ref op, ref x) => {
-                                Some(format!("f{} {} {:?}", i, escape(&format!("{}", op)), x))
-                            }
-                            FilterCondition::In(ref xs) => Some(format!(
-                                "f{} IN ({})",
-                                i,
-                                xs.iter()
-                                    .map(|d| format!("{}", d))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )),
-                        })
-                        .collect::<Vec<_>>()
-                        .as_slice()
-                        .join(", ")
-                )
+            MirNodeInner::Filter { ref conditions, .. } => {
+                write!(f, "σ[{}]", conditions)
             }
             MirNodeInner::FilterAggregation {
                 ref on,
@@ -512,6 +482,7 @@ impl Debug for MirNodeInner {
                 ref group_by,
                 ref kind,
                 conditions: _,
+                remapped_exprs_to_parent_names: _,
             } => {
                 let op_string = match *kind {
                     Aggregation::COUNT => format!("|*|(filter {})", on.name.as_str()),
