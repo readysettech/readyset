@@ -1,5 +1,6 @@
 use crate::column::Column;
-use crate::node::{MirNode, MirNodeType};
+use crate::node::MirNode;
+use crate::node::node_inner::MirNodeInner;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
 
@@ -85,7 +86,7 @@ pub fn merge_mir_for_queries(
                 name: o.name.clone(),
                 from_version: o.from_version,
                 columns: o.columns.clone(),
-                inner: MirNodeType::Reuse { node: o_ref },
+                inner: MirNodeInner::Reuse { node: o_ref },
                 ancestors: o.ancestors.clone(),
                 children: o.children.clone(),
                 flow_node: None,
@@ -221,10 +222,13 @@ pub fn merge_mir_for_queries(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::node::{MirNode, MirNodeType};
-    use crate::MirNodeRef;
     use nom_sql::{self, BinaryOperator, ColumnSpecification, SqlType};
+
+    use crate::node::MirNode;
+    use crate::node::node_inner::MirNodeInner;
+    use crate::MirNodeRef;
+
+    use super::*;
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
@@ -237,7 +241,7 @@ mod tests {
             "a",
             0,
             vec![Column::from("aa"), Column::from("ab")],
-            MirNodeType::Base {
+            MirNodeInner::Base {
                 column_specs: vec![cspec("aa"), cspec("ab")],
                 keys: vec![Column::from("aa")],
                 adapted_over: None,
@@ -249,7 +253,7 @@ mod tests {
             "b",
             0,
             vec![Column::from("ba"), Column::from("bb")],
-            MirNodeType::Base {
+            MirNodeInner::Base {
                 column_specs: vec![cspec("ba"), cspec("bb")],
                 keys: vec![Column::from("ba")],
                 adapted_over: None,
@@ -261,7 +265,7 @@ mod tests {
             "c",
             0,
             vec![Column::from("aa"), Column::from("ba")],
-            MirNodeType::Join {
+            MirNodeInner::Join {
                 on_left: vec![Column::from("ab")],
                 on_right: vec![Column::from("bb")],
                 project: vec![Column::from("aa"), Column::from("ba")],
@@ -273,7 +277,7 @@ mod tests {
             "d",
             0,
             vec![Column::from("aa"), Column::from("ba")],
-            MirNodeType::Leaf {
+            MirNodeInner::Leaf {
                 node: c.clone(),
                 keys: vec![Column::from("ba")],
                 operator: BinaryOperator::Equal,
@@ -286,7 +290,7 @@ mod tests {
 
     #[test]
     fn merge_mir() {
-        use crate::node::{MirNode, MirNodeType};
+        use crate::node::MirNode;
         use crate::query::MirQuery;
 
         let log = slog::Logger::root(slog::Discard, o!());
@@ -313,7 +317,7 @@ mod tests {
             .topo_nodes()
             .iter()
             .all(|n| match n.borrow().inner {
-                MirNodeType::Reuse { .. } => true,
+                MirNodeInner::Reuse { .. } => true,
                 _ => false,
             },));
 
@@ -322,7 +326,7 @@ mod tests {
             "e",
             0,
             vec![Column::from("aa")],
-            MirNodeType::Project {
+            MirNodeInner::Project {
                 emit: vec![Column::from("aa")],
                 expressions: vec![],
                 literals: vec![],

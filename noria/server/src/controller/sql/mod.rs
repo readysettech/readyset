@@ -1,20 +1,9 @@
-mod mir;
-mod passes;
-mod query_graph;
-mod query_signature;
-pub(crate) mod query_utils;
-mod reuse;
-pub(super) mod security;
+use std::collections::HashMap;
+use std::str;
+use std::vec::Vec;
 
-use self::mir::SqlToMirConverter;
-use self::query_graph::{to_query_graph, QueryGraph};
-use self::query_signature::Signature;
-use self::query_utils::{contains_aggregate, is_aggregate};
-use self::reuse::ReuseConfig;
-use super::mir_to_flow::mir_query_to_flow_parts;
-use crate::controller::Migration;
-use crate::errors::internal_err;
-use crate::{invariant, ReadySetResult, ReuseConfigType};
+use petgraph::graph::NodeIndex;
+
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
@@ -26,10 +15,27 @@ use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
 use noria::{internal, unsupported, ReadySetError};
-use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
-use std::str;
-use std::vec::Vec;
+
+use crate::controller::Migration;
+use crate::errors::internal_err;
+use crate::{invariant, ReadySetResult, ReuseConfigType};
+
+use super::mir_to_flow::mir_query_to_flow_parts;
+
+use self::mir::SqlToMirConverter;
+use self::query_graph::{to_query_graph, QueryGraph};
+use self::query_signature::Signature;
+use self::query_utils::{contains_aggregate, is_aggregate};
+use self::reuse::ReuseConfig;
+use ::mir::node::node_inner::MirNodeInner;
+
+mod mir;
+mod passes;
+mod query_graph;
+mod query_signature;
+pub(crate) mod query_utils;
+mod reuse;
+pub(super) mod security;
 
 type UniverseId = (DataType, Option<DataType>);
 
@@ -309,7 +315,6 @@ impl SqlIncorporator {
                         && are_all_parameters_equalities
                         && !is_new_bogokey_needed
                     {
-                        use ::mir::node::MirNodeType;
                         // QGs are identical, except for parameters (or their order)
                         info!(
                             self.log,
@@ -355,8 +360,8 @@ impl SqlIncorporator {
                         // traverse its ancestor chain to find an ancestor with the necessary
                         // parameter columns.
                         let may_rewind = match parent.borrow().inner {
-                            MirNodeType::Identity => true,
-                            MirNodeType::Project {
+                            MirNodeInner::Identity => true,
+                            MirNodeInner::Project {
                                 expressions: ref e,
                                 literals: ref l,
                                 ..
@@ -372,7 +377,7 @@ impl SqlIncorporator {
                         // Reuse based on ancestor, which contains the required parameter columns.
                         if let Some(ancestor) = ancestor {
                             let project_columns = match ancestor.borrow().inner {
-                                MirNodeType::Project { .. } => {
+                                MirNodeInner::Project { .. } => {
                                     // FIXME Ensure ancestor includes all columns in qg, with the
                                     // proper names.
                                     None
@@ -1112,11 +1117,13 @@ impl<'a> ToFlowParts for &'a str {
 
 #[cfg(test)]
 mod tests {
-    use super::{SqlIncorporator, ToFlowParts};
-    use crate::controller::Migration;
-    use crate::integration;
     use dataflow::prelude::*;
     use nom_sql::{Column, Expression, FunctionExpression, Literal};
+
+    use crate::controller::Migration;
+    use crate::integration;
+
+    use super::{SqlIncorporator, ToFlowParts};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {

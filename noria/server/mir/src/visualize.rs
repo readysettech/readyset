@@ -1,12 +1,15 @@
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
-use crate::node::{MirNode, MirNodeType};
-use crate::query::MirQuery;
+use itertools::Itertools;
+
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
+
+use crate::node::MirNode;
+use crate::node::node_inner::MirNodeInner;
+use crate::query::MirQuery;
 
 pub trait GraphViz {
     fn to_graphviz(&self) -> Result<String, fmt::Error>;
@@ -85,7 +88,7 @@ impl GraphViz for MirNode {
     }
 }
 
-impl GraphViz for MirNodeType {
+impl GraphViz for MirNodeInner {
     fn to_graphviz(&self) -> Result<String, fmt::Error> {
         use crate::column::Column;
 
@@ -99,7 +102,7 @@ impl GraphViz for MirNodeType {
         };
 
         match *self {
-            MirNodeType::Aggregation {
+            MirNodeInner::Aggregation {
                 ref on,
                 ref group_by,
                 ref kind,
@@ -116,7 +119,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "{} | γ: {}", op_string, group_cols)?;
             }
-            MirNodeType::Base {
+            MirNodeInner::Base {
                 ref column_specs,
                 ref keys,
                 ..
@@ -135,7 +138,7 @@ impl GraphViz for MirNodeType {
                         .join(", ")
                 )?;
             }
-            MirNodeType::Extremum {
+            MirNodeInner::Extremum {
                 ref on,
                 ref group_by,
                 ref kind,
@@ -151,7 +154,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "{} | γ: {}", op_string, group_cols)?;
             }
-            MirNodeType::FilterAggregation {
+            MirNodeInner::FilterAggregation {
                 ref on,
                 ref group_by,
                 ref kind,
@@ -169,7 +172,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "{} | γ: {}", op_string, group_cols)?;
             }
-            MirNodeType::Filter { ref conditions } => {
+            MirNodeInner::Filter { ref conditions } => {
                 use regex::Regex;
 
                 let escape = |s: &str| {
@@ -201,16 +204,16 @@ impl GraphViz for MirNodeType {
                         .join(", ")
                 )?;
             }
-            MirNodeType::GroupConcat {
+            MirNodeInner::GroupConcat {
                 ref on,
                 ref separator,
             } => {
                 write!(out, "||({}, \"{}\")", print_col(on), separator)?;
             }
-            MirNodeType::Identity => {
+            MirNodeInner::Identity => {
                 write!(out, "≡")?;
             }
-            MirNodeType::Join {
+            MirNodeInner::Join {
                 ref on_left,
                 ref on_right,
                 ..
@@ -223,7 +226,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "⋈  | on: {}", jc)?;
             }
-            MirNodeType::Leaf { ref keys, .. } => {
+            MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
                     .map(|k| print_col(k))
@@ -231,7 +234,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "Leaf | ⚷: {}", key_cols)?;
             }
-            MirNodeType::LeftJoin {
+            MirNodeInner::LeftJoin {
                 ref on_left,
                 ref on_right,
                 ..
@@ -244,7 +247,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "⋉  | on: {}", jc)?;
             }
-            MirNodeType::Latest { ref group_by } => {
+            MirNodeInner::Latest { ref group_by } => {
                 let key_cols = group_by
                     .iter()
                     .map(|k| print_col(k))
@@ -252,7 +255,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "⧖ | γ: {}", key_cols)?;
             }
-            MirNodeType::Project {
+            MirNodeInner::Project {
                 ref emit,
                 ref literals,
                 ref expressions,
@@ -275,10 +278,10 @@ impl GraphViz for MirNodeType {
                         .join(", ")
                 )?;
             }
-            MirNodeType::Reuse { ref node } => {
+            MirNodeInner::Reuse { ref node } => {
                 write!(out, "Reuse | using: {}", node.borrow().versioned_name(),)?;
             }
-            MirNodeType::Distinct { ref group_by } => {
+            MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by
                     .iter()
                     .map(|k| print_col(k))
@@ -286,7 +289,7 @@ impl GraphViz for MirNodeType {
                     .join(", ");
                 write!(out, "Distinct | γ: {}", key_cols)?;
             }
-            MirNodeType::TopK {
+            MirNodeInner::TopK {
                 ref order, ref k, ..
             } => {
                 write!(
@@ -303,7 +306,7 @@ impl GraphViz for MirNodeType {
                         .unwrap_or_else(|| "".into())
                 )?;
             }
-            MirNodeType::Union { ref emit } => {
+            MirNodeInner::Union { ref emit } => {
                 let cols = emit
                     .iter()
                     .map(|c| {
@@ -317,10 +320,10 @@ impl GraphViz for MirNodeType {
 
                 write!(out, "{}", cols)?;
             }
-            MirNodeType::Rewrite { ref column, .. } => {
+            MirNodeInner::Rewrite { ref column, .. } => {
                 write!(out, "Rw | column: {}", column)?;
             }
-            MirNodeType::ParamFilter {
+            MirNodeInner::ParamFilter {
                 ref col,
                 ref emit_key,
                 ref operator,

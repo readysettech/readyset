@@ -4,9 +4,12 @@
 #[macro_use]
 extern crate slog;
 
-use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+use petgraph::graph::NodeIndex;
+
+pub use column::Column;
 
 mod column;
 pub mod node;
@@ -17,8 +20,6 @@ mod rewrite;
 pub mod visualize;
 
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;
-
-pub use column::Column;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
