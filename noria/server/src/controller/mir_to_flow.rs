@@ -1,12 +1,7 @@
-use nom_sql::{
-    Arithmetic, BinaryOperator, ColumnConstraint, ColumnSpecification, Expression,
-    FunctionExpression, Literal, OrderType,
-};
 use std::collections::HashMap;
 
-use crate::controller::Migration;
-use crate::errors::internal_err;
-use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
+use petgraph::graph::NodeIndex;
+
 use common::DataType;
 use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
@@ -14,10 +9,18 @@ use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
 use dataflow::ops::project::{BuiltinFunction, Project, ProjectExpression};
 use dataflow::{node, ops};
-use mir::node::{GroupedNodeType, MirNode, MirNodeType};
+use mir::node::{GroupedNodeType, MirNode};
+use mir::node::node_inner::MirNodeInner;
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
-use petgraph::graph::NodeIndex;
+use nom_sql::{
+    Arithmetic, BinaryOperator, ColumnConstraint,
+    ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
+};
+
+use crate::controller::Migration;
+use crate::errors::internal_err;
+use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
@@ -96,7 +99,7 @@ fn mir_node_to_flow_parts(
         None => {
             #[allow(clippy::let_and_return)]
             let flow_node = match mir_node.inner {
-                MirNodeType::Aggregation {
+                MirNodeInner::Aggregation {
                     ref on,
                     ref group_by,
                     ref kind,
@@ -116,7 +119,7 @@ fn mir_node_to_flow_parts(
                         None,
                     )?
                 }
-                MirNodeType::Base {
+                MirNodeInner::Base {
                     ref mut column_specs,
                     ref keys,
                     ref adapted_over,
@@ -130,7 +133,7 @@ fn mir_node_to_flow_parts(
                         &bna.columns_removed,
                     )?,
                 },
-                MirNodeType::Extremum {
+                MirNodeInner::Extremum {
                     ref on,
                     ref group_by,
                     ref kind,
@@ -150,7 +153,7 @@ fn mir_node_to_flow_parts(
                         None,
                     )?
                 }
-                MirNodeType::FilterAggregation {
+                MirNodeInner::FilterAggregation {
                     ref on,
                     ref else_on,
                     ref group_by,
@@ -172,12 +175,12 @@ fn mir_node_to_flow_parts(
                         Some(conditions),
                     )?
                 }
-                MirNodeType::Filter { ref conditions } => {
+                MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_filter_node(&name, parent, mir_node.columns.as_slice(), conditions, mig)
                 }
-                MirNodeType::GroupConcat {
+                MirNodeInner::GroupConcat {
                     ref on,
                     ref separator,
                 } => {
@@ -197,12 +200,12 @@ fn mir_node_to_flow_parts(
                         None,
                     )?
                 }
-                MirNodeType::Identity => {
+                MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)
                 }
-                MirNodeType::Join {
+                MirNodeInner::Join {
                     ref on_left,
                     ref on_right,
                     ref project,
@@ -222,7 +225,7 @@ fn mir_node_to_flow_parts(
                         mig,
                     )?
                 }
-                MirNodeType::ParamFilter {
+                MirNodeInner::ParamFilter {
                     ref col,
                     ref emit_key,
                     ref operator,
@@ -240,12 +243,12 @@ fn mir_node_to_flow_parts(
                         table_mapping,
                     )?
                 }
-                MirNodeType::Latest { ref group_by } => {
+                MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
-                MirNodeType::Leaf {
+                MirNodeInner::Leaf {
                     ref keys,
                     ref operator,
                     ..
@@ -263,7 +266,7 @@ fn mir_node_to_flow_parts(
                     };
                     node
                 }
-                MirNodeType::LeftJoin {
+                MirNodeInner::LeftJoin {
                     ref on_left,
                     ref on_right,
                     ref project,
@@ -283,7 +286,7 @@ fn mir_node_to_flow_parts(
                         mig,
                     )?
                 }
-                MirNodeType::Project {
+                MirNodeInner::Project {
                     ref emit,
                     ref literals,
                     ref expressions,
@@ -301,7 +304,7 @@ fn mir_node_to_flow_parts(
                         table_mapping,
                     )?
                 }
-                MirNodeType::Reuse { ref node } => {
+                MirNodeInner::Reuse { ref node } => {
                     match *node.borrow()
                            .flow_node
                            .as_ref()
@@ -314,7 +317,7 @@ fn mir_node_to_flow_parts(
                                FlowNode::Existing(na) => FlowNode::Existing(na),
                         }
                 }
-                MirNodeType::Union { ref emit } => {
+                MirNodeInner::Union { ref emit } => {
                     invariant_eq!(mir_node.ancestors.len(), emit.len());
                     make_union_node(
                         &name,
@@ -325,12 +328,12 @@ fn mir_node_to_flow_parts(
                         table_mapping,
                     )
                 }
-                MirNodeType::Distinct { ref group_by } => {
+                MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
                     make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
                 }
-                MirNodeType::TopK {
+                MirNodeInner::TopK {
                     ref order,
                     ref group_by,
                     ref k,
@@ -349,7 +352,7 @@ fn mir_node_to_flow_parts(
                         mig,
                     )?
                 }
-                MirNodeType::Rewrite {
+                MirNodeInner::Rewrite {
                     ref value,
                     ref column,
                     ref key,

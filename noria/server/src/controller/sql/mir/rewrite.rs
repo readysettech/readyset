@@ -1,7 +1,9 @@
-use crate::controller::sql::mir::SqlToMirConverter;
-use mir::node::{MirNode, MirNodeType};
+use mir::node::MirNode;
+use mir::node::node_inner::MirNodeInner;
 use mir::MirNodeRef;
 use noria::ReadySetError;
+
+use crate::controller::sql::mir::SqlToMirConverter;
 
 pub(super) fn make_rewrite_nodes(
     mir_converter: &SqlToMirConverter,
@@ -40,7 +42,7 @@ pub(super) fn make_rewrite_nodes(
             &format!("{}_n{}", name, node_count),
             mir_converter.schema_version,
             fields,
-            MirNodeType::Rewrite {
+            MirNodeInner::Rewrite {
                 value: p.value,
                 column: p.column,
                 key: p.key,

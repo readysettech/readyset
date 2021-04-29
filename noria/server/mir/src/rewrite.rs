@@ -1,7 +1,8 @@
+use std::collections::HashMap;
+
 use crate::column::Column;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
-use std::collections::HashMap;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
@@ -187,7 +188,8 @@ mod tests {
             BinaryOperator, ColumnSpecification, Expression, FunctionExpression, SqlType,
         };
 
-        use crate::node::{MirNode, MirNodeType};
+        use crate::node::MirNode;
+        use crate::node::node_inner::MirNodeInner;
 
         use super::*;
 
@@ -197,7 +199,7 @@ mod tests {
                 "base",
                 0,
                 vec!["a".into(), "b".into(), "c".into()],
-                MirNodeType::Base {
+                MirNodeInner::Base {
                     column_specs: vec![
                         (
                             ColumnSpecification {
@@ -239,7 +241,7 @@ mod tests {
                 "grp",
                 0,
                 vec!["agg".into()],
-                MirNodeType::Aggregation {
+                MirNodeInner::Aggregation {
                     on: "b".into(),
                     group_by: vec![],
                     kind: Aggregation::SUM,
@@ -253,7 +255,7 @@ mod tests {
                 "fil",
                 0,
                 vec!["a".into(), "agg".into()],
-                MirNodeType::Filter {
+                MirNodeInner::Filter {
                     conditions: vec![(
                         0,
                         FilterCondition::Comparison(
@@ -271,7 +273,7 @@ mod tests {
                 "prj",
                 0,
                 vec!["a".into(), "agg".into(), "c0".into()],
-                MirNodeType::Project {
+                MirNodeInner::Project {
                     emit: vec!["a".into(), "agg".into()],
                     expressions: vec![(
                         "c0".to_owned(),
@@ -310,7 +312,7 @@ mod tests {
 
             // The filter has to filter on the correct field
             match &fil.borrow().inner {
-                MirNodeType::Filter { conditions } => assert_eq!(conditions.first().unwrap().0, 1),
+                MirNodeInner::Filter { conditions } => assert_eq!(conditions.first().unwrap().0, 1),
                 _ => unreachable!(),
             };
         }

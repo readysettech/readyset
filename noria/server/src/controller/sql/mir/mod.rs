@@ -1,30 +1,30 @@
-use mir::node::{GroupedNodeType, MirNode, MirNodeType};
-use mir::query::MirQuery;
-use mir::{Column, MirNodeRef};
-use nom_sql::analysis::{find_function_calls, ReferredColumns};
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::vec::Vec;
+
 use petgraph::graph::NodeIndex;
+
 // TODO(malte): remove if possible
 use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::JoinType;
-
-use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
-use crate::controller::sql::query_signature::Signature;
+use mir::node::{GroupedNodeType, MirNode};
+use mir::node::node_inner::MirNodeInner;
+use mir::query::MirQuery;
+use mir::{Column, MirNodeRef};
+use nom_sql::analysis::{find_function_calls, ReferredColumns};
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, ConditionBase,
     ConditionExpression, ConditionTree, Expression, FunctionExpression, LimitClause, Literal,
     OrderClause, SelectStatement, SqlQuery, TableKey,
 };
+use noria::{internal, invariant, invariant_eq, unsupported, DataType, ReadySetError};
 
-use std::collections::{HashMap, HashSet};
-
-use std::ops::Deref;
-use std::vec::Vec;
-
+use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
+use crate::controller::sql::query_signature::Signature;
 use crate::controller::sql::security::Universe;
 use crate::controller::sql::UniverseId;
 use crate::errors::internal_err;
 use crate::ReadySetResult;
-use noria::{internal, invariant, invariant_eq, unsupported, DataType, ReadySetError};
 
 mod grouped;
 mod join;
@@ -306,7 +306,7 @@ impl SqlToMirConverter {
                 &format!("{}_reproject", name),
                 self.schema_version,
                 columns.clone(),
-                MirNodeType::Project {
+                MirNodeInner::Project {
                     emit: columns.clone(),
                     literals: vec![],
                     expressions: vec![],
@@ -320,7 +320,7 @@ impl SqlToMirConverter {
                 &format!("{}_id", name),
                 self.schema_version,
                 columns.clone(),
-                MirNodeType::Identity,
+                MirNodeInner::Identity,
                 vec![parent.clone()],
                 vec![],
             )
@@ -337,7 +337,7 @@ impl SqlToMirConverter {
                     c
                 })
                 .collect(),
-            MirNodeType::Leaf {
+            MirNodeInner::Leaf {
                 node: n.clone(),
                 keys: Vec::from(params),
                 operator: BinaryOperator::Equal,
@@ -422,7 +422,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 sanitized_columns,
-                MirNodeType::Leaf {
+                MirNodeInner::Leaf {
                     node: final_node.clone(),
                     keys: vec![],
                     operator: BinaryOperator::Equal,
@@ -514,7 +514,7 @@ impl SqlToMirConverter {
             q.extend(n.ancestors.clone());
             // node may not be registered, so don't bother checking return
             match n.inner {
-                MirNodeType::Reuse { .. } | MirNodeType::Base { .. } => (),
+                MirNodeInner::Reuse { .. } | MirNodeInner::Base { .. } => (),
                 _ => {
                     self.nodes.remove(&(n.name.to_owned(), v));
                 }
@@ -758,7 +758,7 @@ impl SqlToMirConverter {
                         name,
                         self.schema_version,
                         cols.iter().map(|cs| Column::from(&cs.column)).collect(),
-                        MirNodeType::Base {
+                        MirNodeInner::Base {
                             column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
                             keys: key_cols.iter().map(Column::from).collect(),
                             adapted_over: None,
@@ -774,7 +774,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 cols.iter().map(|cs| Column::from(&cs.column)).collect(),
-                MirNodeType::Base {
+                MirNodeInner::Base {
                     column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
                     keys: vec![],
                     adapted_over: None,
@@ -841,7 +841,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             emit.first().unwrap().clone(),
-            MirNodeType::Union { emit },
+            MirNodeInner::Union { emit },
             ancestors.to_vec(),
             vec![],
         ))
@@ -948,7 +948,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 emit.first().unwrap().clone(),
-                MirNodeType::Union { emit },
+                MirNodeInner::Union { emit },
                 ancestors.to_vec(),
                 vec![],
             ),
@@ -970,7 +970,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             columns,
-            MirNodeType::Union { emit },
+            MirNodeInner::Union { emit },
             ancestors.clone(),
             vec![],
         ))
@@ -990,7 +990,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             fields,
-            MirNodeType::Filter { conditions: filter },
+            MirNodeInner::Filter { conditions: filter },
             vec![parent],
             vec![],
         )
@@ -1287,7 +1287,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 combined_columns,
-                MirNodeType::Aggregation {
+                MirNodeInner::Aggregation {
                     on: over_col.clone(),
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: agg,
@@ -1299,7 +1299,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 combined_columns,
-                MirNodeType::Extremum {
+                MirNodeInner::Extremum {
                     on: over_col.clone(),
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: extr,
@@ -1328,7 +1328,7 @@ impl SqlToMirConverter {
                     name,
                     self.schema_version,
                     combined_columns,
-                    MirNodeType::FilterAggregation {
+                    MirNodeInner::FilterAggregation {
                         on: over_col.clone(),
                         else_on: else_val.clone(),
                         group_by: group_by.into_iter().cloned().collect(),
@@ -1343,7 +1343,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 combined_columns,
-                MirNodeType::GroupConcat {
+                MirNodeInner::GroupConcat {
                     on: over_col.clone(),
                     separator: sep,
                 },
@@ -1422,12 +1422,12 @@ impl SqlToMirConverter {
 
         invariant_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
-            JoinType::Inner => MirNodeType::Join {
+            JoinType::Inner => MirNodeInner::Join {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
                 project: fields.clone(),
             },
-            JoinType::Left => MirNodeType::LeftJoin {
+            JoinType::Left => MirNodeInner::LeftJoin {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
                 project: fields.clone(),
@@ -1505,7 +1505,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             fields,
-            MirNodeType::Project {
+            MirNodeInner::Project {
                 emit: emit_cols,
                 literals,
                 expressions,
@@ -1536,7 +1536,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             fields,
-            MirNodeType::ParamFilter {
+            MirNodeInner::ParamFilter {
                 col: col.clone(),
                 emit_key: emit_key.clone(),
                 operator: operator.clone(),
@@ -1559,7 +1559,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             combined_columns,
-            MirNodeType::Distinct {
+            MirNodeInner::Distinct {
                 group_by: group_by.into_iter().cloned().collect(),
             },
             vec![parent.clone()],
@@ -1599,7 +1599,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             combined_columns,
-            MirNodeType::TopK {
+            MirNodeInner::TopK {
                 order,
                 group_by: group_by.into_iter().cloned().collect(),
                 k: limit.limit as usize,
@@ -2368,7 +2368,7 @@ impl SqlToMirConverter {
                     name,
                     self.schema_version,
                     columns,
-                    MirNodeType::Leaf {
+                    MirNodeInner::Leaf {
                         node: leaf_project_node.clone(),
                         keys: key_columns,
                         operator,
