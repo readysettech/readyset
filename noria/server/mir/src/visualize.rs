@@ -1,14 +1,12 @@
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 
-use itertools::Itertools;
-
-use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 
-use crate::node::MirNode;
 use crate::node::node_inner::MirNodeInner;
+use crate::node::MirNode;
 use crate::query::MirQuery;
 
 pub trait GraphViz {
@@ -172,37 +170,8 @@ impl GraphViz for MirNodeInner {
                     .join(", ");
                 write!(out, "{} | γ: {}", op_string, group_cols)?;
             }
-            MirNodeInner::Filter { ref conditions } => {
-                use regex::Regex;
-
-                let escape = |s: &str| {
-                    Regex::new("([<>])")
-                        .unwrap()
-                        .replace_all(s, "\\$1")
-                        .to_string()
-                };
-                write!(
-                    out,
-                    "σ: {}",
-                    conditions
-                        .iter()
-                        .filter_map(|(i, ref cond)| match *cond {
-                            FilterCondition::Comparison(ref op, ref x) => {
-                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                            }
-                            FilterCondition::In(ref xs) => Some(format!(
-                                "f{} IN ({})",
-                                i,
-                                xs.iter()
-                                    .map(|d| format!("{}", d))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )),
-                        })
-                        .collect::<Vec<_>>()
-                        .as_slice()
-                        .join(", ")
-                )?;
+            MirNodeInner::Filter { ref conditions, .. } => {
+                write!(out, "σ: {}", conditions)?;
             }
             MirNodeInner::GroupConcat {
                 ref on,

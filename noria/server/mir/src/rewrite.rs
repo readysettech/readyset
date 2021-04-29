@@ -182,14 +182,14 @@ mod tests {
     use super::*;
 
     mod pull_required_base_columns {
-        use dataflow::ops::filter::{FilterCondition, Value};
         use dataflow::ops::grouped::aggregate::Aggregation;
         use nom_sql::{
-            BinaryOperator, ColumnSpecification, Expression, FunctionExpression, SqlType,
+            BinaryOperator, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
+            Expression, FunctionExpression, Literal, SqlType,
         };
 
-        use crate::node::MirNode;
         use crate::node::node_inner::MirNodeInner;
+        use crate::node::MirNode;
 
         use super::*;
 
@@ -250,19 +250,22 @@ mod tests {
                 vec![],
             );
 
+            let condition_expression_1 = ConditionExpression::ComparisonOp(ConditionTree {
+                operator: BinaryOperator::Equal,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
+                    Literal::Integer(1),
+                ))),
+            });
+
             // σ[a = 1]
             let fil = MirNode::new(
                 "fil",
                 0,
                 vec!["a".into(), "agg".into()],
                 MirNodeInner::Filter {
-                    conditions: vec![(
-                        0,
-                        FilterCondition::Comparison(
-                            BinaryOperator::Equal,
-                            Value::Constant(1.into()),
-                        ),
-                    )],
+                    conditions: condition_expression_1.clone(),
+                    remapped_exprs_to_parent_names: None,
                 },
                 vec![grp.clone()],
                 vec![],
@@ -312,7 +315,9 @@ mod tests {
 
             // The filter has to filter on the correct field
             match &fil.borrow().inner {
-                MirNodeInner::Filter { conditions } => assert_eq!(conditions.first().unwrap().0, 1),
+                MirNodeInner::Filter { conditions, .. } => {
+                    assert_eq!(conditions, &condition_expression_1)
+                }
                 _ => unreachable!(),
             };
         }

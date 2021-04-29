@@ -1,7 +1,15 @@
+use nom_sql::ConditionExpression::{
+    Base, Between, Bracketed, ComparisonOp, ExistsOp, LogicalOp, NegationOp,
+};
+use nom_sql::{
+    Arithmetic, BinaryOperator, ColumnConstraint, ColumnSpecification, ConditionBase,
+    ConditionExpression, ConditionTree, Expression, FunctionExpression, Literal, OrderType,
+};
 use std::collections::HashMap;
 
-use petgraph::graph::NodeIndex;
-
+use crate::controller::Migration;
+use crate::errors::internal_err;
+use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use common::DataType;
 use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
@@ -9,18 +17,13 @@ use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
 use dataflow::ops::project::{BuiltinFunction, Project, ProjectExpression};
 use dataflow::{node, ops};
-use mir::node::{GroupedNodeType, MirNode};
 use mir::node::node_inner::MirNodeInner;
+use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
-use nom_sql::{
-    Arithmetic, BinaryOperator, ColumnConstraint,
-    ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
-};
 
-use crate::controller::Migration;
-use crate::errors::internal_err;
-use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
+use crate::errors::ReadySetError::MirUnsupportedCondition;
+use petgraph::graph::NodeIndex;
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
@@ -117,6 +120,7 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         None,
+                        None,
                     )?
                 }
                 MirNodeInner::Base {
@@ -151,6 +155,7 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         None,
+                        None,
                     )?
                 }
                 MirNodeInner::FilterAggregation {
@@ -159,6 +164,7 @@ fn mir_node_to_flow_parts(
                     ref group_by,
                     ref kind,
                     ref conditions,
+                    ref remapped_exprs_to_parent_names,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
@@ -172,13 +178,25 @@ fn mir_node_to_flow_parts(
                         GroupedNodeType::FilterAggregation(kind.clone()),
                         mig,
                         table_mapping,
-                        Some(conditions),
+                        Some(conditions.clone()),
+                        remapped_exprs_to_parent_names.clone(),
                     )?
                 }
-                MirNodeInner::Filter { ref conditions } => {
+                MirNodeInner::Filter {
+                    ref conditions,
+                    ref remapped_exprs_to_parent_names,
+                } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
-                    make_filter_node(&name, parent, mir_node.columns.as_slice(), conditions, mig)
+
+                    make_filter_node(
+                        &name,
+                        parent,
+                        mir_node.columns.as_slice(),
+                        conditions.clone(),
+                        mig,
+                        remapped_exprs_to_parent_names.clone(),
+                    )?
                 }
                 MirNodeInner::GroupConcat {
                     ref on,
@@ -197,6 +215,7 @@ fn mir_node_to_flow_parts(
                         GroupedNodeType::GroupConcat(separator.to_string()),
                         mig,
                         table_mapping,
+                        None,
                         None,
                     )?
                 }
@@ -306,16 +325,16 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Reuse { ref node } => {
                     match *node.borrow()
-                           .flow_node
-                           .as_ref()
-                           .ok_or_else(|| internal_err("Reused MirNode must have FlowNode"))? {
-                               // "New" => flow node was originally created for the node that we
-                               // are reusing
-                               FlowNode::New(na) |
-                               // "Existing" => flow node was already reused from some other
-                               // MIR node
-                               FlowNode::Existing(na) => FlowNode::Existing(na),
-                        }
+                        .flow_node
+                        .as_ref()
+                        .ok_or_else(|| internal_err("Reused MirNode must have FlowNode"))? {
+                        // "New" => flow node was originally created for the node that we
+                        // are reusing
+                        FlowNode::New(na) |
+                        // "Existing" => flow node was already reused from some other
+                        // MIR node
+                        FlowNode::Existing(na) => FlowNode::Existing(na),
+                    }
                 }
                 MirNodeInner::Union { ref emit } => {
                     invariant_eq!(mir_node.ancestors.len(), emit.len());
@@ -550,17 +569,27 @@ fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    conditions: &[(usize, FilterCondition)],
+    conditions: ConditionExpression,
     mig: &mut Migration,
-) -> FlowNode {
+    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+) -> ReadySetResult<FlowNode> {
+    let mut fields = parent.borrow().columns().to_vec();
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
+
+    let filter_conditions = extract_conditions(
+        &conditions,
+        &mut fields,
+        &parent,
+        remapped_exprs_to_parent_names,
+    )?;
+
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        ops::filter::Filter::new(parent_na, conditions),
+        ops::filter::Filter::new(parent_na, &filter_conditions),
     );
-    FlowNode::New(node)
+    Ok(FlowNode::New(node))
 }
 
 fn make_grouped_node(
@@ -573,24 +602,23 @@ fn make_grouped_node(
     kind: GroupedNodeType,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    conditions: Option<&[(usize, FilterCondition)]>,
+    conditions: Option<ConditionExpression>,
+    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
     invariant!(match kind {
         GroupedNodeType::FilterAggregation(_) => true,
         _ => else_on.is_none() && conditions.is_none(),
     });
-
     let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_node = parent.borrow();
+    let mut fields = parent_node.columns().to_vec();
     let column_names = column_names(columns);
-
-    let over_col_indx = parent.borrow().column_id_for_column(on, table_mapping);
-
+    let over_col_indx = parent_node.column_id_for_column(on, table_mapping);
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, table_mapping))
+        .map(|c| parent_node.column_id_for_column(c, table_mapping))
         .collect::<Vec<_>>();
-
     invariant!(!group_col_indx.is_empty());
 
     let na = match kind {
@@ -607,6 +635,10 @@ fn make_grouped_node(
         GroupedNodeType::FilterAggregation(agg) => {
             let cond = conditions
                 .ok_or_else(|| internal_err("FilterAggregation must have conditions!"))?;
+
+            let filter =
+                extract_conditions(&cond, &mut fields, &parent, remapped_exprs_to_parent_names)?;
+
             mig.add_ingredient(
                 String::from(name),
                 column_names.as_slice(),
@@ -614,7 +646,7 @@ fn make_grouped_node(
                     parent_na,
                     over_col_indx,
                     group_col_indx.as_slice(),
-                    FilterVec::from(Vec::from(cond)),
+                    FilterVec::from(filter),
                     else_on,
                 )?,
             )
@@ -1041,5 +1073,134 @@ fn materialize_leaf_node(
     } else {
         // if no key specified, default to the first column
         mig.maintain(name, na, &[0], operator);
+    }
+}
+
+/// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
+/// and adds it to a vector of conditions.
+fn extract_conditions(
+    conditions: &ConditionExpression,
+    fields: &mut Vec<Column>,
+    parent: &MirNodeRef,
+    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
+    match conditions {
+        LogicalOp(ref ct) => logical_op_to_conditions(ct, fields, &parent),
+        ComparisonOp(ref ct) => to_conditions(ct, fields, &parent, remapped_exprs_to_parent_names),
+        Bracketed(ce) => extract_conditions(&ce, fields, parent, remapped_exprs_to_parent_names),
+        NegationOp(_) => unreachable!("negation should have been removed earlier"),
+        Base(_) => Err(MirUnsupportedCondition()),
+        ConditionExpression::Arithmetic(_) => Err(MirUnsupportedCondition()),
+        ExistsOp(_) => Err(MirUnsupportedCondition()),
+        Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
+    }
+}
+
+/// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
+/// and adds it to a vector of conditions.
+fn to_conditions(
+    ct: &ConditionTree,
+    columns: &mut Vec<Column>,
+    parent: &MirNodeRef,
+    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
+    use dataflow::ops::filter;
+
+    let mut column_from_parent = |col: &nom_sql::Column| -> usize {
+        let mut name = &col.name as &str;
+        if let Some(ref epm) = remapped_exprs_to_parent_names {
+            if let Some(func) = &col.function {
+                if let Some(remapped_name) = epm.get(func.as_ref()) {
+                    // haha remap go brr!
+                    name = remapped_name;
+                }
+            }
+        }
+
+        let absolute_column_ids: Vec<usize> = columns
+            .iter()
+            .map(|c| {
+                // grr NLL
+                let source: Option<usize> =
+                    { parent.borrow().find_source_for_child_column(c, None) };
+                source.unwrap_or_else(|| parent.borrow_mut().add_column(c.clone()))
+            })
+            .collect();
+
+        if let Some(pos) = columns
+            .iter()
+            .rposition(|c| *c.name == *name && c.table == col.table)
+        {
+            absolute_column_ids[pos]
+        } else {
+            // Might occur if the column doesn't exist in the parent; e.g., for
+            // aggregations.  We assume that the column is appended at the end, unless we
+            // have an aggregation, in which case it needs to go before the computed column,
+            // which is last.
+            let col: Column = col.clone().into();
+            let pos = parent.borrow_mut().add_column(col.clone());
+            columns.insert(pos, col);
+            pos
+        }
+    };
+
+    // TODO(malte): we only support one level of condition nesting at this point :(
+    let l = match *ct.left.as_ref() {
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => Ok(column_from_parent(f)),
+        _ => Err(MirUnsupportedCondition()),
+    }?;
+    let f = match *ct.right.as_ref() {
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => Some(
+            FilterCondition::Comparison(ct.operator, filter::Value::Constant(DataType::from(*i))),
+        ),
+        ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
+            Some(FilterCondition::Comparison(
+                ct.operator,
+                filter::Value::Constant(DataType::from(s.clone())),
+            ))
+        }
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => Some(
+            FilterCondition::Comparison(ct.operator, filter::Value::Constant(DataType::None)),
+        ),
+        ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => Some(FilterCondition::In(
+            ll.iter().map(|l| DataType::from(l.clone())).collect(),
+        )),
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => Some(
+            FilterCondition::Comparison(ct.operator, filter::Value::Column(column_from_parent(f))),
+        ),
+        _ => None,
+    }
+    .ok_or_else(|| MirUnsupportedCondition())?;
+
+    let mut filters = Vec::new();
+    filters.push((l, f));
+    Ok(filters)
+}
+
+fn logical_op_to_conditions(
+    ct: &ConditionTree,
+    columns: &mut Vec<Column>,
+    n: &MirNodeRef,
+) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
+    match ct.operator {
+        BinaryOperator::And => {
+            let mut left_filter = match ct.left.as_ref() {
+                ConditionExpression::LogicalOp(ref ct2) => {
+                    logical_op_to_conditions(ct2, columns, n)
+                }
+                ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
+                _ => Err(MirUnsupportedCondition()),
+            }?;
+            let mut right_filter = match ct.right.as_ref() {
+                ConditionExpression::LogicalOp(ref ct2) => {
+                    logical_op_to_conditions(ct2, columns, n)
+                }
+                ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
+                _ => Err(MirUnsupportedCondition()),
+            }?;
+            left_filter.append(&mut right_filter);
+            Ok(left_filter)
+        }
+        _ => Err(MirUnsupportedCondition()),
     }
 }

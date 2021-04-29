@@ -1,5 +1,5 @@
-use mir::node::MirNode;
 use mir::node::node_inner::MirNodeInner;
+use mir::node::MirNode;
 use mir::MirNodeRef;
 use noria::ReadySetError;
 
