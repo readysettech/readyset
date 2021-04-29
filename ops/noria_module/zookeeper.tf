@@ -44,6 +44,7 @@ resource "aws_security_group" "zookeeper" {
     from_port   = 2181
     to_port     = 2181
     protocol    = "tcp"
+    cidr_blocks = var.zookeeper_clients_subnets
     security_groups = concat(
       [
         aws_security_group.noria_server.id,

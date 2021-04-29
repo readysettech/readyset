@@ -222,3 +222,15 @@ variable "allow_ssh" {
   default     = false
   description = "Allow SSH connections from 0.0.0.0/0."
 }
+
+variable "readyset_server_clients" {
+  type        = list(string)
+  default     = []
+  description = "List of subnets that are allowed to connect to Readyset server."
+}
+
+variable "zookeeper_clients_subnets" {
+  type        = list(string)
+  default     = []
+  description = "List of subnets that are allowed to connect to Zookeeper server."
+}

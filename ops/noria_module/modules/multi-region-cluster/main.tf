@@ -15,6 +15,8 @@ module "readyset_primary" {
 
   allow_ssh                 = true
   mysql_allowed_cidr_blocks = ["0.0.0.0/0"]
+  readyset_server_clients   = ["10.1.0.0/16"]
+  zookeeper_clients_subnets = ["10.1.0.0/16"]
 }
 
 module "readyset_secondary" {
@@ -34,6 +36,8 @@ module "readyset_secondary" {
 
   allow_ssh                 = true
   mysql_allowed_cidr_blocks = ["0.0.0.0/0"]
+  readyset_server_clients   = ["10.0.0.0/16"]
+  zookeeper_clients_subnets = ["10.0.0.0/16"]
 }
 
 module "vpc_peering" {
