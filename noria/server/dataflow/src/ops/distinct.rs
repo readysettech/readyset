@@ -1,12 +1,13 @@
-use noria::ReadySetError;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use maplit::hashmap;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::{internal_err, ReadySetResult};
 use noria::unsupported;
+use std::convert::TryInto;
 
 /// This will get distinct records from a set of records compared over a given set of columns
 #[derive(Clone, Serialize, Deserialize)]
@@ -149,15 +150,11 @@ impl Ingredient for Distinct {
         self.us = Some(remap[&us]);
     }
 
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
-    }
-
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn requires_full_materialization(&self) -> bool {

@@ -1,13 +1,15 @@
 mod expression;
 
 use nom_sql::SqlType;
-use noria::{internal, ReadySetError};
+use noria::internal;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 pub use expression::{BuiltinFunction, ProjectExpression};
 use noria::errors::ReadySetResult;
+use std::convert::TryInto;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
@@ -42,17 +44,6 @@ impl Project {
             src: src.into(),
             cols: 0,
             us: None,
-        }
-    }
-
-    fn resolve_col(&self, col: usize) -> Result<usize, ReadySetError> {
-        if self.emit.is_some() && col >= self.emit.as_ref().unwrap().len() {
-            internal!(
-                "can't resolve literal col {} that doesn't come from parent node!",
-                col
-            )
-        } else {
-            Ok(self.emit.as_ref().map_or(col, |emit| emit[col]))
         }
     }
 
@@ -238,8 +229,32 @@ impl Ingredient for Project {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), self.resolve_col(col)?)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        let mapped_cols = cols
+            .iter()
+            .filter_map(|&x| {
+                if self
+                    .emit
+                    .as_ref()
+                    .map(|emit| x >= emit.len())
+                    .unwrap_or(false)
+                {
+                    None
+                } else {
+                    Some(self.emit.as_ref().map_or(x, |emit| emit[x]))
+                }
+            })
+            .collect::<Vec<_>>();
+        if mapped_cols.len() != cols.len() {
+            Ok(ColumnSource::RequiresFullReplay(vec1![self
+                .src
+                .as_global()]))
+        } else {
+            Ok(ColumnSource::exact_copy(
+                self.src.as_global(),
+                mapped_cols.try_into().unwrap(),
+            ))
+        }
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -272,18 +287,6 @@ impl Ingredient for Project {
             }
         };
         format!("π[{}]", emit_cols.join(", "))
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        let result = if self.emit.is_some() && column >= self.emit.as_ref().unwrap().len() {
-            None
-        } else {
-            Some(self.resolve_col(column)?)
-        };
-        Ok(vec![(self.src.as_global(), result)])
     }
 }
 
@@ -696,6 +699,6 @@ mod tests {
     #[test]
     fn it_fails_to_resolve_literal() {
         let p = setup(false, false, true);
-        assert!(p.node().resolve(2).is_err());
+        assert!(p.node().resolve(2).unwrap().is_none());
     }
 }

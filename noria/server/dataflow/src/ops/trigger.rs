@@ -1,9 +1,11 @@
 use maplit::hashmap;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::{internal_err, ReadySetResult};
-use noria::ReadySetError;
+
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 /// A Trigger data-flow operator.
 ///
@@ -132,19 +134,15 @@ impl Ingredient for Trigger {
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn description(&self, _: bool) -> String {
         "T".into()
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
     }
 
     // Trigger nodes require full materialization because we want group universes

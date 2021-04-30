@@ -1,7 +1,7 @@
 use launchpad::hash::hash;
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::{internal, invariant, ReadySetError};
+use noria::{internal, invariant};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -13,6 +13,7 @@ use std::ops::Index;
 
 use crate::prelude::*;
 
+use crate::processing::ColumnSource;
 use nom_sql::OrderType;
 use noria::errors::{internal_err, ReadySetResult};
 
@@ -363,8 +364,11 @@ impl Ingredient for TopK {
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -379,10 +383,6 @@ impl Ingredient for TopK {
             .collect::<Vec<_>>()
             .join(", ");
         format!("TopK γ[{}]", group_cols)
-    }
-
-    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(col))])
     }
 
     fn is_selective(&self) -> bool {

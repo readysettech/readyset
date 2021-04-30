@@ -1,10 +1,11 @@
-use noria::ReadySetError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::ReadySetResult;
+use std::convert::TryInto;
 
 /// The operator we're comparing on for a [`ParamFilter`]
 ///
@@ -71,11 +72,16 @@ impl Ingredient for ParamFilter {
         HashMap::new()
     }
 
-    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        if i == self.emit_key {
-            Ok(None)
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        if cols.iter().any(|&col| col >= self.emit_key) {
+            Ok(ColumnSource::RequiresFullReplay(vec1![self
+                .src
+                .as_global()]))
         } else {
-            Ok(Some(vec![(self.src.as_global(), i)]))
+            Ok(ColumnSource::exact_copy(
+                self.src.as_global(),
+                cols.try_into().unwrap(),
+            ))
         }
     }
 
@@ -101,20 +107,6 @@ impl Ingredient for ParamFilter {
         _states: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
         Ok(ProcessingResult::default())
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(
-            self.src.as_global(),
-            if column == self.emit_key {
-                None
-            } else {
-                Some(column)
-            },
-        )])
     }
 
     fn can_query_through(&self) -> bool {

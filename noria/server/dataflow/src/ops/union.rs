@@ -1,10 +1,11 @@
-use noria::{invariant, KeyComparison, ReadySetError};
+use noria::{invariant, KeyComparison};
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use vec1::Vec1;
 
 use crate::prelude::*;
+use crate::processing::{ColumnRef, ColumnSource};
 use noria::errors::ReadySetResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -795,13 +796,26 @@ impl Ingredient for Union {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
         match self.emit {
-            Emit::AllFrom(p, _) => Ok(Some(vec![(p.as_global(), col)])),
-            Emit::Project { ref emit, .. } => Ok(Some(
+            Emit::AllFrom(p, _) => Ok(ColumnSource::exact_copy(
+                p.as_global(),
+                cols.try_into().unwrap(),
+            )),
+            Emit::Project { ref emit, .. } => Ok(ColumnSource::Union(
                 emit.iter()
-                    .map(|(src, emit)| (src.as_global(), emit[col]))
-                    .collect(),
+                    .map(|(src, emit)| ColumnRef {
+                        node: src.as_global(),
+                        columns: cols
+                            .iter()
+                            .map(|&idx| emit[idx])
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .unwrap(),
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
             )),
         }
     }
@@ -826,16 +840,6 @@ impl Ingredient for Union {
                     .collect::<Vec<_>>()
                     .join(" ⋃ ")
             }
-        }
-    }
-
-    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        match self.emit {
-            Emit::AllFrom(p, _) => Ok(vec![(p.as_global(), Some(col))]),
-            Emit::Project { ref emit, .. } => Ok(emit
-                .iter()
-                .map(|(src, emit)| (src.as_global(), Some(emit[col])))
-                .collect()),
         }
     }
 }

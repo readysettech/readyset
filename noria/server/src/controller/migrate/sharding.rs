@@ -472,7 +472,9 @@ pub fn shard(
             }
 
             let src_cols = graph[p].parent_columns(col)?;
-            if src_cols.len() != 1 {
+            // FIXME(eta): since joins now return only one parent after the column_source redesign,
+            //             we have to hackily special-case them out here; see ENG-216
+            if graph[p].is_join() || src_cols.len() != 1 {
                 // TODO: technically we could push the sharder to all parents here
                 continue;
             }
@@ -786,10 +788,20 @@ pub fn validate(
 
                 if !equal {
                     internal!(
-                        "invalid sharding: {} sharded by {:?} != {}'s {:?}",
+                        "invalid sharding: {} ({}) sharded by {:?} != {} ({})'s {:?}",
                         in_ni.index(),
+                        if graph[in_ni].is_internal() {
+                            graph[in_ni].description(true)
+                        } else {
+                            "ext".into()
+                        },
                         in_sharding,
                         node.index(),
+                        if graph[node].is_internal() {
+                            graph[node].description(true)
+                        } else {
+                            "ext".into()
+                        },
                         graph[node].sharded_by(),
                     );
                 }
