@@ -1,7 +1,8 @@
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use maplit::hashmap;
 use noria::errors::{internal_err, ReadySetResult};
-use noria::ReadySetError;
+
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use vec1::vec1;
@@ -194,12 +195,16 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        // We can't resolve the rewritten column
-        if col == self.rw_col {
-            Ok(None)
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        if cols.iter().any(|&col| col == self.rw_col) {
+            Ok(ColumnSource::RequiresFullReplay(vec1![self
+                .src
+                .as_global()]))
         } else {
-            Ok(Some(vec![(self.src.as_global(), col)]))
+            Ok(ColumnSource::exact_copy(
+                self.src.as_global(),
+                cols.try_into().unwrap(),
+            ))
         }
     }
 
@@ -209,13 +214,6 @@ impl Ingredient for Rewrite {
         }
 
         format!("Rw[{}]", self.rw_col)
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 

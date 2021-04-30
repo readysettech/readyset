@@ -397,8 +397,7 @@ impl Materializations {
                     break;
                 }
 
-                let paths =
-                    keys::provenance_of(graph, ni, &index.columns[..], plan::Plan::on_join(graph))?;
+                let paths = keys::provenance_of(graph, ni, &index.columns[..])?;
 
                 for path in paths {
                     for (pni, cols) in path.into_iter().skip(1) {
@@ -585,12 +584,7 @@ impl Materializations {
                 }
 
                 for index in added {
-                    let paths = keys::provenance_of(
-                        graph,
-                        ni,
-                        &index.columns[..],
-                        plan::Plan::on_join(graph),
-                    )?;
+                    let paths = keys::provenance_of(graph, ni, &index.columns[..])?;
 
                     for path in paths {
                         for (pni, columns) in path {
@@ -690,9 +684,7 @@ impl Materializations {
                     // we want to resolve col all the way to its nearest materialized ancestor.
                     // and then check whether any other cols of the parent alias that source column
                     let columns: Vec<_> = (0..n.fields().len()).collect();
-                    for path in
-                        keys::provenance_of(graph, parent, &columns[..], |_, _, _| Ok(None))?
-                    {
+                    for path in keys::provenance_of(graph, parent, &columns[..])? {
                         let (mat_anc, cols) = path
                             .into_iter()
                             .skip_while(|&(n, _)| !self.have.contains_key(&n))

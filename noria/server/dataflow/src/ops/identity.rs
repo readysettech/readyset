@@ -1,8 +1,9 @@
-use noria::ReadySetError;
 use std::collections::HashMap;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::ReadySetResult;
+use std::convert::TryInto;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
@@ -52,19 +53,15 @@ impl Ingredient for Identity {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn description(&self, _: bool) -> String {
         "≡".into()
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 

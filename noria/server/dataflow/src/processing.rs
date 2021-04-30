@@ -1,6 +1,6 @@
 use derive_more::From;
 use launchpad::intervals::BoundFunctor;
-use noria::{KeyComparison, ReadySetError};
+use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -138,6 +138,66 @@ impl<'a> ReplayContext<'a> {
     }
 }
 
+/// A reference to one or more of a node's columns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnRef {
+    /// The index of the referenced node.
+    pub node: NodeIndex,
+    /// The referenced column indices.
+    pub columns: Vec1<usize>,
+}
+
+/// A miss on a node's column(s).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnMiss {
+    /// Which columns the miss occurred on.
+    pub missed_columns: ColumnRef,
+    /// The keys that we missed on.
+    pub missed_key: Vec1<KeyComparison>,
+}
+
+/// A description of where some node columns come from, used by the materialization planner
+/// to build replay paths for the columns.
+///
+/// This API operates on the *index* level, not the individual column level; indexing e.g. a join
+/// by `[0, 1]` when columns 0 and 1 come from different parents is a very different thing to
+/// indexing by `[0]` and `[1]` separately, because the replay logic has to change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColumnSource {
+    /// These columns are an exact copy of those referenced in the [`ColumnRef`].
+    /// A miss on these columns can therefore be 1:1 mapped to a miss on the referenced columns.
+    ExactCopy(ColumnRef),
+    /// These columns are part of a union node.
+    /// A miss on these columns should trigger multiple replays through this node through all of
+    /// the referenced columns.
+    Union(Vec1<ColumnRef>),
+    /// The node does some internal logic to generate these columns from one or more parents,
+    /// referenced by [`ColumnRef`]s.
+    ///
+    /// Replay paths will be built for each reference provided here, and replay paths for the
+    /// generated columns on this node will terminate at this node.
+    ///
+    /// **NOTE:** A miss on these columns will result in a call to [`Ingredient::handle_upquery`].
+    /// You MUST read and understand the API docs for that function before returning this from a new
+    /// ingredient implementation.
+    GeneratedFromColumns(Vec1<ColumnRef>),
+    /// This column has no clear mapping to a set of parent columns; misses on this column require
+    /// a full replay from all base tables reachable through the given parents to resolve.
+    ///
+    /// NOTE: this always forces full materialization currently.
+    RequiresFullReplay(Vec1<NodeIndex>),
+}
+
+impl ColumnSource {
+    /// Helper function to make a [`ColumnSource::ExactCopy`] with the provided information.
+    pub fn exact_copy(index: NodeIndex, cols: Vec1<usize>) -> Self {
+        ColumnSource::ExactCopy(ColumnRef {
+            node: index,
+            columns: cols,
+        })
+    }
+}
+
 pub(crate) trait Ingredient
 where
     Self: Send,
@@ -148,8 +208,14 @@ where
 
     fn ancestors(&self) -> Vec<NodeIndex>;
 
-    /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
-    /// replayed if this node's state is to be initialized.
+    /// Dictate which parents are replayed through in the case of full materialization.
+    ///
+    /// The materialization planner will generate replay paths through all of the nodes supplied
+    /// by this API when trying to fully materialize this node. If this API returns `None`, all
+    /// of the node's parents are used.
+    ///
+    /// (The meaning of this API has changed slightly; we now replay through *all* parents returned
+    /// here, instead of choosing one.)
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         None
     }
@@ -160,9 +226,57 @@ where
     /// *compound* key, *not* that multiple columns should be independently indexed.
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index>;
 
-    /// Resolve where the given field originates from. If the view is materialized, or the value is
-    /// otherwise created by this view, None should be returned.
-    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError>;
+    /// Provide information about where the `cols` come from for the materialization planner
+    /// (among other things) to make use of. (See the [`ColumnSource`] docs for more.)
+    ///
+    /// This is used to generate replay paths for [`Ingredient::handle_upquery`], so if you need
+    /// paths to be present for that function to work, you must declare a correct source here.
+    ///
+    /// **NOTE:** You MUST ensure that the returned [`ColumnSource`], if it is a
+    /// [`ColumnSource::ExactCopy`] or [`ColumnSource::Union`], does not change the length of `cols`
+    /// -- i.e. if `column_source` was called with a slice of length 1, the `columns` field in any
+    /// [`ColumnRef`]s returned by this functio must also have length 1, unless the columns are
+    /// generated.
+    ///
+    /// (The above invariant is checked with an assertion in debug builds only.)
+    ///
+    /// (This replaces the old `parent_columns` and `resolve` APIs, which are now gone.)
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource>;
+
+    /// Handle a miss on some columns that were marked as generated by the node's
+    /// [`Ingredient::column_source`] implementation. Using this function is complicated, so read
+    /// this doc comment if you plan on doing so!
+    ///
+    /// This function is called if and only if an upquery is made against a set of columns that
+    /// returned [`ColumnSource::GeneratedFromColumns`] when passed to the [`column_source`] API.
+    ///
+    /// **NOTE:** The returned misses MUST only reference nodes and columns returned by the
+    /// [`column_source`] API.
+    ///
+    /// ## Handling the responses to this API
+    ///
+    /// The responses to the upqueries generated through this API come through
+    /// [`Ingredient::on_input`] as normal.
+    ///
+    /// Ingredients SHOULD buffer these responses internally, and MUST only release records from
+    /// `on_input` when all of the upquery responses have been received (at which point the records
+    /// will be materialized and sent as an upquery response from this ingredient, as usual).
+    ///
+    /// **NOTE:** Ingredients MUST NOT miss while processing responses to this API (doing so is
+    /// a hard error). This restriction may be relaxed later.
+    ///
+    /// ## How this API works internally
+    ///
+    /// The response to the `column_source` API call is used to generate replay paths when the
+    /// materialization planner is run, and also marks the column index as generated.
+    ///
+    /// Column indices marked as generated result in a call to this function when upqueries are
+    /// received for the generated columns. The replay paths set up earlier are then filtered
+    /// to only include those referenced by the returned [`ColumnMiss`] objects, and the key for
+    /// the upqueries along these paths is changed to that specified in the [`ColumnMiss`].
+    fn handle_upquery(&mut self, _miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+        Ok(vec![])
+    }
 
     fn is_join(&self) -> bool {
         false
@@ -297,15 +411,6 @@ where
                 }
             })
     }
-
-    /// Translate a column in this ingredient into the corresponding column(s) in
-    /// parent ingredients. None for the column means that the parent doesn't
-    /// have an associated column. Similar to resolve, but does not depend on
-    /// materialization, and returns results even for computed columns.
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError>;
 
     /// Performance hint: should return true if this operator reduces the size of its input
     fn is_selective(&self) -> bool {

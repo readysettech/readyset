@@ -1,5 +1,5 @@
 use derive_more::From;
-use noria::{KeyComparison, ReadySetError};
+use noria::KeyComparison;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +20,7 @@ pub mod topk;
 pub mod trigger;
 pub mod union;
 
+use crate::processing::{ColumnMiss, ColumnSource};
 pub use msql_srv::MysqlTime;
 
 #[derive(Clone, Serialize, Deserialize, From)]
@@ -98,8 +99,11 @@ impl Ingredient for NodeOperator {
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
-    fn resolve(&self, i: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        impl_ingredient_fn_ref!(self, resolve, i)
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        impl_ingredient_fn_ref!(self, column_source, cols)
+    }
+    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+        impl_ingredient_fn_mut!(self, handle_upquery, miss)
     }
     fn is_join(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_join,)
@@ -184,12 +188,6 @@ impl Ingredient for NodeOperator {
         states: &'a StateMap,
     ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
-    }
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        impl_ingredient_fn_ref!(self, parent_columns, column)
     }
     fn is_selective(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_selective,)

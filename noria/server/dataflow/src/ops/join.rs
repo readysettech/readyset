@@ -1,13 +1,15 @@
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::{internal, ReadySetError};
-use std::collections::HashMap;
-use std::collections::HashSet;
+use noria::internal;
+use std::collections::{HashMap, HashSet};
+
 use std::convert::TryInto;
 use std::mem;
+use vec1::vec1;
 
 use crate::prelude::*;
+use crate::processing::{ColumnRef, ColumnSource};
 use noria::errors::{internal_err, ReadySetResult};
 
 /// Kind of join
@@ -203,6 +205,28 @@ impl Join {
             })
             .collect()
     }
+
+    fn resolve_col(&self, col: usize) -> (Option<usize>, Option<usize>) {
+        let (is_left, pcol) = self.emit[col];
+
+        if let Some((on_l, on_r)) = self
+            .on
+            .iter()
+            // if the column comes from the left and is in the join, find the corresponding right
+            // column
+            .find(|(l, _)| is_left && *l == pcol)
+            // otherwise, if the column comes from the right and is in the join, find the
+            // corresponding left column
+            .or_else(|| self.on.iter().find(|(_, r)| !is_left && *r == pcol))
+        {
+            // Join column comes from both parents
+            (Some(*on_l), Some(*on_r))
+        } else if is_left {
+            (Some(pcol), None)
+        } else {
+            (None, Some(pcol))
+        }
+    }
 }
 
 impl Ingredient for Join {
@@ -219,14 +243,7 @@ impl Ingredient for Join {
     }
 
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
-        match self.kind {
-            JoinType::Left => Some(Some(self.left.as_global()).into_iter().collect()),
-            JoinType::Inner => Some(
-                vec![self.left.as_global(), self.right.as_global()]
-                    .into_iter()
-                    .collect(),
-            ),
-        }
+        Some(Some(self.left.as_global()).into_iter().collect())
     }
 
     fn on_connected(&mut self, _g: &Graph) {}
@@ -620,15 +637,6 @@ impl Ingredient for Join {
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        let e = self.emit[col];
-        if e.0 {
-            Ok(Some(vec![(self.left.as_global(), e.1)]))
-        } else {
-            Ok(Some(vec![(self.right.as_global(), e.1)]))
-        }
-    }
-
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return String::from(match self.kind {
@@ -666,29 +674,62 @@ impl Ingredient for Join {
         )
     }
 
-    fn parent_columns(&self, col: usize) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        let (is_left, pcol) = self.emit[col];
-
-        if let Some((on_l, on_r)) = self
-            .on
-            .iter()
-            // if the column comes from the left and is in the join, find the corresponding right
-            // column
-            .find(|(l, _)| is_left && *l == pcol)
-            // otherwise, if the column comes from the right and is in the join, find the
-            // corresponding left column
-            .or_else(|| self.on.iter().find(|(_, r)| !is_left && *r == pcol))
-        {
-            // Join column comes from both parents
-            Ok(vec![
-                (self.left.as_global(), Some(*on_l)),
-                (self.right.as_global(), Some(*on_r)),
-            ])
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        // column indices in the left parent
+        let mut left_cols = vec![];
+        // column indices in the right parent
+        let mut right_cols = vec![];
+        for (left_idx, right_idx) in cols.iter().map(|&col| self.resolve_col(col)) {
+            left_cols.push(left_idx);
+            right_cols.push(right_idx);
+        }
+        if left_cols.iter().all(|x| x.is_some()) {
+            // the left parent has all the columns in `cols`
+            // we can just 1:1 index the left parent and do the joining bits on replay
+            Ok(ColumnSource::exact_copy(
+                self.left.as_global(),
+                left_cols
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            ))
+        } else if self.kind != JoinType::Left && right_cols.iter().all(|x| x.is_some()) {
+            // as long as we aren't a left join, we can do the same thing as above
+            Ok(ColumnSource::exact_copy(
+                self.right.as_global(),
+                right_cols
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            ))
+        } else if self.kind != JoinType::Left {
+            let right_cols = right_cols
+                .into_iter()
+                .enumerate()
+                // don't include columns in the right that also come from the left
+                .filter_map(|(idx, col)| col.filter(|_| left_cols[idx].is_none()))
+                .collect::<Vec<_>>();
+            let left_cols = left_cols.into_iter().flatten().collect::<Vec<_>>();
+            Ok(ColumnSource::GeneratedFromColumns(vec1![
+                ColumnRef {
+                    node: self.left.as_global(),
+                    columns: left_cols.try_into().unwrap()
+                },
+                ColumnRef {
+                    node: self.right.as_global(),
+                    columns: right_cols.try_into().unwrap()
+                },
+            ]))
         } else {
-            Ok(vec![(
-                if is_left { &self.left } else { &self.right }.as_global(),
-                Some(pcol),
-            )])
+            // haven't thought about how to handle left joins yet
+            Ok(ColumnSource::RequiresFullReplay(vec1![
+                self.left.as_global(),
+                self.right.as_global()
+            ]))
         }
     }
 }
@@ -835,21 +876,10 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves() {
-        let (g, l, r) = setup();
-        assert_eq!(g.node().resolve(0).unwrap(), Some(vec![(l.as_global(), 0)]));
-        assert_eq!(g.node().resolve(1).unwrap(), Some(vec![(l.as_global(), 1)]));
-        assert_eq!(g.node().resolve(2).unwrap(), Some(vec![(r.as_global(), 1)]));
-    }
-
-    #[test]
     fn parent_join_columns() {
-        let (g, l, r) = setup();
+        let (g, l, _) = setup();
         let res = g.node().parent_columns(0).unwrap();
-        assert_eq!(
-            res,
-            vec![(l.as_global(), Some(0)), (r.as_global(), Some(0))]
-        );
+        assert_eq!(res, vec![(l.as_global(), Some(0))]);
     }
 
     mod compound_keys {

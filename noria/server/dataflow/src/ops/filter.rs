@@ -1,5 +1,5 @@
 use derive_more::{Deref, From, Into};
-use noria::ReadySetError;
+
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -7,8 +7,10 @@ use std::fmt::{self, Display};
 use std::sync;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
+use std::convert::TryInto;
 
 /// FilterVec represents set of constraints on columns against which a record can be checked
 /// Used in Filter operators and aggregations with case statements
@@ -161,8 +163,11 @@ impl Ingredient for Filter {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -192,13 +197,6 @@ impl Ingredient for Filter {
 
                 result.map(|rs| Box::new(rs.filter(move |r| filter(r))) as Box<_>)
             })
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
     }
 
     fn is_selective(&self) -> bool {

@@ -68,7 +68,7 @@ impl<'a> Plan<'a> {
     ) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
-        let paths = keys::provenance_of(graph, ni, &columns[..], Self::on_join(&self.graph))?;
+        let paths = keys::provenance_of(graph, ni, &columns[..])?;
 
         // cut paths so they only reach to the the closest materialized node
         let mut paths: Vec<_> = paths
@@ -628,91 +628,6 @@ impl<'a> Plan<'a> {
             assert!(self.pending.is_empty());
         }
         Ok((self.pending, self.paths))
-    }
-
-    pub(super) fn on_join<'b>(
-        graph: &'b Graph,
-    ) -> impl FnMut(
-        NodeIndex,
-        &[Option<usize>],
-        &[NodeIndex],
-    ) -> Result<Option<NodeIndex>, ReadySetError>
-           + 'b {
-        move |node, cols, parents| {
-            // this function should only be called when there's a choice
-            assert!(parents.len() > 1);
-
-            // and only internal nodes have multiple parents
-            let n = &graph[node];
-            assert!(n.is_internal());
-
-            // keep track of remaining parents
-            let mut parents = Vec::from(parents);
-
-            // the node dictates that we *must* replay the state of some ancestor(s)
-            let options = n
-                .must_replay_among()
-                .expect("join did not have must replay preference");
-            parents.retain(|&parent| options.contains(&parent));
-            assert!(!parents.is_empty());
-
-            // we want to prefer source paths where we can translate all keys for the purposes of
-            // partial -- but this only matters if we haven't already lost some keys.
-            if cols.iter().all(Option::is_some) {
-                let first = cols[0].unwrap();
-
-                let mut universal_src = Vec::new();
-                for (src, col) in n.parent_columns(first)? {
-                    if src == node || col.is_none() {
-                        continue;
-                    }
-                    if !options.contains(&src) {
-                        // we can't choose to use this parent anyway
-                        continue;
-                    }
-
-                    // if all other columns resolve into this src, then only keep those srcs
-                    // XXX: this is pretty inefficient, but meh...
-                    let also_to_src = cols.iter().skip(1).map(|c| c.unwrap()).all(|c| {
-                        match n.parent_columns(c) {
-                            Err(_) => false,
-                            Ok(c) => c
-                                .into_iter()
-                                .find(|&(this_src, _)| this_src == src)
-                                .and_then(|(_, c)| c)
-                                .is_some(),
-                        }
-                    });
-
-                    if also_to_src {
-                        universal_src.push(src);
-                    }
-                }
-
-                if !universal_src.is_empty() {
-                    parents = universal_src;
-                }
-            } else {
-                // no ancestor has all the index columns, so any will do (and we won't be partial).
-            }
-
-            // if there is only one left, we don't really have a choice
-            if parents.len() == 1 {
-                // no need to pick
-                return Ok(parents.pop());
-            }
-
-            // ensure that our choice of multiple possible parents is deterministic
-            parents.sort_by_key(|p| p.index());
-
-            // TODO:
-            // if any required parent is empty, and we know we're building a full materialization,
-            // the join must be empty (since outer join targets aren't required), and therefore
-            // we can just pick that parent and get a free full materialization.
-
-            // any choice is fine
-            Ok(Some(parents[0]))
-        }
     }
 
     fn setup_packet_filter(&mut self) -> ReadySetResult<()> {

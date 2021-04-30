@@ -1,10 +1,11 @@
 use maplit::hashmap;
-use noria::ReadySetError;
+
 use std::collections::HashMap;
 use std::convert::TryInto;
 use vec1::vec1;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::{internal_err, ReadySetResult};
 
 /// Latest provides an operator that will maintain the last record for every group.
@@ -134,8 +135,11 @@ impl Ingredient for Latest {
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        Ok(Some(vec![(self.src.as_global(), col)]))
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        Ok(ColumnSource::exact_copy(
+            self.src.as_global(),
+            cols.try_into().unwrap(),
+        ))
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -144,13 +148,6 @@ impl Ingredient for Latest {
         } else {
             format!("⧖ γ[{}]", self.key)
         }
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        Ok(vec![(self.src.as_global(), Some(column))])
     }
 }
 

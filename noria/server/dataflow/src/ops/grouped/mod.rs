@@ -1,4 +1,3 @@
-use noria::ReadySetError;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -9,6 +8,7 @@ use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
+use crate::processing::ColumnSource;
 use noria::errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
@@ -320,25 +320,25 @@ where
         }
     }
 
-    fn resolve(&self, col: usize) -> Result<Option<Vec<(NodeIndex, usize)>>, ReadySetError> {
-        if col == self.group_by.len() {
-            return Ok(None);
+    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        let mapped_cols = cols
+            .iter()
+            .filter_map(|x| self.group_by.get(*x).copied())
+            .collect::<Vec<_>>();
+        if mapped_cols.len() != cols.len() {
+            Ok(ColumnSource::RequiresFullReplay(vec1![self
+                .src
+                .as_global()]))
+        } else {
+            Ok(ColumnSource::exact_copy(
+                self.src.as_global(),
+                mapped_cols.try_into().unwrap(),
+            ))
         }
-        Ok(Some(vec![(self.src.as_global(), self.group_by[col])]))
     }
 
     fn description(&self, detailed: bool) -> String {
         self.inner.description(detailed)
-    }
-
-    fn parent_columns(
-        &self,
-        column: usize,
-    ) -> Result<Vec<(NodeIndex, Option<usize>)>, ReadySetError> {
-        if column == self.group_by.len() {
-            return Ok(vec![(self.src.as_global(), None)]);
-        }
-        Ok(vec![(self.src.as_global(), Some(self.group_by[column]))])
     }
 
     fn is_selective(&self) -> bool {
