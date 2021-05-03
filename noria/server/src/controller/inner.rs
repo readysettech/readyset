@@ -1258,7 +1258,7 @@ impl ControllerInner {
                 let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
-                let mut view = rgb.map(|rgb| rgb.build(x.clone())).unwrap();
+                let mut view = rgb.map(|rgb| rgb.build(None, x.clone())).unwrap();
                 let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
                     .unwrap()
                     .iter()

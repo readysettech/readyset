@@ -395,12 +395,41 @@ pub struct ReplicaShard {
     pub region: Option<String>,
 }
 
+// This function assumes that `replicas` is not empty.
+fn view_replica_for_region(region: String, replicas: &[ViewReplica]) -> &ViewReplica {
+    replicas
+        .iter()
+        .map(|vr| {
+            // Map each replica to a pair of <ViewReplica, percent of shards in region>.
+            let num_replicas = vr
+                .shards
+                .iter()
+                .filter(|s| s.region == Some(region.clone()))
+                .count();
+            (vr, num_replicas as u32 * 100 / vr.shards.len() as u32)
+        })
+        .max_by_key(|p| p.1) // Take replica with the highest percent.
+        .unwrap()
+        .0
+}
+
 impl ViewBuilder {
-    /// Build a `View` out of a `ViewBuilder`
+    /// Selects the replica from `replicas` that has the highest fraction of replica
+    /// shards in `region`.
+    /// Build a `View` out of a `ViewBuilder`. If `region` is specified,
+    /// this selects the reader replica with the most shards in the requested
+    /// region.
     #[doc(hidden)]
-    pub fn build(&self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>) -> View {
-        // TODO(justin): Replace this with replica selection based on location.
-        let replica = &self.replicas[0];
+    pub fn build(
+        &self,
+        region: Option<String>,
+        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
+    ) -> View {
+        let replica = if let Some(region) = region {
+            view_replica_for_region(region, &self.replicas)
+        } else {
+            &self.replicas[0]
+        };
 
         let node = replica.node;
         let columns = replica.columns.clone();
@@ -718,6 +747,12 @@ impl View {
     /// Get the schema definition of this view.
     pub fn schema(&self) -> Option<&[ColumnSpecification]> {
         self.schema.as_deref()
+    }
+
+    /// Get the NodeIndex of the dataflow node that this
+    /// view refers to.
+    pub fn node(&self) -> &NodeIndex {
+        &self.node
     }
 
     /// Get the current size of this view.
