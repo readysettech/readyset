@@ -374,8 +374,14 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let views = self.views.clone();
         async move {
+            let region: Option<String> =
+                if let Some(ViewFilter::Region(region)) = &view_request.filter {
+                    Some(region.clone())
+                } else {
+                    None
+                };
             let view_builder = self.view_builder(view_request).await?;
-            Ok(view_builder.build(views))
+            Ok(view_builder.build(region, views))
         }
     }
 

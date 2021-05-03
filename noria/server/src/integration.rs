@@ -4728,7 +4728,7 @@ async fn test_view_includes_replicas() {
         false,
         false,
         authority.clone(),
-        Some("r1".into()),
+        Some("r2".into()),
     )
     .await;
 
@@ -4784,10 +4784,21 @@ async fn test_view_includes_replicas() {
     };
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 2);
-    // Verify that each replica has one shard and that it's region was
-    // set appropriately.
-    assert_eq!(q.replicas[0].shards[0].region, Some("r1".to_string()));
-    assert_eq!(q.replicas[1].shards[0].region, Some("r1".to_string()));
+
+    // Verify that the replicas match the regions specified above.
+    let r2_node = if q.replicas[0].shards[0].region == Some("r1".to_string()) {
+        assert_eq!(q.replicas[1].shards[0].region, Some("r2".to_string()));
+        q.replicas[1].node
+    } else {
+        assert_eq!(q.replicas[1].shards[0].region, Some("r1".to_string()));
+        q.replicas[0].node
+    };
+
+    // Verify this selects reader nodes with the correct region.
+    let result = w1.view_from_region("q", "r2".into()).await;
+    assert!(result.is_ok());
+
+    assert_eq!(result.unwrap().node().index(), r2_node.index());
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
