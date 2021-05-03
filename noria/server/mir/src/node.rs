@@ -23,7 +23,6 @@ pub enum GroupedNodeType {
     // optimization and rewrite logic.
     // However, the internal operator is the same as a normal aggregation.
     FilterAggregation(ops::grouped::aggregate::Aggregation),
-    GroupConcat(String),
 }
 
 pub struct MirNode {
@@ -369,9 +368,7 @@ impl MirNode {
 
         // + any parent columns referenced internally by the operator
         match self.inner {
-            MirNodeInner::Aggregation { ref on, .. }
-            | MirNodeInner::Extremum { ref on, .. }
-            | MirNodeInner::GroupConcat { ref on, .. } => {
+            MirNodeInner::Aggregation { ref on, .. } | MirNodeInner::Extremum { ref on, .. } => {
                 // need the "over" column
                 if !columns.contains(on) {
                     columns.push(on.clone());
@@ -662,7 +659,7 @@ mod tests {
                 MirNodeInner::Aggregation {
                     on: "z".into(),
                     group_by: vec!["x".into()],
-                    kind: AggregationKind::COUNT,
+                    kind: AggregationKind::Count,
                 },
                 vec![],
                 vec![],

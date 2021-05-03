@@ -934,7 +934,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::SUM),
+                GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
                 None,
             ),
@@ -949,7 +949,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::SUM),
+                GroupedNodeType::FilterAggregation(Aggregation::Sum),
                 false,
                 Some(condition.clone()),
             ),
@@ -964,7 +964,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::FilterAggregation(Aggregation::SUM),
+                GroupedNodeType::FilterAggregation(Aggregation::Sum),
                 false,
                 Some(condition.clone()),
             ),
@@ -972,7 +972,7 @@ impl SqlToMirConverter {
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::SUM),
+                GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
                 None,
             ),
@@ -991,7 +991,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::COUNT),
+                GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
                 None,
             ),
@@ -1006,7 +1006,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::COUNT),
+                GroupedNodeType::FilterAggregation(Aggregation::Count),
                 false,
                 Some(condition.clone()),
             ),
@@ -1021,7 +1021,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::FilterAggregation(Aggregation::COUNT),
+                GroupedNodeType::FilterAggregation(Aggregation::Count),
                 false,
                 Some(condition.clone()),
             ),
@@ -1029,7 +1029,7 @@ impl SqlToMirConverter {
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::COUNT),
+                GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
                 None,
             ),
@@ -1039,7 +1039,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::AVG),
+                GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
                 None,
             ),
@@ -1054,7 +1054,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::AVG),
+                GroupedNodeType::FilterAggregation(Aggregation::Avg),
                 false,
                 Some(condition.clone()),
             ),
@@ -1069,7 +1069,7 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::FilterAggregation(Aggregation::AVG),
+                GroupedNodeType::FilterAggregation(Aggregation::Avg),
                 false,
                 Some(condition.clone()),
             ),
@@ -1077,7 +1077,7 @@ impl SqlToMirConverter {
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Aggregation(Aggregation::AVG),
+                GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
                 None,
             ),
@@ -1119,18 +1119,9 @@ impl SqlToMirConverter {
             } => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::GroupConcat(separator.clone()),
-                false,
-                None,
-            ),
-            GroupConcat {
-                ref expr,
-                ref separator,
-            } => mknode(
-                // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
-                None,
-                GroupedNodeType::GroupConcat(separator.clone()),
+                GroupedNodeType::Aggregation(Aggregation::GroupConcat {
+                    separator: separator.clone(),
+                }),
                 false,
                 None,
             ),
@@ -1205,17 +1196,6 @@ impl SqlToMirConverter {
                     vec![],
                 )
             }
-            GroupedNodeType::GroupConcat(sep) => MirNode::new(
-                name,
-                self.schema_version,
-                combined_columns,
-                MirNodeInner::GroupConcat {
-                    on: over_col.clone(),
-                    separator: sep,
-                },
-                vec![parent_node.clone()],
-                vec![],
-            ),
         }
     }
 

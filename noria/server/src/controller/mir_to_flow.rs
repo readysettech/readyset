@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::controller::Migration;
 use crate::errors::internal_err;
+use crate::manual::ops::grouped::aggregate::Aggregation;
 use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use common::DataType;
 use dataflow::ops::filter::{FilterCondition, FilterVec};
@@ -196,27 +197,6 @@ fn mir_node_to_flow_parts(
                         conditions.clone(),
                         mig,
                         remapped_exprs_to_parent_names.clone(),
-                    )?
-                }
-                MirNodeInner::GroupConcat {
-                    ref on,
-                    ref separator,
-                } => {
-                    invariant_eq!(mir_node.ancestors.len(), 1);
-                    let parent = mir_node.ancestors[0].clone();
-                    let group_cols = parent.borrow().columns().to_vec();
-                    make_grouped_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        on,
-                        None,
-                        &group_cols,
-                        GroupedNodeType::GroupConcat(separator.to_string()),
-                        mig,
-                        table_mapping,
-                        None,
-                        None,
                     )?
                 }
                 MirNodeInner::Identity => {
@@ -622,6 +602,15 @@ fn make_grouped_node(
     invariant!(!group_col_indx.is_empty());
 
     let na = match kind {
+        // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat to
+        // be an aggregation, however once we are in dataflow land the logic has not been merged yet.
+        // For this reason, we need to pattern match for a groupconcat aggregation before we pattern
+        // match for a generic aggregation.
+        GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
+            use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
+            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)?;
+            mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
+        }
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
             String::from(name),
             column_names.as_slice(),
@@ -650,11 +639,6 @@ fn make_grouped_node(
                     else_on,
                 )?,
             )
-        }
-        GroupedNodeType::GroupConcat(sep) => {
-            use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)?;
-            mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
         }
     };
     Ok(FlowNode::New(na))

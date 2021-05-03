@@ -244,7 +244,7 @@ mod tests {
                 MirNodeInner::Aggregation {
                     on: "b".into(),
                     group_by: vec![],
-                    kind: Aggregation::SUM,
+                    kind: Aggregation::Sum,
                 },
                 vec![base.clone()],
                 vec![],

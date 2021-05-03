@@ -51,11 +51,6 @@ pub enum MirNodeInner {
         // This is the 2nd return value of `project_expressions`.
         remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
     },
-    /// over column, separator
-    GroupConcat {
-        on: Column,
-        separator: String,
-    },
     /// no extra info required
     Identity,
     /// left node, right node, on left columns, on right columns, emit columns
@@ -429,9 +424,12 @@ impl Debug for MirNodeInner {
                 ref kind,
             } => {
                 let op_string = match *kind {
-                    Aggregation::COUNT => format!("|*|({})", on.name.as_str()),
-                    Aggregation::SUM => format!("𝛴({})", on.name.as_str()),
-                    Aggregation::AVG => format!("AVG({})", on.name.as_str()),
+                    Aggregation::Count => format!("|*|({})", on.name.as_str()),
+                    Aggregation::Sum => format!("𝛴({})", on.name.as_str()),
+                    Aggregation::Avg => format!("AVG({})", on.name.as_str()),
+                    Aggregation::GroupConcat { separator: ref s } => {
+                        format!("||([{}], \"{}\")", on.name.as_str(), s.as_str())
+                    }
                 };
                 let group_cols = group_by
                     .iter()
@@ -485,9 +483,12 @@ impl Debug for MirNodeInner {
                 remapped_exprs_to_parent_names: _,
             } => {
                 let op_string = match *kind {
-                    Aggregation::COUNT => format!("|*|(filter {})", on.name.as_str()),
-                    Aggregation::SUM => format!("𝛴(filter {})", on.name.as_str()),
-                    Aggregation::AVG => format!("Avg(filter {})", on.name.as_str()),
+                    Aggregation::Count => format!("|*|(filter {})", on.name.as_str()),
+                    Aggregation::Sum => format!("𝛴(filter {})", on.name.as_str()),
+                    Aggregation::Avg => format!("Avg(filter {})", on.name.as_str()),
+                    Aggregation::GroupConcat { separator: ref s } => {
+                        format!("||([{}], \"{}\")", on.name, s)
+                    }
                 };
                 let group_cols = group_by
                     .iter()
@@ -496,10 +497,6 @@ impl Debug for MirNodeInner {
                     .join(", ");
                 write!(f, "{} γ[{}]", op_string, group_cols)
             }
-            MirNodeInner::GroupConcat {
-                ref on,
-                ref separator,
-            } => write!(f, "||([{}], \"{}\")", on.name, separator),
             MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join {
                 ref on_left,
