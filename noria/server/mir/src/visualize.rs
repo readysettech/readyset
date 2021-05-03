@@ -105,10 +105,13 @@ impl GraphViz for MirNodeInner {
                 ref group_by,
                 ref kind,
             } => {
-                let op_string = match *kind {
-                    AggregationKind::COUNT => format!("\\|*\\|({})", print_col(on)),
-                    AggregationKind::SUM => format!("𝛴({})", print_col(on)),
-                    AggregationKind::AVG => format!("AVG({})", print_col(on)),
+                let op_string = match &*kind {
+                    AggregationKind::Count => format!("\\|*\\|({})", print_col(on)),
+                    AggregationKind::Sum => format!("𝛴({})", print_col(on)),
+                    AggregationKind::Avg => format!("AVG({})", print_col(on)),
+                    AggregationKind::GroupConcat { separator: s } => {
+                        format!("||({}, \"{}\")", print_col(on), s)
+                    }
                 };
                 let group_cols = group_by
                     .iter()
@@ -158,10 +161,13 @@ impl GraphViz for MirNodeInner {
                 ref kind,
                 ..
             } => {
-                let op_string = match *kind {
-                    AggregationKind::COUNT => format!("\\|*\\|(filter {})", print_col(on)),
-                    AggregationKind::SUM => format!("𝛴(filter {})", print_col(on)),
-                    AggregationKind::AVG => format!("Avg(filter {})", print_col(on)),
+                let op_string = match &*kind {
+                    AggregationKind::Count => format!("\\|*\\|(filter {})", print_col(on)),
+                    AggregationKind::Sum => format!("𝛴(filter {})", print_col(on)),
+                    AggregationKind::Avg => format!("Avg(filter {})", print_col(on)),
+                    AggregationKind::GroupConcat { separator: s } => {
+                        format!("||({}, \"{}\")", print_col(on), s)
+                    }
                 };
                 let group_cols = group_by
                     .iter()
@@ -172,12 +178,6 @@ impl GraphViz for MirNodeInner {
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 write!(out, "σ: {}", conditions)?;
-            }
-            MirNodeInner::GroupConcat {
-                ref on,
-                ref separator,
-            } => {
-                write!(out, "||({}, \"{}\")", print_col(on), separator)?;
             }
             MirNodeInner::Identity => {
                 write!(out, "≡")?;

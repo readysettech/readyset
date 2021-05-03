@@ -15,11 +15,13 @@ use noria::{invariant, ReadySetResult};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Aggregation {
     /// Count the number of records for each group. The value for the `over` column is ignored.
-    COUNT,
+    Count,
     /// Sum the value of the `over` column for all records of each group.
-    SUM,
+    Sum,
     /// Average the value of the `over` column. Maintains count and sum in HashMap
-    AVG,
+    Avg,
+    /// Concatenates using the given separator between values.
+    GroupConcat { separator: String },
 }
 
 impl Aggregation {
@@ -231,11 +233,15 @@ impl GroupedOperation for Aggregator {
         let apply_diff =
             |curr: ReadySetResult<DataType>, diff: Self::Diff| -> ReadySetResult<DataType> {
                 match self.op {
-                    Aggregation::COUNT => apply_count(curr?, diff),
-                    Aggregation::SUM => apply_sum(curr?, diff),
-                    Aggregation::AVG => apply_avg(curr?, diff),
+                    Aggregation::Count => apply_count(curr?, diff),
+                    Aggregation::Sum => apply_sum(curr?, diff),
+                    Aggregation::Avg => apply_avg(curr?, diff),
+                    Aggregation::GroupConcat { separator: _ } => unreachable!(
+                        "GroupConcats are separate from the other aggregations in the dataflow."
+                    ),
                 }
             };
+
         diffs.fold(
             Ok(current.unwrap_or(&DataType::Int(0)).deep_clone()),
             apply_diff,
@@ -247,9 +253,12 @@ impl GroupedOperation for Aggregator {
             let filter_str = self.filter.as_ref().map(|_| "σ").unwrap_or("");
 
             return match self.op {
-                Aggregation::COUNT => format!("+{}", filter_str),
-                Aggregation::SUM => format!("𝛴{}", filter_str),
-                Aggregation::AVG => format!("Avg{}", filter_str),
+                Aggregation::Count => format!("+{}", filter_str),
+                Aggregation::Sum => format!("𝛴{}", filter_str),
+                Aggregation::Avg => format!("Avg{}", filter_str),
+                Aggregation::GroupConcat { separator: ref s } => {
+                    format!("||({}, {})", s, filter_str)
+                }
             };
         }
 
@@ -259,16 +268,16 @@ impl GroupedOperation for Aggregator {
             .map(|_| format!("σ({})", self.over))
             .unwrap_or_else(|| self.over.to_string());
         let op_string = match self.op {
-            Aggregation::COUNT => format!(
+            Aggregation::Count => format!(
                 "|{}|",
                 self.filter
                     .as_ref()
                     .map(|_| inner_str)
                     .unwrap_or_else(|| String::from("*"))
             ),
-
-            Aggregation::SUM => format!("𝛴({})", inner_str),
-            Aggregation::AVG => format!("Avg({})", inner_str),
+            Aggregation::Sum => format!("𝛴({})", inner_str),
+            Aggregation::Avg => format!("Avg({})", inner_str),
+            Aggregation::GroupConcat { separator: ref s } => format!("||({}, {})", s, inner_str),
         };
         let group_cols = self
             .group
@@ -285,9 +294,9 @@ impl GroupedOperation for Aggregator {
 
     fn output_col_type(&self) -> Option<nom_sql::SqlType> {
         match self.op {
-            Aggregation::COUNT => Some(SqlType::Bigint(64)),
+            Aggregation::Count => Some(SqlType::Bigint(64)),
             // (atsakiris) not sure if this is the right type? float?
-            Aggregation::AVG => Some(SqlType::Decimal(64, 64)),
+            Aggregation::Avg => Some(SqlType::Decimal(64, 64)),
             _ => None, // Sum can be either an int or float.
         }
     }
@@ -341,26 +350,26 @@ mod tests {
     fn it_describes() {
         let src = 0.into();
 
-        let c = Aggregation::COUNT.over(src, 1, &[0, 2]).unwrap();
+        let c = Aggregation::Count.over(src, 1, &[0, 2]).unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
-        let s = Aggregation::SUM.over(src, 1, &[2, 0]).unwrap();
+        let s = Aggregation::Sum.over(src, 1, &[2, 0]).unwrap();
         assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
 
-        let a = Aggregation::AVG.over(src, 1, &[2, 0]).unwrap();
+        let a = Aggregation::Avg.over(src, 1, &[2, 0]).unwrap();
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
 
-        let cf = Aggregation::COUNT
+        let cf = Aggregation::Count
             .over_filtered(src, 1, &[0, 2], FilterVec::from(vec![]), None)
             .unwrap();
         assert_eq!(cf.description(true), "|σ(1)| γ[0, 2]");
 
-        let sf = Aggregation::SUM
+        let sf = Aggregation::Sum
             .over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None)
             .unwrap();
         assert_eq!(sf.description(true), "𝛴(σ(1)) γ[2, 0]");
 
-        let af = Aggregation::AVG
+        let af = Aggregation::Avg
             .over_filtered(src, 1, &[2, 0], FilterVec::from(vec![]), None)
             .unwrap();
         assert_eq!(af.description(true), "Avg(σ(1)) γ[2, 0]");
@@ -372,7 +381,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_forwards() {
-        let mut c = setup(Aggregation::COUNT, true);
+        let mut c = setup(Aggregation::Count, true);
 
         // Add Group=1, Value=1
         let u: Record = vec![1.into(), 1.into()].into();
@@ -516,7 +525,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn sum_forwards() {
-        let mut c = setup(Aggregation::SUM, true);
+        let mut c = setup(Aggregation::Sum, true);
 
         // Add Group=1, Value=2
         let u: Record = vec![1.into(), 2.into()].into();
@@ -648,8 +657,7 @@ mod tests {
     #[allow(clippy::cognitive_complexity)]
     fn avg_of_integers_forwards() {
         use std::convert::TryFrom;
-
-        let mut c = setup(Aggregation::AVG, true);
+        let mut c = setup(Aggregation::Avg, true);
 
         // Add Group=1, Value=2
         let u: Record = vec![1.into(), 2.into()].into();
@@ -779,8 +787,7 @@ mod tests {
     #[allow(clippy::cognitive_complexity)]
     fn avg_of_decimals_forwards() {
         use std::convert::TryFrom;
-
-        let mut c = setup(Aggregation::AVG, true);
+        let mut c = setup(Aggregation::Avg, true);
 
         // Add [1, 1.25]
         let u: Record = vec![1.into(), DataType::try_from(1.25).unwrap()].into();
@@ -913,8 +920,7 @@ mod tests {
     #[allow(clippy::cognitive_complexity)]
     fn avg_groups_by_multiple_columns() {
         use std::convert::TryFrom;
-
-        let mut c = setup_multicolumn(Aggregation::AVG, true);
+        let mut c = setup_multicolumn(Aggregation::Avg, true);
 
         // Add Group=(1,1), Value=1.25
         let u: Record = vec![1.into(), DataType::try_from(1.25).unwrap(), 1.into()].into();
@@ -996,7 +1002,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_groups_by_multiple_columns() {
-        let mut c = setup_multicolumn(Aggregation::COUNT, true);
+        let mut c = setup_multicolumn(Aggregation::Count, true);
 
         // Add Group=(1,2), Value=1
         let u: Record = vec![1.into(), 1.into(), 2.into()].into();
@@ -1089,7 +1095,7 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "ys"],
-            Aggregation::COUNT
+            Aggregation::Count
                 .over_filtered(s.as_global(), 1, &[0], filter, None)
                 .unwrap(),
             mat,
@@ -1108,7 +1114,7 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "z", "ys"],
-            Aggregation::COUNT
+            Aggregation::Count
                 .over_filtered(s.as_global(), 1, &[0, 2], filter, None)
                 .unwrap(),
             mat,
@@ -1133,7 +1139,7 @@ mod tests {
         g.set_op(
             "identity",
             &["y", "zsum"],
-            Aggregation::SUM
+            Aggregation::Sum
                 .over_filtered(s.as_global(), 2, &[1], filter, None)
                 .unwrap(),
             mat,
@@ -1153,7 +1159,7 @@ mod tests {
         g.set_op(
             "identity",
             &["g", "zsum"],
-            Aggregation::SUM
+            Aggregation::Sum
                 .over_filtered(s.as_global(), 2, &[3], filter, Some(Literal::Integer(6)))
                 .unwrap(),
             mat,
@@ -1556,7 +1562,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();
-        let c = setup(Aggregation::AVG, false);
+        let c = setup(Aggregation::Avg, false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
@@ -1569,7 +1575,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let c = setup(Aggregation::AVG, false);
+        let c = setup(Aggregation::Avg, false);
         assert_eq!(
             c.node().resolve(0).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 0)])
