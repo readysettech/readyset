@@ -2,14 +2,14 @@
 const FORCE_INPUT_YIELD_EVERY: usize = 32;
 
 use super::ChannelCoordinator;
-use crate::coordination::CoordinationPayload;
+use crate::ReadySetResult;
 use ahash::{AHashMap, AHashSet};
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
 use dataflow::{
     payload::SourceChannelIdentifier,
     prelude::{DataType, Executor},
-    Domain, Packet, PollEvent, ProcessResult,
+    Domain, DomainRequest, Packet, PollEvent, ProcessResult,
 };
 use futures_util::{
     sink::Sink,
@@ -25,7 +25,6 @@ use noria::{PacketData, ReadySetError, Tagged};
 use pin_project::pin_project;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time;
 use std::{
@@ -34,10 +33,10 @@ use std::{
     task::{Context, Poll},
 };
 use strawpoll::Strawpoll;
-use stream_cancel::Valve;
 use streamunordered::{StreamUnordered, StreamYield};
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::IntervalStream;
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
@@ -55,8 +54,13 @@ fn read_first_byte(mut stream: tokio::net::TcpStream) -> FirstByte {
     }
 }
 
+pub struct WrappedDomainRequest {
+    pub req: DomainRequest,
+    pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
+}
+
 #[pin_project]
-pub(super) struct Replica {
+pub struct Replica {
     domain: Domain,
     pub(super) log: slog::Logger,
 
@@ -68,15 +72,14 @@ pub(super) struct Replica {
     refresh_sizes: IntervalStream,
 
     #[pin]
-    valve: Valve,
-
-    #[pin]
     incoming: Strawpoll<tokio::net::TcpListener>,
 
     #[pin]
     first_byte: FuturesUnordered<FirstByte>,
 
     locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+
+    requests: tokio::sync::mpsc::Receiver<WrappedDomainRequest>,
 
     #[pin]
     inputs: StreamUnordered<
@@ -105,35 +108,30 @@ pub(super) struct Replica {
 
 impl Replica {
     pub(super) fn new(
-        valve: &Valve,
-        mut domain: Domain,
+        domain: Domain,
         on: tokio::net::TcpListener,
-        external_addr: IpAddr,
         locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
-        ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
+        requests: tokio::sync::mpsc::Receiver<WrappedDomainRequest>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
         let id = domain.id();
         let id = format!("{}.{}", id.0.index(), id.1);
-        let mut domain_addr = on.local_addr().unwrap();
-        domain_addr.set_ip(external_addr);
-        domain.booted(domain_addr);
         Replica {
             coord: cc,
             domain,
             retry: None,
-            valve: valve.clone(),
             incoming: Strawpoll::from(on),
             first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
             inputs: Default::default(),
             outputs: Default::default(),
-            out: Outboxes::new(ctrl_tx),
+            out: Outboxes::new(),
             timeout: Box::new(tokio::time::sleep(Duration::from_secs(3600))),
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             timed_out: false,
+            requests,
         }
     }
 
@@ -335,20 +333,16 @@ impl Replica {
     fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, anyhow::Error> {
         let mut this = self.project();
 
-        if let Poll::Ready(true) = this.valve.poll_closed(cx) {
-            return Ok(false);
-        } else {
-            while let Poll::Ready((stream, _)) = this
-                .incoming
-                .as_mut()
-                .poll_fn(cx, |i, cx| i.poll_accept(cx))
-                .map_err(|e| anyhow::Error::new(e).context("poll_accept"))?
-            {
-                // we know that any new connection to a domain will first send a one-byte
-                // token to indicate whether the connection is from a base or not.
-                debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-                this.first_byte.push(read_first_byte(stream));
-            }
+        while let Poll::Ready((stream, _)) = this
+            .incoming
+            .as_mut()
+            .poll_fn(cx, |i, cx| i.poll_accept(cx))
+            .map_err(|e| anyhow::Error::new(e).context("poll_accept"))?
+        {
+            // we know that any new connection to a domain will first send a one-byte
+            // token to indicate whether the connection is from a base or not.
+            debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
+            this.first_byte.push(read_first_byte(stream));
         }
 
         while let Poll::Ready(Some(r)) = this.first_byte.as_mut().poll_next(cx) {
@@ -473,13 +467,10 @@ struct Outboxes {
 
     // which connections have pending writes
     pending: AHashSet<usize>,
-
-    // for sending messages to the controller
-    ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>,
 }
 
 impl Outboxes {
-    fn new(ctrl_tx: tokio::sync::mpsc::UnboundedSender<CoordinationPayload>) -> Self {
+    fn new() -> Self {
         let mut connections = slab::Slab::new();
 
         // index 0 is reserved
@@ -494,7 +485,6 @@ impl Outboxes {
             domains: Default::default(),
             connections,
             pending: Default::default(),
-            ctrl_tx,
             dirty: false,
         }
     }
@@ -543,10 +533,12 @@ impl Executor for Outboxes {
         }
     }
 
-    fn create_universe(&mut self, universe: HashMap<String, DataType>) {
+    fn create_universe(&mut self, _universe: HashMap<String, DataType>) {
+        /*
         self.ctrl_tx
             .send(CoordinationPayload::CreateUniverse(universe))
             .expect("asked to send to controller, but controller has gone away");
+         */
     }
 
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
@@ -602,6 +594,24 @@ impl Future for Replica {
             if let Poll::Ready(Some(_)) = this.refresh_sizes.poll_next(cx) {
                 // TODO: keep the state size up-to-date continuously?
                 d.update_state_sizes();
+            }
+
+            loop {
+                match this.requests.poll_recv(cx) {
+                    Poll::Ready(Some(req)) => {
+                        let ret = d.domain_request(req.req, out);
+                        if let Err(_) = req.done_tx.send(ret) {
+                            warn!(this.log, "domain request sender hung up");
+                        }
+                    }
+                    Poll::Ready(None) => {
+                        // request stream finished
+                        // TODO: should we finish up remaining work?
+                        warn!(this.log, "domain request stream ended");
+                        return Poll::Ready(Ok(()));
+                    }
+                    Poll::Pending => break,
+                }
             }
 
             macro_rules! process {

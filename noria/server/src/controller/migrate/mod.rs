@@ -21,7 +21,7 @@
 //! Beware, Here be dragons™
 
 use dataflow::prelude::*;
-use dataflow::{node, prelude::Packet};
+use dataflow::{node, DomainRequest};
 use metrics::histogram;
 use nom_sql::BinaryOperator;
 use noria::metrics::recorded;
@@ -30,7 +30,6 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::controller::{ControllerInner, WorkerIdentifier};
-
 pub(crate) mod assignment;
 mod augmentation;
 pub(crate) mod materialization;
@@ -523,7 +522,7 @@ impl<'a> Migration<'a> {
                 mainline.ingredients[nodes[0].0].sharded_by().shards(),
                 &log,
                 nodes,
-                self.worker,
+                self.worker.clone(),
             )?;
             mainline.domains.insert(domain, d);
         }
@@ -558,21 +557,22 @@ impl<'a> Migration<'a> {
             for ni in inform {
                 let n = &mainline.ingredients[ni];
                 let m = match change.clone() {
-                    ColumnChange::Add(field, default) => Box::new(Packet::AddBaseColumn {
+                    ColumnChange::Add(field, default) => DomainRequest::AddBaseColumn {
                         node: n.local_addr(),
                         field,
                         default,
-                    }),
-                    ColumnChange::Drop(column) => Box::new(Packet::DropBaseColumn {
+                    },
+                    ColumnChange::Drop(column) => DomainRequest::DropBaseColumn {
                         node: n.local_addr(),
                         column,
-                    }),
+                    },
                 };
 
                 let domain = mainline.domains.get_mut(&n.domain()).unwrap();
 
-                domain.send_to_healthy(m, &mainline.workers).unwrap();
-                futures_executor::block_on(mainline.replies.wait_for_acks(&domain));
+                domain
+                    .send_to_healthy_blocking::<()>(m, &mainline.workers)
+                    .unwrap();
             }
         }
 
@@ -594,7 +594,6 @@ impl<'a> Migration<'a> {
             &new,
             &mut mainline.domains,
             &mainline.workers,
-            &mut mainline.replies,
         )?;
 
         histogram!(

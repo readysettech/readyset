@@ -31,7 +31,7 @@ async fn main() {
     builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);
 
-    let (mut blender, done) = builder.start_local().await.unwrap();
+    let mut blender = builder.start_local().await.unwrap();
     blender.install_recipe(sql).await.unwrap();
     println!("{}", blender.graphviz().await.unwrap());
 
@@ -70,5 +70,6 @@ async fn main() {
     println!("Reading...");
     println!("{:#?}", awvc.lookup(&[aid.into()], true).await);
 
-    done.await;
+    blender.shutdown();
+    blender.wait_done().await;
 }

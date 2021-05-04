@@ -82,7 +82,7 @@ async fn main() {
         _ => unreachable!(),
     }
 
-    let (mut g, done) = builder.start_local().await.unwrap();
+    let mut g = builder.start_local().await.unwrap();
     {
         g.ready().await.unwrap();
         g.install_recipe(RECIPE).await.unwrap();
@@ -146,6 +146,6 @@ async fn main() {
         println!("replay\t99\t{:.2}\tµs", stats.value_at_quantile(0.99));
         println!("replay\t100\t{:.2}\tµs", stats.max());
     }
-    drop(g);
-    done.await;
+    g.shutdown();
+    g.wait_done().await;
 }

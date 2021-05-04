@@ -2,15 +2,14 @@ use crate::consensus::Authority;
 use crate::metrics::MetricsDump;
 use crate::rpc_err;
 use crate::{ControllerHandle, ReadySetError, ReadySetResult};
-use std::collections::HashMap;
-use std::net::SocketAddr;
+use url::Url;
 
 /// A metrics dump tagged with the address it was received from.
 #[derive(Debug)]
 pub struct TaggedMetricsDump {
-    /// The address of the noria-server the metrics dump was received
+    /// The URI of the noria-server the metrics dump was received
     /// from.
-    pub addr: SocketAddr,
+    pub addr: Url,
     /// The set of dumped metrics.
     pub metrics: MetricsDump,
 }
@@ -35,23 +34,20 @@ where
         })
     }
 
-    /// Retrieves the external address for each noria-server in the deployment.
-    /// The result is a HashMap mapping each worker's internal address to their
-    /// controller's external address.
-    pub async fn get_external_addrs(&mut self) -> ReadySetResult<HashMap<SocketAddr, SocketAddr>> {
-        self.controller.external_addrs().await
+    /// Retrieves the RPC URI for each noria-server in the deployment.
+    pub async fn get_workers(&mut self) -> ReadySetResult<Vec<Url>> {
+        self.controller.workers().await
     }
 
     /// Retrieves metrics from each noria-server in a deployment and aggregates the results
     /// into a single json string.
     pub async fn get_metrics(&mut self) -> ReadySetResult<Vec<TaggedMetricsDump>> {
-        let noria_servers = self.get_external_addrs().await?;
+        let noria_servers = self.get_workers().await?;
 
         // TODO(justin): Do these concurrently and join.
         let mut metrics_dumps: Vec<TaggedMetricsDump> = Vec::with_capacity(noria_servers.len());
-        for (_, external_addr) in noria_servers {
-            let metrics_endpoint =
-                format!("http://{}/metrics_dump", external_addr.to_string().as_str());
+        for uri in noria_servers {
+            let metrics_endpoint = uri.join("metrics_dump")?;
             let res = self
                 .client
                 .post(metrics_endpoint.as_str())
@@ -65,7 +61,7 @@ where
                 .await
                 .map_err(|e| ReadySetError::SerializationFailed(e.to_string()))?;
             metrics_dumps.push(TaggedMetricsDump {
-                addr: external_addr,
+                addr: uri,
                 metrics: json,
             });
         }
@@ -75,14 +71,11 @@ where
 
     /// Resets the metrics on each noria-server in the deployment.
     pub async fn reset_metrics(&mut self) -> ReadySetResult<()> {
-        let noria_servers = self.get_external_addrs().await?;
+        let noria_servers = self.get_workers().await?;
 
-        for (_, external_addr) in noria_servers {
+        for uri in noria_servers {
             let client = reqwest::Client::new();
-            let metrics_endpoint = format!(
-                "http://{}/reset_metrics",
-                external_addr.to_string().as_str()
-            );
+            let metrics_endpoint = uri.join("reset_metrics")?;
             client
                 .post(metrics_endpoint.as_str())
                 .send()

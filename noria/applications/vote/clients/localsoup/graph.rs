@@ -1,5 +1,4 @@
 use noria::{self, FrontierStrategy, Handle, LocalAuthority, NodeIndex, PersistenceParameters};
-use std::future::Future;
 
 pub(crate) const RECIPE: &str = "# base tables
 CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
@@ -20,7 +19,6 @@ pub struct Graph {
     pub article: NodeIndex,
     pub end: NodeIndex,
     pub graph: Handle<LocalAuthority>,
-    pub done: Box<dyn Future<Output = ()> + Unpin + Send>,
 }
 
 pub struct Builder {
@@ -77,7 +75,7 @@ impl Builder {
 
         let logging = self.logging;
         let stupid = self.stupid;
-        let (mut wh, done) = g.start_local().await?;
+        let mut wh = g.start_local().await?;
         wh.ready().await?;
         wh.install_recipe(RECIPE).await?;
         wh.ready().await?;
@@ -96,7 +94,6 @@ impl Builder {
             end: outputs["ArticleWithVoteCount"],
             stupid,
             graph: wh,
-            done: Box::new(done),
         })
     }
 }

@@ -31,7 +31,7 @@ impl Backend {
             _ => panic!("reuse configuration not supported"),
         }
 
-        let (g, _done) = cb.start_local().await.unwrap();
+        let g = cb.start_local().await.unwrap();
 
         Backend { g }
     }

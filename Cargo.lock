@@ -3449,6 +3449,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "tracing-futures",
+ "url 2.2.1",
  "vec1",
  "vec_map",
  "zookeeper",
@@ -3734,6 +3735,7 @@ dependencies = [
  "tower",
  "tower-util",
  "tracing",
+ "url 2.2.1",
  "vec1",
  "vec_map",
  "zookeeper",
@@ -6889,6 +6891,7 @@ dependencies = [
  "idna 0.2.2",
  "matches",
  "percent-encoding 2.1.0",
+ "serde",
 ]
 
 [[package]]

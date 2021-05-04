@@ -5,9 +5,8 @@ use crate::prelude::*;
 use noria::{self, KeyComparison};
 use noria::{internal::LocalOrNot, PacketData};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
-use std::net::SocketAddr;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
@@ -76,6 +75,90 @@ pub struct SourceChannelIdentifier {
     pub tag: u32,
 }
 
+/// A request issued to a domain through the worker RPC interface.
+#[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum DomainRequest {
+    /// Request that a domain send usage statistics.
+    GetStatistics,
+
+    /// Add a new column to an existing `Base` node.
+    AddBaseColumn {
+        node: LocalNodeIndex,
+        field: String,
+        default: DataType,
+    },
+
+    /// Drops an existing column from a `Base` node.
+    DropBaseColumn { node: LocalNodeIndex, column: usize },
+
+    /// Add a new node to this domain below the given parents.
+    AddNode {
+        node: Node,
+        parents: Vec<LocalNodeIndex>,
+    },
+
+    /// Direct domain to remove some nodes.
+    RemoveNodes { nodes: Vec<LocalNodeIndex> },
+
+    /// Update Egress node.
+    UpdateEgress {
+        node: LocalNodeIndex,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddr)>,
+        new_tag: Option<(Tag, NodeIndex)>,
+    },
+
+    /// Add a shard to a Sharder node.
+    ///
+    /// Note that this *must* be done *before* the sharder starts being used!
+    UpdateSharder {
+        node: LocalNodeIndex,
+        new_txs: (LocalNodeIndex, Vec<ReplicaAddr>),
+    },
+
+    /// Set up a fresh, empty state for a node, indexed by a particular column.
+    ///
+    /// This is done in preparation of a subsequent state replay.
+    PrepareState {
+        node: LocalNodeIndex,
+        state: InitialState,
+    },
+
+    /// Probe for the number of records in the given node's state
+    StateSizeProbe { node: LocalNodeIndex },
+
+    /// Ask domain to log its state size
+    UpdateStateSize,
+
+    /// Inform domain about a new replay path.
+    SetupReplayPath {
+        tag: Tag,
+        source: Option<LocalNodeIndex>,
+        path: Vec<ReplayPathSegment>,
+        partial_unicast_sharder: Option<NodeIndex>,
+        notify_done: bool,
+        trigger: TriggerEndpoint,
+    },
+
+    /// Instruct domain to replay the state of a particular node along an existing replay path,
+    /// identified by `tag`.
+    StartReplay { tag: Tag, from: LocalNodeIndex },
+
+    /// Query whether a domain has finished replaying.
+    QueryReplayDone,
+
+    /// Sent to instruct a domain that a particular node should be considered ready to process
+    /// updates.
+    Ready {
+        node: LocalNodeIndex,
+        purge: bool,
+        index: HashSet<Index>,
+    },
+
+    /// Process the packet, as per usual
+    Packet(Packet),
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
@@ -122,68 +205,6 @@ pub enum Packet {
 
     // Control messages
     //
-    /// Add a new node to this domain below the given parents.
-    AddNode {
-        node: Node,
-        parents: Vec<LocalNodeIndex>,
-    },
-
-    /// Direct domain to remove some nodes.
-    RemoveNodes {
-        nodes: Vec<LocalNodeIndex>,
-    },
-
-    /// Add a new column to an existing `Base` node.
-    AddBaseColumn {
-        node: LocalNodeIndex,
-        field: String,
-        default: DataType,
-    },
-
-    /// Drops an existing column from a `Base` node.
-    DropBaseColumn {
-        node: LocalNodeIndex,
-        column: usize,
-    },
-
-    /// Update Egress node.
-    UpdateEgress {
-        node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddr)>,
-        new_tag: Option<(Tag, NodeIndex)>,
-    },
-
-    /// Add a shard to a Sharder node.
-    ///
-    /// Note that this *must* be done *before* the sharder starts being used!
-    UpdateSharder {
-        node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<ReplicaAddr>),
-    },
-
-    /// Set up a fresh, empty state for a node, indexed by a particular column.
-    ///
-    /// This is done in preparation of a subsequent state replay.
-    PrepareState {
-        node: LocalNodeIndex,
-        state: InitialState,
-    },
-
-    /// Probe for the number of records in the given node's state
-    StateSizeProbe {
-        node: LocalNodeIndex,
-    },
-
-    /// Inform domain about a new replay path.
-    SetupReplayPath {
-        tag: Tag,
-        source: Option<LocalNodeIndex>,
-        path: Vec<ReplayPathSegment>,
-        partial_unicast_sharder: Option<NodeIndex>,
-        notify_done: bool,
-        trigger: TriggerEndpoint,
-    },
-
     /// Ask domain (nicely) to replay a particular set of keys.
     RequestPartialReplay {
         tag: Tag,
@@ -199,32 +220,8 @@ pub enum Packet {
         keys: Vec<KeyComparison>,
     },
 
-    /// Instruct domain to replay the state of a particular node along an existing replay path.
-    StartReplay {
-        tag: Tag,
-        from: LocalNodeIndex,
-    },
-
-    /// Sent to instruct a domain that a particular node should be considered ready to process
-    /// updates.
-    Ready {
-        node: LocalNodeIndex,
-        purge: bool,
-        index: HashSet<Index>,
-    },
-
-    /// Notification from Blender for domain to terminate
-    Quit,
-
     /// A packet used solely to drive the event loop forward.
     Spin,
-
-    /// Request that a domain send usage statistics on the control reply channel.
-    /// Argument specifies if we wish to get the full state size or just the partial nodes.
-    GetStatistics,
-
-    /// Ask domain to log its state size
-    UpdateStateSize,
 
     /// Propagate updated timestamps for the set of base tables.
     Timestamp {
@@ -386,23 +383,5 @@ impl fmt::Debug for Packet {
                 write!(f, "Packet::Control({:?})", mem::discriminant(p))
             }
         }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ControlReplyPacket {
-    Ack(()),
-    /// (number of rows, size in bytes)
-    StateSize(usize, u64),
-    Statistics(
-        noria::debug::stats::DomainStats,
-        HashMap<petgraph::graph::NodeIndex, noria::debug::stats::NodeStats>,
-    ),
-    Booted(usize, SocketAddr),
-}
-
-impl ControlReplyPacket {
-    pub(crate) fn ack() -> ControlReplyPacket {
-        ControlReplyPacket::Ack(())
     }
 }

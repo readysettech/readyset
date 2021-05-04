@@ -38,7 +38,7 @@ async fn main() {
     // test passes again.
     //builder.disable_partial();
 
-    let (mut blender, _done) = builder.start_local().await.unwrap();
+    let mut blender = builder.start_local().await.unwrap();
     blender.install_recipe(sql).await.unwrap();
 
     // Get mutators and getter.

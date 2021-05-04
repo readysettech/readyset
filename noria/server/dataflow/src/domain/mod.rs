@@ -5,29 +5,28 @@ use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::mem;
-use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
 use crate::group_commit::GroupCommitQueueSet;
 use crate::node::NodeProcessingResult;
-use crate::payload::{ControlReplyPacket, ReplayPieceContext, SourceSelection};
+use crate::payload::{ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::state::RangeLookupResult;
 use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
 pub use internal::DomainIndex as Index;
 use metrics::{counter, gauge, histogram};
-use noria::channel::{self, TcpSender};
+use noria::channel::{self};
 use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError};
 use slog::Logger;
-use stream_cancel::Valve;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::Readers;
+use crate::{DomainRequest, Readers};
 use noria::errors::{internal_err, ReadySetResult};
+
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
 #[derive(Debug)]
@@ -157,8 +156,6 @@ impl DomainBuilder {
         log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
-        control_addr: SocketAddr,
-        shutdown_valve: &Valve,
         state_size: Arc<AtomicUsize>,
     ) -> Domain {
         // initially, all nodes are not ready
@@ -169,7 +166,6 @@ impl DomainBuilder {
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-        let control_reply_tx = TcpSender::connect(&control_addr).unwrap();
         let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
@@ -190,9 +186,7 @@ impl DomainBuilder {
 
             ingress_inject: Default::default(),
 
-            shutdown_valve: shutdown_valve.clone(),
             readers,
-            control_reply_tx,
             channel_coordinator,
 
             buffered_replay_requests: Default::default(),
@@ -217,6 +211,7 @@ impl DomainBuilder {
             total_forward_time: Timer::new(),
 
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
+            replay_completed: false,
         }
     }
 }
@@ -256,9 +251,7 @@ pub struct Domain {
     max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<KeyComparison>)>,
 
-    shutdown_valve: Valve,
     readers: Readers,
-    control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
     buffered_replay_requests: HashMap<(Tag, usize), (time::Instant, HashSet<KeyComparison>, bool)>,
@@ -284,6 +277,8 @@ pub struct Domain {
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
     /// state sizes will never be out-of-date.
     pub aggressively_update_state_sizes: bool,
+
+    replay_completed: bool,
 }
 
 impl Domain {
@@ -759,11 +754,11 @@ impl Domain {
             // now send evictions for all the (tag, [key]) things in evictions
             for (tag, keys) in evictions {
                 self.handle_eviction(
-                    Box::new(Packet::EvictKeys {
+                    Packet::EvictKeys {
                         keys: keys.into_iter().collect(),
                         link: Link::new(src, me),
                         tag,
-                    }),
+                    },
                     executor,
                 )?;
             }
@@ -812,11 +807,7 @@ impl Domain {
         Ok(())
     }
 
-    fn handle_timestamp(
-        &mut self,
-        m: Box<Packet>,
-        executor: &mut dyn Executor,
-    ) -> ReadySetResult<()> {
+    fn handle_timestamp(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
         let me = m.dst();
 
         let m = {
@@ -848,6 +839,655 @@ impl Domain {
             self.handle(p, executor, true)?;
         }
         Ok(())
+    }
+
+    pub fn domain_request(
+        &mut self,
+        req: DomainRequest,
+        executor: &mut dyn Executor,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        let ret = match req {
+            DomainRequest::AddNode { node, parents } => {
+                let addr = node.local_addr();
+                self.not_ready.insert(addr);
+
+                for p in parents {
+                    self.nodes
+                        .get_mut(p)
+                        .unwrap()
+                        .borrow_mut()
+                        .add_child(node.local_addr());
+                }
+                self.nodes.insert(addr, cell::RefCell::new(node));
+                trace!(self.log, "new node incorporated"; "local" => addr.id());
+                Ok(None)
+            }
+            DomainRequest::RemoveNodes { nodes } => {
+                for &node in &nodes {
+                    self.nodes[node].borrow_mut().remove();
+                    self.state.remove(node);
+                    gauge!(
+                        "domain.node_state_size_bytes",
+                        0.0,
+                        "domain" => self.index.index().to_string(),
+                        "shard" => self.shard.unwrap_or(0).to_string(),
+                        "node" => node.id().to_string()
+                    );
+                    trace!(self.log, "node removed"; "local" => node.id());
+                }
+
+                for node in nodes {
+                    for cn in self.nodes.iter_mut() {
+                        cn.1.borrow_mut().try_remove_child(node);
+                        // NOTE: since nodes are always removed leaves-first, it's not
+                        // important to update parent pointers here
+                    }
+                }
+                Ok(None)
+            }
+            DomainRequest::AddBaseColumn {
+                node,
+                field,
+                default,
+            } => {
+                let mut n = self.nodes[node].borrow_mut();
+                n.add_column(&field);
+                if let Some(b) = n.get_base_mut() {
+                    b.add_column(default)?;
+                } else if n.is_ingress() {
+                    self.ingress_inject
+                        .entry(node)
+                        .or_insert_with(|| (n.fields().len(), Vec::new()))
+                        .1
+                        .push(default);
+                } else {
+                    internal!("node unrelated to base got AddBaseColumn");
+                }
+                Ok(None)
+            }
+            DomainRequest::DropBaseColumn { node, column } => {
+                let mut n = self.nodes[node].borrow_mut();
+                n.get_base_mut()
+                    .ok_or_else(|| internal_err("told to drop base column from non-base node"))?
+                    .drop_column(column)?;
+                Ok(None)
+            }
+            DomainRequest::UpdateEgress {
+                node,
+                new_tx,
+                new_tag,
+            } => {
+                let mut n = self.nodes[node].borrow_mut();
+                n.with_egress_mut(move |e| {
+                    if let Some((node, local, addr)) = new_tx {
+                        e.add_tx(node, local, addr);
+                    }
+                    if let Some(new_tag) = new_tag {
+                        e.add_tag(new_tag.0, new_tag.1);
+                    }
+                });
+                Ok(None)
+            }
+            DomainRequest::UpdateSharder { node, new_txs } => {
+                let mut n = self.nodes[node].borrow_mut();
+                n.with_sharder_mut(move |s| {
+                    s.add_sharded_child(new_txs.0, new_txs.1);
+                    Ok(())
+                })?;
+                Ok(None)
+            }
+            DomainRequest::StateSizeProbe { node } => {
+                let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
+                let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
+                let ret = (row_count, mem_size);
+                Ok(Some(bincode::serialize(&ret)?))
+            }
+            DomainRequest::PrepareState { node, state } => {
+                use crate::payload::InitialState;
+                match state {
+                    InitialState::PartialLocal(index) => {
+                        if !self.state.contains_key(node) {
+                            self.state.insert(node, Box::new(MemoryState::default()));
+                        }
+                        let state = self.state.get_mut(node).unwrap();
+                        for (index, tags) in index {
+                            info!(self.log, "told to prepare partial state";
+                                           "index" => ?index,
+                                           "tags" => ?tags);
+                            state.add_key(&index, Some(tags));
+                        }
+                    }
+                    InitialState::IndexedLocal(index) => {
+                        if !self.state.contains_key(node) {
+                            self.state.insert(node, Box::new(MemoryState::default()));
+                        }
+                        let state = self.state.get_mut(node).unwrap();
+                        for idx in index {
+                            info!(self.log, "told to prepare full state";
+                                           "key" => ?idx);
+                            state.add_key(&idx, None);
+                        }
+                    }
+                    InitialState::PartialGlobal {
+                        gid,
+                        cols,
+                        key,
+                        trigger_domain: (trigger_domain, shards),
+                    } => {
+                        use crate::backlog;
+                        let k = key.clone(); // ugh
+                        let txs = (0..shards)
+                            .map(|shard| {
+                                let key = key.clone();
+                                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                                let sender = self
+                                    .channel_coordinator
+                                    .builder_for(&(trigger_domain, shard))
+                                    .unwrap()
+                                    .build_async()
+                                    .unwrap();
+
+                                tokio::spawn(
+                                    UnboundedReceiverStream::new(rx)
+                                        .map(move |misses| {
+                                            Box::new(Packet::RequestReaderReplay {
+                                                keys: misses,
+                                                cols: key.clone(),
+                                                node,
+                                            })
+                                        })
+                                        .map(Ok)
+                                        .forward(sender)
+                                        .map(|r| {
+                                            if let Err(e) = r {
+                                                // domain went away?
+                                                eprintln!("replay source went away: {:?}", e);
+                                            }
+                                        }),
+                                );
+                                tx
+                            })
+                            .collect::<Vec<_>>();
+                        let (r_part, w_part) = backlog::new_partial(
+                            cols,
+                            &k[..],
+                            move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
+                                let n = txs.len();
+                                if n == 1 {
+                                    let misses = misses.cloned().collect::<Vec<_>>();
+                                    if misses.is_empty() {
+                                        return true;
+                                    }
+                                    txs[0].send(misses).is_ok()
+                                } else {
+                                    // TODO: compound reader
+                                    let mut per_shard = HashMap::new();
+                                    for miss in misses {
+                                        assert!(matches!(miss.len(), Some(1) | None));
+                                        for shard in miss.shard_keys(n) {
+                                            per_shard
+                                                .entry(shard)
+                                                .or_insert_with(Vec::new)
+                                                .push(miss);
+                                        }
+                                    }
+                                    if per_shard.is_empty() {
+                                        return true;
+                                    }
+                                    per_shard.into_iter().all(|(shard, keys)| {
+                                        txs[shard].send(keys.into_iter().cloned().collect()).is_ok()
+                                    })
+                                }
+                            },
+                        );
+
+                        let mut n = self.nodes[node].borrow_mut();
+                        tokio::task::block_in_place(|| {
+                            n.with_reader_mut(|r| {
+                                assert!(self
+                                    .readers
+                                    .lock()
+                                    .unwrap()
+                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                    .is_none());
+
+                                // make sure Reader is actually prepared to receive state
+                                r.set_write_handle(w_part)
+                            })
+                        })
+                        .unwrap();
+                    }
+                    InitialState::Global { gid, cols, key } => {
+                        use crate::backlog;
+                        let (r_part, w_part) = backlog::new(cols, &key[..]);
+
+                        let mut n = self.nodes[node].borrow_mut();
+                        tokio::task::block_in_place(|| {
+                            n.with_reader_mut(|r| {
+                                assert!(self
+                                    .readers
+                                    .lock()
+                                    .unwrap()
+                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                    .is_none());
+
+                                // make sure Reader is actually prepared to receive state
+                                r.set_write_handle(w_part)
+                            })
+                        })
+                        .unwrap();
+                    }
+                }
+                Ok(None)
+            }
+            DomainRequest::SetupReplayPath {
+                tag,
+                source,
+                path,
+                notify_done,
+                partial_unicast_sharder,
+                trigger,
+            } => {
+                if notify_done {
+                    info!(self.log,
+                          "told about terminating replay path {:?}",
+                          path;
+                          "tag" => tag
+                    );
+                    // NOTE: we set self.replaying_to when we first receive a replay with
+                    // this tag
+                } else {
+                    info!(self.log, "told about replay path {:?}", path; "tag" => tag);
+                }
+
+                use crate::payload;
+                let trigger = match trigger {
+                    payload::TriggerEndpoint::None => TriggerEndpoint::None,
+                    payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
+                    payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
+                    payload::TriggerEndpoint::End(selection, domain) => {
+                        let shard = |shardi| {
+                            // TODO: make async
+                            self.channel_coordinator
+                                .builder_for(&(domain, shardi))
+                                .unwrap()
+                                .build_sync()
+                                .unwrap()
+                        };
+
+                        let options = tokio::task::block_in_place(|| {
+                            match selection {
+                                SourceSelection::AllShards(nshards)
+                                | SourceSelection::KeyShard { nshards, .. } => {
+                                    // we may need to send to any of these shards
+                                    (0..nshards).map(shard).collect()
+                                }
+                                SourceSelection::SameShard => {
+                                    vec![shard(self.shard.unwrap())]
+                                }
+                            }
+                        });
+
+                        TriggerEndpoint::End {
+                            source: selection,
+                            options,
+                        }
+                    }
+                };
+
+                if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
+                    let last = path.last().unwrap();
+                    self.replay_paths_by_dst
+                        .entry(last.node)
+                        .or_insert_with(HashMap::new)
+                        .entry(last.partial_key.clone().unwrap())
+                        .or_insert_with(Vec::new)
+                        .push(tag);
+                }
+
+                self.replay_paths.insert(
+                    tag,
+                    ReplayPath {
+                        source,
+                        path,
+                        notify_done,
+                        partial_unicast_sharder,
+                        trigger,
+                    },
+                );
+                Ok(None)
+            }
+            DomainRequest::StartReplay { tag, from } => {
+                use std::thread;
+                assert_eq!(self.replay_paths[&tag].source, Some(from));
+
+                let start = time::Instant::now();
+                self.total_replay_time.start();
+                info!(self.log, "starting replay");
+
+                // we know that the node is materialized, as the migration coordinator
+                // picks path that originate with materialized nodes. if this weren't the
+                // case, we wouldn't be able to do the replay, and the entire migration
+                // would fail.
+                //
+                // we clone the entire state so that we can continue to occasionally
+                // process incoming updates to the domain without disturbing the state that
+                // is being replayed.
+                let state = self
+                    .state
+                    .get(from)
+                    .expect("migration replay path started with non-materialized node")
+                    .cloned_records();
+
+                debug!(self.log,
+                       "current state cloned for replay";
+                       "μs" => start.elapsed().as_micros()
+                );
+
+                let link = Link::new(from, self.replay_paths[&tag].path[0].node);
+
+                // we're been given an entire state snapshot, but we need to digest it
+                // piece by piece spawn off a thread to do that chunking. however, before
+                // we spin off that thread, we need to send a single Replay message to tell
+                // the target domain to start buffering everything that follows. we can't
+                // do that inside the thread, because by the time that thread is scheduled,
+                // we may already have processed some other messages that are not yet a
+                // part of state.
+                let p = Box::new(Packet::ReplayPiece {
+                    tag,
+                    link,
+                    context: ReplayPieceContext::Regular {
+                        last: state.is_empty(),
+                    },
+                    data: Vec::<Record>::new().into(),
+                });
+
+                if !state.is_empty() {
+                    let log = self.log.new(o!());
+
+                    let added_cols = self.ingress_inject.get(from).cloned();
+                    let default = {
+                        let n = self.nodes[from].borrow();
+                        let mut default = None;
+                        if let Some(b) = n.get_base() {
+                            let mut row = Vec::new();
+                            b.fix(&mut row);
+                            default = Some(row);
+                        }
+                        default
+                    };
+                    let fix = move |mut r: Vec<DataType>| -> Vec<DataType> {
+                        if let Some((start, ref added)) = added_cols {
+                            let rlen = r.len();
+                            r.extend(added.iter().skip(rlen - start).cloned());
+                        } else if let Some(ref defaults) = default {
+                            let rlen = r.len();
+                            r.extend(defaults.iter().skip(rlen).cloned());
+                        }
+                        r
+                    };
+
+                    let replay_tx_desc = self
+                        .channel_coordinator
+                        .builder_for(&(self.index, self.shard.unwrap_or(0)))
+                        .unwrap();
+
+                    let domain_str = self.index.index().to_string();
+                    let shard_str = self.shard.unwrap_or(0).to_string();
+
+                    thread::Builder::new()
+                        .name(format!(
+                            "replay{}.{}",
+                            self.nodes
+                                .values()
+                                .next()
+                                .unwrap()
+                                .borrow()
+                                .domain()
+                                .index(),
+                            link.src
+                        ))
+                        .spawn(move || {
+                            use itertools::Itertools;
+
+                            // TODO: make async
+                            let mut chunked_replay_tx = replay_tx_desc.build_sync().unwrap();
+
+                            let start = time::Instant::now();
+                            debug!(log, "starting state chunker"; "node" => %link.dst);
+
+                            let iter = state.into_iter().chunks(BATCH_SIZE);
+                            let mut iter = iter.into_iter().enumerate().peekable();
+
+                            // process all records in state to completion within domain
+                            // and then forward on tx (if there is one)
+                            while let Some((i, chunk)) = iter.next() {
+                                use std::iter::FromIterator;
+                                let chunk = Records::from_iter(chunk.map(&fix));
+                                let len = chunk.len();
+                                let last = iter.peek().is_none();
+                                let p = Box::new(Packet::ReplayPiece {
+                                    tag,
+                                    link, // to is overwritten by receiver
+                                    context: ReplayPieceContext::Regular { last },
+                                    data: chunk,
+                                });
+
+                                trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                if chunked_replay_tx.send(p).is_err() {
+                                    warn!(log, "replayer noticed domain shutdown");
+                                    break;
+                                }
+                            }
+
+                            debug!(log,
+                               "state chunker finished";
+                               "node" => %link.dst,
+                               "μs" => start.elapsed().as_micros()
+                            );
+
+                            histogram!(
+                                recorded::DOMAIN_CHUNKED_REPLAY_TIME,
+                                // HACK(eta): scary cast
+                                start.elapsed().as_micros() as f64,
+                                "domain" => domain_str.clone(),
+                                "shard" => shard_str.clone(),
+                                "from_node" => link.dst.id().to_string()
+                            );
+
+                            counter!(
+                                recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
+                                // HACK(eta): scary cast
+                                start.elapsed().as_micros() as u64,
+                                "domain" => domain_str,
+                                "shard" => shard_str,
+                                "from_node" => link.dst.id().to_string()
+                            );
+                        })
+                        .unwrap();
+                }
+                self.handle_replay(*p, executor)?;
+
+                self.total_replay_time.stop();
+                histogram!(
+                    recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
+                    start.elapsed().as_micros() as f64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
+
+                counter!(
+                    recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
+                    start.elapsed().as_micros() as u64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
+                Ok(None)
+            }
+            DomainRequest::Ready { node, purge, index } => {
+                invariant_eq!(self.mode, DomainMode::Forwarding);
+
+                self.nodes[node].borrow_mut().purge = purge;
+
+                if !index.is_empty() {
+                    let mut s: Box<dyn State> = {
+                        let n = self.nodes[node].borrow();
+                        let params = &self.persistence_parameters;
+                        match (n.get_base(), &params.mode) {
+                            (Some(base), &DurabilityMode::DeleteOnExit)
+                            | (Some(base), &DurabilityMode::Permanent) => {
+                                let base_name = format!(
+                                    "{}-{}-{}",
+                                    params.log_prefix,
+                                    n.name(),
+                                    self.shard.unwrap_or(0),
+                                );
+
+                                Box::new(PersistentState::new(base_name, base.key(), &params))
+                            }
+                            _ => Box::new(MemoryState::default()),
+                        }
+                    };
+                    for idx in &index {
+                        s.add_key(idx, None);
+                    }
+                    assert!(self.state.insert(node, s).is_none());
+                } else {
+                    // NOTE: just because index_on is None does *not* mean we're not
+                    // materialized
+                }
+
+                if self.not_ready.remove(&node) {
+                    trace!(self.log, "readying empty node"; "local" => node.id());
+                }
+
+                // swap replayed reader nodes to expose new state
+                {
+                    let mut n = self.nodes[node].borrow_mut();
+                    if n.is_reader() {
+                        n.with_reader_mut(|r| {
+                            if let Some(ref mut state) = r.writer_mut() {
+                                trace!(self.log, "swapping state"; "local" => node.id());
+                                state.swap();
+                                trace!(self.log, "state swapped"; "local" => node.id());
+                            }
+                        })
+                        .unwrap();
+                    }
+                }
+
+                Ok(None)
+            }
+            DomainRequest::GetStatistics => {
+                let domain_stats = noria::debug::stats::DomainStats {
+                    total_time: self.total_time.num_nanoseconds(),
+                    total_ptime: self.total_ptime.num_nanoseconds(),
+                    total_replay_time: self.total_replay_time.num_nanoseconds(),
+                    total_forward_time: self.total_forward_time.num_nanoseconds(),
+                    wait_time: self.wait_time.num_nanoseconds(),
+                };
+
+                let node_stats: HashMap<
+                    petgraph::graph::NodeIndex,
+                    noria::debug::stats::NodeStats,
+                > = self
+                    .nodes
+                    .values()
+                    .filter_map(|nd| {
+                        let n = &*nd.borrow();
+                        let local_index = n.local_addr();
+                        let node_index: NodeIndex = n.global_addr();
+
+                        let time = self.process_times.num_nanoseconds(local_index);
+                        let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                        let mem_size = if n.is_reader() {
+                            let mut size = 0;
+                            n.with_reader(|r| size = r.state_size().unwrap_or(0))
+                                .unwrap();
+                            size
+                        } else {
+                            self.state
+                                .get(local_index)
+                                .map(|s| s.deep_size_of())
+                                .unwrap_or(0)
+                        };
+
+                        let mat_state = if !n.is_reader() {
+                            match self.state.get(local_index) {
+                                Some(ref s) => {
+                                    if s.is_partial() {
+                                        MaterializationStatus::Partial {
+                                            beyond_materialization_frontier: n.purge,
+                                        }
+                                    } else {
+                                        MaterializationStatus::Full
+                                    }
+                                }
+                                None => MaterializationStatus::Not,
+                            }
+                        } else {
+                            n.with_reader(|r| {
+                                if r.is_partial() {
+                                    MaterializationStatus::Partial {
+                                        beyond_materialization_frontier: n.purge,
+                                    }
+                                } else {
+                                    MaterializationStatus::Full
+                                }
+                            })
+                            .unwrap()
+                        };
+
+                        let probe_result = if n.is_internal() {
+                            n.probe()
+                        } else {
+                            Default::default()
+                        };
+
+                        if let (Some(time), Some(ptime)) = (time, ptime) {
+                            Some((
+                                node_index,
+                                noria::debug::stats::NodeStats {
+                                    desc: format!("{:?}", n),
+                                    process_time: time,
+                                    process_ptime: ptime,
+                                    mem_size,
+                                    materialized: mat_state,
+                                    probe_result,
+                                },
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                let ret = (domain_stats, node_stats);
+                Ok(Some(bincode::serialize(&ret)?))
+            }
+            DomainRequest::UpdateStateSize => {
+                self.update_state_sizes();
+                Ok(None)
+            }
+            DomainRequest::Packet(pkt) => {
+                self.handle(Box::new(pkt), executor, true)?;
+                Ok(None)
+            }
+            DomainRequest::QueryReplayDone => {
+                let ret = self.replay_completed;
+                self.replay_completed = false;
+                Ok(Some(bincode::serialize(&ret)?))
+            }
+        };
+        // What we just did might have done things like insert into `self.delayed_for_self`, so
+        // run the event loop before returning to make sure that gets processed.
+        //
+        // Not doing this leads to complete insanity, as things just don't replay sometimes and
+        // you aren't sure why.
+        self.handle(Box::new(Packet::Spin), executor, true)?;
+        ret
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -899,7 +1539,7 @@ impl Domain {
             Packet::ReplayPiece { tag, .. } => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                self.handle_replay(m, executor)?;
+                self.handle_replay(*m, executor)?;
                 self.total_replay_time.stop();
                 counter!(
                     recorded::DOMAIN_TOTAL_REPLAY_TIME,
@@ -918,342 +1558,14 @@ impl Domain {
                 );
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
-                self.handle_eviction(m, executor)?;
+                self.handle_eviction(*m, executor)?;
             }
             Packet::Timestamp { .. } => {
-                self.handle_timestamp(m, executor)?;
+                self.handle_timestamp(*m, executor)?;
             }
             consumed => {
                 match consumed {
                     // workaround #16223
-                    Packet::AddNode { node, parents } => {
-                        let addr = node.local_addr();
-                        self.not_ready.insert(addr);
-
-                        for p in parents {
-                            self.nodes
-                                .get_mut(p)
-                                .unwrap()
-                                .borrow_mut()
-                                .add_child(node.local_addr());
-                        }
-                        self.nodes.insert(addr, cell::RefCell::new(node));
-                        trace!(self.log, "new node incorporated"; "local" => addr.id());
-                    }
-                    Packet::RemoveNodes { nodes } => {
-                        for &node in &nodes {
-                            self.nodes[node].borrow_mut().remove();
-                            self.state.remove(node);
-                            gauge!(
-                                "domain.node_state_size_bytes",
-                                0.0,
-                                "domain" => self.index.index().to_string(),
-                                "shard" => self.shard.unwrap_or(0).to_string(),
-                                "node" => node.id().to_string()
-                            );
-                            trace!(self.log, "node removed"; "local" => node.id());
-                        }
-
-                        for node in nodes {
-                            for cn in self.nodes.iter_mut() {
-                                cn.1.borrow_mut().try_remove_child(node);
-                                // NOTE: since nodes are always removed leaves-first, it's not
-                                // important to update parent pointers here
-                            }
-                        }
-                    }
-                    Packet::AddBaseColumn {
-                        node,
-                        field,
-                        default,
-                    } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.add_column(&field);
-                        if let Some(b) = n.get_base_mut() {
-                            b.add_column(default)?;
-                        } else if n.is_ingress() {
-                            self.ingress_inject
-                                .entry(node)
-                                .or_insert_with(|| (n.fields().len(), Vec::new()))
-                                .1
-                                .push(default);
-                        } else {
-                            internal!("node unrelated to base got AddBaseColumn");
-                        }
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::ack())
-                            .unwrap();
-                    }
-                    Packet::DropBaseColumn { node, column } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.get_base_mut()
-                            .ok_or_else(|| {
-                                internal_err("told to drop base column from non-base node")
-                            })?
-                            .drop_column(column)?;
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::ack())
-                            .unwrap();
-                    }
-                    Packet::UpdateEgress {
-                        node,
-                        new_tx,
-                        new_tag,
-                    } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.with_egress_mut(move |e| {
-                            if let Some((node, local, addr)) = new_tx {
-                                e.add_tx(node, local, addr);
-                            }
-                            if let Some(new_tag) = new_tag {
-                                e.add_tag(new_tag.0, new_tag.1);
-                            }
-                        });
-                    }
-                    Packet::UpdateSharder { node, new_txs } => {
-                        let mut n = self.nodes[node].borrow_mut();
-                        n.with_sharder_mut(move |s| {
-                            s.add_sharded_child(new_txs.0, new_txs.1);
-                            Ok(())
-                        })?;
-                    }
-                    Packet::StateSizeProbe { node } => {
-                        let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
-                        let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::StateSize(row_count, mem_size))
-                            .unwrap();
-                    }
-                    Packet::PrepareState { node, state } => {
-                        use crate::payload::InitialState;
-                        match state {
-                            InitialState::PartialLocal(index) => {
-                                if !self.state.contains_key(node) {
-                                    self.state.insert(node, Box::new(MemoryState::default()));
-                                }
-                                let state = self.state.get_mut(node).unwrap();
-                                for (index, tags) in index {
-                                    info!(self.log, "told to prepare partial state";
-                                           "index" => ?index,
-                                           "tags" => ?tags);
-                                    state.add_key(&index, Some(tags));
-                                }
-                            }
-                            InitialState::IndexedLocal(index) => {
-                                if !self.state.contains_key(node) {
-                                    self.state.insert(node, Box::new(MemoryState::default()));
-                                }
-                                let state = self.state.get_mut(node).unwrap();
-                                for idx in index {
-                                    info!(self.log, "told to prepare full state";
-                                           "key" => ?idx);
-                                    state.add_key(&idx, None);
-                                }
-                            }
-                            InitialState::PartialGlobal {
-                                gid,
-                                cols,
-                                key,
-                                trigger_domain: (trigger_domain, shards),
-                            } => {
-                                use crate::backlog;
-                                let k = key.clone(); // ugh
-                                let txs = (0..shards)
-                                    .map(|shard| {
-                                        let key = key.clone();
-                                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                                        let sender = self
-                                            .channel_coordinator
-                                            .builder_for(&(trigger_domain, shard))
-                                            .unwrap()
-                                            .build_async()
-                                            .unwrap();
-
-                                        tokio::spawn(
-                                            self.shutdown_valve
-                                                .wrap(UnboundedReceiverStream::new(rx))
-                                                .map(move |misses| {
-                                                    Box::new(Packet::RequestReaderReplay {
-                                                        keys: misses,
-                                                        cols: key.clone(),
-                                                        node,
-                                                    })
-                                                })
-                                                .map(Ok)
-                                                .forward(sender)
-                                                .map(|r| {
-                                                    if let Err(e) = r {
-                                                        // domain went away?
-                                                        eprintln!(
-                                                            "replay source went away: {:?}",
-                                                            e
-                                                        );
-                                                    }
-                                                }),
-                                        );
-                                        tx
-                                    })
-                                    .collect::<Vec<_>>();
-                                let (r_part, w_part) = backlog::new_partial(
-                                    cols,
-                                    &k[..],
-                                    move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
-                                        let n = txs.len();
-                                        if n == 1 {
-                                            let misses = misses.cloned().collect::<Vec<_>>();
-                                            if misses.is_empty() {
-                                                return true;
-                                            }
-                                            txs[0].send(misses).is_ok()
-                                        } else {
-                                            // TODO: compound reader
-                                            let mut per_shard = HashMap::new();
-                                            for miss in misses {
-                                                assert!(matches!(miss.len(), Some(1) | None));
-                                                for shard in miss.shard_keys(n) {
-                                                    per_shard
-                                                        .entry(shard)
-                                                        .or_insert_with(Vec::new)
-                                                        .push(miss);
-                                                }
-                                            }
-                                            if per_shard.is_empty() {
-                                                return true;
-                                            }
-                                            per_shard.into_iter().all(|(shard, keys)| {
-                                                txs[shard]
-                                                    .send(keys.into_iter().cloned().collect())
-                                                    .is_ok()
-                                            })
-                                        }
-                                    },
-                                );
-
-                                let mut n = self.nodes[node].borrow_mut();
-                                tokio::task::block_in_place(|| {
-                                    n.with_reader_mut(|r| {
-                                        assert!(self
-                                            .readers
-                                            .lock()
-                                            .unwrap()
-                                            .insert(
-                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                r_part
-                                            )
-                                            .is_none());
-
-                                        // make sure Reader is actually prepared to receive state
-                                        r.set_write_handle(w_part)
-                                    })
-                                })
-                                .unwrap();
-                            }
-                            InitialState::Global { gid, cols, key } => {
-                                use crate::backlog;
-                                let (r_part, w_part) = backlog::new(cols, &key[..]);
-
-                                let mut n = self.nodes[node].borrow_mut();
-                                tokio::task::block_in_place(|| {
-                                    n.with_reader_mut(|r| {
-                                        assert!(self
-                                            .readers
-                                            .lock()
-                                            .unwrap()
-                                            .insert(
-                                                (gid, *self.shard.as_ref().unwrap_or(&0)),
-                                                r_part
-                                            )
-                                            .is_none());
-
-                                        // make sure Reader is actually prepared to receive state
-                                        r.set_write_handle(w_part)
-                                    })
-                                })
-                                .unwrap();
-                            }
-                        }
-                    }
-                    Packet::SetupReplayPath {
-                        tag,
-                        source,
-                        path,
-                        notify_done,
-                        partial_unicast_sharder,
-                        trigger,
-                    } => {
-                        // let coordinator know that we've registered the tagged path
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::ack())
-                            .unwrap();
-
-                        if notify_done {
-                            info!(self.log,
-                                  "told about terminating replay path {:?}",
-                                  path;
-                                  "tag" => tag
-                            );
-                        // NOTE: we set self.replaying_to when we first receive a replay with
-                        // this tag
-                        } else {
-                            info!(self.log, "told about replay path {:?}", path; "tag" => tag);
-                        }
-
-                        use crate::payload;
-                        let trigger = match trigger {
-                            payload::TriggerEndpoint::None => TriggerEndpoint::None,
-                            payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
-                            payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(selection, domain) => {
-                                let shard = |shardi| {
-                                    // TODO: make async
-                                    self.channel_coordinator
-                                        .builder_for(&(domain, shardi))
-                                        .unwrap()
-                                        .build_sync()
-                                        .unwrap()
-                                };
-
-                                let options = tokio::task::block_in_place(|| {
-                                    match selection {
-                                        SourceSelection::AllShards(nshards)
-                                        | SourceSelection::KeyShard { nshards, .. } => {
-                                            // we may need to send to any of these shards
-                                            (0..nshards).map(shard).collect()
-                                        }
-                                        SourceSelection::SameShard => {
-                                            vec![shard(self.shard.unwrap())]
-                                        }
-                                    }
-                                });
-
-                                TriggerEndpoint::End {
-                                    source: selection,
-                                    options,
-                                }
-                            }
-                        };
-
-                        if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
-                            let last = path.last().unwrap();
-                            self.replay_paths_by_dst
-                                .entry(last.node)
-                                .or_insert_with(HashMap::new)
-                                .entry(last.partial_key.clone().unwrap())
-                                .or_insert_with(Vec::new)
-                                .push(tag);
-                        }
-
-                        self.replay_paths.insert(
-                            tag,
-                            ReplayPath {
-                                source,
-                                path,
-                                notify_done,
-                                partial_unicast_sharder,
-                                trigger,
-                            },
-                        );
-                    }
                     Packet::RequestReaderReplay {
                         mut keys,
                         cols,
@@ -1370,175 +1682,6 @@ impl Domain {
                             "tag" => tag.to_string()
                         );
                     }
-                    Packet::StartReplay { tag, from } => {
-                        use std::thread;
-                        assert_eq!(self.replay_paths[&tag].source, Some(from));
-
-                        let start = time::Instant::now();
-                        self.total_replay_time.start();
-                        info!(self.log, "starting replay");
-
-                        // we know that the node is materialized, as the migration coordinator
-                        // picks path that originate with materialized nodes. if this weren't the
-                        // case, we wouldn't be able to do the replay, and the entire migration
-                        // would fail.
-                        //
-                        // we clone the entire state so that we can continue to occasionally
-                        // process incoming updates to the domain without disturbing the state that
-                        // is being replayed.
-                        let state = self
-                            .state
-                            .get(from)
-                            .expect("migration replay path started with non-materialized node")
-                            .cloned_records();
-
-                        debug!(self.log,
-                               "current state cloned for replay";
-                               "μs" => start.elapsed().as_micros()
-                        );
-
-                        let link = Link::new(from, self.replay_paths[&tag].path[0].node);
-
-                        // we're been given an entire state snapshot, but we need to digest it
-                        // piece by piece spawn off a thread to do that chunking. however, before
-                        // we spin off that thread, we need to send a single Replay message to tell
-                        // the target domain to start buffering everything that follows. we can't
-                        // do that inside the thread, because by the time that thread is scheduled,
-                        // we may already have processed some other messages that are not yet a
-                        // part of state.
-                        let p = Box::new(Packet::ReplayPiece {
-                            tag,
-                            link,
-                            context: ReplayPieceContext::Regular {
-                                last: state.is_empty(),
-                            },
-                            data: Vec::<Record>::new().into(),
-                        });
-
-                        if !state.is_empty() {
-                            let log = self.log.new(o!());
-
-                            let added_cols = self.ingress_inject.get(from).cloned();
-                            let default = {
-                                let n = self.nodes[from].borrow();
-                                let mut default = None;
-                                if let Some(b) = n.get_base() {
-                                    let mut row = Vec::new();
-                                    b.fix(&mut row);
-                                    default = Some(row);
-                                }
-                                default
-                            };
-                            let fix = move |mut r: Vec<DataType>| -> Vec<DataType> {
-                                if let Some((start, ref added)) = added_cols {
-                                    let rlen = r.len();
-                                    r.extend(added.iter().skip(rlen - start).cloned());
-                                } else if let Some(ref defaults) = default {
-                                    let rlen = r.len();
-                                    r.extend(defaults.iter().skip(rlen).cloned());
-                                }
-                                r
-                            };
-
-                            let replay_tx_desc = self
-                                .channel_coordinator
-                                .builder_for(&(self.index, self.shard.unwrap_or(0)))
-                                .unwrap();
-
-                            let domain_str = self.index.index().to_string();
-                            let shard_str = self.shard.unwrap_or(0).to_string();
-
-                            thread::Builder::new()
-                                .name(format!(
-                                    "replay{}.{}",
-                                    self.nodes
-                                        .values()
-                                        .next()
-                                        .unwrap()
-                                        .borrow()
-                                        .domain()
-                                        .index(),
-                                    link.src
-                                ))
-                                .spawn(move || {
-                                    use itertools::Itertools;
-
-                                    // TODO: make async
-                                    let mut chunked_replay_tx =
-                                        replay_tx_desc.build_sync().unwrap();
-
-                                    let start = time::Instant::now();
-                                    debug!(log, "starting state chunker"; "node" => %link.dst);
-
-                                    let iter = state.into_iter().chunks(BATCH_SIZE);
-                                    let mut iter = iter.into_iter().enumerate().peekable();
-
-                                    // process all records in state to completion within domain
-                                    // and then forward on tx (if there is one)
-                                    while let Some((i, chunk)) = iter.next() {
-                                        use std::iter::FromIterator;
-                                        let chunk = Records::from_iter(chunk.map(&fix));
-                                        let len = chunk.len();
-                                        let last = iter.peek().is_none();
-                                        let p = Box::new(Packet::ReplayPiece {
-                                            tag,
-                                            link, // to is overwritten by receiver
-                                            context: ReplayPieceContext::Regular { last },
-                                            data: chunk,
-                                        });
-
-                                        trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                        if chunked_replay_tx.send(p).is_err() {
-                                            warn!(log, "replayer noticed domain shutdown");
-                                            break;
-                                        }
-                                    }
-
-                                    debug!(log,
-                                       "state chunker finished";
-                                       "node" => %link.dst,
-                                       "μs" => start.elapsed().as_micros()
-                                    );
-
-                                    histogram!(
-                                        recorded::DOMAIN_CHUNKED_REPLAY_TIME,
-                                        // HACK(eta): scary cast
-                                        start.elapsed().as_micros() as f64,
-                                        "domain" => domain_str.clone(),
-                                        "shard" => shard_str.clone(),
-                                        "from_node" => link.dst.id().to_string()
-                                    );
-
-                                    counter!(
-                                        recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
-                                        // HACK(eta): scary cast
-                                        start.elapsed().as_micros() as u64,
-                                        "domain" => domain_str,
-                                        "shard" => shard_str,
-                                        "from_node" => link.dst.id().to_string()
-                                    );
-                                })
-                                .unwrap();
-                        }
-                        self.handle_replay(p, executor)?;
-
-                        self.total_replay_time.stop();
-                        histogram!(
-                            recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
-                            start.elapsed().as_micros() as f64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-                        );
-
-                        counter!(
-                            recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
-                            start.elapsed().as_micros() as u64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-                        );
-                    }
                     Packet::Finish(tag, ni) => {
                         let start = time::Instant::now();
                         self.total_replay_time.start();
@@ -1559,157 +1702,6 @@ impl Domain {
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "tag" => tag.to_string()
                         );
-                    }
-                    Packet::Ready { node, purge, index } => {
-                        assert_eq!(self.mode, DomainMode::Forwarding);
-
-                        self.nodes[node].borrow_mut().purge = purge;
-
-                        if !index.is_empty() {
-                            let mut s: Box<dyn State> = {
-                                let n = self.nodes[node].borrow();
-                                let params = &self.persistence_parameters;
-                                match (n.get_base(), &params.mode) {
-                                    (Some(base), &DurabilityMode::DeleteOnExit)
-                                    | (Some(base), &DurabilityMode::Permanent) => {
-                                        let base_name = format!(
-                                            "{}-{}-{}",
-                                            params.log_prefix,
-                                            n.name(),
-                                            self.shard.unwrap_or(0),
-                                        );
-
-                                        Box::new(PersistentState::new(
-                                            base_name,
-                                            base.key(),
-                                            &params,
-                                        ))
-                                    }
-                                    _ => Box::new(MemoryState::default()),
-                                }
-                            };
-                            for idx in &index {
-                                s.add_key(idx, None);
-                            }
-                            assert!(self.state.insert(node, s).is_none());
-                        } else {
-                            // NOTE: just because index_on is None does *not* mean we're not
-                            // materialized
-                        }
-
-                        if self.not_ready.remove(&node) {
-                            trace!(self.log, "readying empty node"; "local" => node.id());
-                        }
-
-                        // swap replayed reader nodes to expose new state
-                        {
-                            let mut n = self.nodes[node].borrow_mut();
-                            if n.is_reader() {
-                                n.with_reader_mut(|r| {
-                                    if let Some(ref mut state) = r.writer_mut() {
-                                        trace!(self.log, "swapping state"; "local" => node.id());
-                                        state.swap();
-                                        trace!(self.log, "state swapped"; "local" => node.id());
-                                    }
-                                })
-                                .unwrap();
-                            }
-                        }
-
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::ack())
-                            .unwrap();
-                    }
-                    Packet::GetStatistics => {
-                        let domain_stats = noria::debug::stats::DomainStats {
-                            total_time: self.total_time.num_nanoseconds(),
-                            total_ptime: self.total_ptime.num_nanoseconds(),
-                            total_replay_time: self.total_replay_time.num_nanoseconds(),
-                            total_forward_time: self.total_forward_time.num_nanoseconds(),
-                            wait_time: self.wait_time.num_nanoseconds(),
-                        };
-
-                        let node_stats = self
-                            .nodes
-                            .values()
-                            .filter_map(|nd| {
-                                let n = &*nd.borrow();
-                                let local_index = n.local_addr();
-                                let node_index: NodeIndex = n.global_addr();
-
-                                let time = self.process_times.num_nanoseconds(local_index);
-                                let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                                let mem_size = if n.is_reader() {
-                                    let mut size = 0;
-                                    n.with_reader(|r| size = r.state_size().unwrap_or(0))
-                                        .unwrap();
-                                    size
-                                } else {
-                                    self.state
-                                        .get(local_index)
-                                        .map(|s| s.deep_size_of())
-                                        .unwrap_or(0)
-                                };
-
-                                let mat_state = if !n.is_reader() {
-                                    match self.state.get(local_index) {
-                                        Some(ref s) => {
-                                            if s.is_partial() {
-                                                MaterializationStatus::Partial {
-                                                    beyond_materialization_frontier: n.purge,
-                                                }
-                                            } else {
-                                                MaterializationStatus::Full
-                                            }
-                                        }
-                                        None => MaterializationStatus::Not,
-                                    }
-                                } else {
-                                    n.with_reader(|r| {
-                                        if r.is_partial() {
-                                            MaterializationStatus::Partial {
-                                                beyond_materialization_frontier: n.purge,
-                                            }
-                                        } else {
-                                            MaterializationStatus::Full
-                                        }
-                                    })
-                                    .unwrap()
-                                };
-
-                                let probe_result = if n.is_internal() {
-                                    n.probe()
-                                } else {
-                                    Default::default()
-                                };
-
-                                if let (Some(time), Some(ptime)) = (time, ptime) {
-                                    Some((
-                                        node_index,
-                                        noria::debug::stats::NodeStats {
-                                            desc: format!("{:?}", n),
-                                            process_time: time,
-                                            process_ptime: ptime,
-                                            mem_size,
-                                            materialized: mat_state,
-                                            probe_result,
-                                        },
-                                    ))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
-                            .unwrap();
-                    }
-                    Packet::UpdateStateSize => {
-                        self.update_state_sizes();
-                    }
-                    Packet::Quit => {
-                        internal!("Quit messages are handled by event loop");
                     }
                     Packet::Spin => {
                         // spinning as instructed
@@ -2002,7 +1994,7 @@ impl Domain {
                 internal!();
             }
 
-            self.handle_replay(m, ex)?;
+            self.handle_replay(*m, ex)?;
         }
 
         Ok(())
@@ -2131,18 +2123,14 @@ impl Domain {
         }
 
         if let Some(m) = m {
-            self.handle_replay(m, ex)?;
+            self.handle_replay(*m, ex)?;
         }
 
         Ok(())
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(
-        &mut self,
-        m: Box<Packet>,
-        ex: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
+    fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> Result<(), ReadySetError> {
         let tag = m.tag().unwrap();
         if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
             .borrow()
@@ -2191,7 +2179,6 @@ impl Domain {
             }
 
             // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
-            let m = *m; // workaround for #16223
             match m {
                 Packet::ReplayPiece {
                     tag,
@@ -3010,10 +2997,8 @@ impl Domain {
 
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
-                info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                self.control_reply_tx
-                    .send(ControlReplyPacket::ack())
-                    .unwrap();
+                info!(self.log, "noting replay completed"; "node" => node.id());
+                self.replay_completed = true;
                 Ok(())
             } else {
                 internal!();
@@ -3028,7 +3013,7 @@ impl Domain {
 
     pub fn handle_eviction(
         &mut self,
-        m: Box<Packet>,
+        m: Packet,
         ex: &mut dyn Executor,
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::too_many_arguments)]
@@ -3120,11 +3105,11 @@ impl Domain {
             Ok(())
         }
 
-        match (*m,) {
-            (Packet::Evict {
+        match m {
+            Packet::Evict {
                 node,
                 mut num_bytes,
-            },) => {
+            } => {
                 let nodes = if let Some(node) = node {
                     vec![(node, num_bytes)]
                 } else {
@@ -3252,11 +3237,11 @@ impl Domain {
                     self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
                 }
             }
-            (Packet::EvictKeys {
+            Packet::EvictKeys {
                 link: Link { dst, .. },
                 mut keys,
                 tag,
-            },) => {
+            } => {
                 let (trigger, path) = if let Some(rp) = self.replay_paths.get(&tag) {
                     (&rp.trigger, &rp.path)
                 } else {
@@ -3313,13 +3298,6 @@ impl Domain {
 
     pub fn id(&self) -> (Index, usize) {
         (self.index, self.shard.unwrap_or(0))
-    }
-
-    pub fn booted(&mut self, addr: SocketAddr) {
-        info!(self.log, "booted domain"; "nodes" => self.nodes.len());
-        self.control_reply_tx
-            .send(ControlReplyPacket::Booted(self.shard.unwrap_or(0), addr))
-            .unwrap();
     }
 
     pub fn update_state_sizes(&mut self) {
@@ -3434,10 +3412,6 @@ impl Domain {
                 Ok(ProcessResult::KeepPolling(timeout))
             }
             PollEvent::Process(packet) => {
-                if let Packet::Quit = *packet {
-                    return Ok(ProcessResult::StopPolling);
-                }
-
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
                 if self.group_commit_queues.should_append(&packet, &self.nodes) {

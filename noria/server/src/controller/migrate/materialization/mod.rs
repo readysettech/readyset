@@ -6,20 +6,19 @@
 //! module).
 
 use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{
-    inner::{graphviz, DomainReplies},
-    keys,
-};
+use crate::controller::{inner::graphviz, keys};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::errors::internal_err;
 use crate::ReadySetResult;
 use dataflow::prelude::*;
+use dataflow::DomainRequest;
 use noria::{internal, invariant, ReadySetError};
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 mod plan;
 
@@ -503,7 +502,6 @@ impl Materializations {
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
-        replies: &mut DomainReplies,
     ) -> Result<(), ReadySetError> {
         self.extend(graph, new)?;
 
@@ -861,7 +859,7 @@ impl Materializations {
             // set up, if we're partial).
             // This is somewhat wasteful in some (fully materialized) cases, but it's a lot easier
             // to reason about if all the replay decisions happen in the planner.
-            self.setup(node, &mut index_on, graph, domains, workers, replies)?;
+            self.setup(node, &mut index_on, graph, domains, workers)?;
             self.log = log;
             index_on.clear();
         }
@@ -880,7 +878,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains, workers, replies)?;
+            self.ready_one(ni, &mut index_on, graph, domains, workers)?;
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -890,15 +888,14 @@ impl Materializations {
             // returning before the graph is actually fully operational.
             trace!(self.log, "readying node"; "node" => ni.index());
             let domain = domains.get_mut(&n.domain()).unwrap();
-            domain.send_to_healthy(
-                Box::new(Packet::Ready {
+            domain.send_to_healthy_blocking::<()>(
+                DomainRequest::Ready {
                     node: n.local_addr(),
                     purge: n.purge,
                     index: index_on,
-                }),
+                },
                 workers,
             )?;
-            futures_executor::block_on(replies.wait_for_acks(&domain));
             trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
@@ -923,7 +920,6 @@ impl Materializations {
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
-        replies: &mut DomainReplies,
     ) -> Result<(), ReadySetError> {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
@@ -963,7 +959,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains, workers, replies)?;
+        self.setup(ni, index_on, graph, domains, workers)?;
         self.log = log;
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -981,7 +977,6 @@ impl Materializations {
         graph: &Graph,
         domains: &mut HashMap<DomainIndex, DomainHandle>,
         workers: &HashMap<WorkerIdentifier, Worker>,
-        replies: &mut DomainReplies,
     ) -> Result<(), ReadySetError> {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
@@ -1002,7 +997,7 @@ impl Materializations {
         let (pending, paths) = {
             let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
             for index in index_on.drain() {
-                plan.add(index, replies)?;
+                plan.add(index)?;
             }
             plan.finalize()
         };
@@ -1011,34 +1006,48 @@ impl Materializations {
 
         if !pending.is_empty() {
             trace!(self.log, "all domains ready for replay");
-
             // prepare for, start, and wait for replays
             for pending in pending {
                 // tell the first domain to start playing
-                trace!(self.log, "telling root domain to start replay";
+                info!(self.log, "telling root domain to start replay";
                    "domain" => pending.source_domain.index());
 
                 domains
                     .get_mut(&pending.source_domain)
                     .unwrap()
-                    .send_to_healthy(
-                        Box::new(Packet::StartReplay {
+                    .send_to_healthy_blocking::<()>(
+                        DomainRequest::StartReplay {
                             tag: pending.tag,
                             from: pending.source,
-                        }),
+                        },
                         workers,
-                    )
-                    .unwrap();
+                    )?;
             }
-
             // and then wait for the last domain to receive all the records
             let target = graph[ni].domain();
-            trace!(self.log,
+            info!(self.log,
                "waiting for done message from target";
                "domain" => target.index(),
             );
 
-            futures_executor::block_on(replies.wait_for_acks(&domains[&target]));
+            let mut is_done = || -> ReadySetResult<bool> {
+                Ok(domains
+                    .get_mut(&target)
+                    .unwrap()
+                    .send_to_healthy_blocking::<bool>(DomainRequest::QueryReplayDone, workers)?
+                    .into_iter()
+                    .any(|x| x))
+            };
+            let mut spins = 0;
+            // FIXME(eta): this is a bit of a hack... (also, timeouts?)
+            while !is_done()? {
+                spins += 1;
+                if spins == 10 {
+                    warn!(self.log, "waiting for setup()-initiated replay to complete");
+                    spins = 0;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
         }
         Ok(())
     }

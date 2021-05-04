@@ -110,6 +110,6 @@ async fn main() {
             num as f64 / (took.as_nanos() as f64 / 1_000_000_000.)
         );
     }
-    drop(g.graph);
-    g.done.await;
+    g.graph.shutdown();
+    g.graph.wait_done().await;
 }

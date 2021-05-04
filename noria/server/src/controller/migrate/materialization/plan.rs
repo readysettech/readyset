@@ -1,9 +1,10 @@
 use crate::controller::domain_handle::DomainHandle;
-use crate::controller::inner::{graphviz, DomainReplies};
+use crate::controller::inner::graphviz;
 use crate::controller::keys;
 use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
+use dataflow::DomainRequest;
 use noria::ReadySetError;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -125,11 +126,7 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn add(
-        &mut self,
-        index_on: Index,
-        replies: &mut DomainReplies,
-    ) -> Result<(), ReadySetError> {
+    pub(super) fn add(&mut self, index_on: Index) -> Result<(), ReadySetError> {
         // if we're full and we already have some paths added... (either this run, or from previous
         // runs)
         if !self.partial && (!self.paths.is_empty() || !self.old_paths.is_empty()) {
@@ -342,27 +339,27 @@ impl<'a> Plan<'a> {
                 }
 
                 // build the message we send to this domain to tell it about this replay path.
-                let mut setup = Box::new(Packet::SetupReplayPath {
+                let mut setup = DomainRequest::SetupReplayPath {
                     tag,
                     source: None,
                     path: locals,
                     notify_done: false,
                     partial_unicast_sharder,
                     trigger: TriggerEndpoint::None,
-                });
+                };
 
                 // the first domain also gets to know source node
                 if i == 0 {
-                    if let Packet::SetupReplayPath { ref mut source, .. } = *setup {
+                    if let DomainRequest::SetupReplayPath { ref mut source, .. } = setup {
                         *source = Some(self.graph[nodes[0].0].local_addr());
                     }
                 }
 
                 if let Some(ref key) = partial {
                     // for partial materializations, nodes need to know how to trigger replays
-                    if let Packet::SetupReplayPath {
+                    if let DomainRequest::SetupReplayPath {
                         ref mut trigger, ..
-                    } = *setup
+                    } = setup
                     {
                         if segments.len() == 1 {
                             // replay is entirely contained within one domain
@@ -488,10 +485,10 @@ impl<'a> Plan<'a> {
                 } else {
                     // for full materializations, the last domain should report when it's done
                     if i == segments.len() - 1 {
-                        if let Packet::SetupReplayPath {
+                        if let DomainRequest::SetupReplayPath {
                             ref mut notify_done,
                             ..
-                        } = *setup
+                        } = setup
                         {
                             *notify_done = true;
                             assert!(pending.is_none());
@@ -516,12 +513,12 @@ impl<'a> Plan<'a> {
                         self.domains
                             .get_mut(&domain)
                             .unwrap()
-                            .send_to_healthy(
-                                Box::new(Packet::UpdateEgress {
+                            .send_to_healthy_blocking::<()>(
+                                DomainRequest::UpdateEgress {
                                     node: n.local_addr(),
                                     new_tx: None,
                                     new_tag: Some((tag, segments[i + 1].1[0].0)),
-                                }),
+                                },
                                 workers,
                             )
                             .unwrap();
@@ -532,8 +529,8 @@ impl<'a> Plan<'a> {
 
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
                 let ctx = self.domains.get_mut(&domain).unwrap();
-                ctx.send_to_healthy(setup, self.workers).unwrap();
-                futures_executor::block_on(replies.wait_for_acks(&ctx));
+                ctx.send_to_healthy_blocking::<()>(setup, self.workers)
+                    .unwrap();
             }
 
             if !self.partial {
@@ -603,11 +600,11 @@ impl<'a> Plan<'a> {
         self.domains
             .get_mut(&self.graph[self.node].domain())
             .unwrap()
-            .send_to_healthy(
-                Box::new(Packet::PrepareState {
+            .send_to_healthy_blocking::<()>(
+                DomainRequest::PrepareState {
                     node: self.graph[self.node].local_addr(),
                     state: s,
-                }),
+                },
                 self.workers,
             )
             .unwrap();

@@ -27,7 +27,6 @@ use chrono::NaiveDate;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, thread};
@@ -93,13 +92,9 @@ async fn build_custom(
         builder.set_region(region.unwrap());
     }
     if controller {
-        builder
-            .start_local_custom(authority.clone())
-            .await
-            .unwrap()
-            .0
+        builder.start_local_custom(authority.clone()).await.unwrap()
     } else {
-        builder.start(authority.clone()).await.unwrap().0
+        builder.start(authority.clone()).await.unwrap()
     }
 }
 
@@ -208,56 +203,57 @@ async fn it_works_basic() {
 async fn it_completes() {
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
+    builder.log_with(crate::logger_pls());
     builder.set_persistence(get_persistence_params("it_completes"));
-    let (g, done) = builder.start_local().await.unwrap();
+    let g = builder.start_local().await.unwrap();
 
-    {
-        let mut g = g;
-        // do some stuff (== it_works_basic)
-        let _ = g
-            .migrate(|mig| {
-                let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-                let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+    let mut g = g;
+    // do some stuff (== it_works_basic)
+    let _ = g
+        .migrate(|mig| {
+            let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+            let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
 
-                let mut emits = HashMap::new();
-                emits.insert(a, vec![0, 1]);
-                emits.insert(b, vec![0, 1]);
-                let u = Union::new(emits);
-                let c = mig.add_ingredient("c", &["a", "b"], u);
-                mig.maintain_anonymous(c, &[0]);
-                (a, b, c)
-            })
-            .await;
+            let mut emits = HashMap::new();
+            emits.insert(a, vec![0, 1]);
+            emits.insert(b, vec![0, 1]);
+            let u = Union::new(emits);
+            let c = mig.add_ingredient("c", &["a", "b"], u);
+            mig.maintain_anonymous(c, &[0]);
+            (a, b, c)
+        })
+        .await;
 
-        let mut cq = g.view("c").await.unwrap();
-        let mut muta = g.table("a").await.unwrap();
-        let mut mutb = g.table("b").await.unwrap();
-        let id: DataType = 1.into();
+    let mut cq = g.view("c").await.unwrap();
+    let mut muta = g.table("a").await.unwrap();
+    let mut mutb = g.table("b").await.unwrap();
+    let id: DataType = 1.into();
 
-        assert_eq!(muta.table_name(), "a");
-        assert_eq!(muta.columns(), &["a", "b"]);
+    assert_eq!(muta.table_name(), "a");
+    assert_eq!(muta.columns(), &["a", "b"]);
 
-        muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
-        sleep().await;
-        assert_eq!(
-            cq.lookup(&[id.clone()], true).await.unwrap(),
-            vec![vec![1.into(), 2.into()]]
-        );
-        mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
-        sleep().await;
-        let res = cq.lookup(&[id.clone()], true).await.unwrap();
-        assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-        assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
-        muta.delete(vec![id.clone()]).await.unwrap();
-        sleep().await;
-        assert_eq!(
-            cq.lookup(&[id.clone()], true).await.unwrap(),
-            vec![vec![1.into(), 4.into()]]
-        );
-    } // ensure that all handles and such are dropped
+    muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
+    sleep().await;
+    assert_eq!(
+        cq.lookup(&[id.clone()], true).await.unwrap(),
+        vec![vec![1.into(), 2.into()]]
+    );
+    mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
+    sleep().await;
+    let res = cq.lookup(&[id.clone()], true).await.unwrap();
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    muta.delete(vec![id.clone()]).await.unwrap();
+    sleep().await;
+    assert_eq!(
+        cq.lookup(&[id.clone()], true).await.unwrap(),
+        vec![vec![1.into(), 4.into()]]
+    );
 
     // wait for exit
-    done.await;
+    g.shutdown();
+    eprintln!("waiting for completion");
+    g.wait_done().await;
 }
 
 fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
@@ -1221,8 +1217,10 @@ async fn it_recovers_persisted_bases() {
 
     {
         let mut g = Builder::default();
+        g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
-        let (mut g, done) = g.start(authority.clone()).await.unwrap();
+        let mut g = g.start(authority.clone()).await.unwrap();
+        sleep().await;
 
         {
             let sql = "
@@ -1241,13 +1239,17 @@ async fn it_recovers_persisted_bases() {
 
         // Let writes propagate:
         sleep().await;
-        drop(g);
-        done.await;
+        g.shutdown();
+        g.wait_done().await;
     }
+
+    sleep().await;
 
     let mut g = Builder::default();
     g.set_persistence(persistence_params);
-    let (mut g, done) = g.start(authority.clone()).await.unwrap();
+    g.log_with(crate::logger_pls());
+    let mut g = g.start(authority.clone()).await.unwrap();
+    sleep().await;
     {
         let mut getter = g.view("CarPrice").await.unwrap();
 
@@ -1260,7 +1262,6 @@ async fn it_recovers_persisted_bases() {
         }
     }
     drop(g);
-    done.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1322,7 +1323,7 @@ async fn view_connection_churn() {
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
-    let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+    let mut g = builder.start(authority.clone()).await.unwrap();
 
     g.install_recipe(
         "
@@ -1343,7 +1344,7 @@ async fn view_connection_churn() {
                 let mut builder = Builder::default();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("connection_churn"));
-                let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+                let mut g = builder.start(authority.clone()).await.unwrap();
 
                 g.view("AID")
                     .await
@@ -1354,14 +1355,12 @@ async fn view_connection_churn() {
 
                 drop(tx);
                 drop(g);
-                done.await;
             })
         })
         .collect();
     drop(tx);
     assert_eq!(rx.recv().await, None);
     drop(g);
-    done.await;
     for jh in jhs {
         jh.await.unwrap();
     }
@@ -1375,7 +1374,7 @@ async fn table_connection_churn() {
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
     // builder.log_with(crate::logger_pls());
-    let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+    let mut g = builder.start(authority.clone()).await.unwrap();
 
     g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
         .await
@@ -1391,7 +1390,7 @@ async fn table_connection_churn() {
                 let mut builder = Builder::default();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("connection_churn"));
-                let (mut g, done) = builder.start(authority.clone()).await.unwrap();
+                let mut g = builder.start(authority.clone()).await.unwrap();
 
                 g.table("A")
                     .await
@@ -1401,15 +1400,15 @@ async fn table_connection_churn() {
                     .unwrap();
 
                 drop(tx);
-                drop(g);
-                done.await;
+                g.shutdown();
+                g.wait_done().await;
             })
         })
         .collect();
     drop(tx);
     assert_eq!(rx.recv().await, None);
-    drop(g);
-    done.await;
+    g.shutdown();
+    g.wait_done().await;
     for jh in jhs {
         jh.await.unwrap();
     }
@@ -1433,7 +1432,8 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     {
         let mut g = Builder::default();
         g.set_persistence(persistence_parameters.clone());
-        let (mut g, done) = g.start(authority.clone()).await.unwrap();
+        let mut g = g.start(authority.clone()).await.unwrap();
+        sleep().await;
 
         {
             let sql = "
@@ -1452,23 +1452,26 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
             }
         }
         sleep().await;
-        drop(g);
-        done.await;
+        g.shutdown();
+        g.wait_done().await;
     }
+
+    sleep().await;
 
     // Create a new controller with the same authority, and make sure that it recovers to the same
     // state that the other one had.
     let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
-    let (mut g, done) = g.start(authority.clone()).await.unwrap();
+    let mut g = g.start(authority.clone()).await.unwrap();
+    sleep().await;
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
-    drop(g);
-    done.await;
+    g.shutdown();
+    g.wait_done().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2023,7 +2026,7 @@ async fn replay_during_replay() {
     let mut g = Builder::default();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
-    let mut g = g.start_local().await.unwrap().0;
+    let mut g = g.start_local().await.unwrap();
     let (a, u1, u2) = g
         .migrate(|mig| {
             // we need three bases:
@@ -3523,7 +3526,7 @@ async fn correct_nested_view_schema() {
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
     b.set_sharding(None);
-    let mut g = b.start_local().await.unwrap().0;
+    let mut g = b.start_local().await.unwrap();
     g.install_recipe(r_txt).await.unwrap();
 
     let q = g.view("swvc").await.unwrap();
@@ -3950,8 +3953,7 @@ async fn non_sql_materialized_range_query() {
         builder.start_local()
     }
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
@@ -3991,8 +3993,7 @@ async fn non_sql_range_upquery() {
         builder.start_local()
     }
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
@@ -4032,8 +4033,7 @@ async fn range_upquery_after_point_queries() {
         builder.start_local()
     }
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
@@ -4203,8 +4203,7 @@ async fn post_read_ilike() {
         builder.start_local()
     }
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
@@ -4593,7 +4592,7 @@ async fn reader_replication() {
     let mut w1 = build_custom(
         cluster_name,
         Some(DEFAULT_SHARDING),
-        false,
+        true,
         true,
         authority.clone(),
         None,
@@ -4603,12 +4602,12 @@ async fn reader_replication() {
     let instances_standalone = w1.get_instances().await.unwrap();
     assert_eq!(1usize, instances_standalone.len());
 
-    let w1_addr: SocketAddr = instances_standalone[0].0;
+    let w1_addr = instances_standalone[0].0.clone();
 
     let _w2 = build_custom(
         "reader_replication",
         Some(DEFAULT_SHARDING),
-        false,
+        true,
         false,
         authority.clone(),
         None,
@@ -4616,16 +4615,18 @@ async fn reader_replication() {
     .await;
 
     while w1.get_instances().await.unwrap().len() < 2 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        eprintln!("waiting");
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     let instances_cluster = w1.get_instances().await.unwrap();
 
-    let w2_addr = *instances_cluster
+    let w2_addr = instances_cluster
         .iter()
         .map(|(addr, _, _)| addr)
-        .find(|&&addr| addr != w1_addr)
-        .unwrap();
+        .find(|&addr| addr != &w1_addr)
+        .unwrap()
+        .clone();
 
     w1.install_recipe(
         "
@@ -4644,7 +4645,11 @@ async fn reader_replication() {
         .await
         .unwrap();
 
-    let worker_without_reader = if w1.view_from_workers("q", vec![w1_addr]).await.is_err() {
+    let worker_without_reader = if w1
+        .view_from_workers("q", vec![w1_addr.clone()])
+        .await
+        .is_err()
+    {
         w1_addr
     } else {
         w2_addr
@@ -4661,7 +4666,7 @@ async fn reader_replication() {
             });
 
     let repl_result = w1
-        .replicate_readers(vec!["q".to_owned()], Some(worker_without_reader))
+        .replicate_readers(vec!["q".to_owned()], Some(worker_without_reader.clone()))
         .await
         .unwrap();
 
@@ -4720,7 +4725,7 @@ async fn test_view_includes_replicas() {
     let instances_standalone = w1.get_instances().await.unwrap();
     assert_eq!(1usize, instances_standalone.len());
 
-    let w1_addr: SocketAddr = instances_standalone[0].0;
+    let w1_addr = instances_standalone[0].0.clone();
 
     let _w2 = build_custom(
         "view_includes_replicas",
@@ -4741,7 +4746,7 @@ async fn test_view_includes_replicas() {
     let w2_addr = instances_cluster
         .iter()
         .map(|(addr, _, _)| addr)
-        .find(|&&addr| addr != w1_addr)
+        .find(|&addr| addr != &w1_addr)
         .unwrap()
         .clone();
 
@@ -4811,7 +4816,7 @@ async fn test_view_includes_replicas() {
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
     let dumped_metric: &DumpedMetric = &metrics_dump
         .metrics
-        .get(recorded::SERVER_EXTERNAL_REQUESTS)
+        .get(recorded::SERVER_CONTROLLER_REQUESTS)
         .unwrap()[0];
 
     if let DumpedMetricValue::Counter(v) = dumped_metric.value {
@@ -4821,6 +4826,8 @@ fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
     }
 }
 
+// FIXME(eta): this test is now slightly hacky after we started making more
+//             external requests as part of the RPC refactor.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_client() {
     unsafe {
@@ -4831,28 +4838,28 @@ async fn test_metrics_client() {
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
     let mut builder = Builder::default();
-    builder.set_external_addr("127.0.0.1:6034".parse().unwrap());
-    let g = builder.start_local().await.unwrap().0;
+    let g = builder.start_local().await.unwrap();
 
     let mut client = MetricsClient::new(g.c.clone().unwrap()).unwrap();
     let res = client.reset_metrics().await;
     assert!(!res.is_err());
 
-    // Each get_metrics requests is a two external requests.
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
-    assert_eq!(2.0, get_external_requests_count(metrics_dump));
+    let count = get_external_requests_count(metrics_dump);
+    assert!(get_external_requests_count(metrics_dump) > 0.0);
 
     // Verify that this value is incrementing.
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
-    assert_eq!(4.0, get_external_requests_count(metrics_dump));
+    let second_count = get_external_requests_count(metrics_dump);
+    assert!(get_external_requests_count(metrics_dump) > count);
 
     // Reset the metrics and verify the metrics actually reset.
     assert!(!client.reset_metrics().await.is_err());
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
-    assert_eq!(2.0, get_external_requests_count(metrics_dump));
+    assert!(get_external_requests_count(metrics_dump) < second_count);
 }
 
 #[tokio::test(flavor = "multi_thread")]

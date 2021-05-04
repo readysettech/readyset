@@ -1,18 +1,70 @@
-use crate::controller::ControllerState;
-use crate::coordination::{CoordinationMessage, CoordinationPayload};
-use async_bincode::AsyncBincodeReader;
-use futures_util::{
-    future::FutureExt,
-    future::TryFutureExt,
-    sink::SinkExt,
-    stream::{StreamExt, TryStreamExt},
-};
+//! # The Noria server
+//!
+//! A Noria server instance consists of three main components: the `NoriaServer` HTTP server
+//! (which listens externally for RPC calls), the `ControllerOuter` controller wrapper (which may
+//! contain a `ControllerInner` if this instance is elected leader), and the `Worker` (which
+//! contains many `Domain` objects).
+//!
+//! We also start the reader listening loop (`worker::readers::listen`, responsible for servicing
+//! data-plane read requests) and the controller's leadership election campaign
+//! (`controller::instance_campaign`, responsible for attempting to find leadership information via
+//! the `Authority` and win the leadership election if possible).
+//!
+//! These are all spun up by the `start_instance` function in this module, and run on the Tokio
+//! event loop. This gives you a `Handle`, enabling you to send requests to the `ControllerOuter`.
+//!
+//! # Control plane and data plane
+//!
+//! Communications amongst and within Noria servers are divided into 2 categories:
+//!
+//! - the **control plane**, communications between workers and controllers used to perform
+//!   migrations and alter the structure of the system
+//! - the **data plane**, communications relating to client-initiated read and write traffic, and
+//!   dataflow communications between domains
+//!
+//! It's important to note that data plane communications are very much "in the hot path", since
+//! delays and slowdowns directly impact user-observed read/write performance.
+//!
+//! ## Control plane communications overview
+//!
+//! All control plane communications go via server instances' `NoriaServer`s, which are just HTTP
+//! servers. The endpoints exposed by this HTTP server are:
+//!
+//! - registration and heartbeat requests sent from workers to the `ControllerInner`
+//!   - `ControllerInner::handle_register`, mapped to `POST /worker_rx/register`
+//!   - `ControllerInner::handle_heartbeat`, mapped to `POST /worker_rx/heartbeat`
+//! - requests sent from the `ControllerInner` to workers (including those workers' domains)
+//!   - the `WorkerRequestKind` enum, mapped to `POST /worker_request`
+//!   - ...which can contain a `DomainRequest`
+//! - requests sent from clients to the `ControllerInner`
+//!   - see `ControllerInner::external_request`
+//! - other misc. endpoints for things like metrics (see the `NoriaServer` implementation for more)
+//!
+//! Typically, an incoming HTTP request is deserialized and then sent via a `tokio::sync::mpsc`
+//! channel to the `ControllerOuter` or `Worker`; the response is sent back via a
+//! `tokio::sync::oneshot` channel, serialized, and returned to the client.
+//!
+//! The `do_noria_rpc` function in `noria::util` shows how clients can make RPC requests (as well
+//! as the `ControllerHandle` in `noria::controller`).
+//!
+//! ## Data plane communications overview
+//!
+//! Data plane communications occur over TCP sockets, and use custom protocols optimized for speed.
+//!
+//! (TODO: write this section)
+
+use crate::controller::{ControllerOuter, ControllerRequest};
+
+use futures_util::future::TryFutureExt;
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
+use hyper::{service::make_service_fn, Body, Request, Response};
 use noria::consensus::Authority;
+use noria::metrics::recorded;
 use noria::ControllerDescriptor;
+use noria::ReadySetError;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time;
 use std::{
     future::Future,
@@ -20,52 +72,18 @@ use std::{
     task::{Context, Poll},
 };
 use stream_cancel::Valve;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream, UnboundedReceiverStream};
+use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::TcpListenerStream;
+use tower::Service;
 
 use crate::handle::Handle;
-use crate::{Config, ReadySetResult};
-
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum Event {
-    InternalMessage(CoordinationMessage),
-    ExternalRequest(
-        Method,
-        String,
-        Option<String>,
-        hyper::body::Bytes,
-        tokio::sync::oneshot::Sender<Result<Result<String, String>, StatusCode>>,
-    ),
-    LeaderChange(ControllerState, ControllerDescriptor),
-    WonLeaderElection(ControllerState),
-    CampaignError(anyhow::Error),
-    #[cfg(test)]
-    IsReady(tokio::sync::oneshot::Sender<bool>),
-    ManualMigration {
-        f: Box<
-            dyn FnOnce(&mut crate::controller::migrate::Migration) -> ReadySetResult<()>
-                + Send
-                + 'static,
-        >,
-        done: tokio::sync::oneshot::Sender<()>,
-    },
-}
-
-use std::fmt;
-impl fmt::Debug for Event {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Event::InternalMessage(ref cm) => write!(f, "Internal({:?})", cm),
-            Event::ExternalRequest(ref m, ref path, ..) => write!(f, "Request({} {})", m, path),
-            Event::LeaderChange(..) => write!(f, "LeaderChange(..)"),
-            Event::WonLeaderElection(..) => write!(f, "Won(..)"),
-            Event::CampaignError(ref e) => write!(f, "CampaignError({:?})", e),
-            #[cfg(test)]
-            Event::IsReady(..) => write!(f, "IsReady"),
-            Event::ManualMigration { .. } => write!(f, "ManualMigration{{..}}"),
-        }
-    }
-}
+use crate::worker::{Worker, WorkerRequest};
+use crate::{Config, NoriaMetricsRecorder};
+use dataflow::Readers;
+use noria::metrics::MetricsDump;
+use std::time::Duration;
+use tokio::net::TcpListener;
+use url::Url;
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// instance. Make sure that this method is run while on a runtime.
@@ -75,287 +93,286 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     external_addr: SocketAddr,
     config: Config,
     memory_limit: Option<usize>,
-    memory_check_frequency: Option<time::Duration>,
+    _memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
     region: Option<String>,
-) -> Result<(Handle<A>, impl Future<Output = ()> + Unpin + Send), anyhow::Error> {
+) -> Result<Handle<A>, anyhow::Error> {
+    let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
+    let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
+    let (campaign_tx, campaign_rx) = tokio::sync::mpsc::channel(16);
+    let (handle_tx, handle_rx) = tokio::sync::mpsc::channel(16);
+
     let (trigger, valve) = Valve::new();
-    let (alive, done) = tokio::sync::mpsc::channel(1);
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut rx = valve.wrap(UnboundedReceiverStream::new(rx));
 
-    // we'll be listening for a couple of different types of events:
-    // first, events from workers
-    let wport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
-    let mut waddr = wport.local_addr()?;
-    // second, messages from the "real world"
-    let xport = tokio::net::TcpListener::bind(external_addr)
-        .or_else(|_| tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)))
-        .await?;
-    let mut xaddr = xport.local_addr()?;
-    // and third, domain control traffic. this traffic is a little special, since we may need to
-    // receive from it while handling control messages (e.g., for replay acks). because of this, we
-    // give it its own channel.
-    let cport = tokio::net::TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
-    let mut caddr = cport.local_addr()?;
-
-    // set up different loops for the controller "part" and the worker "part" of us. this is
-    // necessary because sometimes the two need to communicate (e.g., for migrations), and if they
-    // were in a single loop, that could deadlock.
-    let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (worker_tx, worker_rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // spawn all of those
-    tokio::spawn(listen_internal(
-        alive.clone(),
-        valve.clone(),
-        log.clone(),
-        tx.clone(),
-        wport,
-    ));
-    let ext_log = log.clone();
-    let ext_log2 = log.clone();
-    let ext_log3 = log.clone();
-    let ext_log4 = log.clone();
-    tokio::spawn(
-        listen_external(
-            alive.clone(),
-            valve.clone(),
-            tx.clone(),
-            xport,
-            authority.clone(),
-        )
-        .map_err(move |e| {
-            eprintln!("external request failed: {:?}", e);
-            warn!(ext_log, "external request failed: {:?}", e);
+    let http_listener = TcpListener::bind(SocketAddr::new(listen_addr, external_addr.port()))
+        .or_else(|_| {
+            warn!(
+                log,
+                "Could not bind to provided external port; using a random port instead!"
+            );
+            TcpListener::bind(SocketAddr::new(listen_addr, 0))
         })
-        .map(|_| ()),
-    );
+        .await?;
 
-    // first, a loop that just forwards to the appropriate place
-    let a = alive.clone();
-    tokio::spawn(async move {
-        let _alive = a;
-        let ctx = ctrl_tx;
-        let wtx = worker_tx;
-        while let Some(e) = rx.next().await {
-            let snd = match e {
-                Event::InternalMessage(ref msg) => match msg.payload {
-                    CoordinationPayload::Deregister => ctx.send(e),
-                    CoordinationPayload::RemoveDomain => wtx.send(e),
-                    CoordinationPayload::AssignDomain(..) => wtx.send(e),
-                    CoordinationPayload::DomainBooted(..) => wtx.send(e),
-                    CoordinationPayload::Register { .. } => ctx.send(e),
-                    CoordinationPayload::Heartbeat => ctx.send(e),
-                    CoordinationPayload::CreateUniverse(..) => ctx.send(e),
-                },
-                Event::ExternalRequest(..) => ctx.send(e),
-                Event::ManualMigration { .. } => ctx.send(e),
-                Event::LeaderChange(..) => wtx.send(e),
-                Event::WonLeaderElection(..) => ctx.send(e),
-                Event::CampaignError(..) => ctx.send(e),
-                #[cfg(test)]
-                Event::IsReady(..) => ctx.send(e),
-            };
-            // needed for https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
-            if let Err(e) = snd {
-                eprintln!("forwarding loop failed: {:?}", e);
-                warn!(ext_log2, "Forwarding loop failed (!!): {:?}", e);
-                break;
-            }
-        }
-    });
+    let real_external_addr =
+        SocketAddr::new(external_addr.ip(), http_listener.local_addr()?.port());
+    // FIXME(eta): this won't work for IPv6
+    let http_uri = Url::parse(&format!("http://{}", real_external_addr))?;
 
-    xaddr.set_ip(external_addr.ip());
-    waddr.set_ip(external_addr.ip());
-    caddr.set_ip(external_addr.ip());
+    let readers_listener = TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
 
-    let descriptor = ControllerDescriptor {
-        external_addr: xaddr,
-        worker_addr: waddr,
-        domain_addr: caddr,
-        nonce: rand::random(),
+    let reader_addr = SocketAddr::new(external_addr.ip(), readers_listener.local_addr()?.port());
+    let readers: Readers = Arc::new(Mutex::new(Default::default()));
+
+    let http_server = NoriaServer {
+        worker_tx: worker_tx.clone(),
+        controller_tx,
+        authority: authority.clone(),
     };
+
+    tokio::spawn(crate::worker::readers::listen(
+        valve.clone(),
+        readers_listener,
+        readers.clone(),
+    ));
+
     tokio::spawn(
-        crate::controller::main(
-            alive.clone(),
-            valve,
-            config,
-            descriptor,
-            ctrl_rx,
-            cport,
-            log.clone(),
-            authority.clone(),
-            tx.clone(),
-        )
-        .map_err(move |e| {
-            eprintln!("controller failed: {:?}", e);
-            warn!(ext_log4, "controller failed: {:?}", e);
-            e
-        }),
-    );
-    tokio::spawn(
-        crate::worker::main(
-            alive.clone(),
-            worker_rx,
-            listen_addr,
-            external_addr.ip(),
-            external_addr,
-            waddr,
-            memory_limit,
-            memory_check_frequency,
-            log.clone(),
-            region,
-        )
-        .map_err(move |e| {
-            eprintln!("worker domain failed: {:?}", e);
-            warn!(ext_log3, "worker domain failed: {:?}", e);
-            e
-        }),
-    );
-
-    let h = Handle::new(authority, tx, trigger).await?;
-    Ok((h, ReceiverStream::new(done).into_future().map(|_| {})))
-}
-
-async fn listen_internal(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    log: slog::Logger,
-    event_tx: UnboundedSender<Event>,
-    on: tokio::net::TcpListener,
-) {
-    let mut rx = valve.wrap(TcpListenerStream::new(on));
-    while let Some(r) = { rx.next().await } {
-        match r {
-            Err(e) => {
-                warn!(log, "internal connection failed: {:?}", e);
-                return;
-            }
-            Ok(sock) => {
-                let alive = alive.clone();
-                tokio::spawn(
-                    valve
-                        .wrap(AsyncBincodeReader::from(sock))
-                        .map_ok(|m| Event::InternalMessage(m))
-                        .map_err(anyhow::Error::from)
-                        .forward(
-                            crate::ImplSinkForSender(event_tx.clone())
-                                .sink_map_err(|_| format_err!("main event loop went away")),
-                        )
-                        .map_err(|e| panic!("{:?}", e))
-                        .map(move |_| {
-                            let _ = alive;
-                            ()
-                        }),
-                );
-            }
-        }
-    }
-}
-
-struct ExternalServer<A: Authority>(
-    tokio::sync::mpsc::Sender<()>,
-    UnboundedSender<Event>,
-    Arc<A>,
-);
-
-async fn listen_external<A: Authority + 'static>(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    event_tx: UnboundedSender<Event>,
-    on: tokio::net::TcpListener,
-    authority: Arc<A>,
-) -> Result<(), hyper::Error> {
-    let on = valve.wrap(TcpListenerStream::new(on));
-    use hyper::{service::make_service_fn, Body, Request, Response};
-    use tower::Service;
-    impl<A: Authority> Clone for ExternalServer<A> {
-        // Needed due to #26925
-        fn clone(&self) -> Self {
-            ExternalServer(self.0.clone(), self.1.clone(), self.2.clone())
-        }
-    }
-
-    impl<A: Authority> Service<Request<Body>> for ExternalServer<A> {
-        type Response = Response<Body>;
-        type Error = hyper::Error;
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-        fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: Request<Body>) -> Self::Future {
-            let res = Response::builder();
-            // disable CORS to allow use as API server
-            let res = res.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-            if let Method::GET = *req.method() {
-                match req.uri().path() {
-                    "/graph.html" => {
-                        let res = res
-                            .header(CONTENT_TYPE, "text/html")
-                            .body(hyper::Body::from(include_str!("graph.html")));
-                        return Box::pin(async move { Ok(res.unwrap()) });
-                    }
-                    path if path.starts_with("/zookeeper/") => {
-                        let res = match self.2.try_read(&format!("/{}", &path[11..])) {
-                            Ok(Some(data)) => res
-                                .header(CONTENT_TYPE, "application/json")
-                                .body(hyper::Body::from(data)),
-                            _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
-                        };
-                        return Box::pin(async move { Ok(res.unwrap()) });
-                    }
-                    _ => {}
-                }
-            }
-
-            let method = req.method().clone();
-            let path = req.uri().path().to_string();
-            let query = req.uri().query().map(ToOwned::to_owned);
-            let event_tx = self.1.clone();
-
-            Box::pin(async move {
-                let body = hyper::body::to_bytes(req.into_body()).await?;
-                let (tx, rx) = tokio::sync::oneshot::channel();
-
-                if let Err(_) = event_tx.send(Event::ExternalRequest(method, path, query, body, tx))
-                {
-                    let res = res
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .header("Content-Type", "text/plain; charset=utf-8");
-                    return Ok(res.body(hyper::Body::from("server went away")).unwrap());
-                }
-
-                match rx.await {
-                    Ok(reply) => {
-                        let res = match reply {
-                            Ok(Ok(reply)) => res
-                                .header("Content-Type", "application/json; charset=utf-8")
-                                .body(hyper::Body::from(reply)),
-                            Ok(Err(reply)) => res
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .header("Content-Type", "text/plain; charset=utf-8")
-                                .body(hyper::Body::from(reply)),
-                            Err(status_code) => res.status(status_code).body(hyper::Body::empty()),
-                        };
-                        Ok(res.unwrap())
-                    }
-                    Err(_) => {
-                        let res = res.status(StatusCode::NOT_FOUND);
-                        Ok(res.body(hyper::Body::empty()).unwrap())
-                    }
-                }
-            })
-        }
-    }
-
-    let service = ExternalServer(alive, event_tx, authority);
-    hyper::server::Server::builder(hyper::server::accept::from_stream(on))
+        hyper::server::Server::builder(hyper::server::accept::from_stream(
+            valve.wrap(TcpListenerStream::new(http_listener)),
+        ))
         .serve(make_service_fn(move |_| {
-            let s = service.clone();
+            let s = http_server.clone();
             async move { io::Result::Ok(s) }
         }))
-        .await
+        .map_err(|e| {
+            panic!("HTTP server failed: {}", e);
+        }),
+    );
+
+    let worker = Worker {
+        log: log.new(o!("module" => "worker")),
+        election_state: None,
+        // this initial duration doesn't matter; it gets set upon worker registration
+        heartbeat_interval: tokio::time::interval(Duration::from_secs(10)),
+        evict_interval: None,
+        memory_limit,
+        rx: worker_rx,
+        coord: Arc::new(Default::default()),
+        http: reqwest::Client::new(),
+        worker_uri: http_uri.clone(),
+        domain_bind: listen_addr,
+        domain_external: external_addr.ip(),
+        reader_addr,
+        state_sizes: Arc::new(Mutex::new(Default::default())),
+        readers,
+        valve: valve.clone(),
+        domains: Default::default(),
+        region,
+    };
+
+    tokio::spawn(worker.run().map_err(|e| {
+        panic!("Worker failed: {}", e.to_string());
+    }));
+
+    let our_descriptor = ControllerDescriptor {
+        controller_uri: http_uri,
+        nonce: rand::random(),
+    };
+
+    let controller = ControllerOuter {
+        log: log.new(o!("module" => "controller")),
+        inner: None,
+        authority: authority.clone(),
+        worker_tx,
+        campaign_rx,
+        http_rx: controller_rx,
+        handle_rx,
+        our_descriptor: our_descriptor.clone(),
+        valve: valve.clone(),
+    };
+
+    crate::controller::instance_campaign(
+        campaign_tx,
+        authority.clone(),
+        our_descriptor,
+        config,
+        tokio::runtime::Handle::current(),
+    );
+
+    tokio::spawn(controller.run().map_err(|e| {
+        panic!("ControllerOuter failed: {}", e.to_string());
+    }));
+
+    let handle = Handle::new(authority, handle_tx, trigger).await?;
+
+    Ok(handle)
+}
+
+/// The main Noria HTTP server object.
+struct NoriaServer<A> {
+    /// Channel to the running `Worker`.
+    worker_tx: Sender<WorkerRequest>,
+    /// Channel to the running `ControllerOuter`.
+    controller_tx: Sender<ControllerRequest>,
+    /// The `Authority` used inside the server.
+    authority: Arc<A>,
+}
+
+impl<A> Clone for NoriaServer<A> {
+    fn clone(&self) -> Self {
+        Self {
+            worker_tx: self.worker_tx.clone(),
+            controller_tx: self.controller_tx.clone(),
+            authority: self.authority.clone(),
+        }
+    }
+}
+
+impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
+    type Response = Response<Body>;
+    type Error = hyper::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let res = Response::builder()
+            // disable CORS to allow use as API server
+            .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+
+        metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
+
+        match (req.method(), req.uri().path()) {
+            (&Method::GET, "/graph.html") => {
+                let res = res
+                    .header(CONTENT_TYPE, "text/html")
+                    .body(hyper::Body::from(include_str!("graph.html")));
+                return Box::pin(async move { Ok(res.unwrap()) });
+            }
+            (&Method::GET, path) if path.starts_with("/zookeeper/") => {
+                let res = match self.authority.try_read(&format!("/{}", &path[11..])) {
+                    Ok(Some(data)) => res
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(hyper::Body::from(data)),
+                    _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
+                };
+                return Box::pin(async move { Ok(res.unwrap()) });
+            }
+            (&Method::POST, "/metrics_dump") => {
+                let recorder = NoriaMetricsRecorder::get();
+                let (counters, gauges, histograms) =
+                    recorder.with_metrics(|c, g, h| (c.clone(), g.clone(), h.clone()));
+                let md = MetricsDump::from_metrics(counters, gauges, histograms);
+                let res = res
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(hyper::Body::from(serde_json::to_vec(&md).unwrap()));
+                return Box::pin(async move { Ok(res.unwrap()) });
+            }
+            (&Method::POST, "/reset_metrics") => {
+                let recorder = NoriaMetricsRecorder::get();
+                recorder.clear();
+                let res = res
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(hyper::Body::from(vec![]));
+                return Box::pin(async move { Ok(res.unwrap()) });
+            }
+            (&Method::POST, "/worker_request") => {
+                metrics::increment_counter!(recorded::SERVER_WORKER_REQUESTS);
+
+                let wtx = self.worker_tx.clone();
+                Box::pin(async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await?;
+                    let wrq = match bincode::deserialize(&body) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            return Ok(res
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .header("Content-Type", "text/plain; charset=utf-8")
+                                .body(hyper::Body::from(
+                                    bincode::serialize(&ReadySetError::from(e)).unwrap(),
+                                ))
+                                .unwrap());
+                        }
+                    };
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    if let Err(_) = wtx
+                        .send(WorkerRequest {
+                            kind: wrq,
+                            done_tx: tx,
+                        })
+                        .await
+                    {
+                        let res = res.status(StatusCode::SERVICE_UNAVAILABLE);
+                        return Ok(res.body(hyper::Body::empty()).unwrap());
+                    }
+
+                    let res = match rx.await {
+                        Ok(Ok(ret)) => res.header("Content-Type", "application/octet-stream").body(
+                            hyper::Body::from(ret.unwrap_or(bincode::serialize(&()).unwrap())),
+                        ),
+                        Ok(Err(e)) => res
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .header("Content-Type", "application/octet-stream")
+                            .body(hyper::Body::from(bincode::serialize(&e).unwrap())),
+                        Err(_) => res
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .body(hyper::Body::empty()),
+                    };
+                    Ok(res.unwrap())
+                })
+            }
+            _ => {
+                metrics::increment_counter!(recorded::SERVER_CONTROLLER_REQUESTS);
+
+                let method = req.method().clone();
+                let path = req.uri().path().to_string();
+                let query = req.uri().query().map(ToOwned::to_owned);
+                let controller_tx = self.controller_tx.clone();
+
+                Box::pin(async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await?;
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+
+                    let req = ControllerRequest {
+                        method,
+                        path,
+                        query,
+                        body,
+                        reply_tx: tx,
+                    };
+
+                    if let Err(_) = controller_tx.send(req).await {
+                        let res = res
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .header("Content-Type", "text/plain; charset=utf-8");
+                        return Ok(res.body(hyper::Body::from("server went away")).unwrap());
+                    }
+
+                    match rx.await {
+                        Ok(reply) => {
+                            let res = match reply {
+                                Ok(Ok(reply)) => res
+                                    .header("Content-Type", "application/octet-stream")
+                                    .body(hyper::Body::from(reply)),
+                                Ok(Err(reply)) => res
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                    .header("Content-Type", "application/octet-stream")
+                                    .body(hyper::Body::from(reply)),
+                                Err(status_code) => {
+                                    res.status(status_code).body(hyper::Body::empty())
+                                }
+                            };
+                            Ok(res.unwrap())
+                        }
+                        Err(_) => {
+                            let res = res.status(StatusCode::NOT_FOUND);
+                            Ok(res.body(hyper::Body::empty()).unwrap())
+                        }
+                    }
+                })
+            }
+        }
+    }
 }

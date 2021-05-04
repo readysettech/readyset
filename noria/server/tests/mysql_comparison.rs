@@ -275,7 +275,7 @@ async fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let (mut g, done) = Builder::default().start_local().await.unwrap();
+    let mut g = Builder::default().start_local().await.unwrap();
     g.install_recipe(&queries.join("\n")).await.unwrap();
 
     for (table_name, table) in tables.iter() {
@@ -331,8 +331,8 @@ async fn check_query(
             None => {}
         }
     }
-
-    done.await;
+    g.shutdown();
+    g.wait_done().await;
     Ok(())
 }
 

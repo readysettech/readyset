@@ -1,10 +1,11 @@
 //! Error handling, definitions, and utilities
 
 use crate::channel::tcp::SendError;
+use crate::consensus::Epoch;
 use petgraph::graph::NodeIndex;
 use std::error::Error;
-use std::net::SocketAddr;
 use thiserror::Error;
+use url::Url;
 
 /// Wraps a boxed `std::error::Error` to make it implement, um, `std::error::Error`.
 /// Yes, I'm as disappointed as you are.
@@ -54,6 +55,26 @@ pub enum ReadySetError {
         /// The query name (identifier) of the query that couldn't be added.
         qname: String,
         /// The error encountered while adding the query.
+        source: Box<ReadySetError>,
+    },
+
+    /// A migration couldn't be completed.
+    #[error("Migration failed: {source}")]
+    MigrationFailed {
+        /// The error encountered while performing the migration.
+        source: Box<ReadySetError>,
+    },
+
+    /// A domain couldn't be booted on the remote worker.
+    #[error("Failed to boot domain {domain_index}.{shard} on worker '{worker_uri}': {source}")]
+    DomainCreationFailed {
+        /// The index of the domain.
+        domain_index: usize,
+        /// The shard of the domain.
+        shard: usize,
+        /// The URI of the worker where the domain was to be placed.
+        worker_uri: Url,
+        /// The error encountered while trying to boot the domain.
         source: Box<ReadySetError>,
     },
 
@@ -133,7 +154,7 @@ pub enum ReadySetError {
         /// The name of the view that could not be found.
         name: String,
         /// The pool of workers where the view was attempted to be found.
-        workers: Vec<SocketAddr>,
+        workers: Vec<Url>,
     },
 
     /// The query specified an empty lookup key.
@@ -244,6 +265,67 @@ pub enum ReadySetError {
     /// An unsupported conditional combo in MIR.
     #[error("Unsupported conditional in MIR")]
     MirUnsupportedCondition(),
+
+    /// A worker operation couldn't be completed because the worker doesn't know where the
+    /// controller is yet, or has lost track of it.
+    #[error("Worker cannot find its controller")]
+    LostController,
+
+    /// An RPC request was made to a noria-server instance that isn't the leader.
+    #[error("This instance is not the leader")]
+    NotLeader,
+
+    /// An RPC operation couldn't be completed because the message epoch didn't match.
+    #[error("Epoch mismatch: supplied {supplied:?}, but current is {current:?}")]
+    EpochMismatch {
+        /// The epoch supplied in the RPC message.
+        supplied: Option<Epoch>,
+        /// What the recipient thinks the current epoch is.
+        current: Option<Epoch>,
+    },
+
+    /// A worker tried to check in with a heartbeat payload, but the controller is unaware of it.
+    #[error("Unknown worker at {unknown_uri} tried to check in with heartbeat")]
+    UnknownWorker {
+        /// The URI of the worker that the controller didn't recognize.
+        unknown_uri: Url,
+    },
+
+    /// A request for reader replication into a worker failed, because the worker URI provided
+    /// could not be found in the list of registered workers.
+    #[error("Could not find worker at {unknown_uri} for reader replication")]
+    ReplicationUnknownWorker {
+        /// The URI of the worker that could not be found.
+        unknown_uri: Url,
+    },
+
+    /// An RPC request was attempted against a worker that has failed.
+    #[error("Worker at {uri} failed")]
+    WorkerFailed {
+        /// The failed worker's URI.
+        uri: Url,
+    },
+
+    /// Making a HTTP request failed.
+    #[error("HTTP request failed: {0}")]
+    HttpRequestFailed(String),
+
+    /// A domain request was sent to a worker that doesn't have that domain.
+    #[error("Could not find domain {domain_index}.{shard} on worker")]
+    NoSuchDomain {
+        /// The index of the domain.
+        domain_index: usize,
+        /// The shard.
+        shard: usize,
+    },
+
+    /// The remote end isn't ready to handle requests yet, or has fallen over.
+    #[error("Service unavailable")]
+    ServiceUnavailable,
+
+    /// An error was encountered when working with URLs.
+    #[error("URL parse failed: {0}")]
+    UrlParseFailed(String),
 }
 
 impl ReadySetError {
@@ -487,8 +569,24 @@ impl From<serde_json::error::Error> for ReadySetError {
 
 /// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
 /// and deserialized.
+impl From<bincode::Error> for ReadySetError {
+    fn from(e: bincode::Error) -> ReadySetError {
+        ReadySetError::SerializationFailed(e.to_string())
+    }
+}
+
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
 impl From<SendError> for ReadySetError {
     fn from(e: SendError) -> ReadySetError {
         ReadySetError::TcpSendError(e.to_string())
+    }
+}
+
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
+impl From<url::ParseError> for ReadySetError {
+    fn from(e: url::ParseError) -> ReadySetError {
+        ReadySetError::UrlParseFailed(e.to_string())
     }
 }

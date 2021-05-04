@@ -3,6 +3,7 @@ use chrono::NaiveDateTime;
 use msql_srv::MysqlTime;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
+use std::borrow::{Borrow, Cow};
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
@@ -207,15 +208,17 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         }
                         VariantAccess::tuple_variant(variant, 2usize, Visitor)
                     }
-                    (Field::Text, variant) => VariantAccess::newtype_variant::<&'_ [u8]>(variant)
-                        .and_then(|x| {
+                    (Field::Text, variant) => {
+                        VariantAccess::newtype_variant::<Cow<'_, [u8]>>(variant).and_then(|x| {
+                            let x: &[u8] = x.borrow();
                             DataType::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
                                     serde::de::Unexpected::Bytes(x),
                                     &"valid utf-8 or short TinyText",
                                 )
                             })
-                        }),
+                        })
+                    }
                     (Field::Timestamp, variant) => Result::map(
                         VariantAccess::newtype_variant::<NaiveDateTime>(variant),
                         DataType::Timestamp,

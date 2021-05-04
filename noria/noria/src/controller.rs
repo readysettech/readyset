@@ -4,10 +4,11 @@ use crate::debug::stats;
 use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
 use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
+use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetResult,
-    ViewFilter, ViewRequest,
+    internal, rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec,
+    ReadySetResult, ViewFilter, ViewRequest,
 };
 use futures_util::future;
 use petgraph::graph::NodeIndex;
@@ -19,10 +20,12 @@ use std::time::Duration;
 use std::{
     future::Future,
     task::{Context, Poll},
+    time,
 };
 use tower::buffer::Buffer;
 use tower::ServiceExt;
 use tower_service::Service;
+use url::Url;
 
 /// Describes a running controller instance.
 ///
@@ -31,9 +34,7 @@ use tower_service::Service;
 #[derive(Clone, Serialize, Deserialize)]
 #[doc(hidden)]
 pub struct ControllerDescriptor {
-    pub external_addr: SocketAddr,
-    pub worker_addr: SocketAddr,
-    pub domain_addr: SocketAddr,
+    pub controller_uri: Url,
     pub nonce: u64,
 }
 
@@ -49,10 +50,10 @@ struct ControllerRequest {
 }
 
 impl ControllerRequest {
-    fn new<Q: Serialize>(path: &'static str, r: Q) -> Result<Self, serde_json::Error> {
+    fn new<Q: Serialize>(path: &'static str, r: Q) -> ReadySetResult<Self> {
         Ok(ControllerRequest {
             path,
-            request: serde_json::to_vec(&r)?,
+            request: bincode::serialize(&r)?,
         })
     }
 }
@@ -75,11 +76,20 @@ where
         let auth = self.authority.clone();
         let path = req.path;
         let body = req.request;
+        let start = time::Instant::now();
+        let mut last_error_desc: Option<String> = None;
 
         async move {
             let mut url = None;
 
             loop {
+                if time::Instant::now().duration_since(start).as_secs() >= RPC_REQUEST_TIMEOUT_SECS
+                {
+                    internal!(
+                        "request timeout reached; last error: {}",
+                        last_error_desc.unwrap_or_else(|| "(none)".into())
+                    );
+                }
                 if url.is_none() {
                     // TODO: don't do blocking things here...
                     // TODO: cache this value?
@@ -92,19 +102,26 @@ where
                             .1,
                     )?;
 
-                    url = Some(format!("http://{}/{}", descriptor.external_addr, path));
+                    url = Some(descriptor.controller_uri.join(path)?);
                 }
 
-                let r = hyper::Request::post(url.as_ref().unwrap())
+                // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
+                //             (if you try and use the `url` directly instead of stringifying)
+                let r = hyper::Request::post(url.as_ref().unwrap().to_string())
                     .body(hyper::Body::from(body.clone()))
                     .unwrap();
 
                 // TODO(eta): custom error types here?
 
-                let res = client
-                    .request(r)
-                    .await
-                    .map_err(|he| internal_err(format!("hyper request failed: {}", he)))?;
+                let res = match client.request(r).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        last_error_desc = Some(e.to_string());
+                        url = None;
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                };
 
                 let status = res.status();
                 let body = hyper::body::to_bytes(res.into_body())
@@ -114,11 +131,11 @@ where
                 match status {
                     hyper::StatusCode::OK => return Ok(body),
                     hyper::StatusCode::INTERNAL_SERVER_ERROR => {
-                        let body = String::from_utf8_lossy(&*body);
-                        let err: ReadySetError = serde_json::from_str(&body)?;
+                        let err: ReadySetError = bincode::deserialize(&body)?;
                         return Err(err);
                     }
                     s => {
+                        last_error_desc = Some(format!("got status {}", s));
                         if s == hyper::StatusCode::SERVICE_UNAVAILABLE {
                             url = None;
                         }
@@ -254,7 +271,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .await
             .map_err(rpc_err!("ControllerHandle::inputs"))?;
 
-        Ok(serde_json::from_slice(&body)?)
+        Ok(bincode::deserialize(&body)?)
     }
 
     /// Enumerate all known external views.
@@ -272,7 +289,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .await
             .map_err(rpc_err!("ControllerHandle::outputs"))?;
 
-        Ok(serde_json::from_slice(&body)?)
+        Ok(bincode::deserialize(&body)?)
     }
 
     /// Obtain a `View` that allows you to query the given external view.
@@ -296,7 +313,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn view_from_workers<'a>(
         &'a mut self,
         name: &str,
-        workers: Vec<SocketAddr>,
+        workers: Vec<Url>,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
         // This call attempts to detect if this function is being called in a loop. If this is
         // getting false positives, then it is safe to increase the allowed hit count, however, the
@@ -351,7 +368,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .await
             .map_err(rpc_err!("ControllerHandle::view_builder"))?;
 
-        match serde_json::from_slice::<ReadySetResult<Option<ViewBuilder>>>(&body)?
+        match bincode::deserialize::<ReadySetResult<Option<ViewBuilder>>>(&body)?
             .map_err(|e| rpc_err_no_downcast("ControllerHandle::view_builder", e))?
         {
             Some(vb) => Ok(vb),
@@ -407,7 +424,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?;
 
-            match serde_json::from_slice::<ReadySetResult<Option<TableBuilder>>>(&body)?
+            match bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
                 .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
             {
                 Some(tb) => Ok(tb.build(domains)),
@@ -443,18 +460,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .await
                 .map_err(rpc_err!(path))?;
 
-            /*
-            Pro tip! If you're getting SerializationFailed errors, the following println! could
-            be useful. ~eta
-
-            println!(
-                "{} deserializing as {}",
-                String::from_utf8_lossy(&body),
-                std::any::type_name::<R>()
-            );
-            */
-
-            serde_json::from_slice::<R>(&body)
+            bincode::deserialize::<R>(&body)
                 .map_err(ReadySetError::from)
                 .map_err(|e| rpc_err_no_downcast(path, e))
         }
@@ -515,7 +521,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn get_instances(
         &mut self,
-    ) -> impl Future<Output = ReadySetResult<Vec<(SocketAddr, bool, Duration)>>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<Vec<(Url, bool, Duration)>>> + '_ {
         self.rpc("instances", ())
     }
 
@@ -525,11 +531,11 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     pub fn replicate_readers(
         &mut self,
         queries: Vec<String>,
-        worker_addr: Option<SocketAddr>,
+        worker_uri: Option<Url>,
     ) -> impl Future<Output = ReadySetResult<ReaderReplicationResult>> + '_ {
         let request = ReaderReplicationSpec {
             queries,
-            worker_addr,
+            worker_uri,
         };
         self.rpc("replicate_readers", request)
     }
@@ -559,13 +565,10 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         self.rpc("metrics_dump", ())
     }
 
-    /// Fetch the a map of worker address to external address for each noria instance running
-    /// in the cluster lead by this controller.
+    /// Get a list of all registered worker URIs.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn external_addrs(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<HashMap<SocketAddr, SocketAddr>>> + '_ {
-        self.rpc("external_addrs", ())
+    pub fn workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
+        self.rpc("workers", ())
     }
 }

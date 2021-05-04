@@ -251,7 +251,7 @@ If specified, overrides the value of --external-address"))
         .enable_all()
         .thread_name("worker")
         .build()?;
-    let (_server, done) = rt.block_on(async move {
+    let mut handle = rt.block_on(async move {
         let external_addr = external_addr.await.unwrap_or_else(|err| {
             eprintln!("Error obtaining external IP address: {}", err);
             process::exit(1)
@@ -259,7 +259,7 @@ If specified, overrides the value of --external-address"))
         builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
         builder.start(Arc::new(authority)).await
     })?;
-    rt.block_on(done);
+    rt.block_on(handle.wait_done());
     drop(rt);
     Ok(())
 }

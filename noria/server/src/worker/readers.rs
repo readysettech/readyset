@@ -60,12 +60,7 @@ impl From<Vec<u8>> for SerializedReadReplyBatch {
 
 type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>>;
 
-pub(super) async fn listen(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    on: tokio::net::TcpListener,
-    readers: Readers,
-) {
+pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: Readers) {
     let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
     while let Some(stream) = stream.next().await {
         if let Err(_) = stream {
@@ -76,7 +71,6 @@ pub(super) async fn listen(
         let stream = stream.unwrap();
         let readers = readers.clone();
         stream.set_nodelay(true).expect("could not set TCP_NODELAY");
-        let alive = alive.clone();
 
         // future that ensures all blocking reads are handled in FIFO order
         // and avoid hogging the executors with read retries
@@ -116,33 +110,26 @@ pub(super) async fn listen(
                 service_fn(move |req| handle_message(req, &readers, &mut tx)),
             ),
         );
-        tokio::spawn(
-            server
-                .map_err(|e| {
-                    match e {
-                        server::Error::Service(()) => {
-                            // server is shutting down -- no need to report this error
+        tokio::spawn(server.map_err(|e| {
+            match e {
+                server::Error::Service(()) => {
+                    // server is shutting down -- no need to report this error
+                    return;
+                }
+                server::Error::BrokenTransportRecv(ref e)
+                | server::Error::BrokenTransportSend(ref e) => {
+                    if let bincode::ErrorKind::Io(ref e) = **e {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe
+                            || e.kind() == std::io::ErrorKind::ConnectionReset
+                        {
+                            // client went away
                             return;
                         }
-                        server::Error::BrokenTransportRecv(ref e)
-                        | server::Error::BrokenTransportSend(ref e) => {
-                            if let bincode::ErrorKind::Io(ref e) = **e {
-                                if e.kind() == std::io::ErrorKind::BrokenPipe
-                                    || e.kind() == std::io::ErrorKind::ConnectionReset
-                                {
-                                    // client went away
-                                    return;
-                                }
-                            }
-                        }
                     }
-                    eprintln!("!!! reader client protocol error: {:?}", e);
-                })
-                .map(move |r| {
-                    let _ = alive;
-                    r
-                }),
-        );
+                }
+            }
+            eprintln!("!!! reader client protocol error: {:?}", e);
+        }));
     }
 }
 
