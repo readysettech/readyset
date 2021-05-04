@@ -47,6 +47,7 @@ vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "0.10.1"
 derive_more = "0.99.11"
 backoff = "0.3.0"
+url = { version = "2.2", features = ["serde"] }
 
 # consensus/
 slog = "2.4.0"

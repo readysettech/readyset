@@ -5,7 +5,7 @@ use itertools::Itertools;
 use noria::{Builder, DataType, DurabilityMode, Handle, PersistenceParameters, ZookeeperAuthority};
 use rand::prelude::*;
 use std::fs;
-use std::future::Future;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -43,7 +43,7 @@ async fn build_graph(
     authority: Arc<ZookeeperAuthority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> (Handle<ZookeeperAuthority>, impl Future<Output = ()>) {
+) -> Handle<ZookeeperAuthority> {
     let mut builder = Builder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
@@ -309,7 +309,7 @@ async fn main() {
 
     if !args.is_present("use-existing-data") {
         clear_zookeeper(zk_address);
-        let (mut g, done) = build_graph(authority.clone(), persistence.clone(), verbose).await;
+        let mut g = build_graph(authority.clone(), persistence.clone(), verbose).await;
         if use_secondary {
             g.install_recipe(SECONDARY_RECIPE).await.unwrap();
         } else {
@@ -336,12 +336,12 @@ async fn main() {
             return;
         }
 
-        drop(g);
-        done.await;
+        g.shutdown();
+        g.wait_done().await;
     }
 
     // Recover the previous graph and perform reads:
-    let (mut g, done) = build_graph(authority, persistence, verbose).await;
+    let mut g = build_graph(authority, persistence, verbose).await;
     // Flush disk cache:
     Command::new("sync")
         .spawn()
@@ -353,5 +353,6 @@ async fn main() {
         fs::remove_dir_all("replay-TableRow-0.db").unwrap();
     }
 
-    done.await;
+    g.shutdown();
+    g.wait_done().await;
 }

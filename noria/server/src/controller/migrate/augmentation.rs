@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use petgraph;
 use petgraph::graph::NodeIndex;
 
+use dataflow::DomainRequest;
 use slog::Logger;
 
 pub(super) fn inform(
@@ -54,11 +55,11 @@ pub(super) fn inform(
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());
-            ctx.send_to_healthy(
-                Box::new(Packet::AddNode {
+            ctx.send_to_healthy_blocking::<()>(
+                DomainRequest::AddNode {
                     node,
                     parents: old_parents,
-                }),
+                },
                 &controller.workers,
             )
             .unwrap();

@@ -99,10 +99,10 @@ macro_rules! row {
                         .ok_or_else(|| $crate::errors::internal_err("field name appears twice -- should be caught by match"))?;
                     if let Some(ref schema) = schema {
                         if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
-                            return Err(($crate::errors::ReadySetError::TableError {
+                            return Err($crate::errors::ReadySetError::TableError {
                                  name: $tbl.table_name().into(),
                                  source: Box::new($crate::errors::ReadySetError::NonNullable { col: col.into() })
-                            }).into())
+                            }.into())
                         }
                     }
                 },)|+
@@ -129,10 +129,10 @@ macro_rules! row {
                     }
 
                     if !allow_null && row[coli].is_none() {
-                       return Err(($crate::errors::ReadySetError::TableError {
+                       return Err($crate::errors::ReadySetError::TableError {
                             name: $tbl.table_name().into(),
                             source: Box::new($crate::errors::ReadySetError::ColumnRequired { col: cname.into() })
-                       }).into())
+                       }.into())
                     }
                 }
                 _ => { /* leave column value as None */ }

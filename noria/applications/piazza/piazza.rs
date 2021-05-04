@@ -3,7 +3,7 @@ use clap::value_t_or_exit;
 use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
-use std::future::Future;
+
 use std::time;
 
 #[macro_use]
@@ -13,7 +13,6 @@ use crate::populate::Populate;
 
 pub struct Backend {
     g: Handle<LocalAuthority>,
-    done: Box<dyn Future<Output = ()> + Unpin>,
 }
 
 #[derive(PartialEq)]
@@ -43,10 +42,9 @@ impl Backend {
 
         cb.log_with(blender_log);
 
-        let (g, done) = cb.start_local().await.unwrap();
-        let done = Box::new(done);
+        let g = cb.start_local().await.unwrap();
 
-        Backend { g, done }
+        Backend { g }
     }
 
     pub async fn populate(&mut self, name: &'static str, records: Vec<Vec<DataType>>) -> usize {

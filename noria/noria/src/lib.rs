@@ -314,7 +314,7 @@ pub use crate::view::{
     KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, ViewQuery, ViewQueryFilter,
     ViewQueryOperator,
 };
-use std::net::SocketAddr;
+use url::Url;
 
 #[doc(hidden)]
 pub mod builders {
@@ -343,8 +343,8 @@ pub struct ActivationResult {
 pub struct ReaderReplicationSpec {
     /// Name of the queries that will have their reader nodes replicated.
     pub queries: Vec<String>,
-    /// Worker node address.
-    pub worker_addr: Option<SocketAddr>,
+    /// Worker URI.
+    pub worker_uri: Option<Url>,
 }
 
 /// Represents the result of a reader replication.
@@ -360,7 +360,7 @@ pub struct ReaderReplicationResult {
 pub enum ViewFilter {
     /// Pool of worker addresses. If the pool is not empty, this will
     /// look for a view reader in the pool.
-    Workers(Vec<SocketAddr>),
+    Workers(Vec<Url>),
     /// Region to request the view from.
     // TODO(justin): This parameter is currently not supported and
     // is a no-op.

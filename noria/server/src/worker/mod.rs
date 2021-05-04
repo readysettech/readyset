@@ -1,408 +1,432 @@
-use crate::controller::ControllerState;
-use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::coordination::{
+    do_noria_rpc, DomainDescriptor, HeartbeatPayload, RegisterPayload, RunDomainResponse,
+};
 use crate::errors::internal_err;
-use crate::startup::Event;
-use async_bincode::AsyncBincodeWriter;
-use dataflow::{DomainBuilder, Packet};
+use crate::worker::replica::WrappedDomainRequest;
+use crate::ReadySetResult;
+use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use metrics::{counter, gauge};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
 use noria::metrics::recorded;
-use noria::ControllerDescriptor;
-use noria::{channel, internal, ReadySetError};
+use noria::{channel, ReadySetError};
 use replica::ReplicaAddr;
 use std::collections::HashMap;
-use std::fs;
-use std::io;
+use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
-use std::time::{self, Duration};
-use stream_cancel::{Trigger, Valve};
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::IntervalStream;
+use std::task::{Context, Poll};
+use std::time::Duration;
+use stream_cancel::Valve;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::Interval;
+use url::Url;
 
-mod readers;
+pub(crate) mod readers;
 mod replica;
 
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddr, Box<Packet>>;
 
-enum InstanceState {
-    Pining,
-    Active {
+/// Some kind of request for a running Noria worker.
+///
+/// Most of these requests return `()`, apart from `DomainRequest`.
+#[derive(Clone, Serialize, Deserialize)]
+pub enum WorkerRequestKind {
+    /// A new controller has been elected.
+    NewController {
+        /// The URI of the new controller.
+        controller_uri: Url,
+        /// The period at which the new controller expects heartbeat packets.
+        heartbeat_every: Duration,
+        /// The epoch under which this information is valid.
         epoch: Epoch,
-        trigger: Trigger,
-        add_domain: UnboundedSender<DomainBuilder>,
     },
+
+    /// A new domain should be started on this worker.
+    RunDomain(DomainBuilder),
+
+    /// A domain has been started elsewhere in the distributed system.
+    ///
+    /// The message contains information on how the domain can be reached, in order that
+    /// domains on this worker can communicate with it.
+    GossipDomainInformation(DomainDescriptor),
+
+    /// The sender of the request would like one of the domains on this worker to do something.
+    ///
+    /// This actually might return something that isn't `()`; see the `DomainRequest` docs
+    /// for more.
+    DomainRequest {
+        /// The index of the target domain.
+        target_idx: DomainIndex,
+        /// The shard of the target domain.
+        target_shard: usize,
+        /// The actual request.
+        request: DomainRequest,
+    },
+
+    /// Sent to validate that a connection actually works. Provokes an empty response.
+    Ping,
 }
 
-impl InstanceState {
-    fn take(&mut self) -> Self {
-        ::std::mem::replace(self, InstanceState::Pining)
+/// A request to a running Noria worker, containing a request kind and a completion channel.
+pub struct WorkerRequest {
+    /// The kind of request.
+    pub kind: WorkerRequestKind,
+    /// A channel through which the result of executing the request should be sent.
+    ///
+    /// If the request returned a non-`()` response, the result will be sent as a serialized
+    /// bincode vector.
+    pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
+}
+
+/// Information stored in the worker about what the currently active controller is.
+#[derive(Clone, Debug)]
+pub struct WorkerElectionState {
+    /// The URI of the currently active controller.
+    controller_uri: Url,
+    /// The epoch under which this information is valid.
+    epoch: Epoch,
+}
+
+pub struct DomainHandle {
+    req_tx: Sender<WrappedDomainRequest>,
+    join_handle: JoinHandle<Result<(), anyhow::Error>>,
+}
+
+/// A Noria worker, responsible for executing some domains.
+pub struct Worker {
+    /// `slog` logging thingie.
+    pub(crate) log: slog::Logger,
+    /// The current election state, if it exists (see the `WorkerElectionState` docs).
+    pub(crate) election_state: Option<WorkerElectionState>,
+    /// A timer for sending heartbeats to the controller.
+    pub(crate) heartbeat_interval: Interval,
+    /// A timer for doing evictions.
+    pub(crate) evict_interval: Option<Interval>,
+    /// A memory limit for state, in bytes.
+    pub(crate) memory_limit: Option<usize>,
+    /// Channel through which worker requests are received.
+    pub(crate) rx: Receiver<WorkerRequest>,
+    /// Channel coordinator (used by domains to figure out where other domains are).
+    pub(crate) coord: Arc<ChannelCoordinator>,
+    /// `reqwest` client (used to make HTTP requests to the controller)
+    pub(crate) http: reqwest::Client,
+    /// The URI of the worker's HTTP server.
+    pub(crate) worker_uri: Url,
+    /// The IP address to bind on for domain<->domain traffic.
+    pub(crate) domain_bind: IpAddr,
+    /// The IP address to expose to other domains for domain<->domain traffic.
+    pub(crate) domain_external: IpAddr,
+    /// The address the server instance is listening on for reads.
+    pub(crate) reader_addr: SocketAddr,
+    /// A store of the current state size of each domain, used for eviction purposes.
+    pub(crate) state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
+    /// Read handles.
+    pub(crate) readers: Readers,
+    /// Valve for shutting down; triggered by the [`Handle`] when [`Handle::shutdown`] is called.
+    pub(crate) valve: Valve,
+    /// The region this worker is in.
+    pub(crate) region: Option<String>,
+
+    /// Handles to domains currently being run by this worker.
+    ///
+    /// These are indexed by (domain index, shard).
+    pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
+}
+
+impl Worker {
+    async fn process_heartbeat(&mut self) -> ReadySetResult<()> {
+        if let Some(wes) = self.election_state.as_ref() {
+            let uri = wes.controller_uri.join("/worker_rx/heartbeat")?;
+            let body = bincode::serialize(&HeartbeatPayload {
+                epoch: wes.epoch,
+                worker_uri: wes.controller_uri.clone(),
+            })?;
+            let log = self.log.clone();
+            // this happens in a background task to avoid deadlocks
+            tokio::spawn(
+                do_noria_rpc::<()>(self.http.post(uri).body(body))
+                    .map_err(move |e| warn!(log, "heartbeat failed: {}", e)),
+            );
+        }
+        Ok(())
     }
-}
-pub(super) async fn main(
-    alive: tokio::sync::mpsc::Sender<()>,
-    mut worker_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
-    listen_addr: IpAddr,
-    external_addr: IpAddr,
-    external_controller_addr: SocketAddr,
-    waddr: SocketAddr,
-    memory_limit: Option<usize>,
-    memory_check_frequency: Option<time::Duration>,
-    log: slog::Logger,
-    region: Option<String>,
-) -> Result<(), ReadySetError> {
-    // shared df state
-    let coord = Arc::new(ChannelCoordinator::new());
 
-    let mut worker_state = InstanceState::Pining;
-    let log = log.clone();
-    while let Some(e) = worker_rx.recv().await {
-        match e {
-            Event::InternalMessage(msg) => match msg.payload {
-                CoordinationPayload::RemoveDomain => {
-                    internal!();
-                }
-                CoordinationPayload::AssignDomain(d) => {
-                    if let InstanceState::Active {
-                        epoch,
-                        ref mut add_domain,
-                        ..
-                    } = worker_state
-                    {
-                        if epoch == msg.epoch {
-                            let res = add_domain.send(d.clone());
-                            if let Err(e) = res {
-                                internal!("could not add new domain {:?}: {}", d, e);
-                            }
-                        }
-                    } else {
-                        internal!();
-                    }
-                }
-                CoordinationPayload::DomainBooted(dd) => {
-                    if let InstanceState::Active { epoch, .. } = worker_state {
-                        if epoch == msg.epoch {
-                            let domain = dd.domain();
-                            let shard = dd.shard();
-                            let addr = dd.addr();
-                            trace!(
-                                log,
-                                "found that domain {}.{} is at {:?}",
-                                domain.index(),
-                                shard,
-                                addr
-                            );
-                            coord.insert_remote((domain, shard), addr);
-                        }
-                    }
-                }
-                _ => {
-                    internal!();
-                }
-            },
-            Event::LeaderChange(state, descriptor) => {
-                if let InstanceState::Active {
-                    add_domain,
-                    trigger,
-                    ..
-                } = worker_state.take()
-                {
-                    // XXX: should we wait for current DF to be fully shut down?
-                    // FIXME: what about messages in listen_df's ctrl_tx?
-                    info!(log, "detected leader change");
-                    drop(add_domain);
-                    trigger.cancel();
-                } else {
-                    info!(log, "found initial leader");
-                }
+    fn process_eviction(&mut self) {
+        tokio::spawn(do_eviction(
+            self.log.clone(),
+            self.memory_limit,
+            self.coord.clone(),
+            self.state_sizes.clone(),
+        ));
+    }
 
+    async fn process_worker_request(&mut self, req: WorkerRequest) {
+        let ret = self.handle_worker_request(req.kind).await;
+        if let Err(ref e) = ret {
+            warn!(self.log, "worker request failed: {}", e.to_string());
+        }
+        // discard result, since Err(..) means "the receiving end was dropped"
+        let _ = req.done_tx.send(ret);
+    }
+
+    async fn handle_worker_request(
+        &mut self,
+        req: WorkerRequestKind,
+    ) -> ReadySetResult<Option<Vec<u8>>> {
+        match req {
+            WorkerRequestKind::NewController {
+                controller_uri,
+                heartbeat_every,
+                epoch,
+            } => {
                 info!(
-                    log,
-                    "leader listening on external address {:?}", descriptor.external_addr
+                    self.log,
+                    "worker informed of new controller at {} (epoch {:?})", controller_uri, epoch
                 );
-                debug!(
-                    log,
-                    "leader's worker listen address: {:?}", descriptor.worker_addr
+                let log = self.log.clone();
+                tokio::spawn(
+                    do_noria_rpc::<()>(
+                        self.http
+                            .post(controller_uri.join("/worker_rx/register")?)
+                            .body(bincode::serialize(&RegisterPayload {
+                                epoch: epoch.clone(),
+                                worker_uri: self.worker_uri.clone(),
+                                reader_addr: self.reader_addr.clone(),
+                                region: self.region.clone(),
+                            })?),
+                    )
+                    .map_err(move |e| {
+                        warn!(log, "controller registration failed: {}", e);
+                    }),
                 );
-                debug!(
-                    log,
-                    "leader's domain listen address: {:?}", descriptor.domain_addr
-                );
-
-                // we need to make a new valve that we can use to shut down *just* the
-                // worker in the case of controller failover.
-                let (trigger, valve) = Valve::new();
-
-                // TODO: memory stuff should probably also be in config?
-                let (rep_tx, rep_rx) = tokio::sync::mpsc::unbounded_channel();
-                let ctrl = listen_df(
-                    alive.clone(),
-                    valve,
-                    log.clone(),
-                    (memory_limit, memory_check_frequency),
-                    &state,
-                    &descriptor,
-                    waddr,
-                    coord.clone(),
-                    listen_addr,
-                    external_addr,
-                    external_controller_addr,
-                    rep_rx,
-                    region.clone(),
-                )
-                .await;
-
-                if let Err(e) = ctrl {
-                    error!(log, "failed to connect to controller: {}", e);
-                } else {
-                    // now we can start accepting dataflow messages
-                    worker_state = InstanceState::Active {
-                        epoch: state.epoch,
-                        add_domain: rep_tx,
-                        trigger,
-                    };
-                    warn!(log, "Connected to new leader");
+                self.domains.clear();
+                for (_, d) in self.domains.drain() {
+                    d.join_handle.abort();
                 }
-            }
-            e => {
-                internal!("{:?} is not a worker event", e);
-            }
-        }
-    }
-    Ok(())
-    // shutting down...
-    //
-    // NOTE: the Trigger in InstanceState::Active is dropped when the for_each
-    // closure above is dropped, which will also shut down the worker.
-    //
-    // TODO: maybe flush things or something?
-}
-
-async fn listen_df<'a>(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    log: slog::Logger,
-    (memory_limit, evict_every): (Option<usize>, Option<Duration>),
-    state: &'a ControllerState,
-    desc: &'a ControllerDescriptor,
-    waddr: SocketAddr,
-    coord: Arc<ChannelCoordinator>,
-    on: IpAddr,
-    external_addr: IpAddr,
-    external_controller_addr: SocketAddr,
-    mut replicas: tokio::sync::mpsc::UnboundedReceiver<DomainBuilder>,
-    region: Option<String>,
-) -> Result<(), anyhow::Error> {
-    // first, try to connect to controller
-    let ctrl = tokio::net::TcpStream::connect(&desc.worker_addr).await?;
-    let ctrl_addr = ctrl.local_addr()?;
-    info!(log, "connected to controller"; "src" => ?ctrl_addr);
-
-    let log_prefix = state.config.persistence.log_prefix.clone();
-    let prefix = format!("{}-log-", log_prefix);
-    let log_files: Vec<String> = fs::read_dir(".")
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().ok().map(|t| t.is_file()).unwrap_or(false))
-        .map(|e| e.path().to_string_lossy().into_owned())
-        .filter(|path| path.starts_with(&prefix))
-        .collect();
-
-    // extract important things from state config
-    let epoch = state.epoch;
-    let heartbeat_every = state.config.heartbeat_every;
-
-    let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // reader setup
-    let readers = Arc::new(Mutex::new(HashMap::new()));
-    let rport = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-    let mut raddr = rport.local_addr()?;
-    info!(log, "listening for reads"; "on" => ?raddr);
-    raddr.set_ip(external_addr);
-
-    // start controller message handler
-    let mut ctrl = AsyncBincodeWriter::from(ctrl).for_async();
-    let a = alive.clone();
-    tokio::spawn(async move {
-        let _alive = a;
-        while let Some(cm) = ctrl_rx.recv().await {
-            if let Err(e) = ctrl
-                .send(CoordinationMessage {
-                    source: ctrl_addr, // local address part of a connection to the controller
-                    payload: cm,
+                self.election_state = Some(WorkerElectionState {
+                    controller_uri,
                     epoch,
-                })
-                .await
-            {
-                // if the controller goes away, another will be elected, and the worker will be
-                // restarted, so there's no reason to do anything too drastic here.
-                eprintln!("controller went away: {:?}", e);
+                });
+                self.heartbeat_interval = tokio::time::interval(heartbeat_every);
+                Ok(None)
             }
-        }
-    });
+            WorkerRequestKind::RunDomain(builder) => {
+                let idx = builder.index;
+                let shard = builder.shard.unwrap_or(0);
 
-    // also start readers
-    tokio::spawn(readers::listen(
-        alive.clone(),
-        valve.clone(),
-        rport,
-        readers.clone(),
-    ));
+                info!(self.log, "received domain {}.{} to run", idx.index(), shard);
 
-    // and tell the controller about us
-    let mut timer = valve.wrap(IntervalStream::new(tokio::time::interval_at(
-        tokio::time::Instant::now() + heartbeat_every,
-        heartbeat_every,
-    )));
-    let a = alive.clone();
-    let ctx = ctrl_tx.clone();
-    tokio::spawn(async move {
-        let _alive = a;
-        let _ = ctx.send(CoordinationPayload::Register {
-            addr: waddr, // worker address
-            read_listen_addr: raddr,
-            controller_addr: external_controller_addr,
-            log_files,
-            region,
-        });
-
-        // start sending heartbeats
-        while let Some(_) = timer.next().await {
-            if let Err(_) = ctx.send(CoordinationPayload::Heartbeat) {
-                // if we error we're probably just shutting down
-                break;
-            }
-        }
-    });
-
-    let state_sizes = Arc::new(Mutex::new(HashMap::new()));
-    if let Some(evict_every) = evict_every {
-        let log = log.clone();
-        let coord = coord.clone();
-        let mut domain_senders = HashMap::new();
-        let state_sizes = state_sizes.clone();
-        let mut timer = valve.wrap(IntervalStream::new(tokio::time::interval_at(
-            tokio::time::Instant::now() + evict_every,
-            evict_every,
-        )));
-        let a = alive.clone();
-        tokio::spawn(async move {
-            let _alive = a;
-            while let Some(_) = timer.next().await {
-                do_eviction(
-                    &log,
-                    memory_limit,
-                    &mut domain_senders,
-                    &coord,
-                    &state_sizes,
-                )
-                .await;
-            }
-        });
-    }
-
-    // Now we're ready to accept new domains.
-    let dcaddr = desc.domain_addr;
-    tokio::spawn(
-        async move {
-            let alive = alive;
-            while let Some(d) = replicas.recv().await {
-                let idx = d.index;
-                let shard = d.shard.unwrap_or(0);
-
-                let on = tokio::net::TcpListener::bind(&SocketAddr::new(on, 0)).await?;
-                let mut addr = on.local_addr()?;
-                info!(log, "listening for domains"; "on" => ?addr);
-                addr.set_ip(external_addr);
+                let bind_on = self.domain_bind.clone();
+                let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
+                    .map_err(|e| {
+                        internal_err(format!(
+                            "failed to bind domain {}.{} on {}: {}",
+                            idx.index(),
+                            shard,
+                            bind_on,
+                            e
+                        ))
+                    })
+                    .await?;
+                let bind_actual = listener.local_addr().map_err(|e| {
+                    internal_err(format!("couldn't get TCP local address for domain: {}", e))
+                })?;
+                let mut bind_external = bind_actual.clone();
+                bind_external.set_ip(self.domain_external.clone());
 
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let d = tokio::task::block_in_place(|| {
-                    d.build(
-                        log.clone(),
-                        readers.clone(),
-                        coord.clone(),
-                        dcaddr,
-                        &valve,
-                        state_size.clone(),
-                    )
-                });
+                let domain = builder.build(
+                    self.log.clone(),
+                    self.readers.clone(),
+                    self.coord.clone(),
+                    state_size.clone(),
+                );
 
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                // this channel is used for in-process domain traffic, to avoid going through the
+                // network stack unnecessarily
+                let (local_tx, local_rx) = tokio::sync::mpsc::unbounded_channel();
+                // this channel is used for domain requests; it has a buffer size of 1 to prevent
+                // flooding a domain with requests
+                let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
 
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                coord.insert_local((idx, shard), tx);
-                coord.insert_remote((idx, shard), addr);
+                self.coord.insert_local((idx, shard), local_tx);
+                self.coord.insert_remote((idx, shard), bind_external);
 
                 tokio::task::block_in_place(|| {
-                    state_sizes.lock().unwrap().insert((idx, shard), state_size)
+                    self.state_sizes
+                        .lock()
+                        .unwrap()
+                        .insert((idx, shard), state_size)
                 });
 
                 let replica = replica::Replica::new(
-                    &valve,
-                    d,
-                    on,
-                    external_addr,
-                    rx,
-                    ctrl_tx.clone(),
-                    log.clone(),
-                    coord.clone(),
+                    domain,
+                    listener,
+                    local_rx,
+                    request_rx,
+                    self.log.clone(),
+                    self.coord.clone(),
                 );
-                let a = alive.clone();
-                tokio::spawn(async move {
-                    let _alive = a;
-                    let log = replica.log.clone();
-                    if let Err(e) = replica.await {
-                        crit!(log, "replica anyhow: {:?}", e);
-                    }
-                });
+
+                let jh = tokio::spawn(replica);
+
+                self.domains.insert(
+                    (idx, shard),
+                    DomainHandle {
+                        req_tx: request_tx,
+                        join_handle: jh,
+                    },
+                );
 
                 info!(
-                    log,
-                    "informed controller that domain {}.{} is at {:?}",
+                    self.log,
+                    "domain {}.{} booted; binds on {} and exposes {} to others",
                     idx.index(),
+                    shard,
+                    bind_actual,
+                    bind_external
+                );
+                let resp = RunDomainResponse {
+                    external_addr: bind_external,
+                };
+                Ok(Some(bincode::serialize(&resp)?))
+            }
+            WorkerRequestKind::GossipDomainInformation(dd) => {
+                let domain = dd.domain();
+                let shard = dd.shard();
+                let addr = dd.addr();
+                trace!(
+                    self.log,
+                    "found that domain {}.{} is at {:?}",
+                    domain.index(),
                     shard,
                     addr
                 );
+                self.coord.insert_remote((domain, shard), addr);
+                Ok(None)
+            }
+            WorkerRequestKind::DomainRequest {
+                target_idx,
+                target_shard,
+                request,
+            } => {
+                let nsde = || ReadySetError::NoSuchDomain {
+                    domain_index: target_idx.index(),
+                    shard: target_shard,
+                };
+                let dh = self
+                    .domains
+                    .get_mut(&(target_idx, target_shard))
+                    .ok_or_else(nsde)?;
+                let (tx, rx) = oneshot::channel();
+                let _ = dh
+                    .req_tx
+                    .send(WrappedDomainRequest {
+                        req: request,
+                        done_tx: tx,
+                    })
+                    .await
+                    .map_err(|_| nsde())?;
+                rx.await.map_err(|_| nsde())?
+            }
+            WorkerRequestKind::Ping => Ok(None),
+        }
+    }
 
-                ctrl_tx
-                    .send(CoordinationPayload::DomainBooted(DomainDescriptor::new(
-                        idx, shard, addr,
-                    )))
-                    .map_err(|_| {
-                        // controller went away -- exit?
-                        io::Error::new(io::ErrorKind::Other, "controller went away")
-                    })?;
+    /// Run the worker continuously, processing worker requests, heartbeats, and domain failures.
+    /// This function returns if the worker fails, or the worker request sender is dropped.
+    pub async fn run(mut self) -> ReadySetResult<()> {
+        loop {
+            fn poll_domains<'a>(
+                domains: &'a mut HashMap<(DomainIndex, usize), DomainHandle>,
+            ) -> impl Future<
+                Output = Vec<(
+                    DomainIndex,
+                    usize,
+                    Result<Result<(), anyhow::Error>, tokio::task::JoinError>,
+                )>,
+            > + 'a {
+                // poll all currently running domains, futures 0.1 style!
+                futures_util::future::poll_fn(move |cx: &mut Context<'_>| {
+                    let mut failed_domains = vec![];
+                    for ((idx, shard), dh) in domains.iter_mut() {
+                        if let Poll::Ready(ret) = Pin::new(&mut dh.join_handle).poll(cx) {
+                            // uh oh, a domain failed!
+                            failed_domains.push((*idx, *shard, ret));
+                        }
+                    }
+                    if failed_domains.is_empty() {
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(failed_domains)
+                    }
+                })
             }
 
-            Ok(())
-        }
-        // FIXME(eta): fix atrocious conversion
-        .map_err(|e: io::Error| internal_err(format!("{:?}", e)))
-        .map_err(|e| eprintln!("domain task failed: {:?}", e)),
-    );
+            // produces a value when the `Valve` is closed
+            let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
 
-    Ok(())
+            let ei = &mut self.evict_interval;
+            let eviction = async {
+                if let Some(ref mut ei) = ei {
+                    ei.tick().await
+                } else {
+                    futures_util::future::pending().await
+                }
+            };
+
+            tokio::select! {
+                req = self.rx.recv() => {
+                    if let Some(req) = req {
+                        self.process_worker_request(req).await;
+                    }
+                    else {
+                        info!(self.log, "worker shutting down after request handle dropped");
+                        return Ok(());
+                    }
+                }
+                failed_domains = poll_domains(&mut self.domains) => {
+                    for (idx, shard, err) in failed_domains {
+                        // FIXME(eta): do something about this, now that we can?
+                        error!(self.log, "domain {}.{} failed: {:?}", idx.index(), shard, err);
+                        self.domains.remove(&(idx, shard));
+                    }
+                }
+                _ = shutdown_stream.next() => {
+                    info!(self.log, "worker shutting down after valve shut");
+                    return Ok(());
+                }
+                _ = eviction => {
+                    self.process_eviction();
+                }
+                _ = self.heartbeat_interval.tick() => {
+                    self.process_heartbeat().await?;
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
 async fn do_eviction(
-    log: &slog::Logger,
+    log: slog::Logger,
     memory_limit: Option<usize>,
-    domain_senders: &mut HashMap<
-        (DomainIndex, usize),
-        Box<dyn futures_sink::Sink<Box<Packet>, Error = Box<bincode::ErrorKind>> + Send + Unpin>,
-    >,
-    coord: &ChannelCoordinator,
-    state_sizes: &Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
+    coord: Arc<ChannelCoordinator>,
+    state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
 ) {
+    let mut domain_senders = HashMap::new();
+
     use std::cmp;
 
     // 2. add current state sizes (could be out of date, as packet sent below is not

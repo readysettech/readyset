@@ -1,33 +1,22 @@
 use crate::controller::inner::ControllerInner;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
-use crate::coordination::CoordinationMessage;
-use crate::coordination::CoordinationPayload;
-use crate::metrics::MetricsDump;
-use crate::startup::Event;
-use crate::NoriaMetricsRecorder;
+use crate::coordination::do_noria_rpc;
+use crate::errors::internal_err;
+use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult};
-use async_bincode::AsyncBincodeReader;
-use dataflow::payload::ControlReplyPacket;
-use futures_util::{
-    future::FutureExt,
-    future::TryFutureExt,
-    sink::SinkExt,
-    stream::{StreamExt, TryStreamExt},
-};
+use futures_util::StreamExt;
 use hyper::{self, Method, StatusCode};
-use noria::channel::TcpSender;
 use noria::consensus::{Authority, Epoch, STATE_KEY};
-use noria::metrics::recorded;
 use noria::ControllerDescriptor;
 use noria::{internal, ReadySetError};
-use std::net::SocketAddr;
+use serde::de::DeserializeOwned;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time;
 use stream_cancel::Valve;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio::sync::mpsc::{Receiver, Sender};
+use url::Url;
 
 mod domain_handle;
 mod inner;
@@ -48,249 +37,307 @@ pub(crate) struct ControllerState {
     recipes: Vec<String>,
 }
 
-struct Worker {
+pub struct Worker {
     healthy: bool,
     last_heartbeat: time::Instant,
-    sender: TcpSender<CoordinationMessage>,
+    uri: Url,
+    http: reqwest::Client,
     region: Option<String>,
 }
 
 impl Worker {
-    fn new(sender: TcpSender<CoordinationMessage>, region: Option<String>) -> Self {
+    pub fn new(instance_uri: Url, region: Option<String>) -> Self {
         Worker {
             healthy: true,
             last_heartbeat: time::Instant::now(),
-            sender,
+            uri: instance_uri,
+            http: reqwest::Client::new(),
             region,
         }
     }
-}
-
-type WorkerIdentifier = SocketAddr;
-
-/// External requests that can be handled without a controller at this
-/// noria-server.
-fn external_request(
-    method: hyper::Method,
-    path: String,
-) -> Result<Result<String, ReadySetError>, StatusCode> {
-    use serde_json as json;
-
-    match (&method, path.as_ref()) {
-        (&Method::POST, "/metrics_dump") => {
-            let recorder = NoriaMetricsRecorder::get();
-            let (counters, gauges, histograms) =
-                recorder.with_metrics(|c, g, h| (c.clone(), g.clone(), h.clone()));
-            let md = MetricsDump::from_metrics(counters, gauges, histograms);
-            Ok(Ok(json::to_string(&md).unwrap()))
-        }
-        (&Method::POST, "/reset_metrics") => {
-            let recorder = NoriaMetricsRecorder::get();
-            recorder.clear();
-            // Callers convert this to a 200 response to the client.
-            Ok(Ok("".to_string()))
-        }
-        _ => Err(StatusCode::NOT_FOUND),
+    pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
+        Ok(do_noria_rpc(
+            self.http
+                .post(self.uri.join("worker_request")?)
+                .body(hyper::Body::from(bincode::serialize(&req)?)),
+        )
+        .await?)
     }
 }
 
-pub(super) async fn main<A: Authority + 'static>(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    config: Config,
-    descriptor: ControllerDescriptor,
-    mut ctrl_rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
-    cport: tokio::net::TcpListener,
-    log: slog::Logger,
-    authority: Arc<A>,
-    tx: tokio::sync::mpsc::UnboundedSender<Event>,
-) -> Result<(), ReadySetError> {
-    let (dtx, drx) = tokio::sync::mpsc::unbounded_channel();
+/// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
+type WorkerIdentifier = Url;
 
-    tokio::spawn(listen_domain_replies(
-        alive.clone(),
-        valve.clone(),
-        log.clone(),
-        dtx,
-        cport,
-    ));
+/// An update on the controller's ongoing election campaign.
+pub(crate) enum CampaignUpdate {
+    /// The current leader has changed.
+    ///
+    /// The King is dead; long live the King!
+    LeaderChange(ControllerState, ControllerDescriptor),
+    /// We are now the new leader.
+    WonLeaderElection(ControllerState),
+    /// An error occurred in the leadership election process, which won't be restarted.
+    CampaignError(anyhow::Error),
+}
 
-    // note that we do not start up the data-flow until we find a controller!
+/// An HTTP request made to a controller.
+pub struct ControllerRequest {
+    /// The HTTP method used.
+    pub method: Method,
+    /// The path of the request.
+    pub path: String,
+    /// The request's query string.
+    pub query: Option<String>,
+    /// The request body.
+    pub body: hyper::body::Bytes,
+    /// Sender to send the response down.
+    pub reply_tx: tokio::sync::oneshot::Sender<Result<Result<Vec<u8>, Vec<u8>>, StatusCode>>,
+}
 
-    let campaign = instance_campaign(tx.clone(), authority.clone(), descriptor, config);
+/// A request made from a `Handle` to a controller.
+pub enum HandleRequest {
+    /// Inquires whether the controller is ready to accept requests (but see below for caveats).
+    ///
+    /// This is primarily used in tests; in this context, "ready" means "controller is the leader,
+    /// with at least 1 worker attached". The result gets sent down the provided sender.
+    #[allow(dead_code)]
+    QueryReadiness(tokio::sync::oneshot::Sender<bool>),
+    /// Performs a manual migration.
+    PerformMigration {
+        /// The migration function to perform.
+        func: Box<
+            dyn FnOnce(&mut crate::controller::migrate::Migration) -> ReadySetResult<()>
+                + Send
+                + 'static,
+        >,
+        /// The result of the migration gets sent down here.
+        done_tx: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+    },
+}
 
-    // state that this instance will take if it becomes the controller
-    let mut campaign = Some(campaign);
-    let mut drx = Some(drx);
+/// A wrapper for a potential controller, also handling leader elections, HTTP requests that aren't
+/// destined for the worker, and requests originated from this server instance's `Handle`.
+pub struct ControllerOuter<A> {
+    /// `slog` logging thingie.
+    pub(crate) log: slog::Logger,
+    /// If we're the leader, the actual controller.
+    pub(crate) inner: Option<ControllerInner>,
+    /// The `Authority` structure used for leadership elections & such state.
+    pub(crate) authority: Arc<A>,
+    /// Channel to the `Worker` running inside this server instance.
+    ///
+    /// This is used to convey changes in leadership state.
+    pub(crate) worker_tx: Sender<WorkerRequest>,
+    /// Receives updates from the election campaign thread.
+    pub(crate) campaign_rx: Receiver<CampaignUpdate>,
+    /// Receives external HTTP requests.
+    pub(crate) http_rx: Receiver<ControllerRequest>,
+    /// Receives requests from the controller's `Handle`.
+    pub(crate) handle_rx: Receiver<HandleRequest>,
+    /// A `ControllerDescriptor` that describes this server instance.
+    pub(crate) our_descriptor: ControllerDescriptor,
+    /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
+    pub(crate) valve: Valve,
+}
+impl<A> ControllerOuter<A>
+where
+    A: Authority + 'static,
+{
+    /// Run the provided *blocking* closure with the `ControllerInner` and the `Authority` if this
+    /// server instance is currently the leader.
+    ///
+    /// If it isn't, returns `Err(ReadySetError::NotLeader)`, and doesn't run the closure.
+    async fn with_controller_blocking<F, T>(&mut self, func: F) -> ReadySetResult<T>
+    where
+        F: FnOnce(&mut ControllerInner, Arc<A>) -> ReadySetResult<T>,
+    {
+        // FIXME: this is potentially slow, and it's only like this because borrowck sucks
+        let auth = self.authority.clone();
+        if let Some(ref mut ci) = self.inner {
+            Ok(tokio::task::block_in_place(|| func(ci, auth))?)
+        } else {
+            Err(ReadySetError::NotLeader)
+        }
+    }
 
-    let mut controller: Option<ControllerInner> = None;
-    while let Some(e) = ctrl_rx.recv().await {
-        match e {
-            Event::InternalMessage(msg) => match msg.payload {
-                CoordinationPayload::Deregister => {
-                    internal!();
+    /// Send the provided `WorkerRequestKind` to the worker running in the same server instance as
+    /// this controller wrapper, but don't bother waiting for the response.
+    ///
+    /// Not waiting for the response avoids deadlocking when the controller and worker are in the
+    /// same noria-server instance.
+    async fn send_worker_request(&mut self, kind: WorkerRequestKind) -> ReadySetResult<()> {
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        self.worker_tx
+            .send(WorkerRequest { kind, done_tx: tx })
+            .await
+            .map_err(|e| internal_err(format!("failed to send to instance worker: {}", e)))?;
+        Ok(())
+    }
+
+    async fn handle_controller_request(&mut self, req: ControllerRequest) -> ReadySetResult<()> {
+        let ControllerRequest {
+            method,
+            path,
+            query,
+            body,
+            reply_tx,
+        } = req;
+
+        let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
+            let resp = self
+                .with_controller_blocking(|ctrl, auth| {
+                    Ok(ctrl.external_request(method.clone(), path.clone(), query, body, &auth))
+                })
+                .await;
+            match resp {
+                // ok ok ok
+                Ok(Ok(Ok(r))) => Ok(Ok(r)),
+                Ok(Ok(Err(e))) => Ok(Err(bincode::serialize(&e)?)),
+                // HACK(eta): clients retry on 503, but not on `NotLeader`, so fudge the gap here.
+                Err(ReadySetError::NotLeader) => Err(StatusCode::SERVICE_UNAVAILABLE),
+                Err(e) => Ok(Err(bincode::serialize(&e)?)),
+                Ok(Err(s)) => Err(s),
+            }
+        };
+
+        if reply_tx.send(ret).is_err() {
+            warn!(self.log, "client hung up");
+        }
+        Ok(())
+    }
+
+    async fn handle_handle_request(&mut self, req: HandleRequest) -> ReadySetResult<()> {
+        match req {
+            HandleRequest::QueryReadiness(tx) => {
+                let done = self
+                    .inner
+                    .as_ref()
+                    .map(|ctrl| !ctrl.workers.is_empty())
+                    .unwrap_or(false);
+                if tx.send(done).is_err() {
+                    warn!(self.log, "readiness query sender hung up!");
                 }
-                CoordinationPayload::CreateUniverse(universe) => {
-                    if let Some(ref mut ctrl) = controller {
-                        tokio::task::block_in_place(|| ctrl.create_universe(universe).unwrap());
+            }
+            HandleRequest::PerformMigration { func, done_tx } => {
+                let ret = self
+                    .with_controller_blocking(|ctrl, _| {
+                        ctrl.migrate(move |m| func(m))??;
+                        Ok(())
+                    })
+                    .await;
+                if done_tx.send(ret).is_err() {
+                    warn!(self.log, "handle-based migration sender hung up!");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_campaign_update(&mut self, msg: CampaignUpdate) -> ReadySetResult<()> {
+        match msg {
+            CampaignUpdate::LeaderChange(state, descr) => {
+                self.send_worker_request(WorkerRequestKind::NewController {
+                    controller_uri: descr.controller_uri,
+                    heartbeat_every: state.config.heartbeat_every,
+                    epoch: state.epoch,
+                })
+                .await?;
+            }
+            CampaignUpdate::WonLeaderElection(state) => {
+                info!(self.log, "won leader election, creating ControllerInner");
+
+                self.inner = Some(ControllerInner::new(self.log.clone(), state.clone()));
+                self.send_worker_request(WorkerRequestKind::NewController {
+                    controller_uri: self.our_descriptor.controller_uri.clone(),
+                    heartbeat_every: state.config.heartbeat_every,
+                    epoch: state.epoch,
+                })
+                .await?;
+            }
+            CampaignUpdate::CampaignError(e) => {
+                // the campaign can't be restarted, so the controller should hard-exit
+                internal!("controller's leadership campaign failed: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Run the controller wrapper continuously, processing leadership updates and external
+    /// requests (if it gets elected).
+    /// This function returns if the wrapper fails, or the controller request sender is dropped.
+    pub async fn run(mut self) -> ReadySetResult<()> {
+        loop {
+            // produces a value when the `Valve` is closed
+            let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
+
+            tokio::select! {
+                req = self.handle_rx.recv() => {
+                    if let Some(req) = req {
+                        self.handle_handle_request(req).await?;
+                    }
+                    else {
+                        info!(self.log, "ControllerOuter shutting down after request handle dropped");
+                        break;
                     }
                 }
-                CoordinationPayload::Register { .. } => {
-                    if let Some(ref mut ctrl) = controller {
-                        tokio::task::block_in_place(|| {
-                            if let Err(e) = ctrl.handle_register(msg) {
-                                warn!(log, "worker registered and then immediately left: {:?}", e);
-                            }
-                        });
+                req = self.http_rx.recv() => {
+                    if let Some(req) = req {
+                        self.handle_controller_request(req).await?;
+                    }
+                    else {
+                        info!(self.log, "ControllerOuter shutting down after HTTP handle dropped");
+                        break;
                     }
                 }
-                CoordinationPayload::Heartbeat => {
-                    if let Some(ref mut ctrl) = controller {
-                        tokio::task::block_in_place(|| ctrl.handle_heartbeat(msg).unwrap());
+                // note: the campaign sender gets closed when we become the leader, so don't
+                // try to receive from it any more
+                req = self.campaign_rx.recv(), if self.inner.is_none() => {
+                    if let Some(req) = req {
+                        self.handle_campaign_update(req).await?;
                     }
-                }
-                _ => internal!(),
-            },
-            Event::ExternalRequest(method, path, query, body, reply_tx) => {
-                if let Some(ref mut ctrl) = controller {
-                    let authority = &authority;
-                    let reply = tokio::task::block_in_place(|| {
-                        let resp = ctrl.external_request(
-                            method.clone(),
-                            path.clone(),
-                            query,
-                            body,
-                            &authority,
-                        );
-                        match resp {
-                            Ok(r) => Ok(r.map_err(|e| serde_json::to_string(&e).unwrap())),
-                            Err(s) => {
-                                // If the request is not supported with a controller, check if we
-                                // can use the external request path that does not use a
-                                // controller.
-                                if let StatusCode::NOT_FOUND = s {
-                                    external_request(method, path)
-                                        .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
-                                } else {
-                                    Err(s)
-                                }
-                            }
+                    else {
+                        if self.inner.is_some() {
+                            info!(self.log, "leadership campaign terminated normally");
                         }
-                    });
-
-                    if reply_tx.send(reply).is_err() {
-                        warn!(log, "client hung up");
-                    }
-                } else {
-                    // There is no controller, however, we may still support an
-                    // external request to this noria-server. If the external
-                    // request is not supported, NOT_FOUND will be returned.
-                    metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
-                    let reply = tokio::task::block_in_place(|| {
-                        external_request(method, path)
-                            .map(|r| r.map_err(|e| serde_json::to_string(&e).unwrap()))
-                    });
-                    if reply_tx.send(reply).is_err() {
-                        warn!(log, "client hung up");
+                        else {
+                            // this shouldn't ever happen: if the leadership campaign thread fails,
+                            // it should send a `CampaignError` that we handle above first before
+                            // ever hitting this bit
+                            // still, good to be doubly sure
+                            internal!("leadership sender dropped without being elected");
+                        }
                     }
                 }
-            }
-            Event::ManualMigration { f, done } => {
-                if let Some(ref mut ctrl) = controller {
-                    if !ctrl.workers.is_empty() {
-                        tokio::task::block_in_place(|| -> ReadySetResult<()> {
-                            ctrl.migrate(move |m| f(m))??;
-                            done.send(()).unwrap();
-                            Ok(())
-                        })?
-                    }
-                } else {
-                    internal!("got migration closure before becoming leader");
+                _ = shutdown_stream.next() => {
+                    info!(self.log, "ControllerOuter shutting down after valve shut");
+                    break;
                 }
             }
-            #[cfg(test)]
-            Event::IsReady(reply) => {
-                reply
-                    .send(
-                        controller
-                            .as_ref()
-                            .map(|ctrl| !ctrl.workers.is_empty())
-                            .unwrap_or(false),
-                    )
-                    .unwrap();
-            }
-            Event::WonLeaderElection(state) => {
-                let c = campaign.take().unwrap();
-                tokio::task::block_in_place(move || c.join().unwrap());
-                let drx = drx.take().unwrap();
-                controller = Some(ControllerInner::new(log.clone(), state, drx));
-            }
-            Event::CampaignError(e) => {
-                internal!("{:?}", e);
-            }
-            e => internal!("{:?} is not a controller event", e),
         }
-    }
-
-    // shutting down
-    if controller.is_some() {
-        if let Err(e) = authority.surrender_leadership() {
-            error!(log, "failed to surrender leadership");
-            internal!("failed to surrender leadership: {}", e)
-        }
-    }
-
-    Ok(())
-}
-
-async fn listen_domain_replies(
-    alive: tokio::sync::mpsc::Sender<()>,
-    valve: Valve,
-    log: slog::Logger,
-    reply_tx: UnboundedSender<ControlReplyPacket>,
-    on: tokio::net::TcpListener,
-) {
-    let mut incoming = valve.wrap(TcpListenerStream::new(on));
-    while let Some(sock) = incoming.next().await {
-        match sock {
-            Err(e) => {
-                warn!(log, "domain reply connection failed: {:?}", e);
-                break;
-            }
-            Ok(sock) => {
-                let alive = alive.clone();
-                tokio::spawn(
-                    valve
-                        .wrap(AsyncBincodeReader::from(sock))
-                        .map_err(anyhow::Error::from)
-                        .forward(
-                            crate::ImplSinkForSender(reply_tx.clone())
-                                .sink_map_err(|_| format_err!("main event loop went away")),
-                        )
-                        .map_err(|e| panic!("{:?}", e))
-                        .map(move |_| {
-                            let _ = alive;
-                            ()
-                        }),
-                );
+        if self.inner.is_some() {
+            if let Err(e) = self.authority.surrender_leadership() {
+                error!(self.log, "failed to surrender leadership");
+                internal!("failed to surrender leadership: {}", e)
             }
         }
+        Ok(())
     }
 }
 
-fn instance_campaign<A: Authority + 'static>(
-    event_tx: UnboundedSender<Event>,
+pub(crate) fn instance_campaign<A: Authority + 'static>(
+    event_tx: Sender<CampaignUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
     config: Config,
+    rt_handle: tokio::runtime::Handle,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
-    let campaign_inner = move |event_tx: UnboundedSender<Event>| -> Result<(), anyhow::Error> {
-        let payload_to_event = |payload: Vec<u8>| -> Result<Event, anyhow::Error> {
+    let campaign_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
+        let payload_to_event = |payload: Vec<u8>| -> Result<CampaignUpdate, anyhow::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
             let state: ControllerState =
                 serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap())?;
-            Ok(Event::LeaderChange(state, descriptor))
+            Ok(CampaignUpdate::LeaderChange(state, descriptor))
         };
 
         loop {
@@ -301,15 +348,22 @@ fn instance_campaign<A: Authority + 'static>(
             let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
                 epoch = leader.0;
-                event_tx
-                    .send(payload_to_event(leader.1)?)
-                    .map_err(|_| format_err!("send failed"))?;
-                while let Some(leader) = authority.await_new_epoch(epoch)? {
-                    epoch = leader.0;
+                rt_handle.block_on(async {
                     event_tx
                         .send(payload_to_event(leader.1)?)
+                        .await
                         .map_err(|_| format_err!("send failed"))?;
-                }
+                    while let Some(leader) =
+                        tokio::task::block_in_place(|| authority.await_new_epoch(epoch))?
+                    {
+                        epoch = leader.0;
+                        event_tx
+                            .send(payload_to_event(leader.1)?)
+                            .await
+                            .map_err(|_| format_err!("send failed"))?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })?;
             }
 
             // ELECTION STATE - attempt to become leader
@@ -350,12 +404,20 @@ fn instance_campaign<A: Authority + 'static>(
             // It is not currently possible to safely handle involuntary loss of leadership status
             // (and there is nothing that can currently trigger it), so don't bother watching for
             // it.
-            event_tx
-                .send(Event::WonLeaderElection(state.clone().unwrap()))
-                .map_err(|_| format_err!("failed to announce who won leader election"))?;
-            event_tx
-                .send(Event::LeaderChange(state.unwrap(), descriptor.clone()))
-                .map_err(|_| format_err!("failed to announce leader change"))?;
+            rt_handle.block_on(async move {
+                event_tx
+                    .send(CampaignUpdate::WonLeaderElection(state.clone().unwrap()))
+                    .await
+                    .map_err(|_| format_err!("failed to announce who won leader election"))?;
+                event_tx
+                    .send(CampaignUpdate::LeaderChange(
+                        state.unwrap(),
+                        descriptor.clone(),
+                    ))
+                    .await
+                    .map_err(|_| format_err!("failed to announce leader change"))?;
+                Ok::<(), anyhow::Error>(())
+            })?;
             break Ok(());
         }
     };
@@ -364,7 +426,7 @@ fn instance_campaign<A: Authority + 'static>(
         .name("srv-zk".to_owned())
         .spawn(move || {
             if let Err(e) = campaign_inner(event_tx.clone()) {
-                let _ = event_tx.send(Event::CampaignError(e));
+                let _ = event_tx.send(CampaignUpdate::CampaignError(e));
             }
         })
         .unwrap()

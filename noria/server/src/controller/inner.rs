@@ -1,23 +1,22 @@
-use crate::controller::domain_handle::{DomainHandle, DomainShardHandle};
+use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::recipe::Schema;
 use crate::controller::schema;
 use crate::controller::{ControllerState, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
-use crate::coordination::{CoordinationMessage, CoordinationPayload, DomainDescriptor};
+use crate::coordination::{DomainDescriptor, HeartbeatPayload, RegisterPayload, RunDomainResponse};
 use crate::debug::info::{DomainKey, GraphInfo};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
+use crate::worker::WorkerRequestKind;
 use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequest};
 use dataflow::prelude::*;
-use dataflow::{node, payload::ControlReplyPacket, prelude::Packet, DomainBuilder, DomainConfig};
-use futures_util::stream::StreamExt;
+use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
 use hyper::{self, Method, StatusCode};
 use nom_sql::ColumnSpecification;
 use noria::builders::*;
-use noria::channel::tcp::{SendError, TcpSender};
+
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::metrics::recorded;
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use slog::Logger;
@@ -26,17 +25,18 @@ use std::mem;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{cell, io, time};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use std::{cell, time};
 
-/// `Controller` is the core component of the alternate Soup implementation.
+/// The Noria controller, responsible for making control-plane decisions for the whole of a Noria
+/// cluster.
+///
+/// This runs inside a `ControllerOuter` when it is elected as leader.
 ///
 /// It keeps track of the structure of the underlying data flow graph and its domains. `Controller`
 /// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
 /// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
 /// occur at any given point in time.
-pub(super) struct ControllerInner {
+pub struct ControllerInner {
     pub(super) ingredients: Graph,
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
@@ -55,11 +55,8 @@ pub(super) struct ControllerInner {
     pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
 
-    /// Map from worker address to the address the worker is listening on for reads.
+    /// Map from worker URI to the address the worker is listening on for reads.
     read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    /// Map from worker address to the address the worker is listening on for
-    /// external http requests.
-    external_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
 
     /// State between migrations
@@ -75,52 +72,6 @@ pub(super) struct ControllerInner {
     last_checked_workers: Instant,
 
     log: slog::Logger,
-
-    pub(in crate::controller) replies: DomainReplies,
-}
-
-pub(in crate::controller) struct DomainReplies(UnboundedReceiverStream<ControlReplyPacket>);
-
-impl DomainReplies {
-    pub(in crate::controller) fn new(recv: mpsc::UnboundedReceiver<ControlReplyPacket>) -> Self {
-        Self(UnboundedReceiverStream::new(recv))
-    }
-
-    async fn read_n_domain_replies(&mut self, n: usize) -> Vec<ControlReplyPacket> {
-        let crps: Vec<_> = (&mut self.0).take(n).collect().await;
-
-        if crps.len() != n {
-            unreachable!(
-                "got unexpected EOF from domain reply channel after {} replies",
-                crps.len()
-            );
-        }
-
-        crps
-    }
-
-    pub(in crate::controller) async fn wait_for_acks(&mut self, d: &DomainHandle) {
-        for r in self.read_n_domain_replies(d.shards()).await {
-            match r {
-                ControlReplyPacket::Ack(_) => {}
-                r => unreachable!("got unexpected non-ack control reply: {:?}", r),
-            }
-        }
-    }
-
-    async fn wait_for_statistics(
-        &mut self,
-        d: &DomainHandle,
-    ) -> Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)> {
-        let mut stats = Vec::with_capacity(d.shards());
-        for r in self.read_n_domain_replies(d.shards()).await {
-            match r {
-                ControlReplyPacket::Statistics(d, s) => stats.push((d, s)),
-                r => unreachable!("got unexpected non-stats control reply: {:?}", r),
-            }
-        }
-        stats
-    }
 }
 
 pub(super) fn graphviz(
@@ -204,23 +155,30 @@ impl ControllerInner {
         query: Option<String>,
         body: hyper::body::Bytes,
         authority: &Arc<A>,
-    ) -> Result<Result<String, ReadySetError>, StatusCode> {
+    ) -> Result<Result<Vec<u8>, ReadySetError>, StatusCode> {
         // TODO(eta): the error handling / general serialization inside this function is really
-        // confusing, and has been the source of at least 1 hard-to-track-down bug
-        metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
-        use serde_json as json;
-
+        //            confusing, and has been the source of at least 1 hard-to-track-down bug
         match (&method, path.as_ref()) {
-            (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false))),
+            (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false).into_bytes())),
             (&Method::POST, "/simple_graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(false)).unwrap()));
+                return Ok(Ok(bincode::serialize(&self.graphviz(false)).unwrap()));
             }
-            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true))),
+            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true).into_bytes())),
             (&Method::POST, "/graphviz") => {
-                return Ok(Ok(json::to_string(&self.graphviz(true)).unwrap()));
+                return Ok(Ok(bincode::serialize(&self.graphviz(true)).unwrap()));
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
-                return Ok(Ok(json::to_string(&self.get_statistics()).unwrap()));
+                return Ok(Ok(bincode::serialize(&self.get_statistics()).unwrap()));
+            }
+            (&Method::POST, "/worker_rx/register") => {
+                return bincode::deserialize(&body)
+                    .map_err(|_| StatusCode::BAD_REQUEST)
+                    .map(|args| Ok(bincode::serialize(&self.handle_register(args)?).unwrap()));
+            }
+            (&Method::POST, "/worker_rx/heartbeat") => {
+                return bincode::deserialize(&body)
+                    .map_err(|_| StatusCode::BAD_REQUEST)
+                    .map(|args| Ok(bincode::serialize(&self.handle_heartbeat(args)?).unwrap()))
             }
             _ => {}
         }
@@ -231,16 +189,17 @@ impl ControllerInner {
 
         match (method, path.as_ref()) {
             (Method::GET, "/flush_partial") => {
-                Ok(Ok(json::to_string(&self.flush_partial()).unwrap()))
+                Ok(Ok(bincode::serialize(&self.flush_partial()).unwrap()))
             }
-            (Method::POST, "/inputs") => Ok(Ok(json::to_string(&self.inputs()).unwrap())),
-            (Method::POST, "/outputs") => Ok(Ok(json::to_string(&self.outputs()).unwrap())),
+            (Method::POST, "/inputs") => Ok(Ok(bincode::serialize(&self.inputs()).unwrap())),
+            (Method::POST, "/outputs") => Ok(Ok(bincode::serialize(&self.outputs()).unwrap())),
             (Method::GET | Method::POST, "/instances") => {
-                Ok(Ok(json::to_string(&self.get_instances()).unwrap()))
+                Ok(Ok(bincode::serialize(&self.get_instances()).unwrap()))
             }
-            (Method::GET, "external_addrs") | (Method::POST, "/external_addrs") => {
-                Ok(Ok(json::to_string(&self.external_addrs).unwrap()))
-            }
+            (Method::GET, "/workers") | (Method::POST, "/workers") => Ok(Ok(bincode::serialize(
+                &self.workers.keys().collect::<Vec<_>>(),
+            )
+            .unwrap())),
             (Method::GET, "/nodes") => {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this
@@ -256,7 +215,7 @@ impl ControllerInner {
                     // all data-flow nodes
                     self.nodes_on_worker(None)
                 };
-                Ok(Ok(json::to_string(
+                Ok(Ok(bincode::serialize(
                     &nodes
                         .into_iter()
                         .filter_map(|ni| {
@@ -275,77 +234,85 @@ impl ControllerInner {
                 )
                 .unwrap()))
             }
-            (Method::POST, "/table_builder") => json::from_slice(&body)
+            (Method::POST, "/table_builder") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| Ok(json::to_string(&self.table_builder(args)).unwrap())),
-            (Method::POST, "/view_builder") => json::from_slice(&body)
+                .map(|args| Ok(bincode::serialize(&self.table_builder(args)).unwrap())),
+            (Method::POST, "/view_builder") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| self.view_builder(args))
-                .map(|view| Ok(json::to_string(&view).unwrap())),
-            (Method::POST, "/extend_recipe") => json::from_slice(&body)
+                .map(|view| Ok(bincode::serialize(&view).unwrap())),
+            (Method::POST, "/extend_recipe") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.extend_recipe(authority, args)
-                        .map(|r| json::to_string(&r).unwrap())
+                        .map(|r| bincode::serialize(&r).unwrap())
                 }),
-            (Method::POST, "/install_recipe") => json::from_slice(&body)
+            (Method::POST, "/install_recipe") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.install_recipe(authority, args)
-                        .map(|r| json::to_string(&r).unwrap())
+                        .map(|r| bincode::serialize(&r).unwrap())
                 }),
-            (Method::POST, "/set_security_config") => json::from_slice(&body)
+            (Method::POST, "/set_security_config") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.set_security_config(args)
-                        .map(|r| json::to_string(&r).unwrap())
+                        .map(|r| bincode::serialize(&r).unwrap())
                 }),
-            (Method::POST, "/create_universe") => json::from_slice(&body)
+            (Method::POST, "/create_universe") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| self.create_universe(args))
-                .map(|universe| Ok(json::to_string(&universe).unwrap())),
-            (Method::POST, "/replicate_readers") => json::from_slice(&body)
+                .map(|universe| Ok(bincode::serialize(&universe).unwrap())),
+            (Method::POST, "/replicate_readers") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.replicate_readers(args)
-                        .map(|readers| json::to_string(&readers).unwrap())
+                        .map(|readers| bincode::serialize(&readers).unwrap())
                 }),
-            (Method::POST, "/get_info") => Ok(Ok(json::to_string(&self.get_info()).unwrap())),
-            (Method::POST, "/remove_node") => json::from_slice(&body)
+            (Method::POST, "/get_info") => Ok(Ok(bincode::serialize(&self.get_info()).unwrap())),
+            (Method::POST, "/remove_node") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
                     self.remove_nodes(vec![args].as_slice())
-                        .map(|r| json::to_string(&r).unwrap())
+                        .map(|r| bincode::serialize(&r).unwrap())
                 }),
             _ => Err(StatusCode::NOT_FOUND),
         }
     }
 
-    pub(super) fn handle_register(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
-        let (remote, read_listen_addr, controller_addr, region) =
-            if let CoordinationPayload::Register {
-                addr: remote,
-                read_listen_addr,
-                controller_addr,
-                region,
-                ..
-            } = msg.payload
-            {
-                (remote, read_listen_addr, controller_addr, region)
-            } else {
-                unreachable!();
-            };
+    pub(super) fn handle_register(&mut self, msg: RegisterPayload) -> ReadySetResult<()> {
+        let RegisterPayload {
+            epoch,
+            worker_uri,
+            reader_addr,
+            region,
+        } = msg;
 
         info!(
             self.log,
-            "new worker registered from {:?}, which listens on {:?}", msg.source, remote
+            "received registration payload from worker: {} (reader address {})",
+            worker_uri,
+            reader_addr
         );
 
-        let sender = TcpSender::connect(&remote)?;
-        let ws = Worker::new(sender, region);
-        self.workers.insert(msg.source, ws);
-        self.read_addrs.insert(msg.source, read_listen_addr);
-        self.external_addrs.insert(msg.source, controller_addr);
+        if epoch != self.epoch {
+            return Err(ReadySetError::EpochMismatch {
+                supplied: Some(epoch),
+                current: Some(self.epoch.clone()),
+            });
+        }
+
+        let ws = Worker::new(worker_uri.clone(), region);
+
+        self.workers.insert(worker_uri.clone(), ws);
+        self.read_addrs.insert(worker_uri, reader_addr);
+
+        info!(
+            self.log,
+            "now have {} of {} required workers",
+            self.workers.len(),
+            self.quorum
+        );
 
         if self.workers.len() >= self.quorum {
             if let Some((recipes, mut recipe_version)) = self.pending_recovery.take() {
@@ -437,13 +404,23 @@ impl ControllerInner {
         Ok(())
     }
 
-    pub(super) fn handle_heartbeat(&mut self, msg: CoordinationMessage) -> ReadySetResult<()> {
-        match self.workers.get_mut(&msg.source) {
-            None => crit!(
-                self.log,
-                "got heartbeat for unknown worker {:?}",
-                msg.source
-            ),
+    pub(super) fn handle_heartbeat(&mut self, msg: HeartbeatPayload) -> ReadySetResult<()> {
+        let HeartbeatPayload { epoch, worker_uri } = msg;
+
+        if epoch != self.epoch {
+            return Err(ReadySetError::EpochMismatch {
+                supplied: Some(epoch),
+                current: Some(self.epoch.clone()),
+            });
+        }
+
+        match self.workers.get_mut(&worker_uri) {
+            None => {
+                crit!(self.log, "got heartbeat for unknown worker: {}", worker_uri);
+                return Err(ReadySetError::UnknownWorker {
+                    unknown_uri: worker_uri.clone(),
+                });
+            }
             Some(ref mut ws) => {
                 ws.last_heartbeat = Instant::now();
             }
@@ -458,7 +435,7 @@ impl ControllerInner {
         for (di, dh) in self.domains.iter() {
             for (i, shard) in dh.shards.iter().enumerate() {
                 worker_info
-                    .entry(shard.worker)
+                    .entry(shard.clone())
                     .or_insert_with(HashMap::new)
                     .entry(DomainKey(*di, i))
                     .or_insert_with(Vec::new)
@@ -475,22 +452,15 @@ impl ControllerInner {
         spec: ReaderReplicationSpec,
     ) -> ReadySetResult<ReaderReplicationResult> {
         let mut reader_nodes = Vec::new();
-        let worker_addr = spec.worker_addr;
-        // If we've been specified to replicate readers into a specific worker,
-        // we must then check that the worker is registered in the Controller.
-        // Otherwise, we return a BAD_REQUEST error.
-        if let Some(addr) = worker_addr {
-            if !self.workers.contains_key(&addr) {
-                let c = self
-                    .workers
-                    .keys()
-                    .map(|wi| wi.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(bad_request_err(format!(
-                    "The specified worker '{:?}' is not registered. Workers: {:?}",
-                    &addr, c
-                )));
+        let worker_addr = spec.worker_uri;
+
+        if let Some(ref worker_addr) = worker_addr {
+            // If we've been specified to replicate readers into a specific worker,
+            // we must then check that the worker is registered in the Controller.
+            if !self.workers.contains_key(worker_addr) {
+                return Err(ReadySetError::ReplicationUnknownWorker {
+                    unknown_uri: worker_addr.clone(),
+                });
             }
         }
 
@@ -589,11 +559,7 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(
-        log: slog::Logger,
-        state: ControllerState,
-        drx: tokio::sync::mpsc::UnboundedReceiver<ControlReplyPacket>,
-    ) -> Self {
+    pub(super) fn new(log: slog::Logger, state: ControllerState) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -641,14 +607,11 @@ impl ControllerInner {
 
             remap: HashMap::default(),
 
-            read_addrs: HashMap::default(),
-            external_addrs: HashMap::default(),
             workers: HashMap::default(),
 
             pending_recovery,
             last_checked_workers: Instant::now(),
-
-            replies: DomainReplies::new(drx),
+            read_addrs: Default::default(),
         }
     }
 
@@ -681,8 +644,6 @@ impl ControllerInner {
         nodes: Vec<(NodeIndex, bool)>,
         worker_id_opt: Option<WorkerIdentifier>,
     ) -> ReadySetResult<DomainHandle> {
-        // TODO: can we just redirect all domain traffic through the worker's connection?
-        let mut assignments = Vec::new();
         let mut nodes = Some(
             nodes
                 .into_iter()
@@ -698,14 +659,14 @@ impl ControllerInner {
         // is not valid, log a warning and fallback to using
         // all the available workers in a simple round-robin fashion.
         let selected_worker = match worker_id_opt {
-            Some(worker_id)
+            Some(ref worker_id)
                 if self
                     .workers
-                    .get(&worker_id)
+                    .get(worker_id)
                     .filter(|worker| worker.healthy)
                     .is_some() =>
             {
-                worker_id_opt
+                worker_id_opt.clone()
             }
             Some(worker_id) => {
                 warn!(
@@ -719,14 +680,17 @@ impl ControllerInner {
             }
             _ => None,
         };
+        let selected_worker = selected_worker.as_ref();
         let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &mut Worker)| {
             (selected_worker.is_none())
                 || (selected_worker
-                    .filter(|s_worker_id| **worker_id == *s_worker_id)
+                    .filter(|s_worker_id| **worker_id == **s_worker_id)
                     .is_some())
         };
         let mut wi = self.workers.iter_mut().filter(&worker_selector);
 
+        let mut domain_addresses = vec![];
+        let mut assignments = vec![];
         // Send `AssignDomain` to each shard of the given domain
         for i in 0..num_shards.unwrap_or(1) {
             let nodes = if i == num_shards.unwrap_or(1) - 1 {
@@ -744,59 +708,44 @@ impl ControllerInner {
                 persistence_parameters: self.persistence.clone(),
             };
 
-            let (identifier, w) = loop {
-                if let Some((i, w)) = wi.next() {
+            let w = loop {
+                if let Some((_, w)) = wi.next() {
                     if w.healthy {
-                        break (*i, w);
+                        break w;
                     }
                 } else {
                     wi = self.workers.iter_mut().filter(&worker_selector);
                 }
             };
 
+            let idx = domain.index.clone();
+            let shard = domain.shard.unwrap_or(0);
+
             // send domain to worker
             info!(
                 log,
-                "sending domain {}.{} to worker {:?}",
-                domain.index.index(),
-                domain.shard.unwrap_or(0),
-                w.sender.peer_addr()
+                "sending domain {}.{} to worker {}",
+                idx.index(),
+                shard,
+                w.uri
             );
-            let src = w.sender.local_addr().unwrap();
-            w.sender.send(CoordinationMessage {
-                epoch: self.epoch,
-                source: src,
-                payload: CoordinationPayload::AssignDomain(domain),
+
+            let ret = futures_executor::block_on(
+                w.rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain)),
+            )
+            .map_err(|e| ReadySetError::DomainCreationFailed {
+                domain_index: idx.index(),
+                shard,
+                worker_uri: w.uri.clone(),
+                source: Box::new(e),
             })?;
 
-            assignments.push(identifier);
-        }
+            info!(log, "worker booted domain at {}", ret.external_addr);
 
-        // Wait for all the domains to acknowledge.
-        let mut txs = HashMap::new();
-        let mut announce = Vec::new();
-        let fut = self.replies.read_n_domain_replies(num_shards.unwrap_or(1));
-        let replies = futures_executor::block_on(fut);
-        for r in replies {
-            match r {
-                ControlReplyPacket::Booted(shard, addr) => {
-                    self.channel_coordinator.insert_remote((idx, shard), addr);
-                    announce.push(DomainDescriptor::new(idx, shard, addr));
-                    txs.insert(
-                        shard,
-                        self.channel_coordinator
-                            .builder_for(&(idx, shard))
-                            .ok_or_else(|| internal_err("could not get domain connection builder"))?
-                            .build_sync()
-                            .map_err(|e| {
-                                internal_err(format!("failed to build domain sender: {:?}", e))
-                            })?,
-                    );
-                }
-                crp => {
-                    internal!("got unexpected control reply packet: {:?}", crp);
-                }
-            }
+            self.channel_coordinator
+                .insert_remote((idx.clone(), shard), ret.external_addr.clone());
+            domain_addresses.push(DomainDescriptor::new(idx, shard, ret.external_addr));
+            assignments.push(w.uri.clone());
         }
 
         // Tell all workers about the new domain(s)
@@ -812,37 +761,30 @@ impl ControllerInner {
         // with the migration waiting for a domain to become ready when trying to send
         // the information. (We used to do this in the controller thread, with the
         // result of a nasty deadlock.)
-        for (address, endpoint) in self.workers.iter_mut() {
-            for &dd in &announce {
-                if let Err(e) = endpoint.sender.send(CoordinationMessage {
-                    epoch: self.epoch,
-                    source: endpoint.sender.local_addr().unwrap(),
-                    payload: CoordinationPayload::DomainBooted(dd),
-                }) {
+        for (address, w) in self.workers.iter_mut() {
+            for &dd in &domain_addresses {
+                info!(
+                    log,
+                    "informing worker at {} about newly placed domain", w.uri
+                );
+                if let Err(e) = futures_executor::block_on(
+                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(dd.clone())),
+                ) {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
                     error!(
                         log,
                         "Worker could not be reached and will be ignored. Address: {:?} | Error: {:?}",
-                        address.to_string(),
+                        address,
                         e
                     );
                 }
             }
         }
 
-        let shards = assignments
-            .into_iter()
-            .enumerate()
-            .map(|(i, worker)| {
-                let tx = txs.remove(&i).unwrap();
-                DomainShardHandle { worker, tx }
-            })
-            .collect();
-
         Ok(DomainHandle {
             idx,
-            shards,
+            shards: assignments,
             log: log.clone(),
         })
     }
@@ -902,7 +844,9 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m);
-        m.commit()?;
+        m.commit().map_err(|e| ReadySetError::MigrationFailed {
+            source: Box::new(e),
+        })?;
         Ok(r)
     }
 
@@ -1149,16 +1093,14 @@ impl ControllerInner {
         trace!(self.log, "asked to get statistics");
         let log = &self.log;
         let workers = &self.workers;
-        let replies = &mut self.replies;
         // TODO: request stats from domains in parallel.
         let domains = self
             .domains
             .iter_mut()
             .flat_map(|(&di, s)| {
                 trace!(log, "requesting stats from domain"; "di" => di.index());
-                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
-                    .unwrap();
-                futures_executor::block_on(replies.wait_for_statistics(&s))
+                s.send_to_healthy_blocking(DomainRequest::GetStatistics, workers)
+                    .unwrap()
                     .into_iter()
                     .enumerate()
                     .map(move |(i, s)| ((di, i), s))
@@ -1171,7 +1113,7 @@ impl ControllerInner {
     fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
         self.workers
             .iter()
-            .map(|(&id, ref status)| (id, status.healthy, status.last_heartbeat.elapsed()))
+            .map(|(id, ref status)| (id.clone(), status.healthy, status.last_heartbeat.elapsed()))
             .collect()
     }
 
@@ -1179,27 +1121,26 @@ impl ControllerInner {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
-        let replies = &mut self.replies;
         let to_evict: Vec<_> = self
             .domains
             .iter_mut()
             .map(|(di, s)| {
-                s.send_to_healthy(Box::new(Packet::GetStatistics), workers)
-                    .unwrap();
-                let to_evict: Vec<(NodeIndex, u64)> =
-                    futures_executor::block_on(replies.wait_for_statistics(&s))
-                        .into_iter()
-                        .flat_map(move |(_, node_stats)| {
-                            node_stats
-                                .into_iter()
-                                .filter_map(|(ni, ns)| match ns.materialized {
-                                    MaterializationStatus::Partial { .. } => {
-                                        Some((ni, ns.mem_size))
-                                    }
-                                    _ => None,
-                                })
-                        })
-                        .collect();
+                let to_evict: Vec<(NodeIndex, u64)> = s
+                    .send_to_healthy_blocking::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
+                        DomainRequest::GetStatistics,
+                        workers,
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(move |(_, node_stats)| {
+                        node_stats
+                            .into_iter()
+                            .filter_map(|(ni, ns)| match ns.materialized {
+                                MaterializationStatus::Partial { .. } => Some((ni, ns.mem_size)),
+                                _ => None,
+                            })
+                    })
+                    .collect();
                 (*di, to_evict)
             })
             .collect();
@@ -1211,8 +1152,8 @@ impl ControllerInner {
                 self.domains
                     .get_mut(&di)
                     .unwrap()
-                    .send_to_healthy(
-                        Box::new(Packet::Evict {
+                    .send_to_healthy_blocking::<()>(
+                        DomainRequest::Packet(Packet::Evict {
                             node: Some(na),
                             num_bytes: bytes as usize,
                         }),
@@ -1542,28 +1483,13 @@ impl ControllerInner {
                 domain.index(),
             );
 
-            match self
-                .domains
+            self.domains
                 .get_mut(&domain)
                 .unwrap()
-                .send_to_healthy(Box::new(Packet::RemoveNodes { nodes }), &self.workers)
-            {
-                Ok(_) => (),
-                Err(e) => match e {
-                    SendError::IoError(ref ioe) => {
-                        if ioe.kind() == io::ErrorKind::BrokenPipe
-                            && ioe.get_ref().unwrap().to_string() == "worker failed"
-                        {
-                            // message would have gone to a failed worker, so ignore error
-                        } else {
-                            internal!("failed to remove nodes: {:?}", e);
-                        }
-                    }
-                    _ => {
-                        internal!("failed to remove nodes: {:?}", e);
-                    }
-                },
-            }
+                .send_to_healthy_blocking::<()>(
+                    DomainRequest::RemoveNodes { nodes },
+                    &self.workers,
+                )?;
         }
 
         Ok(())
@@ -1617,18 +1543,6 @@ impl ControllerInner {
                 acc.extend(domain_nodes(dh.index()));
                 acc
             })
-        }
-    }
-}
-
-impl Drop for ControllerInner {
-    fn drop(&mut self) {
-        for d in self.domains.values_mut() {
-            // XXX: this is a terrible ugly hack to ensure that all workers exit
-            for _ in 0..100 {
-                // don't unwrap, because given domain may already have terminated
-                drop(d.send_to_healthy(Box::new(Packet::Quit), &self.workers));
-            }
         }
     }
 }

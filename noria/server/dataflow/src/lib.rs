@@ -47,7 +47,7 @@ pub type Readers =
 pub type DomainConfig = domain::Config;
 
 pub use crate::domain::{Domain, DomainBuilder, Index, PollEvent, ProcessResult};
-pub use crate::payload::Packet;
+pub use crate::payload::{DomainRequest, Packet};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

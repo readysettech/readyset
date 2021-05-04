@@ -402,12 +402,12 @@ impl Node {
 
     pub(crate) fn process_timestamp(
         &mut self,
-        m: Box<Packet>,
+        m: Packet,
         executor: &mut dyn Executor,
     ) -> Option<Box<Packet>> {
         // TODO: not error handling compliant!
         let src_node = m.src();
-        match *m {
+        match m {
             Packet::Timestamp {
                 link,
                 src,

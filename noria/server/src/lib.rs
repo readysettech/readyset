@@ -1,5 +1,12 @@
 #![warn(clippy::dbg_macro)]
 
+//! # Note to engineers
+//!
+//! For documentation on how the Noria server code is structured, please see the module-level
+//! documentation for the [`startup`] module.
+//!
+//! # For everyone else
+//!
 //! Hello! Welcome to Noria.
 //!
 //! Noria is a database built to provide incrementally maintained materialized views for a known

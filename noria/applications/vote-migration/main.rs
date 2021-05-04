@@ -256,7 +256,7 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
     stats.join().unwrap();
 
     g.graph.shutdown();
-    g.done.await;
+    g.graph.wait_done().await;
 }
 
 #[tokio::main]

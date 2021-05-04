@@ -54,7 +54,7 @@ impl BenchmarkApplication {
     pub async fn new() -> BenchmarkApplication {
         let mut builder = Builder::default();
         builder.disable_partial();
-        let (g, _) = builder.start_local().await.unwrap();
+        let g = builder.start_local().await.unwrap();
 
         let url = "mysql://mysqluser:mysqlpw@localhost:3306/inventory";
         let pool = Pool::new(url).unwrap();

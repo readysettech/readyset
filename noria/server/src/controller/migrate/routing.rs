@@ -10,8 +10,8 @@ use crate::controller::domain_handle::DomainHandle;
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::errors::internal_err;
 use crate::ReadySetResult;
-use dataflow::node;
 use dataflow::prelude::*;
+use dataflow::{node, DomainRequest};
 use noria::{internal, invariant, invariant_eq, ReadySetError};
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -302,13 +302,13 @@ pub(super) fn connect(
                     // because an egress implies that no shuffle was necessary, which again means
                     // that the sharding must be the same.
                     for i in 0..shards {
-                        domain.send_to_healthy_shard(
+                        domain.send_to_healthy_shard_blocking::<()>(
                             i,
-                            Box::new(Packet::UpdateEgress {
+                            DomainRequest::UpdateEgress {
                                 node: sender_node.local_addr(),
                                 new_tx: Some((node, n.local_addr(), (n.domain(), i))),
                                 new_tag: None,
-                            }),
+                            },
                             workers,
                         )?;
                     }
@@ -318,12 +318,12 @@ pub(super) fn connect(
                     // sending to a sharded child. but that shouldn't be allowed -- such a node
                     // *must* be a Sharder.
                     invariant_eq!(shards, 1);
-                    domain.send_to_healthy(
-                        Box::new(Packet::UpdateEgress {
+                    domain.send_to_healthy_blocking::<()>(
+                        DomainRequest::UpdateEgress {
                             node: sender_node.local_addr(),
                             new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
                             new_tag: None,
-                        }),
+                        },
                         workers,
                     )?;
                 }
@@ -339,11 +339,11 @@ pub(super) fn connect(
                 domains
                     .get_mut(&sender_node.domain())
                     .unwrap()
-                    .send_to_healthy(
-                        Box::new(Packet::UpdateSharder {
+                    .send_to_healthy_blocking::<()>(
+                        DomainRequest::UpdateSharder {
                             node: sender_node.local_addr(),
                             new_txs: (n.local_addr(), txs),
-                        }),
+                        },
                         workers,
                     )?;
             } else if sender_node.is_source() {

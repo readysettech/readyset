@@ -1,49 +1,40 @@
 use dataflow::prelude::*;
-use dataflow::DomainBuilder;
 use noria::consensus::Epoch;
-use std::collections::HashMap;
+pub use noria::util::do_noria_rpc;
 use std::net::SocketAddr;
+use url::Url;
 
-/// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
+/// Initial registration request body, sent from workers to controllers.
+///
+/// (used for the `/worker_rx/register` route)
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CoordinationMessage {
-    /// The worker's `SocketAddr` from which this message was sent.
-    pub source: SocketAddr,
-    /// The epoch this message is associated with.
+pub struct RegisterPayload {
+    /// What the worker thinks the current epoch is.
     pub epoch: Epoch,
-    /// Message payload.
-    pub payload: CoordinationPayload,
+    /// URI at which the worker can be reached.
+    pub worker_uri: Url,
+    /// Socket address the worker listens on for data-plane read queries.
+    pub reader_addr: SocketAddr,
+    /// The region the worker is located in.
+    pub region: Option<String>,
 }
 
-/// Coordination-layer message payloads.
+/// Worker heartbeat request body, sent from workers to controllers.
+///
+/// (used for the `/worker_rx/heartbeat` route)
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum CoordinationPayload {
-    /// Register a new worker.
-    Register {
-        /// Address of the worker.
-        addr: SocketAddr,
-        /// Address the worker will be listening on to serve reads.
-        read_listen_addr: SocketAddr,
-        /// Address the controller associated with the worker listens
-        /// to external requests at.
-        controller_addr: SocketAddr,
-        /// Which log files are stored locally on the worker.
-        log_files: Vec<String>,
-        /// The region that the worker is located in.
-        region: Option<String>,
-    },
-    /// Worker going offline.
-    Deregister,
-    /// Worker is still alive.
-    Heartbeat,
-    /// Assign a new domain for a worker to run.
-    AssignDomain(DomainBuilder),
-    /// Remove a running domain from a worker.
-    RemoveDomain,
-    /// Domain connectivity gossip.
-    DomainBooted(DomainDescriptor),
-    /// Create a new security universe.
-    CreateUniverse(HashMap<String, DataType>),
+pub struct HeartbeatPayload {
+    /// What the worker thinks the current epoch is.
+    pub epoch: Epoch,
+    /// URI at which the worker can be reached.
+    pub worker_uri: Url,
+}
+
+/// Response to `WorkerRequestKind::RunDomain`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RunDomainResponse {
+    /// The address used by other domains to talk to the newly booted domain.
+    pub(crate) external_addr: SocketAddr,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

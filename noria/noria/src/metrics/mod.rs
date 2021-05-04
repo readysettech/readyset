@@ -258,8 +258,15 @@ pub mod recorded {
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str = "domain.total_node_state_size_bytes";
 
-    /// Counter: The number of external http requests received at the noria-server.
+    /// Counter: The number of HTTP requests received at the noria-server, for either the controller
+    /// or worker.
     pub const SERVER_EXTERNAL_REQUESTS: &str = "server.external_requests";
+
+    /// Counter: The number of worker HTTP requests received by the noria-server.
+    pub const SERVER_WORKER_REQUESTS: &str = "server.worker_requests";
+
+    /// Counter: The number of controller HTTP requests received by the noria-server.
+    pub const SERVER_CONTROLLER_REQUESTS: &str = "server.controller_requests";
 }
 
 /// A dumped metric's kind.

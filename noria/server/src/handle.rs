@@ -1,6 +1,6 @@
 use crate::controller::migrate::Migration;
+use crate::controller::HandleRequest;
 use crate::errors::bad_request_err;
-use crate::startup::Event;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
 use noria::internal;
@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use stream_cancel::Trigger;
+use tokio::sync::mpsc::Sender;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct Handle<A: Authority + 'static> {
@@ -16,7 +17,7 @@ pub struct Handle<A: Authority + 'static> {
     /// controller has been shutdown.
     pub c: Option<ControllerHandle<A>>,
     #[allow(dead_code)]
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+    event_tx: Option<Sender<HandleRequest>>,
     kill: Option<Trigger>,
 }
 
@@ -36,7 +37,7 @@ impl<A: Authority> DerefMut for Handle<A> {
 impl<A: Authority + 'static> Handle<A> {
     pub(super) async fn new(
         authority: Arc<A>,
-        event_tx: tokio::sync::mpsc::UnboundedSender<Event>,
+        event_tx: Sender<HandleRequest>,
         kill: Trigger,
     ) -> Result<Self, anyhow::Error> {
         let c = ControllerHandle::make(authority).await?;
@@ -56,8 +57,11 @@ impl<A: Authority + 'static> Handle<A> {
             self.event_tx
                 .as_mut()
                 .unwrap()
-                .send(Event::IsReady(tx))
-                .unwrap();
+                .send(HandleRequest::QueryReadiness(tx))
+                .await
+                .ok()
+                .expect("ControllerOuter dropped, failed, or panicked");
+
             if rx.await.unwrap() {
                 break;
             }
@@ -84,10 +88,15 @@ impl<A: Authority + 'static> Handle<A> {
         self.event_tx
             .as_mut()
             .unwrap()
-            .send(Event::ManualMigration { f: b, done: fin_tx })
-            .unwrap();
+            .send(HandleRequest::PerformMigration {
+                func: b,
+                done_tx: fin_tx,
+            })
+            .await
+            .ok()
+            .expect("ControllerOuter dropped, failed, or panicked");
 
-        fin_rx.await.unwrap();
+        fin_rx.await.unwrap().unwrap();
         ret_rx.await.unwrap()
     }
 
@@ -134,8 +143,14 @@ impl<A: Authority + 'static> Handle<A> {
     pub fn shutdown(&mut self) {
         if let Some(kill) = self.kill.take() {
             drop(self.c.take());
-            drop(self.event_tx.take());
             drop(kill);
+        }
+    }
+
+    /// Wait until the instance has exited.
+    pub async fn wait_done(&mut self) {
+        if let Some(etx) = self.event_tx.take() {
+            etx.closed().await;
         }
     }
 }

@@ -1,20 +1,16 @@
 use crate::controller::{Worker, WorkerIdentifier};
+use crate::worker::WorkerRequestKind;
 use dataflow::prelude::*;
-use noria::channel::tcp;
+use dataflow::DomainRequest;
+use serde::de::DeserializeOwned;
 use slog::Logger;
 use std::collections::HashMap;
-use std::io;
-
-pub(super) struct DomainShardHandle {
-    pub(super) worker: WorkerIdentifier,
-    pub(super) tx: Box<dyn noria::channel::Sender<Item = Box<Packet>> + Send>,
-}
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.
 pub(super) struct DomainHandle {
     pub(super) idx: DomainIndex,
-    pub(super) shards: Vec<DomainShardHandle>,
+    pub(super) shards: Vec<WorkerIdentifier>,
     pub(super) log: Logger,
 }
 
@@ -28,47 +24,70 @@ impl DomainHandle {
     }
 
     pub(super) fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.shards[shard].worker
+        self.shards[shard].clone()
     }
 
     pub(super) fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
-        self.shards.iter().any(|s| s.worker == *worker)
+        self.shards.iter().any(|s| s == worker)
     }
 
-    pub(super) fn send_to_healthy(
-        &mut self,
-        p: Box<Packet>,
-        workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> Result<(), tcp::SendError> {
-        for shard in self.shards.iter_mut() {
-            if workers[&shard.worker].healthy {
-                shard.tx.send(p.clone())?;
-            } else {
-                error!(
-                    self.log,
-                    "Tried to send packet to failed worker {:?}; ignoring!", shard.worker
-                );
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn send_to_healthy_shard(
+    pub(super) async fn send_to_healthy_shard<T: DeserializeOwned>(
         &mut self,
         i: usize,
-        p: Box<Packet>,
+        req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> Result<(), tcp::SendError> {
-        if workers[&self.shards[i].worker].healthy {
-            self.shards[i].tx.send(p)?;
+    ) -> ReadySetResult<T> {
+        let addr = &self.shards[i];
+        if workers[addr].healthy {
+            Ok(workers[addr]
+                .rpc(WorkerRequestKind::DomainRequest {
+                    target_idx: self.idx,
+                    target_shard: i,
+                    request: req.clone(),
+                })
+                .await
+                .map_err(|e| {
+                    rpc_err_no_downcast(format!("domain request to {}.{}", self.idx.index(), i), e)
+                })?)
         } else {
             error!(
                 self.log,
-                "Tried to send packet to failed worker {:?}; ignoring!", &self.shards[i].worker
+                "tried to send domain request to failed worker at {}", addr
             );
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "worker failed").into());
+            Err(ReadySetError::WorkerFailed { uri: addr.clone() })?
         }
-        Ok(())
+    }
+
+    pub(super) async fn send_to_healthy<T: DeserializeOwned>(
+        &mut self,
+        req: DomainRequest,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+    ) -> ReadySetResult<Vec<T>> {
+        let mut ret = Vec::with_capacity(self.shards.len());
+        for shard in 0..(self.shards.len()) {
+            ret.push(
+                self.send_to_healthy_shard(shard, req.clone(), workers)
+                    .await?,
+            );
+        }
+
+        Ok(ret)
+    }
+
+    pub(super) fn send_to_healthy_blocking<T: DeserializeOwned>(
+        &mut self,
+        req: DomainRequest,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+    ) -> ReadySetResult<Vec<T>> {
+        tokio::runtime::Handle::current().block_on(self.send_to_healthy(req, workers))
+    }
+
+    pub(super) fn send_to_healthy_shard_blocking<T: DeserializeOwned>(
+        &mut self,
+        i: usize,
+        req: DomainRequest,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+    ) -> ReadySetResult<T> {
+        tokio::runtime::Handle::current().block_on(self.send_to_healthy_shard(i, req, workers))
     }
 }

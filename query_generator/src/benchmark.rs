@@ -19,6 +19,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use noria::consensus::LocalAuthority;
+use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
 use noria_server::metrics::NoriaMetricsRecorder;
@@ -250,7 +251,7 @@ impl Benchmark {
                 .await
             {
                 Ok(result) => results.push(result),
-                Err(e) => eprintln!("{}", e),
+                Err(e) => eprintln!("\n\n{}\n\n", e),
             }
             pb.inc(1);
         }
@@ -317,6 +318,7 @@ impl Benchmark {
             }
 
             let mut noria = self.setup_noria().await?;
+            let mut metrics_client = MetricsClient::new(noria.clone())?;
             let query_name = "benchmark_query";
             noria.install_recipe(&query.to_recipe(query_name)).await?;
 
@@ -331,7 +333,7 @@ impl Benchmark {
             }
             let cold_write_time = start.elapsed();
 
-            let metrics = noria.metrics_dump().await?;
+            let metrics = metrics_client.get_metrics().await?.remove(0).metrics;
 
             let cold_materialization_size = metrics
                 .total(recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES)
@@ -344,7 +346,7 @@ impl Benchmark {
             let start = Instant::now();
             view.lookup(&lookup_key, true).await?;
             let cold_read_time = start.elapsed();
-            let metrics = noria.metrics_dump().await?;
+            let metrics = metrics_client.get_metrics().await?.remove(0).metrics;
 
             let warm_materialization_size = metrics
                 .total(recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES)
@@ -436,7 +438,7 @@ impl Benchmark {
             ..Default::default()
         });
         builder.set_aggressively_update_state_sizes(true);
-        let (mut noria, _) = builder.start_local().await?;
+        let mut noria = builder.start_local().await?;
         futures_util::future::poll_fn(|cx| noria.poll_ready(cx)).await?;
         Ok(noria)
     }

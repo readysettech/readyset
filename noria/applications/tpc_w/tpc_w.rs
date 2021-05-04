@@ -14,7 +14,6 @@ use std::time;
 pub struct Backend {
     r: String,
     g: Handle<LocalAuthority>,
-    done: Box<dyn Future<Output = ()> + Unpin>,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,
@@ -61,8 +60,7 @@ async fn make(
         b.disable_partial();
     }
 
-    let (mut g, done) = b.start_local().await.unwrap();
-    let done = Box::new(done);
+    let mut g = b.start_local().await.unwrap();
 
     let recipe = {
         let mut f = File::open(recipe_location).unwrap();
@@ -104,7 +102,6 @@ async fn make(
     Backend {
         r: recipe,
         g,
-        done,
         parallel_prepop: parallel,
         prepop_counts: HashMap::new(),
         barrier: Arc::new(Barrier::new(9)), // N.B.: # base tables
@@ -410,6 +407,6 @@ async fn main() {
         _ => unreachable!(),
     };
 
-    drop(backend.g);
-    backend.done.await;
+    backend.g.shutdown();
+    backend.g.wait_done().await;
 }
