@@ -34,8 +34,11 @@
 2. To get started quickly, clone the test database
   * `git clone git@github.com:readysettech/test_db.git`
 3. Run the MySQL adaptor
-  * `cd <repo_path>/noria-mysql`
-  * `cargo run --release -- --deployment myapp --no-require-authentication --permissive`
+  * `cargo run --release --bin noria-mysql -- --deployment myapp --no-require-authentication --permissive`
+  * If you are running mysql server already, you will likely get a collision and
+    need to specify a different port. You can accomplish that with the `-a`
+    flag:
+    * `cargo run --release --bin noria-mysql -- --deployment myapp --no-require-authentication --permissive -a 127.0.0.1:3333`
 4. Load the test database
    * `cd <path to testdb>`
    * `mysql -h 127.0.0.1 < employees.tiny.noria.sql`
@@ -63,6 +66,9 @@
 
 ### Clean up 
 - Noria server can be stopped via `CTRL-C`
+- If you've deployed Noria using a script to run the server and adapter in the
+  background, you can stop them with:
+  * `kill -9 $(pidof noria-server) && kill -9 $(pidof noria-mysql)`
 - Use `docker container rm <container-name>` to remove stopped containers. Add `-f` if you want to stop and remove container that is still running. You can remove the zookeeper container to fully clean out the noria server + database you are working with.
 
 ### Troubleshooting
