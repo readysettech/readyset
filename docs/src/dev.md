@@ -42,7 +42,7 @@
 ### Start up the ReadySet UI
 1. Install Python 3 using these [instructions] (https://www.python.org/downloads/)
 2. Install dependencies:
-   * On Mac: `sudo pip3 install pystache`
+   * On Mac: `pip3 install pystache`
    * On Ubuntu: `apt-get install python-pystache`
 3. Make, and run the UI:
    * `cd <repo_path>/noria-ui` (from the repository root)
