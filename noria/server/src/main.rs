@@ -2,7 +2,7 @@
 use clap::value_t_or_exit;
 use futures_util::future::{self, Either};
 use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
@@ -18,6 +18,16 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
         .text()
         .await?
         .parse()?)
+}
+
+pub fn resolve_addr(addr: &str) -> IpAddr {
+    return [addr, ":0"]
+        .concat()
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap()
+        .ip();
 }
 
 fn main() -> anyhow::Result<()> {
@@ -166,14 +176,14 @@ If specified, overrides the value of --external-address"))
     let log = noria_server::logger_pls();
 
     let durability = matches.value_of("durability").unwrap();
-    let listen_addr: IpAddr = matches.value_of("address").unwrap().parse().unwrap();
+    let listen_addr: IpAddr = resolve_addr(matches.value_of("address").unwrap());
     let external_addr = if matches.is_present("use_aws_external_address") {
         Either::Left(get_aws_private_ip())
     } else {
         Either::Right(future::ok(
             matches
                 .value_of("external_address")
-                .map_or(listen_addr.clone(), |addr| addr.parse().unwrap()),
+                .map_or(listen_addr.clone(), |addr| resolve_addr(addr)),
         ))
     };
     let external_port = value_t_or_exit!(matches, "external_port", u16);
