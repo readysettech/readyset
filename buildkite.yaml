@@ -1,6 +1,7 @@
 steps:
   - label: ':git: Lint commits'
     key: lint-commits
+    branches: '!master'
     commands:
     - ./scripts/commit_lint.sh
 
