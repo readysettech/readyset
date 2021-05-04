@@ -1,4 +1,4 @@
-# Client
+# Controller Handle
 
 Like most databases, Noria follows a server-client model where many clients connect to a
 (potentially distributed) server. The server in this case is the `noria-server`
@@ -7,6 +7,9 @@ and the [Noria repository README](https://github.com/mit-pdos/noria) for details
 [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its servers, so
 ZooKeeper must also be running.
 
+A ControllerHandle is, unsurprisingly, a handle to a Noria controller.
+This handle allows interaction with a running Noria instance and lets
+you add and remove queries, retrieve handles for inserting or querying the underlying data, and perform meta-operations such as fetching the dataflow's GraphViz visualization.
 ________________
 ** Note: we are working on a new version of the docs below. ETA: end of the week of May 3rd **
 `noria/noria`

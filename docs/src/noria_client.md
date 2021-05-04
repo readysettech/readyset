@@ -5,7 +5,7 @@ The Noria Client is located in the [noria-client directory.](../../noria-client)
 The Noria Client is a robust and versatile library to manage user interaction
 with a **system that includes noria** and possibly another database. It is the
 primary way to manage interaction with the noria server, as seen in the diagram
-on the main client and connections [page](./client.md). An end user application
+on the main client and connections [page](./clients.md). An end user application
 should use the Noria Client to interact with the noria server. The Noria Client
 in turn interacts with a noria server instance through a `ControllerHandle`
 (also known as the `noria/noria` bindings.) The Noria Client is NOT the same as
@@ -91,7 +91,7 @@ simple!
 Writes are a bit more complicated, since depending on how the system is
 configured, writes may be handled in different ways. A ReadySet system is
 intended to be used as shown in the diagram in the main [client
-page](./client.md). Specifically, writes go to a separate database instead of
+page](./clients.md). Specifically, writes go to a separate database instead of
 directly to noria. This is necessary because in most cases, clients of ReadySet
 want to add Noria to their system without having to start using a new database.
 ReadySet does not want to own client's databases. We want to place noria in
