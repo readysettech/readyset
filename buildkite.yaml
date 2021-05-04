@@ -27,6 +27,10 @@ steps:
             - label: ':clippy: Check clippy'
               exclude:
                 - "ops/**"
+            
+            - lavel: ':nodejs: Test js-client'
+              exclude:
+                - "ops/**"
 
             - label: ':rust: Build noria-logictest'
               exclude:

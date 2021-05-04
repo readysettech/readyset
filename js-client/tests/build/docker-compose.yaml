@@ -1,0 +1,37 @@
+version: "2.2"
+
+services:
+  zookeeper:
+    image: zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  noria-server:
+    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    build:
+      context: ../../..
+      dockerfile: build/Dockerfile.noria-server
+      cache_from:
+        - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    environment:
+      - ZOOKEEPER_HOST=zookeeper
+      - LISTEN_ADDRESS=0.0.0.0
+      - EXTERNAL_ADDRESS=noria-server
+      - DEPLOYMENT=jstests
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+  node:
+    image: node:15.12.0
+    environment:
+      - ZOOKEEPER_HOST=zookeeper
+      - DEPLOYMENT=jstests
+    volumes:
+      - ../..:/js-client
+    depends_on:
+      - zookeeper
+      - noria-server
+    working_dir: /js-client
+    command: /bin/bash -c "yarn install && yarn run test"

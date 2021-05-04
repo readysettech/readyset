@@ -5,14 +5,14 @@
   "main": "index.node",
   "scripts": {
     "build": "cargo-cp-artifact -a cdylib js-client index.node -- cargo build --target-dir ./target --message-format=json-render-diagnostics",
-    "install": "npm run build",
-    "test": "cargo test",
+    "test": "jest",
     "start": "node ./examples/basic_demo.js"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "cargo-cp-artifact": "^0.1",
+    "jest": "^26.6.3",
     "prettier": "2.2.1"
   }
 }
