@@ -67,11 +67,6 @@ Now, let’s consider when the data changes. Let’s say that we add a record to
 
 The leaf nodes of the query graph (referred to as Readers in the figures) cache the final query results. When users issue queries, the queries are routed directly to these reader nodes. Under the hood, these nodes are represented by special data structures that are optimized for low latency access and to support many users accessing it once.
 
-Consider the following instantiated version of the StoriesWithVoteCount query (where the ? parameter is filled in with value 2): 
-
-
-The reader node stores a mapping from story IDs to query results, and thus this read in ReadySet can be decomposed into performing a single key-value lookup for key 2 into this node.
-
 ReadySet’s streaming dataflow model ensures that the cache state is kept up-to-date every time the data changes without requiring any developer effort or rerunning the query from scratch. ReadySet entirely obviates the need for writing any custom cache maintenance logic. 
 
 There may also be cases where a new write does not change the stored result of a Reader node. Instead of the previous write, let’s say Eta voted for story with ID 3. Per Figure 8, when the data flows to the WHERE vcount > 500 node, the results don’t change, so downward propagation halts. ReadySet may reuse nodes for multiple queries when constructing the dataflow graph for your application, so the results of every node are kept fresh with each write even if the Reader node remains unchanged.
