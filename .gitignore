@@ -1,4 +1,5 @@
 target/
+docs/book/
 .idea/
 .DS_Store
 .terraform
