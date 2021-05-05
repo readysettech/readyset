@@ -5,6 +5,7 @@
 2. Install Docker using the instructions [here](https://docs.docker.com/get-docker/)
 3. Install Readyset dependencies:
   * On Mac:
+    - Install HomeBrew using the instructions [here](https://brew.sh)
     - `brew install lz4`
     - `brew install openssl@1.1`
   * On Ubuntu:

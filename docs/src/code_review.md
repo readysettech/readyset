@@ -21,7 +21,7 @@
     potential trade offs you made during this code change.
    ~~~
    * Compile
-   * Pass `cargo fmt --check`
+   * Pass `cargo fmt -- --check`
    * Pass all tests
 
 2. The name of the PR is a brief description of the change made
@@ -59,7 +59,7 @@
 4. If an author is not convinced about a reviewer's comment, they are not required to make the change. At the end of the day, the author has ownership over the work, not the reviewer.
 
 #### Parting remarks:
-1. The PR needs to pass the CI pipeeline in order to be merged. You can see the progress of this as well as all failing tests by using the link to Buildkite in the PR status dot.
+1. The PR needs to pass the CI pipeline in order to be merged. You can see the progress of this as well as all failing tests by using the link to Buildkite in the PR status dot.
 
 2. To resolve conflicts with master, REBASE. Do not "merge" as this creates merge commits that pollute the git history.
 
