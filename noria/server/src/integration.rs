@@ -4990,3 +4990,66 @@ async fn join_simple_cte() {
         .unwrap();
     assert_eq!(res["name"], "four".into());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_sum() {
+    let mut g = start_simple("multiple_aggregate").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value1 int, value2 int);
+         VIEW multiagg: SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiagg").await.unwrap();
+
+    t.insert_many(vec![
+        vec![
+            DataType::from(1i32),
+            DataType::from(1i32),
+            DataType::from(5i32),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(4i32),
+            DataType::from(2i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(5i32),
+            DataType::from(7i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(7i32),
+            DataType::from(1i32),
+        ],
+        vec![
+            DataType::from(3i32),
+            DataType::from(1i32),
+            DataType::from(3i32),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s1"]).unwrap(),
+                i32::try_from(&r["s2"]).unwrap(),
+            )
+        })
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
+}
