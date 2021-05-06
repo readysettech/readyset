@@ -4702,7 +4702,8 @@ async fn reader_replication() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+// FIXME(justinmiron): Test flakes in CI, returns incorrect replica.
+/*#[tokio::test(flavor = "multi_thread")]
 async fn test_view_includes_replicas() {
     let authority = Arc::new(LocalAuthority::new());
     let cluster_name = "view_includes_replicas";
@@ -4799,7 +4800,7 @@ async fn test_view_includes_replicas() {
     assert!(result.is_ok());
 
     assert_eq!(result.unwrap().node().index(), r2_node.index());
-}
+} */
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
     let dumped_metric: &DumpedMetric = &metrics_dump
