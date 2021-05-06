@@ -1,12 +1,14 @@
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::inner::graphviz;
-use crate::controller::keys;
+use crate::controller::keys::{self, OptColumnRef};
 use crate::controller::{Worker, WorkerIdentifier};
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::TryFrom;
+use vec1::Vec1;
 
 pub(super) struct Plan<'a> {
     m: &'a mut super::Materializations,
@@ -62,53 +64,43 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(
-        &mut self,
-        columns: &[usize],
-    ) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError> {
+    fn paths(&mut self, columns: &[usize]) -> Result<Vec<Vec<OptColumnRef>>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
-        let paths = keys::provenance_of(graph, ni, &columns[..])?;
-
-        // cut paths so they only reach to the the closest materialized node
-        let mut paths: Vec<_> = paths
-            .into_iter()
-            .map(|path| -> Vec<_> {
-                let mut found = false;
-                let mut path: Vec<_> = path
-                    .into_iter()
-                    .enumerate()
-                    .take_while(|&(i, (node, _))| {
-                        // remember, the paths are "backwards", so the first node is target node
-                        if i == 0 {
-                            return true;
-                        }
-
-                        // keep taking until we get our first materialized node
-                        // (`found` helps us emulate `take_while_inclusive`)
-                        if found {
-                            // we've already found a materialized node
-                            return false;
-                        }
-
-                        if self.m.have.contains_key(&node) {
-                            // we want to take this node, but not any later ones
-                            found = true;
-                        }
-                        true
-                    })
-                    .map(|(_, segment)| segment)
-                    .collect();
-                path.reverse();
-                path
-            })
-            .collect();
+        let mut paths = keys::replay_paths_for_opt(
+            graph,
+            OptColumnRef {
+                node: ni,
+                cols: if self.partial {
+                    Some(Vec1::try_from(columns).unwrap())
+                } else {
+                    None
+                },
+            },
+            |stop_ni| {
+                stop_ni != ni
+                    && self
+                        .m
+                        .have
+                        .get(&stop_ni)
+                        .map(|x| !x.is_empty())
+                        .unwrap_or(false)
+            },
+        )?
+        .into_iter()
+        .map(|mut path| {
+            path.reverse();
+            path
+        })
+        .collect::<Vec<_>>();
 
         // it doesn't make sense for a replay path to have <=1 nodes in it; this can, however,
         // happen now that we run the materialization planner when adding indices to already
         // materialized nodes (presumably because they might originate the columns indices are
         // being added to?)
-        paths.retain(|x| x.len() > 1);
+        //
+        // also, don't include paths that don't end at this node.
+        paths.retain(|x| x.len() > 1 && x.last().unwrap().node == ni);
 
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
@@ -117,7 +109,9 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        assert!(!self.partial || paths.iter().all(|p| p[0].1.iter().all(Option::is_some)));
+        if self.partial && !paths.iter().all(|p| p.iter().all(|cr| cr.cols.is_some())) {
+            internal!("tried to be partial over replay paths that require full materialization: paths = {:?}", paths);
+        }
 
         Ok(paths)
     }
@@ -223,15 +217,17 @@ impl<'a> Plan<'a> {
             .enumerate()
             .flat_map(|(pi, path)| {
                 let graph = &self.graph;
-                path.iter().enumerate().filter_map(move |(at, &(ni, _))| {
-                    let n = &graph[ni];
-                    if n.is_union() && !n.is_shard_merger() {
-                        let suffix = &path[(at + 1)..];
-                        Some(((ni, suffix), pi))
-                    } else {
-                        None
-                    }
-                })
+                path.iter()
+                    .enumerate()
+                    .filter_map(move |(at, &OptColumnRef { node, .. })| {
+                        let n = &graph[node];
+                        if n.is_union() && !n.is_shard_merger() {
+                            let suffix = &path[(at + 1)..];
+                            Some(((node, suffix), pi))
+                        } else {
+                            None
+                        }
+                    })
             })
             .fold(BTreeMap::new(), |mut map, (key, pi)| {
                 map.entry(key).or_insert_with(Vec::new).push(pi);
@@ -254,18 +250,19 @@ impl<'a> Plan<'a> {
         for (pi, path) in paths.into_iter().enumerate() {
             let tag = assigned_tags[pi];
             // TODO(eta): figure out a way to check partial replay path idempotency
-            self.paths
-                .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
+            self.paths.insert(
+                tag,
+                path.iter().map(|&OptColumnRef { node, .. }| node).collect(),
+            );
 
             // what key are we using for partial materialization (if any)?
-            let mut partial = None;
+            let mut partial: Option<Vec<usize>> = None;
             if self.partial {
-                if let Some(&(_, ref cols)) = path.first() {
-                    assert!(cols.iter().all(Option::is_some));
-                    let key: Vec<_> = cols.iter().map(|c| c.unwrap()).collect();
-                    partial = Some(key);
+                if let Some(&OptColumnRef { ref cols, .. }) = path.first() {
+                    // unwrap: ok since `Plan::paths` validates paths if we're partial
+                    partial = Some(cols.as_ref().unwrap().iter().cloned().collect());
                 } else {
-                    unreachable!();
+                    unreachable!("Plan::paths should have deleted zero-length path");
                 }
             }
 
@@ -274,29 +271,25 @@ impl<'a> Plan<'a> {
             // to the requesting shard, as opposed to all shards. in order to do that, that sharder
             // needs to know who it is!
             let mut partial_unicast_sharder = None;
-            if partial.is_some() && !self.graph[path.last().unwrap().0].sharded_by().is_none() {
+            if partial.is_some() && !self.graph[path.last().unwrap().node].sharded_by().is_none() {
                 partial_unicast_sharder = path
                     .iter()
                     .rev()
-                    .map(|&(ni, _)| ni)
+                    .map(|&OptColumnRef { node, .. }| node)
                     .find(|&ni| self.graph[ni].is_sharder());
             }
 
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for (node, cols) in path {
+            for OptColumnRef { node, cols } in path {
                 let domain = self.graph[node].domain();
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
                     last_domain = Some(domain);
                 }
 
-                let key = if self.partial {
-                    Some(cols.into_iter().map(Option::unwrap).collect::<Vec<_>>())
-                } else {
-                    None
-                };
+                let key = cols.map(Vec1::into_vec);
 
                 segments.last_mut().unwrap().1.push((node, key));
             }
