@@ -339,10 +339,11 @@ impl Domain {
 
         if tags.is_empty() {
             internal!(
-                "no tag found to fill missing value {:?} in {}.{:?}",
+                "no tag found to fill missing value {:?} in {}.{:?}; available tags: {:?}",
                 miss_keys,
                 miss_in,
-                miss_columns
+                miss_columns,
+                self.replay_paths_by_dst.get(miss_in)
             );
         }
         Ok(())

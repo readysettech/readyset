@@ -16,9 +16,11 @@ use noria::{internal, invariant, ReadySetError};
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use vec1::Vec1;
 
 mod plan;
 
@@ -397,28 +399,54 @@ impl Materializations {
                     break;
                 }
 
-                let paths = keys::provenance_of(graph, ni, &index.columns[..])?;
+                let paths = keys::replay_paths_for_nonstop(
+                    graph,
+                    ColumnRef {
+                        node: ni,
+                        columns: Vec1::try_from(index.columns.clone()).unwrap(),
+                    },
+                )?;
 
                 for path in paths {
-                    for (pni, cols) in path.into_iter().skip(1) {
-                        if let Some(p) = cols.iter().position(Option::is_none) {
-                            warn!(self.log, "full because column {} does not resolve", index[p];
-                                  "node" => ni.index(), "broken at" => pni.index());
-                            able = false;
-                            break 'attempt;
-                        }
-                        let index = Index::new(
-                            index.index_type,
-                            cols.into_iter().map(Option::unwrap).collect(),
-                        );
-                        if let Some(m) = self.have.get(&pni) {
-                            if !m.contains(&index) {
-                                // we'd need to add an index to this view,
-                                add.entry(pni)
-                                    .or_insert_with(HashSet::new)
-                                    .insert(index.clone());
+                    // Some of these replay paths might start at nodes other than the one we're
+                    // passing to replay_paths_for, if generated columns are involved. We need to
+                    // materialize those nodes, too.
+                    let n_to_skip = if path[0].node == ni { 1 } else { 0 };
+                    for (i, OptColumnRef { node, cols }) in
+                        path.into_iter().skip(n_to_skip).enumerate()
+                    {
+                        match cols {
+                            None => {
+                                warn!(
+                                    self.log,
+                                    "full because node before {} requested full replay",
+                                    node.index()
+                                );
+                                able = false;
+                                break 'attempt;
                             }
-                            break;
+                            Some(cols) => {
+                                let index =
+                                    Index::new(index.index_type, cols.into_iter().collect());
+                                if let Some(m) = self.have.get(&node) {
+                                    if !m.contains(&index) {
+                                        // we'd need to add an index to this view,
+                                        add.entry(node)
+                                            .or_insert_with(HashSet::new)
+                                            .insert(index.clone());
+                                    }
+                                    break;
+                                }
+                                if i == 0 && n_to_skip == 0 {
+                                    if !self.have.contains_key(&node) {
+                                        warn!(self.log, "forcing materialization for node {} with generated columns", node.index());
+                                        self.have.insert(node, HashSet::new());
+                                    }
+                                    add.entry(node)
+                                        .or_insert_with(HashSet::new)
+                                        .insert(index.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -461,8 +489,6 @@ impl Materializations {
                         self.added.entry(ni).or_default().insert(index);
                     }
                 }
-            } else {
-                assert!(graph[ni].is_reader());
             }
         }
         assert!(replay_obligations.is_empty());
@@ -584,71 +610,77 @@ impl Materializations {
                 }
 
                 for index in added {
-                    let paths = keys::provenance_of(graph, ni, &index.columns[..])?;
+                    let paths = keys::replay_paths_for_nonstop(
+                        graph,
+                        ColumnRef {
+                            node: ni,
+                            columns: Vec1::try_from(index.columns.clone()).unwrap(),
+                        },
+                    )?;
 
                     for path in paths {
-                        for (pni, columns) in path {
-                            if columns.iter().any(Option::is_none) {
-                                break;
-                            } else if self.partial.contains(&pni) {
-                                'outer: for index in &self.have[&pni] {
-                                    // is this node partial over some of the child's partial
-                                    // columns, but not others? if so, we run into really sad
-                                    // situations where the parent could miss in its state despite
-                                    // the child having state present for that key.
+                        for OptColumnRef { node, cols } in path {
+                            match cols {
+                                None => break,
+                                Some(columns) => {
+                                    if self.partial.contains(&node) {
+                                        'outer: for index in &self.have[&node] {
+                                            // is this node partial over some of the child's partial
+                                            // columns, but not others? if so, we run into really sad
+                                            // situations where the parent could miss in its state despite
+                                            // the child having state present for that key.
 
-                                    // do we share a column?
-                                    if index.columns.iter().all(|&c| !columns.contains(&Some(c))) {
-                                        continue;
-                                    }
+                                            // do we share a column?
+                                            if index.columns.iter().all(|&c| !columns.contains(&c))
+                                            {
+                                                continue;
+                                            }
 
-                                    // is there a column we *don't* share?
-                                    let unshared = index
-                                        .columns
-                                        .iter()
-                                        .cloned()
-                                        .find(|&c| !columns.contains(&Some(c)))
-                                        .or_else(|| {
-                                            columns
+                                            // is there a column we *don't* share?
+                                            let unshared = index
+                                                .columns
                                                 .iter()
-                                                .map(|c| c.unwrap())
-                                                .find(|c| !index.columns.contains(&c))
-                                        });
-                                    if let Some(not_shared) = unshared {
-                                        // This might be fine if we also have the child's index in
-                                        // the parent, since then the overlapping index logic in
-                                        // `MemoryState::lookup` will save us.
-                                        for other_idx in &self.have[&pni] {
-                                            let cols = columns
-                                                .iter()
-                                                .map(|x| x.unwrap())
-                                                .collect::<Vec<_>>();
-                                            if other_idx.columns == cols {
-                                                // Looks like we have the necessary index, so we'll
-                                                // be okay.
-                                                continue 'outer;
+                                                .cloned()
+                                                .find(|&c| !columns.contains(&c))
+                                                .or_else(|| {
+                                                    columns
+                                                        .iter()
+                                                        .cloned()
+                                                        .find(|c| !index.columns.contains(&c))
+                                                });
+                                            if let Some(not_shared) = unshared {
+                                                // This might be fine if we also have the child's index in
+                                                // the parent, since then the overlapping index logic in
+                                                // `MemoryState::lookup` will save us.
+                                                for other_idx in &self.have[&node] {
+                                                    if other_idx.columns == &columns as &[_] {
+                                                        // Looks like we have the necessary index, so we'll
+                                                        // be okay.
+                                                        continue 'outer;
+                                                    }
+                                                }
+                                                // If we get here, we've somehow managed to not index the
+                                                // parent by the same key as the child, which really should
+                                                // never happen.
+                                                // This code should probably just be taken out soon.
+                                                println!("{}", graphviz(graph, true, &self));
+                                                crit!(self.log, "partially overlapping partial indices";
+                                                          "parent" => node.index(),
+                                                          "pcols" => ?index,
+                                                          "child" => ni.index(),
+                                                          "cols" => ?columns,
+                                                          "conflict" => not_shared,
+                                                );
+                                                internal!(
+                                        "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
+                                        node.index(), index, &self.have[&node], ni.index(), columns
+                                        );
                                             }
                                         }
-                                        // If we get here, we've somehow managed to not index the
-                                        // parent by the same key as the child, which really should
-                                        // never happen.
-                                        // This code should probably just be taken out soon.
-                                        println!("{}", graphviz(graph, true, &self));
-                                        crit!(self.log, "partially overlapping partial indices";
-                                                  "parent" => pni.index(),
-                                                  "pcols" => ?index,
-                                                  "child" => ni.index(),
-                                                  "cols" => ?columns,
-                                                  "conflict" => not_shared,
-                                        );
-                                        internal!(
-                                        "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
-                                        pni.index(), index, &self.have[&pni], ni.index(), columns
-                                        );
+                                    } else if self.have.contains_key(&ni) {
+                                        break;
                                     }
                                 }
-                            } else if self.have.contains_key(&ni) {
-                                break;
                             }
                         }
                     }
