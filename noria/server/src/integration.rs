@@ -4702,8 +4702,7 @@ async fn reader_replication() {
     }
 }
 
-// FIXME(justinmiron): Test flakes in CI, returns incorrect replica.
-/*#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_view_includes_replicas() {
     let authority = Arc::new(LocalAuthority::new());
     let cluster_name = "view_includes_replicas";
@@ -4767,11 +4766,17 @@ async fn test_view_includes_replicas() {
 
     let shards = &q.replicas[0].shards;
     assert_eq!(shards.len(), 1);
-    assert_eq!(shards[0].region, Some("r1".to_string()));
+
+    // Replicate into the region it is currently not in.
+    let dst_addr = if &shards[0].region == &Some("r1".to_string()) {
+        w2_addr
+    } else {
+        w1_addr
+    };
 
     // Replicate the reader for `q`.
     let repl_result = w1
-        .replicate_readers(vec!["q".to_owned()], Some(w2_addr))
+        .replicate_readers(vec!["q".to_owned()], Some(dst_addr))
         .await
         .unwrap();
 
@@ -4786,21 +4791,22 @@ async fn test_view_includes_replicas() {
     let q = w1.view_builder(request).await.unwrap();
     assert_eq!(q.replicas.len(), 2);
 
-    // Verify that the replicas match the regions specified above.
-    let r2_node = if q.replicas[0].shards[0].region == Some("r1".to_string()) {
-        assert_eq!(q.replicas[1].shards[0].region, Some("r2".to_string()));
-        q.replicas[1].node
-    } else {
-        assert_eq!(q.replicas[1].shards[0].region, Some("r1".to_string()));
-        q.replicas[0].node
-    };
+    // Get the replica that is in r2. We later check that this node
+    // is indeed the node returned by the view.
+    let mut r2_node: Option<_> = None;
+    for r in &q.replicas {
+        if r.shards[0].region == Some("r2".to_string()) {
+            r2_node = Some(r.node);
+            break;
+        }
+    }
+    assert!(r2_node.is_some());
 
     // Verify this selects reader nodes with the correct region.
-    let result = w1.view_from_region("q", "r2".into()).await;
+    let result = w1.view_from_region("q", "r2".to_string()).await;
     assert!(result.is_ok());
-
-    assert_eq!(result.unwrap().node().index(), r2_node.index());
-} */
+    assert_eq!(result.unwrap().node().index(), r2_node.unwrap().index());
+}
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
     let dumped_metric: &DumpedMetric = &metrics_dump
