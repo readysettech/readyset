@@ -99,6 +99,18 @@ test("Ad-hoc UPDATE", async () => {
     numRowsUpdated: 1,
     lastInsertedId: 0,
   });
+
+  const checkSelectRes = await client.query(
+    "SELECT emp_no, first_name FROM employees WHERE emp_no = 10001"
+  );
+  expect(checkSelectRes).toEqual({
+    data: [
+      {
+        emp_no: 10001,
+        first_name: "TESTING AD-HOC",
+      },
+    ],
+  });
 });
 
 test("Prepared SELECT no params", async () => {
@@ -135,13 +147,25 @@ test("Prepared SELECT 1 param", async () => {
 
 test("Prepared UPDATE 2 params", async () => {
   const client = new Client(CONFIG);
-  const res = await client.execute(
+  const updateRes = await client.execute(
     "UPDATE employees SET first_name = ? WHERE emp_no = ?",
     ["TESTING EXEC", 10001]
   );
-  expect(res).toEqual({
+  expect(updateRes).toEqual({
     numRowsUpdated: 1,
     lastInsertedId: 0,
+  });
+
+  const checkSelectRes = await client.query(
+    "SELECT emp_no, first_name FROM employees WHERE emp_no = 10001"
+  );
+  expect(checkSelectRes).toEqual({
+    data: [
+      {
+        emp_no: 10001,
+        first_name: "TESTING EXEC",
+      },
+    ],
   });
 });
 
