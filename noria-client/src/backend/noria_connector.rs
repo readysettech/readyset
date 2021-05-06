@@ -6,7 +6,7 @@ use noria::{
 
 use msql_srv::{self, *};
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement,
+    self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
     UpdateStatement,
 };
 use vec1::vec1;
@@ -263,7 +263,18 @@ impl NoriaConnector {
         trace!("delegate");
         match prep {
             PreparedStatement::Insert(ref q) => {
-                return self.do_insert(&q, vec![params]).await;
+                let table = &q.table.name;
+                let putter = self.inner.ensure_mutator(table).await?;
+                trace!("insert::extract schema");
+                let schema = putter
+                    .schema()
+                    .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
+                // unwrap: safe because we always pass in Some(params) so don't hit None path of coerce_params
+                let coerced_params =
+                    utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), &schema)
+                        .unwrap()
+                        .unwrap();
+                return self.do_insert(&q, vec![coerced_params]).await;
             }
             _ => {
                 internal!(
@@ -782,7 +793,9 @@ impl NoriaConnector {
                 // no update on views
                 unsupported!();
             };
-            utils::extract_update(q, params.map(|p| p.into_iter()), schema)?
+            let coerced_params =
+                utils::coerce_params(params, &SqlQuery::Update(q.clone()), &schema)?;
+            utils::extract_update(q, coerced_params.map(|p| p.into_iter()), schema)?
         };
 
         trace!("update::update");

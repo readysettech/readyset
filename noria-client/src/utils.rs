@@ -484,6 +484,29 @@ where
     Ok((key, updates?))
 }
 
+/// coerce params to correct sql types
+pub(crate) fn coerce_params(
+    params: Option<Vec<DataType>>,
+    q: &SqlQuery,
+    schema: &CreateTableStatement,
+) -> ReadySetResult<Option<Vec<DataType>>> {
+    if params.is_some() {
+        let prms = params.unwrap();
+        let mut coerced_params = vec![];
+        for (i, col) in get_parameter_columns(q).iter().enumerate() {
+            for field in &schema.fields {
+                if col.name == field.column.name {
+                    coerced_params
+                        .push(DataType::coerce_to(&prms[i], &field.sql_type)?.into_owned());
+                }
+            }
+        }
+        Ok(Some(coerced_params))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
