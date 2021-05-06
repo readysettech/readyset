@@ -5053,3 +5053,46 @@ async fn multiple_aggregate_sum() {
 
     assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_same_col() {
+    let mut g = start_simple("multiple_aggregate_same_col").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggsamecol: SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggsamecol").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(1, 1.), (5, 2.5), (12, 6.0)]);
+}
