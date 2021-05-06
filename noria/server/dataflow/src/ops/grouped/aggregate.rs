@@ -303,7 +303,7 @@ impl GroupedOperation for Aggregator {
 
     fn empty_value(&self) -> Option<DataType> {
         match self.op {
-            Aggregation::COUNT => Some(0.into()),
+            Aggregation::Count => Some(0.into()),
             _ => None,
         }
     }
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn count_empty_group() {
-        let mut c = setup(Aggregation::COUNT, true);
+        let mut c = setup(Aggregation::Count, true);
 
         let u = Record::from(vec![1.into(), 1.into()]);
         let rs = c.narrow_one(u, true);
