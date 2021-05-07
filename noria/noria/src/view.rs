@@ -190,6 +190,11 @@ impl KeyComparison {
             }
         }
     }
+
+    /// Returns true if this [`KeyComparison`] is an equality comparison predicate.
+    pub fn is_equal(&self) -> bool {
+        matches!(self, KeyComparison::Equal(_))
+    }
 }
 
 impl TryFrom<Vec<DataType>> for KeyComparison {
