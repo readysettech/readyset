@@ -11,33 +11,38 @@ const EMPLOYEES = [
     emp_no: 10001,
     first_name: "first1",
     last_name: "last1",
+    birthday: "2015-09-05 23:56:04",
   },
   {
     emp_no: 10002,
     first_name: "first2",
     last_name: "last2",
+    birthday: "2015-09-05 23:56:04",
   },
   {
     emp_no: 10003,
     first_name: "first3",
     last_name: "last3",
+    birthday: "2015-09-05 23:56:04",
   },
   {
     emp_no: 10004,
     first_name: "first4",
     last_name: "last4",
+    birthday: "2015-09-05 23:56:04",
   },
   {
     emp_no: 10005,
     first_name: "first5",
     last_name: "last5",
+    birthday: "2015-09-05 23:56:04",
   },
 ];
 
 function createEmployeesTable() {
   const client = new Client(CONFIG);
   client.query(
-    "CREATE TABLE employees (emp_no INT PRIMARY KEY, first_name TEXT, last_name TEXT)"
+    "CREATE TABLE employees (emp_no INT PRIMARY KEY, first_name TEXT, last_name TEXT, birthday TIMESTAMP)"
   );
 }
 
@@ -46,7 +51,7 @@ async function fillEmployees() {
   return EMPLOYEES.forEach(
     async (e) =>
       await client.query(
-        `INSERT INTO employees (emp_no, first_name, last_name) VALUES (${e.emp_no}, "${e.first_name}", "${e.last_name}")`
+        `INSERT INTO employees (emp_no, first_name, last_name, birthday) VALUES (${e.emp_no}, "${e.first_name}", "${e.last_name}", "${e.birthday}")`
       )
   );
 }
@@ -76,15 +81,17 @@ test("Create client", () => {
 });
 
 test("Ad-hoc SELECT", async () => {
+  const d = new Date("2015-09-05 23:56:04");
   const client = new Client(CONFIG);
   const res = await client.query(
-    "SELECT emp_no, first_name FROM employees WHERE emp_no = 10001"
+    "SELECT emp_no, first_name, birthday FROM employees WHERE emp_no = 10001"
   );
   expect(res).toEqual({
     data: [
       {
         emp_no: 10001,
         first_name: "first1",
+        birthday: d,
       },
     ],
   });
@@ -206,4 +213,29 @@ test("Prepared query using the cache", async () => {
     ],
   });
   expect(client.prep_cache).toEqual(expected_prep_cache);
+});
+
+test("Prepared UPDATE with Date", async () => {
+  const d = new Date("December 16, 1998 03:24:00");
+  const client = new Client(CONFIG);
+  const updateRes = await client.execute(
+    "UPDATE employees SET birthday = ? WHERE emp_no = ?",
+    [d, 10001]
+  );
+  expect(updateRes).toEqual({
+    numRowsUpdated: 1,
+    lastInsertedId: 0,
+  });
+
+  const checkSelectRes = await client.query(
+    "SELECT emp_no, birthday FROM employees WHERE emp_no = 10001"
+  );
+  expect(checkSelectRes).toEqual({
+    data: [
+      {
+        emp_no: 10001,
+        birthday: d,
+      },
+    ],
+  });
 });
