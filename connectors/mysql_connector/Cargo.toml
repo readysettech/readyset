@@ -1,0 +1,18 @@
+[package]
+name = "mysql_connector"
+version = "0.1.0"
+authors = ["Vlad Krasnov <vlad@readyset.io>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.33"
+mysql_async = { git = "https://github.com/readysettech/mysql_async" }
+mysql_common = "0.27"
+tokio = { version = "1.5", features = ["full"] }
+futures = { version = "0.3" }
+chrono = "0.4.19"
+tracing = {version = "0.1", features = ["max_level_trace"]}
+tracing-subscriber = {version = "0.2", features = ["tracing-log"]}
+
+nom-sql = { path = "../../nom-sql" }
+noria = { path = "../../noria/noria", package = "noria" }

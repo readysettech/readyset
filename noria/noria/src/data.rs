@@ -1280,32 +1280,41 @@ impl TryFrom<mysql_common::value::Value> for DataType {
     type Error = ReadySetError;
 
     fn try_from(v: mysql_common::value::Value) -> Result<Self, Self::Error> {
+        DataType::try_from(&v)
+    }
+}
+
+impl TryFrom<&mysql_common::value::Value> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(v: &mysql_common::value::Value) -> Result<Self, Self::Error> {
         use mysql_common::value::Value;
 
         match v {
             Value::NULL => Ok(DataType::None),
             Value::Bytes(v) => DataType::try_from(&v[..]),
-            Value::Int(v) => Ok(DataType::from(v)),
-            Value::UInt(v) => Ok(DataType::from(v)),
-            Value::Float(v) => DataType::try_from(v),
-            Value::Double(v) => DataType::try_from(v),
+            Value::Int(v) => Ok(DataType::from(*v)),
+            Value::UInt(v) => Ok(DataType::from(*v)),
+            Value::Float(v) => DataType::try_from(*v),
+            Value::Double(v) => DataType::try_from(*v),
             Value::Date(year, month, day, hour, minutes, seconds, micros) => {
                 Ok(DataType::Timestamp(
-                    NaiveDate::from_ymd(year.into(), month.into(), day.into()).and_hms_micro(
-                        hour.into(),
-                        minutes.into(),
-                        seconds.into(),
-                        micros,
-                    ),
+                    NaiveDate::from_ymd((*year).into(), (*month).into(), (*day).into())
+                        .and_hms_micro(
+                            (*hour).into(),
+                            (*minutes).into(),
+                            (*seconds).into(),
+                            *micros,
+                        ),
                 ))
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
                 Ok(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                     !neg,
-                    <u16>::try_from(hours as u32 + days * 24u32).unwrap_or(u16::MAX),
-                    minutes,
-                    seconds,
-                    microseconds.into(),
+                    <u16>::try_from(*hours as u32 + days * 24u32).unwrap_or(u16::MAX),
+                    *minutes,
+                    *seconds,
+                    (*microseconds).into(),
                 ))))
             }
         }

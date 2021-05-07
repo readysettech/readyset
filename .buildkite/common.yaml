@@ -87,6 +87,7 @@ steps:
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     - "( echo '--- :rust: Checking noria'; cargo clippy -p noria -- -D warnings)"
     - "( echo '--- :rust: Checking noria-dataflow'; cargo clippy -p noria-dataflow -- -D warnings)"
+    - "( echo '--- :rust: Checking mysql-connector'; cargo clippy -p mysql_connector -- -D warnings)"
     depends_on:
     - build-image
     plugins:
