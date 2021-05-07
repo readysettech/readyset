@@ -110,8 +110,7 @@ named!(
     add_column<AlterTableDefinition>,
     do_parse!(
         tag_no_case!("add")
-            >> multispace1
-            >> tag_no_case!("column")
+            >> opt!(preceded!(multispace1, tag_no_case!("column")))
             >> multispace1
             >> column: column_specification
             >> (AlterTableDefinition::AddColumn(column))
@@ -253,6 +252,42 @@ mod tests {
             })],
         };
         let result = alter_table_statement(qstring.as_bytes());
+        assert_eq!(result.unwrap().1, expected);
+    }
+
+    #[test]
+    fn parse_add_column_no_column_tag() {
+        let qstring = b"ALTER TABLE employees ADD Email varchar(255), ADD snailmail TEXT";
+        let expected = AlterTableStatement {
+            table: Table {
+                name: "employees".into(),
+                schema: None,
+                alias: None,
+            },
+            definitions: vec![
+                AlterTableDefinition::AddColumn(ColumnSpecification {
+                    column: Column {
+                        name: "Email".into(),
+                        table: None,
+                        function: None,
+                    },
+                    sql_type: SqlType::Varchar(255),
+                    constraints: vec![],
+                    comment: None,
+                }),
+                AlterTableDefinition::AddColumn(ColumnSpecification {
+                    column: Column {
+                        name: "snailmail".into(),
+                        table: None,
+                        function: None,
+                    },
+                    sql_type: SqlType::Text,
+                    constraints: vec![],
+                    comment: None,
+                }),
+            ],
+        };
+        let result = alter_table_statement(qstring);
         assert_eq!(result.unwrap().1, expected);
     }
 

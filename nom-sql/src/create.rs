@@ -3,7 +3,6 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, schema_table_reference, sql_identifier, statement_terminator,
     ws_sep_comma, TableKey,
@@ -14,6 +13,10 @@ use crate::keywords::escape_if_keyword;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, SelectStatement};
 use crate::table::Table;
+use crate::{
+    column::{column_specification, Column, ColumnSpecification},
+    ColumnConstraint,
+};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -177,12 +180,12 @@ fn primary_key(i: &[u8]) -> IResult<&[u8], TableKey> {
 named!(
     foreign_key<TableKey>,
     do_parse!(
-        tag_no_case!("constraint")
-            >> name: opt!(preceded!(multispace1, sql_identifier))
-            >> multispace1
-            >> tag_no_case!("foreign")
+        opt!(preceded!(tag_no_case!("constraint"), multispace1))
+            >> name: opt!(sql_identifier)
+            >> preceded!(opt!(multispace1), tag_no_case!("foreign"))
             >> multispace1
             >> tag_no_case!("key")
+            >> index_name: opt!(preceded!(multispace1, sql_identifier))
             >> multispace0
             >> tag!("(")
             >> columns:
@@ -205,6 +208,7 @@ named!(
             >> tag!(")")
             >> (TableKey::ForeignKey {
                 name: name.map(|n| String::from_utf8(n.to_vec()).unwrap()),
+                index_name: index_name.map(|n| String::from_utf8(n.to_vec()).unwrap()),
                 columns,
                 target_table,
                 target_columns
@@ -293,6 +297,9 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
 
     // "table AS alias" isn't legal in CREATE statements
     assert!(table.alias.is_none());
+
+    let mut primary_key = None;
+
     // attach table names to columns:
     let fields = fields_list
         .into_iter()
@@ -302,12 +309,18 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
                 ..field.column
             };
 
+            if field.constraints.contains(&ColumnConstraint::PrimaryKey) {
+                // If there is a row that was defined with the PRIMARY KEY constraint, then it will be the primary key
+                // there can only be one such key, but we don't check this is the case
+                primary_key.replace(TableKey::PrimaryKey(vec![column.clone()]));
+            }
+
             ColumnSpecification { column, ..field }
         })
         .collect();
 
     // and to keys:
-    let keys = keys_list.map(|ks| {
+    let mut keys: Option<Vec<_>> = keys_list.map(|ks| {
         ks.into_iter()
             .map(|key| {
                 let attach_names = |columns: Vec<Column>| {
@@ -334,16 +347,28 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
                         columns: column,
                         target_table,
                         target_columns: target_column,
+                        index_name,
                     } => TableKey::ForeignKey {
                         name,
                         columns: attach_names(column),
                         target_table,
                         target_columns: target_column,
+                        index_name,
                     },
                 }
             })
             .collect()
     });
+
+    // Add the previously found key to the list
+    if let Some(primary_key) = primary_key {
+        if let Some(keys) = &mut keys {
+            keys.push(primary_key);
+        } else {
+            keys = Some(vec![primary_key]);
+        }
+    }
+    // TODO: check that there is only one PRIMARY KEY?
 
     Ok((
         remaining_input,
@@ -674,7 +699,11 @@ mod tests {
                         vec![ColumnConstraint::NotNull],
                     ),
                 ],
-                ..Default::default()
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column {
+                    name: "id".into(),
+                    table: Some("django_admin_log".into()),
+                    function: None,
+                }])])
             }
         );
 
@@ -702,7 +731,11 @@ mod tests {
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                     ),
                 ],
-                ..Default::default()
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column {
+                    name: "id".into(),
+                    table: Some("auth_group".into()),
+                    function: None,
+                }])])
             }
         );
     }
@@ -714,8 +747,8 @@ mod tests {
                        `name` varchar(80) NOT NULL UNIQUE)";
         // TODO(malte): INTEGER isn't quite reflected right here, perhaps
         let expected = "CREATE TABLE auth_group (\
-                        id INT(32) AUTO_INCREMENT NOT NULL PRIMARY KEY, \
-                        name VARCHAR(80) NOT NULL UNIQUE)";
+                        id INT(32) AUTO_INCREMENT NOT NULL, \
+                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
         let res = creation(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
@@ -852,6 +885,11 @@ mod tests {
                         "index_comments_on_user_id".into(),
                         vec![Column::from("comments.user_id")]
                     ),
+                    TableKey::PrimaryKey(vec![Column {
+                        name: "id".into(),
+                        table: Some("comments".into()),
+                        function: None,
+                    }]),
                 ]),
             }
         );
@@ -888,7 +926,76 @@ mod tests {
                         columns: vec![col("group_id")],
                         target_table: "groups".into(),
                         target_columns: vec!["id".into()],
+                        index_name: None,
                     }
+                ])
+            }
+        )
+    }
+
+    /// Tests that CONSTRAINT is not required for FOREIGN KEY
+    #[test]
+    fn foreign_key_no_constraint_keyword() {
+        // Test query borrowed from debezeum MySQL docker example
+        let qstring = b"CREATE TABLE addresses (
+                        id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        customer_id INTEGER NOT NULL,
+                        street VARCHAR(255) NOT NULL,
+                        city VARCHAR(255) NOT NULL,
+                        state VARCHAR(255) NOT NULL,
+                        zip VARCHAR(255) NOT NULL,
+                        type enum(\'SHIPPING\',\'BILLING\',\'LIVING\') NOT NULL,
+                        FOREIGN KEY (customer_id) REFERENCES customers(id) )
+                        AUTO_INCREMENT = 10";
+
+        let (rem, res) = creation(qstring).unwrap();
+        assert!(rem.is_empty());
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("addresses".into()),
+            function: None,
+        };
+        let non_null_col = |n: &str, t: SqlType| {
+            ColumnSpecification::with_constraints(col(n), t, vec![ColumnConstraint::NotNull])
+        };
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "addresses".into(),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        col("id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::PrimaryKey,
+                        ]
+                    ),
+                    non_null_col("customer_id", SqlType::Int(32)),
+                    non_null_col("street", SqlType::Varchar(255)),
+                    non_null_col("city", SqlType::Varchar(255)),
+                    non_null_col("state", SqlType::Varchar(255)),
+                    non_null_col("zip", SqlType::Varchar(255)),
+                    non_null_col(
+                        "type",
+                        SqlType::Enum(vec![
+                            Literal::String("SHIPPING".into()),
+                            Literal::String("BILLING".into()),
+                            Literal::String("LIVING".into()),
+                        ]),
+                    ),
+                ],
+                keys: Some(vec![
+                    TableKey::ForeignKey {
+                        name: None,
+                        columns: vec![col("customer_id")],
+                        target_table: "customers".into(),
+                        target_columns: vec!["id".into()],
+                        index_name: None,
+                    },
+                    TableKey::PrimaryKey(vec![col("id")]),
                 ])
             }
         )
@@ -916,5 +1023,116 @@ mod tests {
 ) ENGINE=InnoDB AUTO_INCREMENT=546971 DEFAULT CHARSET=latin1";
         let res = creation(qstring);
         assert!(res.is_ok());
+    }
+
+    /// Tests that index_name is parsed properly for FOREIGN KEY
+    #[test]
+    fn foreign_key_with_index() {
+        let qstring = b"CREATE TABLE orders (
+                        order_number INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        purchaser INTEGER NOT NULL,
+                        product_id INTEGER NOT NULL,
+                        FOREIGN KEY order_customer (purchaser) REFERENCES customers(id),
+                        FOREIGN KEY ordered_product (product_id) REFERENCES products(id) )";
+
+        let (rem, res) = creation(qstring).unwrap();
+        assert!(rem.is_empty());
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("orders".into()),
+            function: None,
+        };
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "orders".into(),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        col("order_number"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::PrimaryKey,
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("purchaser"),
+                        SqlType::Int(32),
+                        vec![ColumnConstraint::NotNull]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("product_id"),
+                        SqlType::Int(32),
+                        vec![ColumnConstraint::NotNull]
+                    ),
+                ],
+                keys: Some(vec![
+                    TableKey::ForeignKey {
+                        name: None,
+                        columns: vec![col("purchaser")],
+                        target_table: "customers".into(),
+                        target_columns: vec!["id".into()],
+                        index_name: Some("order_customer".into()),
+                    },
+                    TableKey::ForeignKey {
+                        name: None,
+                        columns: vec![col("product_id")],
+                        target_table: "products".into(),
+                        target_columns: vec!["id".into()],
+                        index_name: Some("ordered_product".into()),
+                    },
+                    TableKey::PrimaryKey(vec![col("order_number")]),
+                ])
+            }
+        )
+    }
+
+    /// Tests that UNIQUE KEY column constraint is parsed properly
+    #[test]
+    fn test_unique_key() {
+        let qstring = b"CREATE TABLE customers (
+                        id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        last_name VARCHAR(255) NOT NULL UNIQUE,
+                        email VARCHAR(255) NOT NULL UNIQUE KEY )
+                        AUTO_INCREMENT=1001";
+
+        let (rem, res) = creation(qstring).unwrap();
+        assert!(rem.is_empty());
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("customers".into()),
+            function: None,
+        };
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "customers".into(),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        col("id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::PrimaryKey,
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("last_name"),
+                        SqlType::Varchar(255),
+                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("email"),
+                        SqlType::Varchar(255),
+                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
+                    ),
+                ],
+                keys: Some(vec![TableKey::PrimaryKey(vec![col("id")]),])
+            }
+        )
     }
 }

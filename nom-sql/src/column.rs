@@ -133,7 +133,12 @@ impl fmt::Display for ColumnSpecification {
             escape_if_keyword(&self.column.name),
             self.sql_type
         )?;
-        for constraint in self.constraints.iter() {
+        for constraint in self
+            .constraints
+            .iter()
+            // Don't output PRIMARY KEY, because it will be formatted as table level key instead
+            .filter(|c| !matches!(c, ColumnConstraint::PrimaryKey))
+        {
             write!(f, " {}", constraint)?;
         }
         if let Some(ref comment) = self.comment {
@@ -245,7 +250,11 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         |_| Some(ColumnConstraint::PrimaryKey),
     );
     let unique = map(
-        delimited(multispace0, tag_no_case("unique"), multispace0),
+        delimited(
+            multispace0,
+            delimited(tag_no_case("unique"), multispace0, opt(tag_no_case("key"))),
+            multispace0,
+        ),
         |_| Some(ColumnConstraint::Unique),
     );
     let character_set = map(

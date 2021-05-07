@@ -255,6 +255,7 @@ pub enum TableKey {
     Key(String, Vec<Column>),
     ForeignKey {
         name: Option<String>,
+        index_name: Option<String>,
         columns: Vec<Column>,
         target_table: Table,
         target_columns: Vec<Column>,
@@ -320,14 +321,16 @@ impl fmt::Display for TableKey {
             }
             TableKey::ForeignKey {
                 name,
+                index_name,
                 columns: column,
                 target_table,
                 target_columns: target_column,
             } => {
                 write!(
                     f,
-                    "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
-                    name.clone().unwrap_or_else(|| "".to_owned()),
+                    "CONSTRAINT {} FOREIGN KEY {}({}) REFERENCES {} ({})",
+                    name.as_deref().unwrap_or(""),
+                    index_name.as_deref().unwrap_or(""),
                     column.iter().map(|c| escape_if_keyword(&c.name)).join(", "),
                     target_table,
                     target_column
