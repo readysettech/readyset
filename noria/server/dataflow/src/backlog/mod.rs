@@ -239,10 +239,10 @@ impl WriteHandle {
     pub(crate) fn contains(&self, key: &KeyComparison) -> Option<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.read().contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.read().contains_range(&(
-                start.as_ref().map(Vec1::as_vec),
-                end.as_ref().map(Vec1::as_vec),
-            )),
+            KeyComparison::Range((start, end)) => self
+                .handle
+                .read()
+                .contains_range(&(start.map(Vec1::as_vec), end.map(Vec1::as_vec))),
         }
     }
 
@@ -323,10 +323,7 @@ impl WriteHandle {
         match key {
             KeyComparison::Equal(k) => self.mut_with_key(k.as_vec()).mark_hole(),
             KeyComparison::Range((start, end)) => {
-                let range = (
-                    start.as_ref().map(Vec1::as_vec),
-                    end.as_ref().map(Vec1::as_vec),
-                );
+                let range = (start.map(Vec1::as_vec), end.map(Vec1::as_vec));
                 let size = self
                     .handle
                     .read()
@@ -345,8 +342,8 @@ impl WriteHandle {
         match key {
             KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled(),
             KeyComparison::Range((start, end)) => self.handle.insert_range((
-                (start.as_ref()).map(Vec1::as_vec),
-                (end.as_ref()).map(Vec1::as_vec),
+                BoundAsRef::as_ref(&start).map(Vec1::as_vec),
+                BoundAsRef::as_ref(&end).map(Vec1::as_vec),
             )),
         }
     }
@@ -408,10 +405,9 @@ impl SingleReadHandle {
     pub fn contains(&self, key: &KeyComparison) -> Option<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.contains_key(k),
-            KeyComparison::Range((start, end)) => self.handle.contains_range(&(
-                start.as_ref().map(Vec1::as_vec),
-                end.as_ref().map(Vec1::as_vec),
-            )),
+            KeyComparison::Range((start, end)) => self
+                .handle
+                .contains_range(&(start.map(Vec1::as_vec), end.map(Vec1::as_vec))),
         }
     }
 

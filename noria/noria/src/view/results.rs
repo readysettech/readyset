@@ -26,9 +26,9 @@ impl Results {
     }
 }
 
-impl Into<Vec<Vec<DataType>>> for Results {
-    fn into(self) -> Vec<Vec<DataType>> {
-        self.results
+impl From<Results> for Vec<Vec<DataType>> {
+    fn from(val: Results) -> Self {
+        val.results
     }
 }
 
@@ -99,7 +99,7 @@ impl<'a> ResultRow<'a> {
 
 impl PartialEq<[DataType]> for ResultRow<'_> {
     fn eq(&self, other: &[DataType]) -> bool {
-        &self.result[..] == other
+        self.result == other
     }
 }
 
@@ -242,9 +242,9 @@ impl Row {
     }
 }
 
-impl Into<Vec<DataType>> for Row {
-    fn into(self) -> Vec<DataType> {
-        self.row
+impl From<Row> for Vec<DataType> {
+    fn from(val: Row) -> Vec<DataType> {
+        val.row
     }
 }
 

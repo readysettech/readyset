@@ -38,21 +38,21 @@ struct TestingShim<Q, P, E, I, W> {
 impl<Q, P, E, I, W> MysqlShim<W> for TestingShim<Q, P, E, I, W>
 where
     Q: for<'a> FnMut(
-        &'a str,
-        QueryResultWriter<'a, W>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            &'a str,
+            QueryResultWriter<'a, W>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
     P: FnMut(&str) -> u32 + Send,
     E: for<'a> FnMut(
-        u32,
-        Vec<msql_srv::ParamValue>,
-        QueryResultWriter<'a, W>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            u32,
+            Vec<msql_srv::ParamValue>,
+            QueryResultWriter<'a, W>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
     I: for<'a> FnMut(
-        &'a str,
-        InitWriter<'a, W>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            &'a str,
+            InitWriter<'a, W>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
     W: AsyncWrite + Unpin + Send + 'static,
 {
@@ -98,23 +98,23 @@ where
 impl<Q, P, E, I> TestingShim<Q, P, E, I, OwnedWriteHalf>
 where
     Q: for<'a> FnMut(
-        &'a str,
-        QueryResultWriter<'a, OwnedWriteHalf>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            &'a str,
+            QueryResultWriter<'a, OwnedWriteHalf>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
     P: FnMut(&str) -> u32 + Send + 'static,
     E: for<'a> FnMut(
-        u32,
-        Vec<msql_srv::ParamValue>,
-        QueryResultWriter<'a, OwnedWriteHalf>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            u32,
+            Vec<msql_srv::ParamValue>,
+            QueryResultWriter<'a, OwnedWriteHalf>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
     I: for<'a> FnMut(
-        &'a str,
-        InitWriter<'a, OwnedWriteHalf>,
-    ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+            &'a str,
+            InitWriter<'a, OwnedWriteHalf>,
+        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
 {

@@ -409,9 +409,9 @@ fn len_as_u16(len: &[u8]) -> u16 {
     match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => v,
-            Err(e) => panic!(e),
+            Err(e) => panic!("{:?}", e),
         },
-        Err(e) => panic!(e),
+        Err(e) => panic!("{:?}", e),
     }
 }
 
@@ -722,10 +722,7 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
         }),
         map(table_parser, |tup| Column {
             name: str::from_utf8(tup.1).unwrap().to_string(),
-            table: match tup.0 {
-                None => None,
-                Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
-            },
+            table: tup.0.map(|t| str::from_utf8(t).unwrap().to_string()),
             function: None,
         }),
     ))(i)
@@ -742,10 +739,7 @@ pub fn column_identifier(i: &[u8]) -> IResult<&[u8], Column> {
         tuple((opt(terminated(sql_identifier, tag("."))), sql_identifier)),
         |tup| Column {
             name: str::from_utf8(tup.1).unwrap().to_string(),
-            table: match tup.0 {
-                None => None,
-                Some(t) => Some(str::from_utf8(t).unwrap().to_string()),
-            },
+            table: tup.0.map(|t| str::from_utf8(t).unwrap().to_string()),
             function: None,
         },
     );
@@ -1009,14 +1003,8 @@ pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
         )),
         |tup| Table {
             name: String::from(str::from_utf8(tup.1).unwrap()),
-            alias: match tup.2 {
-                Some(a) => Some(String::from(a)),
-                None => None,
-            },
-            schema: match tup.0 {
-                Some((schema, _)) => Some(String::from(str::from_utf8(schema).unwrap())),
-                None => None,
-            },
+            alias: tup.2.map(String::from),
+            schema: tup.0.map(|(s, _)| str::from_utf8(s).unwrap().to_string()),
         },
     )(i)
 }
@@ -1025,10 +1013,7 @@ pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
 pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
     map(pair(sql_identifier, opt(as_alias)), |tup| Table {
         name: String::from(str::from_utf8(tup.0).unwrap()),
-        alias: match tup.1 {
-            Some(a) => Some(String::from(a)),
-            None => None,
-        },
+        alias: tup.1.map(String::from),
         schema: None,
     })(i)
 }

@@ -18,7 +18,7 @@ impl SecurityConfig {
     pub fn parse(policy_text: &str) -> SecurityConfig {
         let config: serde_json::Map<String, Value> = match serde_json::from_str(policy_text) {
             Ok(v) => v,
-            Err(e) => panic!(e.to_string()),
+            Err(e) => panic!("{}", e),
         };
 
         let groups = match config.get("groups") {

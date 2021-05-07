@@ -6,7 +6,7 @@ use slog::info;
 
 pub struct Backend {
     blacklist: Vec<String>,
-    r: String,
+    _r: String,
     log: slog::Logger,
     g: Handle<LocalAuthority>,
 }
@@ -42,7 +42,7 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     //recipe.enable_reuse(reuse);
     Box::new(Backend {
         blacklist: blacklisted_queries,
-        r: String::new(),
+        _r: String::new(),
         log,
         g,
     })
@@ -106,7 +106,7 @@ impl Backend {
             Err(e) => return Err(format!("failed to activate recipe: {}", e)),
         }
 
-        self.r = rs;
+        self._r = rs;
         Ok(())
     }
 }
@@ -285,7 +285,7 @@ async fn main() {
             let graph_fname = format!("{}/failed_hotcrp_{}.gv", gloc.unwrap(), schema_version);
             let mut gf = File::create(graph_fname).unwrap();
             assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
-            panic!(e)
+            panic!("{}", e)
         }
 
         if gloc.is_some() {

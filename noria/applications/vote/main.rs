@@ -464,7 +464,7 @@ where
             }
         }
 
-        atomic::spin_loop_hint();
+        std::hint::spin_loop();
     }
 
     // we're done _generating_ requests, so we can measure generation throughput

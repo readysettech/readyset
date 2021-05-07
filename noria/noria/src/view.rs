@@ -8,7 +8,7 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
-use launchpad::intervals::{BoundAsRef, BoundFunctor, BoundPair};
+use launchpad::intervals::{BoundFunctor, BoundPair};
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
@@ -89,10 +89,9 @@ fn make_views_discover(addr: SocketAddr) -> Discover {
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
-type Discover =
-    impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
-        + Unpin
-        + Send;
+type Discover = impl tower::discover::Discover<Key = usize, Service = InnerService, Error = tokio::io::Error>
+    + Unpin
+    + Send;
 
 pub(crate) type ViewRpc =
     Buffer<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>, Tagged<ReadQuery>>;
@@ -186,11 +185,9 @@ impl KeyComparison {
     pub fn contains(&self, key: &[DataType]) -> bool {
         match self {
             Self::Equal(equal) => key == equal.as_slice(),
-            Self::Range((lower, upper)) => (
-                lower.as_ref().map(Vec1::as_slice),
-                upper.as_ref().map(Vec1::as_slice),
-            )
-                .contains(key),
+            Self::Range((lower, upper)) => {
+                (lower.map(Vec1::as_slice), upper.map(Vec1::as_slice)).contains(key)
+            }
         }
     }
 }
@@ -974,9 +971,9 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
     }
 }
 
-impl Into<Vec<Vec<DataType>>> for ReadReplyBatch {
-    fn into(self) -> Vec<Vec<DataType>> {
-        self.0
+impl From<ReadReplyBatch> for Vec<Vec<DataType>> {
+    fn from(val: ReadReplyBatch) -> Vec<Vec<DataType>> {
+        val.0
     }
 }
 

@@ -11,9 +11,9 @@ impl From<usize> for DomainIndex {
     }
 }
 
-impl Into<usize> for DomainIndex {
-    fn into(self) -> usize {
-        self.0
+impl From<DomainIndex> for usize {
+    fn from(val: DomainIndex) -> usize {
+        val.0
     }
 }
 

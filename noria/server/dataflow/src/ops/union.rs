@@ -686,7 +686,7 @@ impl Ingredient for Union {
                             pieces.buffered.into_iter()
                         })
                         .map(|(from, rs)| {
-                            Ok(self.on_input(ex, from, rs, Some(&key_cols[..]), n, s)?
+                            Ok(self.on_input(ex, from, rs, Some(key_cols), n, s)?
                                 .results)
                         })
                         // FIXME(eta): this iterator / result stuff makes me sad, and is probably

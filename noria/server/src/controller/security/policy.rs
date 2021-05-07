@@ -94,7 +94,7 @@ impl Policy {
     pub fn parse(policy_text: &str) -> Vec<Policy> {
         let config: Vec<Value> = match serde_json::from_str(policy_text) {
             Ok(v) => v,
-            Err(e) => panic!(e.to_string()),
+            Err(e) => panic!("{}", e),
         };
 
         config

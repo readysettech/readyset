@@ -9,9 +9,9 @@ use std::convert::TryFrom;
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Extremum {
     /// The minimum value that occurs in the `over` column in each group.
-    MIN,
+    Min,
     /// The maximum value of the `over` column for all records of each group.
-    MAX,
+    Max,
 }
 
 impl Extremum {
@@ -98,8 +98,8 @@ impl GroupedOperation for ExtremumOperator {
                 // if you *really* want to ignore this error, use this code:
                 //
                 //   match self.op {
-                //       Extremum::MIN => i64::max_value(),
-                //       Extremum::MAX => i64::min_value(),
+                //       Extremum::Min => i64::max_value(),
+                //       Extremum::Max => i64::min_value(),
                 //   }
             }
         };
@@ -139,8 +139,8 @@ impl GroupedOperation for ExtremumOperator {
                     _ => unreachable!(),
                 };
                 match self.op {
-                    Extremum::MAX => x >= n,
-                    Extremum::MIN => x <= n,
+                    Extremum::Max => x >= n,
+                    Extremum::Min => x <= n,
                 }
             } else {
                 true
@@ -160,8 +160,8 @@ impl GroupedOperation for ExtremumOperator {
         }
 
         let extreme = match self.op {
-            Extremum::MIN => extreme_values.into_iter().min(),
-            Extremum::MAX => extreme_values.into_iter().max(),
+            Extremum::Min => extreme_values.into_iter().min(),
+            Extremum::Max => extreme_values.into_iter().max(),
         };
 
         if let Some(extreme) = extreme {
@@ -175,14 +175,14 @@ impl GroupedOperation for ExtremumOperator {
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return String::from(match self.op {
-                Extremum::MIN => "MIN",
-                Extremum::MAX => "MAX",
+                Extremum::Min => "MIN",
+                Extremum::Max => "MAX",
             });
         }
 
         let op_string = match self.op {
-            Extremum::MIN => format!("min({})", self.over),
-            Extremum::MAX => format!("max({})", self.over),
+            Extremum::Min => format!("min({})", self.over),
+            Extremum::Max => format!("max({})", self.over),
         };
         let group_cols = self
             .group
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn it_forwards_maximum() {
-        let mut c = setup(Extremum::MAX, true);
+        let mut c = setup(Extremum::Max, true);
         let key = 1;
 
         // First insertion should trigger an update.
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn it_forwards_minimum() {
-        let mut c = setup(Extremum::MIN, true);
+        let mut c = setup(Extremum::Min, true);
         let key = 1;
 
         // First insertion should trigger an update.
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn it_cancels_out_opposite_records() {
-        let mut c = setup(Extremum::MAX, true);
+        let mut c = setup(Extremum::Max, true);
         c.narrow_one_row(vec![1.into(), 5.into()], true);
         // Competing positive and negative should cancel out.
         let u = vec![
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();
-        let c = setup(Extremum::MAX, false);
+        let c = setup(Extremum::Max, false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let c = setup(Extremum::MAX, false);
+        let c = setup(Extremum::Max, false);
         assert_eq!(
             c.node().resolve(0).unwrap(),
             Some(vec![(c.narrow_base_id().as_global(), 0)])

@@ -43,7 +43,7 @@ named!(
 named!(
     skipif<Conditional>,
     do_parse!(
-        constructor: tag!("skipif")
+        _constructor: tag!("skipif")
             >> multispace1
             >> name: flat_map!(alphanumeric1, parse_to!(String))
             >> (Conditional::SkipIf(name))
@@ -53,7 +53,7 @@ named!(
 named!(
     onlyif<Conditional>,
     do_parse!(
-        constructor: tag!("onlyif")
+        _constructor: tag!("onlyif")
             >> multispace1
             >> name: flat_map!(alphanumeric1, parse_to!(String))
             >> (Conditional::OnlyIf(name))

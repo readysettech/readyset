@@ -51,7 +51,7 @@ impl ToDataType for Literal {
 impl<'a> ToDataType for Value<'a> {
     fn to_datatype(self) -> Result<DataType, ReadySetError> {
         Ok(match self.into_inner() {
-            ValueInner::NULL => DataType::None,
+            ValueInner::Null => DataType::None,
             ValueInner::Bytes(b) => DataType::try_from(b).unwrap(),
             ValueInner::Int(i) => i.into(),
             ValueInner::UInt(i) => (i as i32).into(),

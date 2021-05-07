@@ -145,8 +145,8 @@ impl GraphViz for MirNodeInner {
                 ref kind,
             } => {
                 let op_string = match *kind {
-                    ExtremumKind::MIN => format!("min({})", print_col(on)),
-                    ExtremumKind::MAX => format!("max({})", print_col(on)),
+                    ExtremumKind::Min => format!("min({})", print_col(on)),
+                    ExtremumKind::Max => format!("max({})", print_col(on)),
                 };
                 let group_cols = group_by
                     .iter()

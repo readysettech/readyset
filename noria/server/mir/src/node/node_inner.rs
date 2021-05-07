@@ -461,8 +461,8 @@ impl Debug for MirNodeInner {
                 ref kind,
             } => {
                 let op_string = match *kind {
-                    Extremum::MIN => format!("min({})", on.name.as_str()),
-                    Extremum::MAX => format!("max({})", on.name.as_str()),
+                    Extremum::Min => format!("min({})", on.name.as_str()),
+                    Extremum::Max => format!("max({})", on.name.as_str()),
                 };
                 let group_cols = group_by
                     .iter()

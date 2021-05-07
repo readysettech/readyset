@@ -76,9 +76,9 @@ impl From<(Vec<DataType>, bool)> for Record {
     }
 }
 
-impl Into<Vec<Record>> for Records {
-    fn into(self) -> Vec<Record> {
-        self.0
+impl From<Records> for Vec<Record> {
+    fn from(val: Records) -> Vec<Record> {
+        val.0
     }
 }
 
@@ -161,26 +161,26 @@ impl DerefMut for Records {
     }
 }
 
-impl Into<Records> for Record {
-    fn into(self) -> Records {
-        Records(vec![self])
+impl From<Record> for Records {
+    fn from(val: Record) -> Records {
+        Records(vec![val])
     }
 }
 
-impl Into<Records> for Vec<Record> {
-    fn into(self) -> Records {
-        Records(self)
+impl From<Vec<Record>> for Records {
+    fn from(val: Vec<Record>) -> Records {
+        Records(val)
     }
 }
 
-impl Into<Records> for Vec<Vec<DataType>> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(Into::into).collect())
+impl From<Vec<Vec<DataType>>> for Records {
+    fn from(val: Vec<Vec<DataType>>) -> Records {
+        Records(val.into_iter().map(Into::into).collect())
     }
 }
 
-impl Into<Records> for Vec<(Vec<DataType>, bool)> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(Into::into).collect())
+impl From<Vec<(Vec<DataType>, bool)>> for Records {
+    fn from(val: Vec<(Vec<DataType>, bool)>) -> Records {
+        Records(val.into_iter().map(Into::into).collect())
     }
 }
