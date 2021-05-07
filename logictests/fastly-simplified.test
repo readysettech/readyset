@@ -1,0 +1,32 @@
+statement ok
+CREATE TABLE `articles` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `author_id` int(11) NOT NULL,
+  `creation_time` timestamp NOT NULL DEFAULT current_timestamp(),
+  `keywords` varchar(40) NOT NULL,
+  `title` varchar(128) NOT NULL,
+  `fulltext` varchar(65535) NOT NULL,
+  `shorttext` varchar(512) NOT NULL,
+  `image_url` varchar(128) NOT NULL,
+  `url` varchar(128) NOT NULL,
+  `type` varchar(20) DEFAULT NULL,
+  `priority` int(8) DEFAULT 1
+)
+
+statement ok
+CREATE TABLE `authors` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(40) NOT NULL,
+  `image_url` varchar(128) NOT NULL
+)
+
+statement ok
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT
+)
+
+statement ok
+CREATE TABLE `recommendations` (
+  `user_id` int(11) NOT NULL,
+  `article_id` int(11) NOT NULL
+)
