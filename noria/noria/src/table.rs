@@ -279,7 +279,7 @@ pub(crate) type TableRpc = Buffer<
 >;
 
 /// Wrapper of packet payloads with their destination node.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct PacketData {
     /// The domain identifier of the destination node.
     pub dst: LocalNodeIndex,
@@ -289,7 +289,7 @@ pub struct PacketData {
 
 /// Wrapper around types that can be propagated to base tables
 /// as packets.
-#[derive(Clone, Serialize, Deserialize, TryInto)]
+#[derive(Clone, Serialize, Deserialize, TryInto, PartialEq)]
 #[try_into(owned, ref, ref_mut)]
 pub enum PacketPayload {
     /// An input update to a base table.

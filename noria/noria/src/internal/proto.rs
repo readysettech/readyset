@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+#[derive(PartialEq)]
 struct LocalBypass<T>(*mut T);
 
 impl<T> LocalBypass<T> {
@@ -40,7 +41,7 @@ impl<T> Clone for LocalBypass<T> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 enum LocalOrNotInner<T> {
     Local(LocalBypass<T>),
     Not(T),
@@ -72,7 +73,7 @@ where
 }
 
 #[doc(hidden)]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct LocalOrNot<T>(LocalOrNotInner<T>);
 
 impl<T> fmt::Debug for LocalOrNot<T>
