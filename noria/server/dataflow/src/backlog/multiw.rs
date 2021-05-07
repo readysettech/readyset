@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use super::{key_to_double, key_to_single, Key};
 use crate::prelude::*;
 use ahash::RandomState;
-use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::BoundFunctor;
 use noria::consistency::Timestamp;
 
 pub(super) enum Handle {
@@ -66,11 +66,11 @@ impl Handle {
         match self {
             Handle::Single(h) => {
                 h.remove_range((
-                    range.start_bound().as_ref().map(|r| {
+                    range.start_bound().map(|r| {
                         debug_assert_eq!(r.len(), 1);
                         &r[0]
                     }),
-                    range.end_bound().as_ref().map(|r| {
+                    range.end_bound().map(|r| {
                         debug_assert_eq!(r.len(), 1);
                         &r[0]
                     }),
@@ -78,11 +78,11 @@ impl Handle {
             }
             Handle::Double(h) => {
                 h.remove_range((
-                    range.start_bound().as_ref().map(|r| {
+                    range.start_bound().map(|r| {
                         debug_assert_eq!(r.len(), 2);
                         (r[0].clone(), r[1].clone())
                     }),
-                    range.end_bound().as_ref().map(|r| {
+                    range.end_bound().map(|r| {
                         debug_assert_eq!(r.len(), 2);
                         (r[0].clone(), r[1].clone())
                     }),
@@ -202,11 +202,11 @@ impl Handle {
                 h.insert_range(
                     vec![],
                     (
-                        range.start_bound().as_ref().map(|r| {
+                        range.start_bound().map(|r| {
                             debug_assert_eq!(r.len(), 1);
                             &r[0]
                         }),
-                        range.end_bound().as_ref().map(|r| {
+                        range.end_bound().map(|r| {
                             debug_assert_eq!(r.len(), 1);
                             &r[0]
                         }),
@@ -217,11 +217,11 @@ impl Handle {
                 h.insert_range(
                     vec![],
                     (
-                        range.start_bound().as_ref().map(|r| {
+                        range.start_bound().map(|r| {
                             debug_assert_eq!(r.len(), 2);
                             (r[0].clone(), r[1].clone())
                         }),
-                        range.end_bound().as_ref().map(|r| {
+                        range.end_bound().map(|r| {
                             debug_assert_eq!(r.len(), 2);
                             (r[0].clone(), r[1].clone())
                         }),

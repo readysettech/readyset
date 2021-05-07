@@ -140,7 +140,7 @@ impl Multiverse for SqlIncorporator {
 
             let qg = match to_query_graph(st) {
                 Ok(qg) => qg,
-                Err(e) => panic!(e),
+                Err(e) => panic!("{}", e),
             };
 
             let e = row_policies_qg

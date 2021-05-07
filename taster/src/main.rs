@@ -441,7 +441,7 @@ pub fn main() {
         ws.fetch().unwrap();
 
         match ws.repo.find_object(cid, None) {
-            Err(e) => panic!(format!("{}", e.to_string())),
+            Err(e) => panic!("{}", e),
             Ok(o) => {
                 let cobj = o.as_commit().unwrap();
                 let hc = Commit {

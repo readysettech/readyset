@@ -15,7 +15,7 @@ impl Group {
     pub fn parse(grou_txt: &str) -> Vec<Group> {
         let groups: Vec<Value> = match serde_json::from_str(grou_txt) {
             Ok(v) => v,
-            Err(e) => panic!(e.to_string()),
+            Err(e) => panic!("{}", e),
         };
 
         groups

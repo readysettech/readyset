@@ -1086,7 +1086,7 @@ impl SqlToMirConverter {
             Max(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::Extremum(Extremum::MAX),
+                GroupedNodeType::Extremum(Extremum::Max),
                 false,
                 None,
             ),
@@ -1094,14 +1094,14 @@ impl SqlToMirConverter {
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Extremum(Extremum::MAX),
+                GroupedNodeType::Extremum(Extremum::Max),
                 false,
                 None,
             ),
             Min(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
                 None,
-                GroupedNodeType::Extremum(Extremum::MIN),
+                GroupedNodeType::Extremum(Extremum::Min),
                 false,
                 None,
             ),
@@ -1109,7 +1109,7 @@ impl SqlToMirConverter {
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
                 None,
-                GroupedNodeType::Extremum(Extremum::MIN),
+                GroupedNodeType::Extremum(Extremum::Min),
                 false,
                 None,
             ),

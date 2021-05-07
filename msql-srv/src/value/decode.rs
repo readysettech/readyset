@@ -11,7 +11,7 @@ pub struct Value<'a>(ValueInner<'a>);
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum ValueInner<'a> {
     /// The MySQL `NULL` value.
-    NULL,
+    Null,
     /// An untyped sequence of bytes (usually a text type or `MYSQL_TYPE_BLOB`).
     Bytes(&'a [u8]),
     /// A signed integer.
@@ -44,12 +44,12 @@ impl<'a> Value<'a> {
     }
 
     pub(crate) fn null() -> Self {
-        Value(ValueInner::NULL)
+        Value(ValueInner::Null)
     }
 
     /// Returns true if this is a NULL value
     pub fn is_null(&self) -> bool {
-        matches!(self.0, ValueInner::NULL)
+        matches!(self.0, ValueInner::Null)
     }
 
     pub(crate) fn parse_from(
@@ -156,7 +156,7 @@ impl<'a> ValueInner<'a> {
                 let len = input.read_u8()?;
                 Ok(ValueInner::Time(read_bytes!(input, len)?))
             }
-            ColumnType::MYSQL_TYPE_NULL => Ok(ValueInner::NULL),
+            ColumnType::MYSQL_TYPE_NULL => Ok(ValueInner::Null),
             ct => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("unknown column type {:?}", ct),
@@ -165,12 +165,12 @@ impl<'a> ValueInner<'a> {
     }
 }
 
-// NOTE: these should all be TryInto
-macro_rules! impl_into {
+// NOTE: these should all be TryFrom
+macro_rules! impl_from {
     ($t:ty, $($variant:path),*) => {
-        impl<'a> Into<$t> for Value<'a> {
-            fn into(self) -> $t {
-                match self.0 {
+        impl<'a> From<Value<'a>> for $t {
+            fn from(val: Value<'a>) -> Self {
+                match val.0 {
                     $($variant(v) => v as $t),*,
                     v => panic!(concat!("invalid type conversion from {:?} to ", stringify!($t)), v)
                 }
@@ -179,32 +179,32 @@ macro_rules! impl_into {
     }
 }
 
-impl_into!(u8, ValueInner::UInt, ValueInner::Int);
-impl_into!(u16, ValueInner::UInt, ValueInner::Int);
-impl_into!(u32, ValueInner::UInt, ValueInner::Int);
-impl_into!(u64, ValueInner::UInt);
-impl_into!(i8, ValueInner::UInt, ValueInner::Int);
-impl_into!(i16, ValueInner::UInt, ValueInner::Int);
-impl_into!(i32, ValueInner::UInt, ValueInner::Int);
-impl_into!(i64, ValueInner::Int);
-impl_into!(f32, ValueInner::Double);
-impl_into!(f64, ValueInner::Double);
-impl_into!(&'a [u8], ValueInner::Bytes);
+impl_from!(u8, ValueInner::UInt, ValueInner::Int);
+impl_from!(u16, ValueInner::UInt, ValueInner::Int);
+impl_from!(u32, ValueInner::UInt, ValueInner::Int);
+impl_from!(u64, ValueInner::UInt);
+impl_from!(i8, ValueInner::UInt, ValueInner::Int);
+impl_from!(i16, ValueInner::UInt, ValueInner::Int);
+impl_from!(i32, ValueInner::UInt, ValueInner::Int);
+impl_from!(i64, ValueInner::Int);
+impl_from!(f32, ValueInner::Double);
+impl_from!(f64, ValueInner::Double);
+impl_from!(&'a [u8], ValueInner::Bytes);
 
-impl<'a> Into<&'a str> for Value<'a> {
-    fn into(self) -> &'a str {
-        if let ValueInner::Bytes(v) = self.0 {
+impl<'a> From<Value<'a>> for &'a str {
+    fn from(val: Value<'a>) -> &'a str {
+        if let ValueInner::Bytes(v) = val.0 {
             ::std::str::from_utf8(v).unwrap()
         } else {
-            panic!("invalid type conversion from {:?} to string", self)
+            panic!("invalid type conversion from {:?} to string", val)
         }
     }
 }
 
 use chrono::{NaiveDate, NaiveDateTime};
-impl<'a> Into<NaiveDate> for Value<'a> {
-    fn into(self) -> NaiveDate {
-        if let ValueInner::Date(mut v) = self.0 {
+impl<'a> From<Value<'a>> for NaiveDate {
+    fn from(val: Value<'a>) -> NaiveDate {
+        if let ValueInner::Date(mut v) = val.0 {
             assert_eq!(v.len(), 4);
             NaiveDate::from_ymd(
                 i32::from(v.read_u16::<LittleEndian>().unwrap()),
@@ -212,14 +212,14 @@ impl<'a> Into<NaiveDate> for Value<'a> {
                 u32::from(v.read_u8().unwrap()),
             )
         } else {
-            panic!("invalid type conversion from {:?} to date", self)
+            panic!("invalid type conversion from {:?} to date", val)
         }
     }
 }
 
-impl<'a> Into<NaiveDateTime> for Value<'a> {
-    fn into(self) -> NaiveDateTime {
-        if let ValueInner::Datetime(mut v) = self.0 {
+impl<'a> From<Value<'a>> for NaiveDateTime {
+    fn from(val: Value<'a>) -> NaiveDateTime {
+        if let ValueInner::Datetime(mut v) = val.0 {
             assert!(v.len() == 7 || v.len() == 11);
             let d = NaiveDate::from_ymd(
                 i32::from(v.read_u16::<LittleEndian>().unwrap()),
@@ -238,16 +238,16 @@ impl<'a> Into<NaiveDateTime> for Value<'a> {
                 d.and_hms(h, m, s)
             }
         } else {
-            panic!("invalid type conversion from {:?} to datetime", self)
+            panic!("invalid type conversion from {:?} to datetime", val)
         }
     }
 }
 
 use crate::MysqlTime;
 
-impl<'a> Into<MysqlTime> for Value<'a> {
-    fn into(self) -> MysqlTime {
-        if let ValueInner::Time(mut v) = self.0 {
+impl<'a> From<Value<'a>> for MysqlTime {
+    fn from(val: Value<'a>) -> MysqlTime {
+        if let ValueInner::Time(mut v) = val.0 {
             let is_positive = v.read_u8().unwrap() == 0; // sign: 1 negative, 0 positive
             let d = v.read_u32::<LittleEndian>().unwrap() as u16;
             let h = v.read_u8().unwrap() as u16;
@@ -256,7 +256,7 @@ impl<'a> Into<MysqlTime> for Value<'a> {
             let us = v.read_u32::<LittleEndian>().unwrap_or(0) as u64;
             MysqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us)
         } else {
-            panic!("Invalid type conversion from {:?} to time", self)
+            panic!("Invalid type conversion from {:?} to time", val)
         }
     }
 }
@@ -279,9 +279,9 @@ impl From<MysqlTime> for myc::value::Value {
 
 use std::time::Duration;
 
-impl<'a> Into<Duration> for Value<'a> {
-    fn into(self) -> Duration {
-        if let ValueInner::Time(mut v) = self.0 {
+impl<'a> From<Value<'a>> for Duration {
+    fn from(val: Value<'a>) -> Duration {
+        if let ValueInner::Time(mut v) = val.0 {
             assert!(v.len() == 8 || v.len() == 12);
 
             let neg = v.read_u8().unwrap();
@@ -304,7 +304,7 @@ impl<'a> Into<Duration> for Value<'a> {
                 micros * 1_000,
             )
         } else {
-            panic!("invalid type conversion from {:?} to datetime", self)
+            panic!("invalid type conversion from {:?} to datetime", val)
         }
     }
 }

@@ -52,7 +52,7 @@ impl Workspace {
                     );
                     clone(github_repo, local_path).unwrap()
                 } else {
-                    panic!(e);
+                    panic!("{:?}", e);
                 }
             }
         };

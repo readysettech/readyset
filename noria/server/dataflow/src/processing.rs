@@ -1,5 +1,5 @@
 use derive_more::From;
-use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::BoundFunctor;
 use noria::{KeyComparison, ReadySetError};
 use slog::Logger;
 use std::borrow::Cow;
@@ -31,10 +31,9 @@ impl MissRecord {
         };
         match self {
             Self::Point(rec) => KeyComparison::Equal(project_rec(rec)),
-            Self::Range((lower, upper)) => KeyComparison::Range((
-                lower.as_ref().map(|r| project_rec(r)),
-                upper.as_ref().map(|r| project_rec(r)),
-            )),
+            Self::Range((lower, upper)) => {
+                KeyComparison::Range((lower.map(|r| project_rec(r)), upper.map(|r| project_rec(r))))
+            }
         }
     }
 }

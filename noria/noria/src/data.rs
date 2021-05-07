@@ -1345,12 +1345,10 @@ macro_rules! arithmetic_operation (
                 DataType::try_from(a $op b)?
             }
             (first, second) => panic!(
-                format!(
-                    "can't {} a {:?} and {:?}",
-                    stringify!($op),
-                    first,
-                    second,
-                )
+                "can't {} a {:?} and {:?}",
+                stringify!($op),
+                first,
+                second,
             ),
         }
     );

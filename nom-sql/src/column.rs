@@ -300,7 +300,7 @@ pub fn column_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
         ColumnSpecification {
             column,
             sql_type,
-            constraints: constraints.into_iter().filter_map(|m| m).collect(),
+            constraints: constraints.into_iter().flatten().collect(),
             comment,
         },
     ))

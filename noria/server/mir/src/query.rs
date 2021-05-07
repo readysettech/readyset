@@ -56,7 +56,7 @@ impl MirQuery {
                 } else {
                     child.borrow().ancestors.len()
                 };
-                assert!(in_edges >= 1, format!("{} has no incoming edges!", nd));
+                assert!(in_edges >= 1, "{} has no incoming edges!", nd);
                 if in_edges == 1 {
                     // last edge removed
                     node_queue.push_back(child.clone());

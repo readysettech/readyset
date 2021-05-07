@@ -202,7 +202,7 @@ pub fn merge_mir_for_queries(
             } else {
                 c.borrow().ancestors.len()
             };
-            assert!(in_edges >= 1, format!("{} has no incoming edges!", cid));
+            assert!(in_edges >= 1, "{} has no incoming edges!", cid);
             if in_edges == 1 {
                 // last edge removed
                 q.push_back(c.clone());

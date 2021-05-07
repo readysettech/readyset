@@ -80,7 +80,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
 #[derive(Debug)]
 enum Finalizer {
     Ok { rows: u64, last_insert_id: u64 },
-    EOF,
+    Eof,
 }
 
 /// Convenience type for providing query results to clients.
@@ -128,7 +128,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
                 rows,
                 last_insert_id,
             }) => writers::write_ok_packet(self.writer, rows, last_insert_id, status).await,
-            Some(Finalizer::EOF) => writers::write_eof_packet(self.writer, status).await,
+            Some(Finalizer::Eof) => writers::write_eof_packet(self.writer, status).await,
         }
     }
 
@@ -382,7 +382,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
             });
         } else {
             // we wrote out at least one row
-            self.result.as_mut().unwrap().last_end = Some(Finalizer::EOF);
+            self.result.as_mut().unwrap().last_end = Some(Finalizer::Eof);
         }
     }
 
