@@ -160,7 +160,7 @@ fn delete_basic() {
     let d = Deployment::new("delete_basic");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
     sleep();
 
@@ -222,7 +222,7 @@ fn delete_multiple() {
     let d = Deployment::new("delete_multiple");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -262,7 +262,7 @@ fn delete_bogus() {
     let d = Deployment::new("delete_bogus");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
     sleep();
 
@@ -282,7 +282,7 @@ fn delete_bogus_valid_and() {
     let d = Deployment::new("delete_bogus_valid_and");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
     sleep();
 
@@ -316,7 +316,7 @@ fn delete_bogus_valid_or() {
     let d = Deployment::new("delete_bogus_valid_or");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -350,7 +350,7 @@ fn delete_other_column() {
     let d = Deployment::new("delete_other_column");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -365,7 +365,7 @@ fn delete_no_keys() {
     let d = Deployment::new("delete_no_keys");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -424,7 +424,7 @@ fn update_basic() {
     let d = Deployment::new("update_basic");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
     sleep();
 
@@ -452,10 +452,10 @@ fn update_basic() {
 
 #[test]
 fn update_basic_prepared() {
-    let d = Deployment::new("update_basic");
+    let d = Deployment::new("update_basic_prepared");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
     sleep();
 
@@ -582,7 +582,7 @@ fn update_pkey() {
     let d = Deployment::new("update_pkey");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -618,7 +618,7 @@ fn update_separate() {
     let d = Deployment::new("update_separate");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
@@ -660,7 +660,7 @@ fn update_no_keys() {
     let d = Deployment::new("update_no_keys");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
     sleep();
 
@@ -670,10 +670,10 @@ fn update_no_keys() {
 
 #[test]
 fn update_other_column() {
-    let d = Deployment::new("update_no_keys");
+    let d = Deployment::new("update_other_column");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
     sleep();
 
@@ -686,7 +686,7 @@ fn update_bogus() {
     let d = Deployment::new("update_bogus");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
     sleep();
 
@@ -700,10 +700,10 @@ fn update_bogus() {
 
 #[test]
 fn select_collapse_where_in() {
-    let d = Deployment::new("collapsed_where");
+    let d = Deployment::new("select_collapse_where_in");
     let opts = setup(&d, true);
     let mut conn = opts.connect(NoTls).unwrap();
-    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
+    conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
     sleep();
 
