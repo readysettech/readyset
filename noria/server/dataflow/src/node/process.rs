@@ -118,7 +118,7 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard.unwrap_or(0), ex)?;
+                e.process(m, keyed_by.map(Vec::as_slice), on_shard.unwrap_or(0), ex)?;
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(
@@ -330,6 +330,7 @@ impl Node {
                         tag,
                         keys: keys.to_vec(),
                     })),
+                    None,
                     on_shard.unwrap_or(0),
                     ex,
                 )?;
@@ -486,7 +487,7 @@ impl Node {
                     NodeType::Egress(Some(ref mut e)) => {
                         // TODO(justin): Should this use on_shard like process.
                         let p = &mut Some(p);
-                        e.process(p, 0, executor).unwrap();
+                        e.process(p, None, 0, executor).unwrap();
                         None
                     }
                     NodeType::Base(_) => {

@@ -1,6 +1,8 @@
+use crate::node::special::packet_filter::PacketFilter;
 use crate::prelude::*;
 use noria::errors::{internal_err, ReadySetResult};
 use noria::invariant;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
@@ -14,6 +16,7 @@ struct EgressTx {
 pub struct Egress {
     txs: Vec<EgressTx>,
     tags: HashMap<Tag, NodeIndex>,
+    packet_filter: PacketFilter,
 }
 
 impl Clone for Egress {
@@ -23,6 +26,7 @@ impl Clone for Egress {
         Self {
             txs: Vec::new(),
             tags: self.tags.clone(),
+            packet_filter: self.packet_filter.clone(),
         }
     }
 }
@@ -32,6 +36,7 @@ impl Default for Egress {
         Self {
             tags: Default::default(),
             txs: Default::default(),
+            packet_filter: Default::default(),
         }
     }
 }
@@ -45,6 +50,10 @@ impl Egress {
         });
     }
 
+    pub fn add_for_filtering(&mut self, target: NodeIndex) {
+        self.packet_filter.add_for_filtering(target);
+    }
+
     pub fn add_tag(&mut self, tag: Tag, dst: NodeIndex) {
         self.tags.insert(tag, dst);
     }
@@ -52,12 +61,14 @@ impl Egress {
     pub fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
+        keyed_by: Option<&[usize]>,
         shard: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let &mut Self {
             ref mut txs,
             ref tags,
+            ref mut packet_filter,
         } = self;
 
         // send any queued updates to all external children
@@ -103,6 +114,11 @@ impl Egress {
             m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
             m.link_mut().dst = tx.local;
 
+            // Take the packet through the filter. The filter will make any necessary modifications
+            // to the packet to be sent, and tell us if we should send the packet or drop it.
+            if !packet_filter.process(m.as_mut(), keyed_by, tx.node)? {
+                continue;
+            }
             output.send(tx.dest, m);
             if take {
                 break;
