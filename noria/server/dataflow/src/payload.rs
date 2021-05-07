@@ -55,7 +55,7 @@ pub enum InitialState {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<KeyComparison>,
@@ -68,7 +68,7 @@ pub enum ReplayPieceContext {
     },
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SourceChannelIdentifier {
     pub token: usize,
     pub epoch: usize,
@@ -170,7 +170,7 @@ pub enum DomainRequest {
     Packet(Packet),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages
