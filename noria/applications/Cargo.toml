@@ -12,7 +12,8 @@ anyhow = "1.0"
 flurry = "0.3"
 futures-core = "0.3.0"
 futures-util = "0.3.0"
-hdrhistogram = "7"
+hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec and funty:
+                      # https://github.com/nucypher/rust-umbral/issues/34
 itertools = "0.9"
 memcached-rs = "0.4.2"
 mysql_async = "0.23.0"

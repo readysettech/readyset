@@ -42,7 +42,7 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "0.4.17"
 futures-util = "0.3.0"
-mysql_common = "0.22"
+mysql_common = "0.27"
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "0.10.1"
 derive_more = "0.99.11"

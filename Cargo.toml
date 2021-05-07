@@ -15,7 +15,8 @@ members = [
     "unbounded-interval-tree",
     "launchpad",
     "connectors/debezium_connector",
-    "query_generator"
+    "connectors/mysql_connector",
+    "query_generator",
 ]
 [profile.release]
 debug=true
