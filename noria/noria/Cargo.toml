@@ -70,6 +70,7 @@ launchpad = { path = "../../launchpad" }
 msql-srv = { path = "../../msql-srv" }
 metrics = "0.14.2"
 metrics-util = "0.6.2"
+itertools = "0.10.0"
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

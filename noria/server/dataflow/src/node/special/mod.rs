@@ -1,4 +1,4 @@
-mod base;
+pub(crate) mod base;
 mod egress;
 mod reader;
 mod sharder;
