@@ -1,3 +1,20 @@
+//! Node state that's persisted to disk
+//!
+//! The [`PersistedState`] struct is an implementation of [`State`] that stores rows (currently
+//! only for base tables) in [RocksDB][0], an on-disk key-value store. The data is stored in
+//! [indices](PersistentState::indices) - one primary index which stores the actual rows, and a
+//! number of secondary indices which maintain pointers to the data in the primary index.
+//!
+//! # Replication Offsets
+//!
+//! When running in a read-replica configuration, where a thread is run as part of the controller
+//! that reads the replication log from the underlying database, we need to persist the *offset* in
+//! that replication log of the last record that we have successfully applied. To maintain
+//! atomicity, these offsets are stored inside of rocksdb as part of the persisted
+//! [`PersistentMeta`], and updated as part of every write.
+//!
+//! [0]: https://rocksdb.org/
+
 use itertools::Itertools;
 use launchpad::intervals::BoundFunctor;
 use noria::KeyComparison;
@@ -20,6 +37,7 @@ type IndexSeq = u64;
 
 // RocksDB key used for storing meta information (like indices).
 const META_KEY: &[u8] = b"meta";
+
 // A default column family is always created, so we'll make use of that for meta information.
 // The indices themselves are stored in a column family each, with their position in
 // PersistentState::indices as name.
@@ -28,11 +46,74 @@ const DEFAULT_CF: &str = "default";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 100_000;
 
-// Store index information in RocksDB to avoid rebuilding indices on recovery.
+fn get_meta(db: &rocksdb::DB) -> PersistentMeta {
+    db.get_pinned(META_KEY)
+        .unwrap()
+        .map(|data| bincode::deserialize(data.as_ref()).unwrap())
+        .unwrap_or_default()
+}
+
+/// Abstraction over writing to different kinds of rocksdb dbs.
+///
+/// This trait is (consciously) incomplete - if necessary, a more complete version including
+/// *put_cf* etc could be put inside a utility module somewhere
+trait Put {
+    /// Write a key/value pair
+    ///
+    /// This method is prefixed with "do" so that it doesn't conflict with the `put` method on both
+    /// [`rocksdb::DB`] and [`rocksdb::WriteBatch`]
+    fn do_put<K, V>(self, key: K, value: V)
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>;
+}
+
+impl Put for &rocksdb::DB {
+    fn do_put<K, V>(self, key: K, value: V)
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        self.put(key, value).unwrap()
+    }
+}
+
+impl Put for &mut rocksdb::WriteBatch {
+    fn do_put<K, V>(self, key: K, value: V)
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        self.put(key, value)
+    }
+}
+
+fn save_meta<DB>(db: DB, meta: &PersistentMeta)
+where
+    DB: Put,
+{
+    db.do_put(META_KEY, bincode::serialize(meta).unwrap());
+}
+
+/// Load the saved [`PersistentMeta`] from the database, increment its
+/// [epoch](PersistentMeta::epoch) by one, and return it
+fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta {
+    let mut meta = get_meta(db);
+    meta.epoch += 1;
+    save_meta(db, &meta);
+    meta
+}
+
+/// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Default, Serialize, Deserialize)]
 struct PersistentMeta {
+    /// Index information is stored in RocksDB to avoid rebuilding indices on recovery
     indices: Vec<Vec<usize>>,
     epoch: IndexEpoch,
+
+    /// The latest replication offset that has been written to the base table backed by this
+    /// [`PersistentState`]. Corresponds to [`PersistentState::replication_offset`]
+    replication_offset: usize,
 }
 
 #[derive(Clone)]
@@ -55,6 +136,9 @@ pub struct PersistentState {
     indices: Vec<PersistentIndex>,
     seq: IndexSeq,
     epoch: IndexEpoch,
+    /// The latest replication offset that has been written to the base table backed by this
+    /// [`PersistentState`]
+    replication_offset: usize,
     has_unique_index: bool,
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
@@ -62,7 +146,12 @@ pub struct PersistentState {
 }
 
 impl State for PersistentState {
-    fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>) {
+    fn process_records(
+        &mut self,
+        records: &mut Records,
+        partial_tag: Option<Tag>,
+        replication_offset: Option<usize>,
+    ) {
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
         if records.len() == 0 {
             return;
@@ -80,14 +169,22 @@ impl State for PersistentState {
             }
         }
 
+        if let Some(offset) = replication_offset {
+            self.set_replication_offset(&mut batch, offset);
+        }
+
         // Sync the writes to RocksDB's WAL:
         let mut opts = rocksdb::WriteOptions::default();
         opts.set_sync(true);
-        tokio::task::block_in_place(|| self.db.as_ref().unwrap().write_opt(batch, &opts)).unwrap();
+        tokio::task::block_in_place(|| self.db().write_opt(batch, &opts)).unwrap();
+    }
+
+    fn replication_offset(&self) -> Option<usize> {
+        Some(self.replication_offset)
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db();
         let index_id = self.index_id(columns);
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
@@ -117,7 +214,7 @@ impl State for PersistentState {
     }
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db();
         tokio::task::block_in_place(|| {
             let cf = self.index_cf(columns);
             let (lower, upper) = Self::serialize_range(key, ((), ()));
@@ -232,7 +329,7 @@ impl State for PersistentState {
     // Returns a row count estimate from RocksDB.
     fn rows(&self) -> usize {
         tokio::task::block_in_place(|| {
-            let db = self.db.as_ref().unwrap();
+            let db = self.db();
             let cf = db.cf_handle("0").unwrap();
             let total_keys = db
                 .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
@@ -296,7 +393,7 @@ impl PersistentState {
             };
 
             let opts = Self::build_options(&name, params);
-            // We use a column for each index, and one for meta information.
+            // We use a column family for each index, and one for metadata.
             // When opening the DB the exact same column families needs to be used,
             // so we'll have to retrieve the existing ones first:
             let column_families = match DB::list_cf(&opts, &full_name) {
@@ -322,7 +419,7 @@ impl PersistentState {
                 db = DB::open_cf_descriptors(&opts, &full_name, make_cfs());
             }
             let mut db = db.unwrap();
-            let meta = Self::retrieve_and_update_meta(&db);
+            let meta = increment_epoch(&db);
             let indices: Vec<PersistentIndex> = meta
                 .indices
                 .into_iter()
@@ -345,6 +442,7 @@ impl PersistentState {
                 indices,
                 has_unique_index: primary_key.is_some(),
                 epoch: meta.epoch,
+                replication_offset: meta.replication_offset,
                 db_opts: opts,
                 db: Some(db),
                 _directory: directory,
@@ -373,6 +471,12 @@ impl PersistentState {
 
             state
         })
+    }
+
+    /// Return a reference to the underlying [`rocksdb::DB`] for this [`PersistentState`]
+    fn db(&self) -> &rocksdb::DB {
+        // for the unwrap here, see the note on Self::db
+        self.db.as_ref().unwrap()
     }
 
     fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
@@ -438,30 +542,34 @@ impl PersistentState {
         KeyType::from(columns.iter().map(|i| &row[*i]))
     }
 
-    fn retrieve_and_update_meta(db: &rocksdb::DB) -> PersistentMeta {
-        let indices = db.get(META_KEY).unwrap();
-        let mut meta = match indices {
-            Some(data) => bincode::deserialize(&*data).unwrap(),
-            None => PersistentMeta::default(),
-        };
-
-        meta.epoch += 1;
-        let data = bincode::serialize(&meta).unwrap();
-        db.put(META_KEY, &data).unwrap();
-        meta
+    /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
+    /// including:
+    ///
+    /// * The columns of the indices
+    /// * The epoch
+    /// * The replication offset
+    fn meta(&self) -> PersistentMeta {
+        PersistentMeta {
+            indices: self.indices.iter().map(|i| i.columns.clone()).collect(),
+            epoch: self.epoch,
+            replication_offset: self.replication_offset,
+        }
     }
 
+    /// Save metadata about this [`PersistentState`] to the db.
+    ///
+    /// See [Self::meta] for more information about what is saved to the db
     fn persist_meta(&mut self) {
-        let db = self.db.as_ref().unwrap();
-        // Stores the columns of self.indices in RocksDB so that we don't rebuild indices on recovery.
-        let columns = self.indices.iter().map(|i| i.columns.clone()).collect();
-        let meta = PersistentMeta {
-            indices: columns,
-            epoch: self.epoch,
-        };
+        save_meta(self.db(), &self.meta());
+    }
 
-        let data = bincode::serialize(&meta).unwrap();
-        db.put(META_KEY, &data).unwrap();
+    /// Add an operation to the given [`WriteBatch`] to set the [replication
+    /// offset](PersistentMeta::replication_offset) to the given value.
+    fn set_replication_offset(&mut self, batch: &mut WriteBatch, offset: usize) {
+        // It's ok to read and update meta in two steps here since each State can (currently) only
+        // be modified by a single thread.
+        self.replication_offset = offset;
+        save_meta(batch, &self.meta());
     }
 
     // Our RocksDB keys come in three forms, and are encoded as follows:
@@ -536,7 +644,7 @@ impl PersistentState {
 
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
     fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_ {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db();
         let cf = db.cf_handle(&self.indices[0].column_family).unwrap();
         db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
     }
@@ -564,7 +672,7 @@ impl PersistentState {
         let serialized_row = bincode::serialize(&r).unwrap();
 
         tokio::task::block_in_place(|| {
-            let db = self.db.as_ref().unwrap();
+            let db = self.db();
             let value_cf = db.cf_handle(&self.indices[0].column_family).unwrap();
             batch.put_cf(value_cf, &serialized_pk, &serialized_row);
 
@@ -581,7 +689,7 @@ impl PersistentState {
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
         tokio::task::block_in_place(|| {
-            let db = self.db.as_ref().unwrap();
+            let db = self.db();
             let pk_index = &self.indices[0];
             let value_cf = db.cf_handle(&pk_index.column_family).unwrap();
             let mut do_remove = move |primary_key: &[u8]| {
@@ -703,15 +811,15 @@ impl SizeOf for PersistentState {
     }
 
     fn deep_size_of(&self) -> u64 {
-        let db = self.db.as_ref().unwrap();
-        db.property_int_value("rocksdb.estimate-live-data-size")
+        self.db()
+            .property_int_value("rocksdb.estimate-live-data-size")
             .unwrap()
             .unwrap()
     }
 
     fn is_empty(&self) -> bool {
-        let db = self.db.as_ref().unwrap();
-        db.property_int_value("rocksdb.estimate-num-keys")
+        self.db()
+            .property_int_value("rocksdb.estimate-num-keys")
             .unwrap()
             .unwrap()
             == 0
@@ -726,7 +834,7 @@ mod tests {
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
-        state.process_records(&mut record.into(), None);
+        state.process_records(&mut record.into(), None, None);
     }
 
     fn get_tmp_path() -> (TempDir, String) {
@@ -803,7 +911,7 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1, 2]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -835,7 +943,7 @@ mod tests {
         let second: Vec<DataType> = vec![10.into(), 20.into(), "Cat".into()];
         state.add_key(&pk, None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![2]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&pk.columns, &KeyType::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -881,7 +989,7 @@ mod tests {
         let first: Vec<DataType> = vec![1.into(), 2.into()];
         let second: Vec<DataType> = vec![10.into(), 20.into()];
         state.add_key(&pk, None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         match state.lookup(&[0], &KeyType::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -890,7 +998,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        state.process_records(&mut vec![(first, false)].into(), None);
+        state.process_records(&mut vec![(first, false)].into(), None, None);
         match state.lookup(&[0], &KeyType::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);
@@ -914,7 +1022,7 @@ mod tests {
         let second: Vec<DataType> = vec![0.into(), 1.into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&0.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -941,7 +1049,7 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Bob".into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -971,7 +1079,7 @@ mod tests {
             let mut state = PersistentState::new(name.clone(), None, &params);
             state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
             state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-            state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+            state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         }
 
         let state = PersistentState::new(name, None, &params);
@@ -1003,7 +1111,7 @@ mod tests {
             let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
             state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
             state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-            state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+            state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         }
 
         let state = PersistentState::new(name, Some(&[0]), &params);
@@ -1035,9 +1143,11 @@ mod tests {
         state.process_records(
             &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
             None,
+            None,
         );
         state.process_records(
             &mut vec![(first.clone(), false), (first.clone(), false)].into(),
+            None,
             None,
         );
 
@@ -1119,7 +1229,7 @@ mod tests {
         {
             let mut state = PersistentState::new(name.clone(), None, &params);
             state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-            state.process_records(&mut rows.clone().into(), None);
+            state.process_records(&mut rows.clone().into(), None, None);
             // Add a second index that we'll have to build in add_key:
             state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
             // Make sure we actually built the index:
@@ -1185,7 +1295,7 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Cat".into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None);
+        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         assert_eq!(state.cloned_records(), vec![first, second]);
     }
@@ -1234,8 +1344,8 @@ mod tests {
         .into();
 
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.process_records(&mut Vec::from(&records[..3]).into(), None);
-        state.process_records(&mut records[3].clone().into(), None);
+        state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
+        state.process_records(&mut records[3].clone().into(), None, None);
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
@@ -1250,6 +1360,17 @@ mod tests {
                 _ => unreachable!(),
             };
         }
+    }
+
+    #[test]
+    fn replication_offset_roundtrip() {
+        let mut state = setup_persistent("replication_offset_roundtrip");
+        state.add_key(&Index::new(IndexType::HashMap, vec![0]), None);
+        let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
+        let replication_offset = Some(12);
+        state.process_records(&mut records, None, replication_offset);
+        let result = state.replication_offset();
+        assert_eq!(result, replication_offset);
     }
 
     #[test]
@@ -1292,6 +1413,7 @@ mod tests {
                 &mut (0..10)
                     .map(|n| Record::from(vec![n.into()]))
                     .collect::<Records>(),
+                None,
                 None,
             );
             state

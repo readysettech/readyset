@@ -34,9 +34,27 @@ pub(crate) trait State: SizeOf + Send {
 
     fn is_partial(&self) -> bool;
 
-    // Inserts or removes each record into State. Records that miss all indices in partial state
-    // are removed from `records` (thus the mutable reference).
-    fn process_records(&mut self, records: &mut Records, partial_tag: Option<Tag>);
+    /// Inserts or removes each record into State. Records that miss all indices in partial state
+    /// are removed from `records` (thus the mutable reference).
+    ///
+    /// `replication_offset`, which is ignored for all non-base-table state, can be used to specify
+    /// an update to the replication offset of a base table. See [the documentation for
+    /// PersistentState](::noria_dataflow::state::persistent_state) for more information about
+    /// replication offsets.
+    fn process_records(
+        &mut self,
+        records: &mut Records,
+        partial_tag: Option<Tag>,
+        replication_offset: Option<usize>,
+    );
+
+    /// Returns the current replication offset written to this state.
+    ///
+    ///  See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    fn replication_offset(&self) -> Option<usize> {
+        None
+    }
 
     fn mark_hole(&mut self, key: &KeyComparison, tag: Tag);
 

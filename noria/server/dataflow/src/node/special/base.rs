@@ -359,7 +359,7 @@ mod tests {
                 .unwrap()
                 .process(local, u, &states)
                 .unwrap();
-            node::materialize(&mut m, None, states.get_mut(local));
+            node::materialize(&mut m, None, None, states.get_mut(local));
             m
         };
 
