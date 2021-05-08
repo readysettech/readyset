@@ -483,6 +483,7 @@ impl Table {
                             ));
                         }
                     }
+                    TableOperation::SetReplicationOffset(_) => {}
                 }
             }
             Ok(())
@@ -516,17 +517,10 @@ impl Table {
             tracing::trace!("shard request");
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
             let ops: &mut Vec<TableOperation> = (&mut i.data).try_into().unwrap();
-            for r in &mut ops.drain(..) {
-                let shard = {
-                    let key = match r {
-                        TableOperation::Insert(ref r) => &r[key_col],
-                        TableOperation::Delete { ref key } => &key[0],
-                        TableOperation::Update { ref key, .. } => &key[0],
-                        TableOperation::InsertOrUpdate { ref row, .. } => &row[key_col],
-                    };
-                    crate::shard_by(key, self.shards.len())
-                };
-                shard_writes[shard].push(r);
+            for r in ops.drain(..) {
+                for shard in r.shards(key_col, self.shards.len()) {
+                    shard_writes[shard].push(r.clone())
+                }
             }
 
             let wait_for = FuturesUnordered::new();

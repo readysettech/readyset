@@ -3493,6 +3493,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "hyper 0.14.7",
+ "itertools 0.10.0",
  "launchpad",
  "lazy_static",
  "metrics",

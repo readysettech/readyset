@@ -1,13 +1,40 @@
 use crate::prelude::*;
+use itertools::Either;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
 use noria::internal;
 use noria::{Modification, Operation, TableOperation};
 use std::borrow::Cow;
-use std::cmp::Ordering;
+use std::cmp::{self, Ordering};
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::iter;
 use vec_map::VecMap;
+
+/// A batch of writes to be persisted to the state backing a [`Base`] node
+#[derive(Debug, PartialEq)]
+pub struct BaseWrite {
+    /// The records to be written
+    pub records: Records,
+
+    /// The replication offset to optionally be set.
+    ///
+    /// `None` in this field means that no changes to the previously-set replication offset should
+    /// be made
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    pub replication_offset: Option<usize>,
+}
+
+impl From<Records> for BaseWrite {
+    fn from(records: Records) -> Self {
+        Self {
+            records,
+            replication_offset: None,
+        }
+    }
+}
 
 /// Base is used to represent the root nodes of the Noria data flow graph.
 ///
@@ -117,20 +144,28 @@ impl Default for Base {
     }
 }
 
-fn key_val(i: usize, col: usize, r: &TableOperation) -> &DataType {
+fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
     match *r {
-        TableOperation::Insert(ref row) => &row[col],
-        TableOperation::Delete { ref key } => &key[i],
-        TableOperation::Update { ref key, .. } => &key[i],
-        TableOperation::InsertOrUpdate { ref row, .. } => &row[col],
+        TableOperation::Insert(ref row) => Some(&row[col]),
+        TableOperation::Delete { ref key } => Some(&key[i]),
+        TableOperation::Update { ref key, .. } => Some(&key[i]),
+        TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
+        TableOperation::SetReplicationOffset(_) => None,
     }
 }
 
 fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
-    key_cols
-        .iter()
-        .enumerate()
-        .map(move |(i, col)| key_val(i, *col, r))
+    if matches!(r, TableOperation::SetReplicationOffset(_)) {
+        Either::Left(iter::empty())
+    } else {
+        Either::Right(
+            key_cols
+                .iter()
+                .enumerate()
+                // unwrap: we already know it's not a SetReplicationOffset
+                .map(move |(i, col)| key_val(i, *col, r).unwrap()),
+        )
+    }
 }
 
 impl Base {
@@ -143,19 +178,29 @@ impl Base {
         us: LocalNodeIndex,
         mut ops: Vec<TableOperation>,
         state: &StateMap,
-    ) -> ReadySetResult<Records> {
+    ) -> ReadySetResult<BaseWrite> {
+        let mut replication_offset = None;
         if self.primary_key.is_none() || ops.is_empty() {
-            return ops
-                .into_iter()
-                .map(|r| {
-                    if let TableOperation::Insert(mut r) = r {
+            let mut records = Vec::with_capacity(ops.len());
+            for r in ops {
+                match r {
+                    TableOperation::Insert(mut r) => {
                         self.fix(&mut r);
-                        Ok(Record::Positive(r))
-                    } else {
+                        records.push(Record::Positive(r))
+                    }
+                    TableOperation::SetReplicationOffset(offset) => {
+                        replication_offset = cmp::max(replication_offset, Some(offset));
+                    }
+                    _ => {
                         internal!("unkeyed base got non-insert operation {:?}", r);
                     }
-                })
-                .collect();
+                }
+            }
+
+            return Ok(BaseWrite {
+                records: records.into(),
+                replication_offset,
+            });
         }
 
         let key_cols = &self.primary_key.as_ref().unwrap()[..];
@@ -235,6 +280,10 @@ impl Base {
                     }
                     update
                 }
+                TableOperation::SetReplicationOffset(offset) => {
+                    replication_offset = cmp::max(replication_offset, Some(offset));
+                    continue;
+                }
             };
 
             if current.is_none() {
@@ -276,7 +325,10 @@ impl Base {
             self.fix(r);
         }
 
-        Ok(results.into())
+        Ok(BaseWrite {
+            records: results.into(),
+            replication_offset,
+        })
     }
 
     pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Index> {
@@ -358,7 +410,8 @@ mod tests {
                 .get_base_mut()
                 .unwrap()
                 .process(local, u, &states)
-                .unwrap();
+                .unwrap()
+                .records;
             node::materialize(&mut m, None, None, states.get_mut(local));
             m
         };
@@ -410,7 +463,7 @@ mod tests {
                     key: vec![2.into(), 1.into()],
                 },
             ]),
-            Records::default()
+            Records::default().into()
         );
     }
 

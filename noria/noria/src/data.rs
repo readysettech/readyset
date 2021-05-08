@@ -1,15 +1,16 @@
 use arccstr::ArcCStr;
 
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
+use itertools::Either;
 
 use crate::{ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
 use std::borrow::Cow;
 use std::convert::TryFrom;
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
+use std::{fmt, iter};
 
 use proptest::prelude::{prop_oneof, Arbitrary};
 
@@ -1440,6 +1441,13 @@ pub enum TableOperation {
         /// The key used to identify the row to update.
         key: Vec<DataType>,
     },
+    /// Set the replication offset for data written to this base table.
+    ///
+    /// Within a group of table operations, the largest replication offset will take precedence
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    SetReplicationOffset(usize),
 }
 
 impl TableOperation {
@@ -1449,6 +1457,25 @@ impl TableOperation {
             TableOperation::Insert(ref r) => Some(r),
             TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
             _ => None,
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
+        let key = match self {
+            TableOperation::Insert(r) => Some(&r[key_col]),
+            TableOperation::Delete { key } => Some(&key[0]),
+            TableOperation::Update { key, .. } => Some(&key[0]),
+            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
+            TableOperation::SetReplicationOffset(_) => None,
+        };
+
+        if let Some(key) = key {
+            Either::Left(iter::once(crate::shard_by(key, num_shards)))
+        } else {
+            // updates to replication offsets should hit all shards
+            Either::Right(0..num_shards)
         }
     }
 }

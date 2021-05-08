@@ -1,3 +1,4 @@
+use crate::node::special::base::BaseWrite;
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
@@ -80,7 +81,10 @@ impl Node {
                         let data = data
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
-                        let mut rs = b.process(addr, data, &*state)?;
+                        let BaseWrite {
+                            records: mut rs,
+                            replication_offset,
+                        } = b.process(addr, data, &*state)?;
 
                         // When a replay originates at a base node, we replay the data *through* that
                         // same base node because its column set may have changed. However, this replay
@@ -90,7 +94,7 @@ impl Node {
                         //
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
-                            materialize(&mut rs, None /* TODO */, None, state.get_mut(addr));
+                            materialize(&mut rs, replication_offset, None, state.get_mut(addr));
                         }
 
                         // Send write-ACKs to all the clients with updates that made
