@@ -503,7 +503,7 @@ mod tests {
         let row: Record = vec![1.into(), 2.into(), 3.into()].into();
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
-        state.process_records(&mut row.into(), None);
+        state.process_records(&mut row.into(), None, None);
         states.insert(local, state);
 
         let mut project = Project::new(global, permutation, additional, expressions);

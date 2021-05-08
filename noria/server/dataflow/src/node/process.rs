@@ -67,7 +67,7 @@ impl Node {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
                 m.map_data(|rs| {
-                    materialize(rs, tag, state.get_mut(addr));
+                    materialize(rs, None, tag, state.get_mut(addr));
                 });
             }
             NodeType::Base(ref mut b) => {
@@ -90,7 +90,7 @@ impl Node {
                         //
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
-                            materialize(&mut rs, None, state.get_mut(addr));
+                            materialize(&mut rs, None /* TODO */, None, state.get_mut(addr));
                         }
 
                         // Send write-ACKs to all the clients with updates that made
@@ -281,7 +281,7 @@ impl Node {
                     _ => None,
                 };
                 m.map_data(|rs| {
-                    materialize(rs, tag, state.get_mut(addr));
+                    materialize(rs, None, tag, state.get_mut(addr));
                 });
 
                 for miss in misses.iter_mut() {
@@ -501,6 +501,7 @@ impl Node {
 // crate visibility due to use by tests
 pub(crate) fn materialize(
     rs: &mut Records,
+    replication_offset: Option<usize>,
     partial: Option<Tag>,
     state: Option<&mut Box<dyn State>>,
 ) {
@@ -511,5 +512,7 @@ pub(crate) fn materialize(
     }
 
     // yes!
-    state.unwrap().process_records(rs, partial);
+    state
+        .unwrap()
+        .process_records(rs, partial, replication_offset);
 }
