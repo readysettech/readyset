@@ -32,7 +32,7 @@ impl DomainHandle {
     }
 
     pub(super) async fn send_to_healthy_shard<T: DeserializeOwned>(
-        &mut self,
+        &self,
         i: usize,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
@@ -59,7 +59,7 @@ impl DomainHandle {
     }
 
     pub(super) async fn send_to_healthy<T: DeserializeOwned>(
-        &mut self,
+        &self,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
     ) -> ReadySetResult<Vec<T>> {

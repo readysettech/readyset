@@ -894,4 +894,22 @@ impl Table {
     pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> ReadySetResult<()> {
         self.quick_n_dirty(TableRequest::Timestamp(t)).await
     }
+
+    /// Set the replication offset for this table to the given value.
+    ///
+    /// Generally this method should not be used, instead preferring to atomically set replication
+    /// offsets as part of an existing write batch - but there are some cases where it might be
+    /// useful to set outside of a write batch, such as in tests.
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    pub async fn set_replication_offset(
+        &mut self,
+        offset: ReplicationOffset,
+    ) -> ReadySetResult<()> {
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::SetReplicationOffset(offset),
+        ]))
+        .await
+    }
 }

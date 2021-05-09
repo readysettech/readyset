@@ -155,6 +155,9 @@ pub enum DomainRequest {
         index: HashSet<Index>,
     },
 
+    /// Request the max replication offset of all the base table nodes in the domain
+    RequestReplicationOffset,
+
     /// Process the packet, as per usual
     Packet(Packet),
 }

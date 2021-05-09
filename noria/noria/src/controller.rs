@@ -8,7 +8,7 @@ use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
     internal, rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec,
-    ReadySetResult, ViewFilter, ViewRequest,
+    ReadySetResult, ReplicationOffset, ViewFilter, ViewRequest,
 };
 use futures_util::future;
 use petgraph::graph::NodeIndex;
@@ -570,5 +570,16 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
         self.rpc("workers", ())
+    }
+
+    /// Get the maximum replication offset that has been written to any of the tables in this Noria
+    /// instance
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    pub fn replication_offset(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<Option<ReplicationOffset>>> + '_ {
+        self.rpc("replication_offset", ())
     }
 }

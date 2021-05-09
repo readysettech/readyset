@@ -154,7 +154,7 @@ impl State for PersistentState {
         replication_offset: Option<ReplicationOffset>,
     ) {
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
-        if records.len() == 0 {
+        if records.len() == 0 && replication_offset.is_none() {
             return;
         }
 
