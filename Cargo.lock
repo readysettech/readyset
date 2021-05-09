@@ -3766,6 +3766,7 @@ dependencies = [
  "clap 2.33.3",
  "crossbeam 0.8.0",
  "diff",
+ "futures 0.3.14",
  "futures-core",
  "futures-executor",
  "futures-sink",

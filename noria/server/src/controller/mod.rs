@@ -435,7 +435,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration_utils::start_simple;
+    use crate::integration_utils::{sleep, start_simple};
     use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -454,5 +454,92 @@ mod tests {
             "source = {:?}",
             source
         );
+    }
+
+    mod replication_offsets {
+        use super::*;
+        use noria::ReplicationOffset;
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn same_log() {
+            let mut noria = start_simple("replication_offsets").await;
+            noria
+                .extend_recipe(
+                    "CREATE TABLE t1 (id int);
+             CREATE TABLE t2 (id int);",
+                )
+                .await
+                .unwrap();
+            let mut t1 = noria.table("t1").await.unwrap();
+            let mut t2 = noria.table("t2").await.unwrap();
+
+            t1.set_replication_offset(ReplicationOffset {
+                offset: 1,
+                replication_log_name: "binlog".to_owned(),
+            })
+            .await
+            .unwrap();
+            t2.set_replication_offset(ReplicationOffset {
+                offset: 7,
+                replication_log_name: "binlog".to_owned(),
+            })
+            .await
+            .unwrap();
+
+            sleep().await;
+
+            let offset = noria.replication_offset().await.unwrap();
+            assert_eq!(
+                offset,
+                Some(ReplicationOffset {
+                    offset: 7,
+                    replication_log_name: "binlog".to_owned(),
+                })
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn different_log() {
+            let mut noria = start_simple("replication_offsets").await;
+            noria
+                .extend_recipe(
+                    "CREATE TABLE t1 (id int);
+             CREATE TABLE t2 (id int);",
+                )
+                .await
+                .unwrap();
+            let mut t1 = noria.table("t1").await.unwrap();
+            let mut t2 = noria.table("t2").await.unwrap();
+
+            t1.set_replication_offset(ReplicationOffset {
+                offset: 1,
+                replication_log_name: "binlog".to_owned(),
+            })
+            .await
+            .unwrap();
+            t2.set_replication_offset(ReplicationOffset {
+                offset: 7,
+                replication_log_name: "linbog".to_owned(),
+            })
+            .await
+            .unwrap();
+
+            sleep().await;
+
+            let offset = noria.replication_offset().await;
+            assert!(offset.is_err());
+            let err = offset.err().unwrap();
+            assert!(
+                matches!(
+                    err,
+                    ReadySetError::RpcFailed {
+                        source: box ReadySetError::ReplicationOffsetLogDifferent(_, _),
+                        ..
+                    }
+                ),
+                "err = {:?}",
+                err
+            );
+        }
     }
 }

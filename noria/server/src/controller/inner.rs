@@ -11,12 +11,12 @@ use crate::worker::WorkerRequestKind;
 use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequest};
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::{self, Method, StatusCode};
 use nom_sql::ColumnSpecification;
-use noria::builders::*;
-
 use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
+use noria::{builders::*, ReplicationOffset};
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use slog::Logger;
@@ -26,6 +26,10 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, time};
+
+/// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
+/// for replication offsets)
+const CONCURRENT_REQUESTS: usize = 16;
 
 /// The Noria controller, responsible for making control-plane decisions for the whole of a Noria
 /// cluster.
@@ -276,6 +280,12 @@ impl ControllerInner {
                     self.remove_nodes(vec![args].as_slice())
                         .map(|r| bincode::serialize(&r).unwrap())
                 }),
+            (Method::POST, "/replication_offset") => {
+                // this method can't be `async` since `ControllerInner` isn't Send because `Graph`
+                // isn't Send :(
+                let res = futures_executor::block_on(self.replication_offset());
+                Ok(res.map(|r| bincode::serialize(&r).unwrap()))
+            }
             _ => Err(StatusCode::NOT_FOUND),
         }
     }
@@ -855,7 +865,8 @@ impl ControllerInner {
         &self.ingredients
     }
 
-    /// Get a Vec of all known input nodes.
+    /// Get a map of all known input nodes, mapping the name of the node to that node's
+    /// [index](NodeIndex)
     ///
     /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
@@ -870,7 +881,8 @@ impl ControllerInner {
             .collect()
     }
 
-    /// Get a Vec of all known output nodes.
+    /// Get a map of all known output nodes, mapping the name of the node to that node's
+    /// [index](NodeIndex)
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
@@ -1544,5 +1556,47 @@ impl ControllerInner {
                 acc
             })
         }
+    }
+
+    /// Returns the maximum replication offset that has been written to any of the tables in this
+    /// Noria instance
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    async fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        // Collect a *unique* list of domains that might contain base tables, to avoid sending
+        // multiple requests to a domain that happens to contain multiple base tables
+        let domains = self
+            .inputs()
+            .values()
+            .map(|ni| self.ingredients[*ni].domain())
+            .collect::<HashSet<_>>();
+
+        stream::iter(domains)
+            .map(|domain| {
+                self.domains[&domain].send_to_healthy::<Option<ReplicationOffset>>(
+                    DomainRequest::RequestReplicationOffset,
+                    &self.workers,
+                )
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS)
+            .try_fold(
+                None,
+                |acc: Option<ReplicationOffset>, domain_offs| async move {
+                    // NOTE(grfn): domain_offs is a vec per-shard here - ostensibly, every time we
+                    // do an update to a replication offset that applies to every shard - meaning
+                    // the only case domain_offs *wouldn't* be unique is if we crashed at some
+                    // point. Is that a problem?
+                    domain_offs
+                        .into_iter()
+                        .flatten()
+                        .chain(acc.into_iter())
+                        .try_fold(None, |mut off1, off2| {
+                            off2.try_max_into(&mut off1)?;
+                            Ok(off1)
+                        })
+                },
+            )
+            .await
     }
 }

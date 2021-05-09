@@ -57,6 +57,9 @@ stream-cancel = "0.8.0"
 vec1 = "1.6.0"
 reqwest = "0.11.3"
 url = { version = "2.2", features = ["serde"] }
+maplit = "1.0.2"
+tokio-stream = "0.1.5"
+futures = "0.3.14"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
@@ -73,8 +76,6 @@ mir = { version = "0.7.0", path = "mir", package = "noria-mir" }
 common = { version = "0.7.0", path = "common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../noria" }
 launchpad = { path = "../../launchpad" }
-maplit = "1.0.2"
-tokio-stream = "0.1.5"
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }

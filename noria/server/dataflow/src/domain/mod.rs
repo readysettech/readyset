@@ -20,7 +20,7 @@ pub use internal::DomainIndex as Index;
 use metrics::{counter, gauge, histogram};
 use noria::channel::{self};
 use noria::metrics::recorded;
-use noria::{internal, KeyComparison, ReadySetError};
+use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
 use slog::Logger;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -1470,6 +1470,9 @@ impl Domain {
             DomainRequest::UpdateStateSize => {
                 self.update_state_sizes();
                 Ok(None)
+            }
+            DomainRequest::RequestReplicationOffset => {
+                Ok(Some(bincode::serialize(&self.replication_offset()?)?))
             }
             DomainRequest::Packet(pkt) => {
                 self.handle(Box::new(pkt), executor, true)?;
@@ -3382,6 +3385,16 @@ impl Domain {
         );
         self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
+    }
+
+    pub fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
+        self.state
+            .values()
+            .filter_map(|state| state.replication_offset())
+            .try_fold(None, |mut off1, off2| {
+                off2.try_max_into(&mut off1)?;
+                Ok(off1)
+            })
     }
 
     pub fn on_event(
