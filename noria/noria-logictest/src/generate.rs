@@ -104,6 +104,10 @@ pub struct Generate {
     /// Enable verbose output
     #[clap(long, short = 'v')]
     verbose: bool,
+
+    /// Enable randomly generating column data.
+    #[clap(long)]
+    random: bool,
 }
 
 fn write_output<W, I>(original_file: &mut File, new_entries: I, output: &mut W) -> io::Result<()>
@@ -185,7 +189,7 @@ impl Generate {
             .map(|table_name| {
                 let spec = generator.table(&table_name.clone().into()).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
-                let data = spec.generate_data(self.rows_per_table);
+                let data = spec.generate_data(self.rows_per_table, self.random);
                 nom_sql::InsertStatement {
                     table: table_name.as_str().into(),
                     fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
