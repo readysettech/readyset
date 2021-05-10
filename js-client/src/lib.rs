@@ -68,6 +68,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let slowlog = parse_arg!("slowLog", false, JsBoolean);
     let permissive = parse_arg!("permissive", false, JsBoolean);
     let read_your_write = parse_arg!("readYourWrite", false, JsBoolean);
+    let region = parse_arg!("region", "".to_string(), JsString);
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
@@ -82,10 +83,16 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
             ch.clone(),
             auto_increments.clone(),
             query_cache.clone(),
+            Some(region.clone()),
         ));
         Writer::NoriaConnector(writer)
     };
-    let reader = rt.block_on(NoriaConnector::new(ch, auto_increments, query_cache));
+    let reader = rt.block_on(NoriaConnector::new(
+        ch,
+        auto_increments,
+        query_cache,
+        Some(region),
+    ));
 
     let b = BackendBuilder::new()
         .sanitize(sanitize)

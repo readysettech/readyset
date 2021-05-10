@@ -30,8 +30,13 @@ async fn main() {
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
 
     let mut ch = ControllerHandle::new(zk_auth).await.unwrap();
-    let reader =
-        NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone()).await;
+    let reader = NoriaConnector::new(
+        ch.clone(),
+        auto_increments.clone(),
+        query_cache.clone(),
+        None,
+    )
+    .await;
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);

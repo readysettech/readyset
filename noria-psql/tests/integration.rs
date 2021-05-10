@@ -127,8 +127,13 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
             tokio::net::TcpStream::from_std(s).unwrap()
         };
 
-        let writer = NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
-        let reader = NoriaConnector::new(ch, auto_increments, query_cache);
+        let writer = NoriaConnector::new(
+            ch.clone(),
+            auto_increments.clone(),
+            query_cache.clone(),
+            None,
+        );
+        let reader = NoriaConnector::new(ch, auto_increments, query_cache, None);
 
         let backend = Backend(
             BackendBuilder::new()

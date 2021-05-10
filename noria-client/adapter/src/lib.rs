@@ -133,6 +133,12 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     .env("MYSQL_URL")
                     .help("Host for mysql connection. Should include username and password if nececssary."),
             )
+            .arg(
+                Arg::with_name("region")
+                .default_value("")
+                .env("NORIA_REGION")
+                .help("The region the worker is hosted in. Required to route view requests to specific regions."),
+            )
             .get_matches();
 
         let listen_addr = value_t_or_exit!(matches, "address", String);
@@ -147,6 +153,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
         let static_responses = !matches.is_present("no-static-responses");
         let mysql_url = matches.value_of("mysql-url").map(|s| s.to_owned());
         let require_authentication = !matches.is_present("no-require-authentication");
+        let region = matches.value_of("region").map(|s| s.to_owned());
 
         let users: &'static HashMap<String, String> =
             Box::leak(Box::new(if require_authentication {
@@ -212,6 +219,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mysql_url = mysql_url.clone();
             let mut connection_handler = self.connection_handler.clone();
+            let r = region.clone();
             let fut = async move {
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
@@ -222,9 +230,13 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 // thought, there is no benefit to sharing any implentation between the two. the
                 // only potential shared state is the query_cache, however, the set of queries
                 // handles by a reader and writer are disjoint
-                let reader =
-                    NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone())
-                        .await;
+                let reader = NoriaConnector::new(
+                    ch.clone(),
+                    auto_increments.clone(),
+                    query_cache.clone(),
+                    r.clone(),
+                )
+                .await;
 
                 let _g = connection.enter();
 
@@ -234,7 +246,8 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
                     Writer::MySqlConnector(writer)
                 } else {
-                    let writer = NoriaConnector::new(ch, auto_increments, query_cache).await;
+                    let writer =
+                        NoriaConnector::new(ch, auto_increments, query_cache, r.clone()).await;
                     Writer::NoriaConnector(writer)
                 };
 
