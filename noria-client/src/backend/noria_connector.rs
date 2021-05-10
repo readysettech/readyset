@@ -102,8 +102,12 @@ impl NoriaBackendInner {
         self.get_or_make_mutator(table).await
     }
 
-    async fn ensure_getter(&mut self, view: &str) -> ReadySetResult<&mut View> {
-        self.get_or_make_getter(view).await
+    async fn ensure_getter(
+        &mut self,
+        view: &str,
+        region: Option<String>,
+    ) -> ReadySetResult<&mut View> {
+        self.get_or_make_getter(view, region).await
     }
 
     async fn get_or_make_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
@@ -114,9 +118,16 @@ impl NoriaBackendInner {
         Ok(self.inputs.get_mut(table).unwrap())
     }
 
-    async fn get_or_make_getter(&mut self, view: &str) -> ReadySetResult<&mut View> {
+    async fn get_or_make_getter(
+        &mut self,
+        view: &str,
+        region: Option<String>,
+    ) -> ReadySetResult<&mut View> {
         if !self.outputs.contains_key(view) {
-            let vh = noria_await!(self, self.noria.view(view))?;
+            let vh = match region {
+                None => noria_await!(self, self.noria.view(view))?,
+                Some(r) => noria_await!(self, self.noria.view_from_region(view, r))?,
+            };
             self.outputs.insert(view.to_owned(), vh);
         }
         Ok(self.outputs.get_mut(view).unwrap())
@@ -131,6 +142,8 @@ pub struct NoriaConnector {
     /// thread-local version of `cached` (consulted first)
     tl_cached: HashMap<SelectStatement, String>,
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
+    /// The region to pass to noria for replica selection.
+    region: Option<String>,
 }
 
 impl NoriaConnector {
@@ -138,6 +151,7 @@ impl NoriaConnector {
         ch: ControllerHandle<ZookeeperAuthority>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
+        region: Option<String>,
     ) -> Self {
         NoriaConnector {
             inner: NoriaBackendInner::new(ch).await,
@@ -145,6 +159,7 @@ impl NoriaConnector {
             cached: query_cache,
             tl_cached: HashMap::new(),
             prepared_statement_cache: HashMap::new(),
+            region,
         }
     }
 
@@ -630,7 +645,10 @@ impl NoriaConnector {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         trace!("select::access view");
-        let getter = self.inner.ensure_getter(&qname).await?;
+        let getter = self
+            .inner
+            .ensure_getter(&qname, self.region.clone())
+            .await?;
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
@@ -823,7 +841,7 @@ impl NoriaConnector {
         trace!(%qname, "query::select::extract schema");
         let getter_schema = self
             .inner
-            .ensure_getter(&qname)
+            .ensure_getter(&qname, self.region.clone())
             .await?
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
@@ -886,7 +904,7 @@ impl NoriaConnector {
         trace!(qname = %qname, "select::extract schema");
         let getter_schema = self
             .inner
-            .ensure_getter(&qname)
+            .ensure_getter(&qname, self.region.clone())
             .await?
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;

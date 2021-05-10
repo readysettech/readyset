@@ -325,9 +325,13 @@ impl TestScript {
                 let _guard = rt.handle().enter();
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
-            let reader =
-                NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone());
-            let writer = NoriaConnector::new(ch, auto_increments, query_cache);
+            let reader = NoriaConnector::new(
+                ch.clone(),
+                auto_increments.clone(),
+                query_cache.clone(),
+                None,
+            );
+            let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);
 
             let backend = BackendBuilder::new()
                 .writer(rt.block_on(writer))

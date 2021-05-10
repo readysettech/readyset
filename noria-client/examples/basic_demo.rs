@@ -21,11 +21,16 @@ async fn main() -> Result<()> {
     let sanitize = true;
     let static_responses = false;
     let writer = {
-        let writer =
-            NoriaConnector::new(ch.clone(), auto_increments.clone(), query_cache.clone()).await;
+        let writer = NoriaConnector::new(
+            ch.clone(),
+            auto_increments.clone(),
+            query_cache.clone(),
+            None,
+        )
+        .await;
         Writer::NoriaConnector(writer)
     };
-    let reader = NoriaConnector::new(ch, auto_increments, query_cache).await;
+    let reader = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
     let slowlog = false;
     let permissive = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
