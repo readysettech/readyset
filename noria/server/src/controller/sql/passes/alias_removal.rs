@@ -1,28 +1,36 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    Arithmetic, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, FunctionExpression, JoinConstraint, JoinRightSide, SqlQuery, Table,
+    Arithmetic, Column, CommonTableExpression, ConditionBase, ConditionExpression, ConditionTree,
+    Expression, FieldDefinitionExpression, FunctionExpression, JoinConstraint, JoinRightSide,
+    SelectStatement, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {
-    ToTable {
-        from: String,
-        to_table: String,
-    },
+    /// An alias to a base table was rewritten
+    ToTable { from: String, to_table: String },
+
+    /// An alias to a view was rewritten
     ToView {
         from: String,
         to_view: String,
         for_table: String,
     },
+
+    /// An alias to a common table expression was rewritten
+    ToCTE {
+        from: String,
+        to_view: String,
+        for_statement: Box<SelectStatement>, // box for perf
+    },
 }
 
 pub trait AliasRemoval {
-    // Remove all table aliases, leaving the table unaliased if possible but rewriting the table name
-    // to a new view name derived from 'query_name' when necessary (ie when a single table is
-    // referenced by more than one alias). Return a list of the rewrites performed.
+    /// Remove all table aliases, leaving tables unaliased if possible but rewriting the table name
+    /// to a new view name derived from 'query_name' when necessary (ie when a single table is
+    /// referenced by more than one alias). Return a list of the rewrites performed.
     fn rewrite_table_aliases(
         &mut self,
         query_name: &str,
@@ -276,6 +284,17 @@ impl AliasRemoval for SqlQuery {
                         })
                         .collect(),
                 })
+                .chain(
+                    sq.ctes
+                        .drain(..)
+                        .map(|CommonTableExpression { name, statement }| {
+                            TableAliasRewrite::ToCTE {
+                                to_view: format!("__{}__{}", query_name, name),
+                                from: name,
+                                for_statement: Box::new(statement),
+                            }
+                        }),
+                )
                 .collect();
 
             // Add an alias for any universe context table.
@@ -305,6 +324,9 @@ impl AliasRemoval for SqlQuery {
                     TableAliasRewrite::ToView { from, to_view, .. } => {
                         (from.clone(), to_view.clone())
                     }
+                    TableAliasRewrite::ToCTE { from, to_view, .. } => {
+                        (from.clone(), to_view.clone())
+                    }
                 })
                 .chain(universe_rewrite.into_iter())
                 .collect();
@@ -322,6 +344,22 @@ impl AliasRemoval for SqlQuery {
                 .iter()
                 .map(|jc| {
                     let mut jc = jc.clone();
+                    match jc.right {
+                        JoinRightSide::Table(Table { ref mut name, .. }) => {
+                            if let Some(new_name) = col_table_remap.get(name) {
+                                *name = new_name.clone()
+                            }
+                        }
+                        JoinRightSide::Tables(ref mut tables) => {
+                            for Table { ref mut name, .. } in tables {
+                                if let Some(new_name) = col_table_remap.get(name) {
+                                    *name = new_name.clone()
+                                }
+                            }
+                        }
+                        JoinRightSide::NestedSelect(_, _) | JoinRightSide::NestedJoin(_) => {}
+                    }
+
                     jc.constraint = match jc.constraint {
                         JoinConstraint::On(ref cond) => {
                             JoinConstraint::On(rewrite_conditional(&col_table_remap, cond))

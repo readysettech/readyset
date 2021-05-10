@@ -924,21 +924,30 @@ impl SqlIncorporator {
         // may occur when a single table is referenced using more than one alias).
         let table_alias_rewrites = fq.rewrite_table_aliases(query_name, mig.context());
         for r in table_alias_rewrites {
-            if let TableAliasRewrite::ToView {
-                to_view, for_table, ..
-            } = r
-            {
-                let query = SqlQuery::Select(SelectStatement {
-                    tables: vec![Table {
-                        name: for_table,
+            match r {
+                TableAliasRewrite::ToView {
+                    to_view, for_table, ..
+                } => {
+                    let query = SqlQuery::Select(SelectStatement {
+                        tables: vec![Table {
+                            name: for_table,
+                            ..Default::default()
+                        }],
+                        fields: vec![FieldDefinitionExpression::All],
                         ..Default::default()
-                    }],
-                    fields: vec![FieldDefinitionExpression::All],
-                    ..Default::default()
-                });
-                let is_name_required = true;
-                self.nodes_for_named_query(query, to_view, is_name_required, false, mig)
-                    .expect("failed to add named view for table");
+                    });
+                    let is_name_required = true;
+                    self.nodes_for_named_query(query, to_view, is_name_required, false, mig)?;
+                }
+                TableAliasRewrite::ToCTE {
+                    to_view,
+                    for_statement,
+                    ..
+                } => {
+                    let query = SqlQuery::Select(*for_statement);
+                    self.nodes_for_named_query(query, to_view, true, false, mig)?;
+                }
+                TableAliasRewrite::ToTable { .. } => {}
             }
         }
 
