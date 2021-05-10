@@ -3471,6 +3471,8 @@ async fn test_join_across_shards() {
     recs.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
     recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
+    sleep().await;
+
     // Check 'all_user_recs' results.
     let mut query = g.view("all_user_recs").await.unwrap();
     let results: Vec<(i32, i32)> = query
@@ -3522,6 +3524,8 @@ async fn test_join_across_shards_with_param() {
     votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
     votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
     votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
+
+    sleep().await;
 
     // Check 'user_recs' results.
     let mut query = g.view("user_recs").await.unwrap();
