@@ -4948,3 +4948,45 @@ async fn aggregate_after_filter_non_equality() {
 
     assert_eq!(res, vec![13]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn join_simple_cte() {
+    let mut g = start_simple("join_simple_cte").await;
+
+    g.install_recipe(
+        "CREATE TABLE t1 (id int, value int);
+         CREATE TABLE t2 (value int, name text);
+         VIEW join_simple_cte:
+         WITH max_val AS (SELECT max(value) as value FROM t1)
+         SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value;",
+    )
+    .await
+    .unwrap();
+
+    let mut t1 = g.table("t1").await.unwrap();
+    let mut t2 = g.table("t2").await.unwrap();
+    let mut view = g.view("join_simple_cte").await.unwrap();
+
+    t1.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(2i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+    ])
+    .await
+    .unwrap();
+
+    t2.insert_many(vec![
+        vec![DataType::from(2i32), DataType::from("two")],
+        vec![DataType::from(4i32), DataType::from("four")],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let res = view
+        .lookup_first(&[0i32.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(res["name"], "four".into());
+}
