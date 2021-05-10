@@ -1,13 +1,15 @@
 use nom::character::complete::{multispace0, multispace1};
 use nom::error::ErrorKind;
 use nom::multi::many0;
-use nom::{alt, delimited, do_parse, named, opt, tag, tag_no_case};
+use nom::{
+    alt, char, complete, delimited, do_parse, named, opt, separated_nonempty_list, tag, tag_no_case,
+};
 use std::fmt;
 use std::str;
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
-    table_list, unsigned_number, FieldDefinitionExpression,
+    as_alias, field_definition_expr, field_list, schema_table_reference, sql_identifier,
+    statement_terminator, table_list, unsigned_number, ws_sep_comma, FieldDefinitionExpression,
 };
 use crate::condition::{condition_expr, ConditionExpression};
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -78,7 +80,14 @@ impl fmt::Display for LimitClause {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CommonTableExpression {
+    pub name: String,
+    pub statement: SelectStatement,
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
+    pub ctes: Vec<CommonTableExpression>,
     pub tables: Vec<Table>,
     pub distinct: bool,
     pub fields: Vec<FieldDefinitionExpression>,
@@ -367,8 +376,33 @@ named!(from_clause(&[u8]) -> FromClause, do_parse!(
         >> (from_clause)
 ));
 
+named!(cte(&[u8]) -> CommonTableExpression, do_parse!(
+    name: sql_identifier
+        >> multispace1
+        >> complete!(tag_no_case!("as"))
+        >> multispace0
+        >> char!('(')
+        >> multispace0
+        >> statement: nested_selection
+        >> multispace0
+        >> char!(')')
+        >> (CommonTableExpression {
+            name: String::from_utf8(name.to_owned()).unwrap(),
+            statement
+        })
+));
+
+named!(ctes(&[u8]) -> Vec<CommonTableExpression>, do_parse!(
+    complete!(tag_no_case!("with"))
+        >> multispace1
+        >> ctes: separated_nonempty_list!(ws_sep_comma, cte)
+        >> multispace0
+        >> (ctes)
+));
+
 pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
-    let (remaining_input, (_, _, distinct, _, fields)) = tuple((
+    let (remaining_input, (ctes, _, _, distinct, _, fields)) = tuple((
+        opt(ctes),
         tag_no_case("select"),
         multispace1,
         opt(tag_no_case("distinct")),
@@ -386,6 +420,7 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
     )))(remaining_input)?;
 
     let mut result = SelectStatement {
+        ctes: ctes.unwrap_or_default(),
         distinct: distinct.is_some(),
         fields,
         ..Default::default()
@@ -1525,5 +1560,34 @@ mod tests {
         let (rem, query) = res.unwrap();
         assert!(rem.is_empty());
         assert_eq!(query.join.len(), 4);
+    }
+
+    #[test]
+    fn simple_cte() {
+        let qstr = b"WITH max_val AS (SELECT max(value) as value FROM t1)
+            SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.ctes.len(), 1);
+        assert_eq!(query.ctes.first().unwrap().name, "max_val".to_owned());
+    }
+
+    #[test]
+    fn multiple_ctes() {
+        let qstr = b"WITH
+              max_val AS (SELECT max(value) as value FROM t1),
+              min_val AS (SELECT min(value) as value FROM t1)
+            SELECT name FROM t2
+            JOIN max_val ON max_val.value = t2.max_value
+            JOIN min_val ON min_val.value = t2.min_value";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.ctes.len(), 2);
+        assert_eq!(query.ctes[0].name, "max_val".to_owned());
+        assert_eq!(query.ctes[1].name, "min_val".to_owned());
     }
 }

@@ -25,7 +25,9 @@ pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
-pub use self::select::{GroupByClause, JoinClause, LimitClause, SelectStatement};
+pub use self::select::{
+    CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
+};
 pub use self::set::SetStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
