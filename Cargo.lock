@@ -4555,6 +4555,7 @@ dependencies = [
  "noria",
  "noria-server",
  "prettytable-rs",
+ "rand 0.8.3",
  "regex",
  "serde",
  "serde_json",

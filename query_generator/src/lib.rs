@@ -59,6 +59,7 @@ use chrono::{NaiveDate, NaiveTime};
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -114,6 +115,74 @@ fn value_of_type(typ: &SqlType) -> DataType {
         }
         SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
         SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
+        SqlType::Enum(_) => unimplemented!(),
+        SqlType::Bool => unimplemented!(),
+    }
+}
+
+/// Generate a random value with the given [`SqlType`]. The length of the value
+/// is pulled from a uniform distribution over the set of possible ranges.
+///
+/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+///
+/// - [`SqlType::Date`]
+/// - [`SqlType::Enum`]
+/// - [`SqlType::Bool`]
+fn random_value_of_type(typ: &SqlType) -> DataType {
+    let mut rng = rand::thread_rng();
+    match typ {
+        SqlType::Char(x) | SqlType::Varchar(x) => {
+            let length: usize = rng.gen_range(1..*x).into();
+            "a".repeat(length).into()
+        }
+        SqlType::Tinyblob | SqlType::Tinytext => {
+            // 2^8 bytes
+            let length: usize = rng.gen_range(1..256);
+            "a".repeat(length).into()
+        }
+        SqlType::Blob | SqlType::Text => {
+            // 2^16 bytes
+            let length: usize = rng.gen_range(1..65536);
+            "a".repeat(length).into()
+        }
+        SqlType::Mediumblob | SqlType::Mediumtext => {
+            // 2^24 bytes
+            // Currently capped at 65536 as these are generated in memory.
+            let length: usize = rng.gen_range(1..65536);
+            "a".repeat(length).into()
+        }
+        SqlType::Longblob | SqlType::Longtext => {
+            // 2^32 bytes
+            // Currently capped at 65536 as these are generated in memory.
+            let length: usize = rng.gen_range(1..65536);
+            "a".repeat(length).into()
+        }
+        SqlType::Binary(x) | SqlType::Varbinary(x) => {
+            // Convert to bytes and generate string data to match.
+            let length: usize = rng.gen_range(1..*x / 8).into();
+            "a".repeat(length).into()
+        }
+        SqlType::Int(_) => rng.gen::<i32>().into(),
+        SqlType::Bigint(_) => rng.gen::<i64>().into(),
+        SqlType::UnsignedInt(_) => rng.gen::<u32>().into(),
+        SqlType::UnsignedBigint(_) => rng.gen::<u64>().into(),
+        SqlType::Tinyint(_) => rng.gen::<i8>().into(),
+        SqlType::UnsignedTinyint(_) => rng.gen::<u8>().into(),
+        SqlType::Smallint(_) => rng.gen::<i16>().into(),
+        SqlType::UnsignedSmallint(_) => rng.gen::<u16>().into(),
+        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
+            1.5.try_into().unwrap()
+        }
+        SqlType::DateTime(_) | SqlType::Timestamp => {
+            // Generate a random month and day within the same year.
+            NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
+                .and_hms(12, 30, 45)
+                .into()
+        }
+        SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
+        SqlType::Date => {
+            NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
+        }
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
     }
@@ -311,7 +380,11 @@ impl TableSpec {
     }
 
     /// Generate `num_rows` rows of data for this table
-    pub fn generate_data(&self, num_rows: usize) -> Vec<HashMap<&ColumnName, DataType>> {
+    pub fn generate_data(
+        &self,
+        num_rows: usize,
+        random: bool,
+    ) -> Vec<HashMap<&ColumnName, DataType>> {
         (0..num_rows)
             .map(|n| {
                 self.columns
@@ -328,6 +401,8 @@ impl TableSpec {
                                     vals.iter().nth((n / 2) % vals.len()).unwrap().clone()
                                 })
                                 .unwrap_or_else(|| value_of_type(col_type))
+                        } else if random {
+                            random_value_of_type(col_type)
                         } else {
                             value_of_type(col_type)
                         };
@@ -436,7 +511,9 @@ impl GeneratorState {
         self.tables.iter().map(|(_, tbl)| tbl.clone().into())
     }
 
-    /// Generate `num_rows` rows of data for the table given by `table_name`
+    /// Generate `num_rows` rows of data for the table given by `table_name`.
+    /// If `random` is passed on column data will be random in length for
+    /// variable length data, and value for fixed-lenght data.
     ///
     /// # Panics
     ///
@@ -445,8 +522,9 @@ impl GeneratorState {
         &self,
         table_name: &TableName,
         num_rows: usize,
+        random: bool,
     ) -> Vec<HashMap<&ColumnName, DataType>> {
-        self.tables[table_name].generate_data(num_rows)
+        self.tables[table_name].generate_data(num_rows, random)
     }
 
     /// Get a reference to the generator state's tables.
@@ -518,11 +596,14 @@ impl<'a> QueryState<'a> {
         &self,
         rows_per_table: usize,
         make_unique: bool,
+        random: bool,
     ) -> HashMap<&TableName, Vec<HashMap<&ColumnName, DataType>>> {
         self.tables
             .iter()
             .map(|table_name| {
-                let mut rows = self.gen.generate_data_for_table(table_name, rows_per_table);
+                let mut rows = self
+                    .gen
+                    .generate_data_for_table(table_name, rows_per_table, random);
                 if make_unique {
                     if let Some(column_data) = self.unique_parameters.get(table_name) {
                         for row in &mut rows {

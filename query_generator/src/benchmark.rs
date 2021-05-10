@@ -326,7 +326,7 @@ impl Benchmark {
                 println!("{}", noria.graphviz().await?);
             }
 
-            let data = query.state.generate_data(self.rows_per_table, false);
+            let data = query.state.generate_data(self.rows_per_table, false, false);
             let start = Instant::now();
             for (table_name, rows) in data {
                 self.seed_data(&mut noria, table_name, rows).await?;
@@ -359,7 +359,7 @@ impl Benchmark {
             view.lookup(&lookup_key, true).await?;
             let warm_read_time = start.elapsed();
             let unique_key = query.state.make_unique_key();
-            let unique_data = query.state.generate_data(self.rows_per_table, true);
+            let unique_data = query.state.generate_data(self.rows_per_table, true, false);
             // trigger an upquery for the unique key, to make sure that key is materialized
             // as empty
             // (we're just testing how long it takes for this set of data to propagate through
