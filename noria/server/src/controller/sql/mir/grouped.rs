@@ -113,7 +113,7 @@ pub(super) fn make_grouped(
     is_reconcile: bool,
     projected_exprs: &HashMap<Expression, String>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
-    let mut func_nodes: Vec<MirNodeRef> = Vec::new();
+    let mut agg_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
 
     if let Some(computed_cols_cgn) = qg.relations.get("computed_columns") {
@@ -286,7 +286,7 @@ pub(super) fn make_grouped(
                     let proj =
                         mir_converter.make_projection_helper(&proj_name, parent_node, fn_cols);
 
-                    func_nodes.push(proj.clone());
+                    agg_nodes.push(proj.clone());
                     node_count += 1;
 
                     let bogo_group_col = Column::new(None, "grp");
@@ -308,9 +308,9 @@ pub(super) fn make_grouped(
 
             *prev_node = Some(nodes.last().unwrap().clone());
             node_count += nodes.len();
-            func_nodes.extend(nodes);
+            agg_nodes.extend(nodes);
         }
     }
 
-    Ok(func_nodes)
+    Ok(agg_nodes)
 }
