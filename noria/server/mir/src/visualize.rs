@@ -195,6 +195,9 @@ impl GraphViz for MirNodeInner {
                     .join(", ");
                 write!(out, "⋈  | on: {}", jc)?;
             }
+            MirNodeInner::JoinAggregates => {
+                write!(out, "AGG ⋈")?;
+            }
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
