@@ -14,6 +14,8 @@ use nom_sql::{
     OrderClause, SelectStatement, SqlQuery, TableKey,
 };
 
+use itertools::Itertools;
+
 use std::collections::{HashMap, HashSet};
 
 use std::ops::Deref;
@@ -1286,6 +1288,30 @@ impl SqlToMirConverter {
             fields,
             inner,
             vec![left_node.clone(), right_node.clone()],
+            vec![],
+        ))
+    }
+
+    fn make_join_aggregates_node(
+        &self,
+        name: &str,
+        aggregates: &[MirNodeRef; 2],
+    ) -> ReadySetResult<MirNodeRef> {
+        let fields = aggregates
+            .into_iter()
+            .map(|node| node.borrow().columns().to_owned())
+            .flatten()
+            .unique()
+            .collect::<Vec<Column>>();
+
+        let inner = MirNodeInner::JoinAggregates;
+        trace!(self.log, "Added join node {:?}", inner);
+        Ok(MirNode::new(
+            name,
+            self.schema_version,
+            fields,
+            inner,
+            aggregates.to_vec(),
             vec![],
         ))
     }

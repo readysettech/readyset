@@ -4,6 +4,7 @@ use crate::ReadySetResult;
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
 use nom_sql::ConditionTree;
+use noria::invariant;
 use std::collections::{HashMap, HashSet};
 
 struct JoinChain {
@@ -58,6 +59,42 @@ pub(super) fn make_joins(
         // merge node chains
         let new_chain = left_chain.merge_chain(right_chain, jn.clone());
         join_chains.push(new_chain);
+
+        node_count += 1;
+
+        join_nodes.push(jn);
+    }
+
+    Ok(join_nodes)
+}
+
+// Generate join nodes for the query aggregates. This will call `mir_converter.make_join_aggregates_node` only
+// once if there are only two parents, and otherwise create multiple nodes of type
+// `MirNodeInner::JoinAggregates`.
+pub(super) fn make_joins_for_aggregates(
+    mir_converter: &SqlToMirConverter,
+    name: &str,
+    ancestors: &Vec<MirNodeRef>,
+    node_count: usize,
+) -> ReadySetResult<Vec<MirNodeRef>> {
+    invariant!(ancestors.len() >= 2);
+
+    let parent_join = mir_converter.make_join_aggregates_node(
+        &format!("{}_n{}", name, node_count),
+        &[ancestors[0].clone(), ancestors[1].clone()],
+    )?;
+
+    let mut node_count = node_count + 1;
+
+    let mut join_nodes = vec![parent_join];
+
+    // We skip the first two because those were used for the initial parent join.
+    for ancestor in ancestors.into_iter().skip(2) {
+        // We want top join our most recent join node to our next ancestor.
+        let jn = mir_converter.make_join_aggregates_node(
+            &format!("{}_n{}", name, node_count),
+            &[join_nodes.last().unwrap().clone(), ancestor.clone()],
+        )?;
 
         node_count += 1;
 

@@ -1,8 +1,9 @@
-use crate::controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::mir::{join::make_joins_for_aggregates, SqlToMirConverter};
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
 use crate::{internal, invariant, unsupported};
+use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{self, ConditionExpression, FunctionExpression};
@@ -306,11 +307,44 @@ pub(super) fn make_grouped(
                 projected_exprs,
             );
 
-            *prev_node = Some(nodes.last().unwrap().clone());
             node_count += nodes.len();
             agg_nodes.extend(nodes);
+        }
+
+        let joinable_agg_nodes = joinable_aggregate_nodes(&agg_nodes);
+
+        if joinable_agg_nodes.len() >= 2 {
+            let join_nodes =
+                make_joins_for_aggregates(mir_converter, name, &joinable_agg_nodes, node_count)?;
+            agg_nodes.extend(join_nodes);
+        }
+
+        if !agg_nodes.is_empty() {
+            *prev_node = Some(agg_nodes.last().unwrap().clone());
         }
     }
 
     Ok(agg_nodes)
+}
+
+// joinable_aggregate_nodes will take in a list of aggregate nodes and return a list of aggregate
+// nodes in the same order they appeared in the input list, and filter out nodes that should not be
+// joined. For example, we could see a projection node appear as an aggregate node in the case:
+//
+// ```
+// SELECT 5 * sum(col1)
+// ```
+//
+// The projection node would represent the 5 * being applied to sum(col1), which we would not want
+// to accidentally join.
+fn joinable_aggregate_nodes(agg_nodes: &Vec<MirNodeRef>) -> Vec<MirNodeRef> {
+    agg_nodes
+        .into_iter()
+        .filter_map(|node| match node.borrow().inner {
+            MirNodeInner::Aggregation { .. } => Some(node.clone()),
+            MirNodeInner::FilterAggregation { .. } => Some(node.clone()),
+            MirNodeInner::Extremum { .. } => Some(node.clone()),
+            _ => None,
+        })
+        .collect()
 }
