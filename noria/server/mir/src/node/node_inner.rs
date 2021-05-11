@@ -178,7 +178,7 @@ impl MirNodeInner {
                     // it is, so dig deeper
                     // this does not check the projected columns of the inner node for two
                     // reasons:
-                    // 1) our own projected columns aren't accessible on `MirNodeType`, but
+                    // 1) our own projected columns aren't accessible on `MirNodeInner`, but
                     //    only on the outer `MirNode`, which isn't accessible here; but more
                     //    importantly
                     // 2) since this is already a node reuse, the inner, reused node must have
@@ -303,8 +303,8 @@ impl MirNodeInner {
                         ref project,
                     } => {
                         // TODO(malte): column order does not actually need to match, but this only
-                        // succeeds if it does.
                         our_on_left == on_left && our_on_right == on_right && our_project == project
+                        // succeeds if it does.
                     }
                     _ => false,
                 }
