@@ -4994,7 +4994,6 @@ async fn join_simple_cte() {
 // multiple_aggregate_sum tests multiple aggregators of the same type, in this case sum(),
 // operating over different columns from the same table.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_sum() {
     let mut g = start_simple_unsharded("multiple_aggregate").await;
 
@@ -5059,7 +5058,6 @@ async fn multiple_aggregate_sum() {
 // multiple_aggregate_same_col tests multiple aggregators of different types operating on the same
 // column.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_same_col() {
     let mut g = start_simple_unsharded("multiple_aggregate_same_col").await;
 
@@ -5104,7 +5102,6 @@ async fn multiple_aggregate_same_col() {
 // multiple_aggregate_sum_sharded tests multiple aggregators of the same type, in this case sum(),
 // operating over different columns from the same table in a sharded environment.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_sum_sharded() {
     let mut g = start_simple("multiple_aggregate_sharded").await;
 
@@ -5169,7 +5166,6 @@ async fn multiple_aggregate_sum_sharded() {
 // multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on the same
 // column in a sharded environment.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_same_col_sharded() {
     let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
 
@@ -5215,7 +5211,6 @@ async fn multiple_aggregate_same_col_sharded() {
 // the same select query. This effectively tests our ability to appropriately generate multiple
 // MirNodeInner::JoinAggregates nodes and join them all together correctly.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_over_two() {
     let mut g = start_simple_unsharded("multiple_aggregate_over_two").await;
 
@@ -5264,7 +5259,6 @@ async fn multiple_aggregate_over_two() {
 // MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
 // environment.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_over_two_sharded() {
     let mut g = start_simple("multiple_aggregate_over_two_sharded").await;
 
@@ -5308,11 +5302,100 @@ async fn multiple_aggregate_over_two_sharded() {
     assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
 }
 
+// multiple_aggregate_with_expressions tests multiple aggregates involving arithmetic expressions
+// that would modify the output of the resulting columns. This tests that when we join aggregates
+// that we are ignoring projection nodes appropriately.
+#[tokio::test(flavor = "multi_thread")]
+async fn multiple_aggregate_with_expressions() {
+    let mut g = start_simple_unsharded("multiple_aggregate_with_expressions").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggwexpressions: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggwexpressions").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(1, 5.), (5, 12.5), (12, 30.0)]);
+}
+
+// multiple_aggregate_with_expressions_sharded tests multiple aggregates involving arithmetic expressions
+// that would modify the output of the resulting columns. This tests that when we join aggregates
+// that we are ignoring projection nodes appropriately in a sharded environment
+#[tokio::test(flavor = "multi_thread")]
+async fn multiple_aggregate_with_expressions_sharded() {
+    let mut g = start_simple("multiple_aggregate_with_expressions_sharded").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggwexpressionssharded: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggwexpressionssharded").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(1, 5.), (5, 12.5), (12, 30.0)]);
+}
+
 // multiple_aggregate_reuse tests a scenario that would trigger reuse. It tests this by generating
 // an initial select query with multiple aggregates, and then generates another one involving
 // shared nodes. This tests that reuse is being used appropriately in the case of aggregate joins.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn multiple_aggregate_reuse() {
     let mut g = start_simple_unsharded("multiple_aggregate_reuse").await;
 
