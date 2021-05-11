@@ -4991,10 +4991,12 @@ async fn join_simple_cte() {
     assert_eq!(res["name"], "four".into());
 }
 
+// multiple_aggregate_sum tests multiple aggregators of the same type, in this case sum(),
+// operating over different columns from the same table.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn multiple_aggregate_sum() {
-    let mut g = start_simple("multiple_aggregate").await;
+    let mut g = start_simple_unsharded("multiple_aggregate").await;
 
     g.install_recipe(
         "CREATE TABLE test (number int, value1 int, value2 int);
@@ -5054,10 +5056,12 @@ async fn multiple_aggregate_sum() {
     assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
 }
 
+// multiple_aggregate_same_col tests multiple aggregators of different types operating on the same
+// column.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn multiple_aggregate_same_col() {
-    let mut g = start_simple("multiple_aggregate_same_col").await;
+    let mut g = start_simple_unsharded("multiple_aggregate_same_col").await;
 
     g.install_recipe(
         "CREATE TABLE test (number int, value int);
@@ -5095,4 +5099,211 @@ async fn multiple_aggregate_same_col() {
         .collect::<Vec<(i32, f64)>>();
 
     assert_eq!(res, vec![(1, 1.), (5, 2.5), (12, 6.0)]);
+}
+
+// multiple_aggregate_sum_sharded tests multiple aggregators of the same type, in this case sum(),
+// operating over different columns from the same table in a sharded environment.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_sum_sharded() {
+    let mut g = start_simple("multiple_aggregate_sharded").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value1 int, value2 int);
+         VIEW multiaggsharded: SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggsharded").await.unwrap();
+
+    t.insert_many(vec![
+        vec![
+            DataType::from(1i32),
+            DataType::from(1i32),
+            DataType::from(5i32),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(4i32),
+            DataType::from(2i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(5i32),
+            DataType::from(7i32),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(7i32),
+            DataType::from(1i32),
+        ],
+        vec![
+            DataType::from(3i32),
+            DataType::from(1i32),
+            DataType::from(3i32),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s1"]).unwrap(),
+                i32::try_from(&r["s2"]).unwrap(),
+            )
+        })
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
+}
+
+// multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on the same
+// column in a sharded environment.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_same_col_sharded() {
+    let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggsamecolsharded: SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggsamecolsharded").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(1, 1.), (5, 2.5), (12, 6.0)]);
+}
+
+// multiple_aggregate_over_two tests the case of more than two aggregate functions being used in
+// the same select query. This effectively tests our ability to appropriately generate multiple
+// MirNodeInner::JoinAggregates nodes and join them all together correctly.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_over_two() {
+    let mut g = start_simple_unsharded("multiple_aggregate_over_two").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggovertwo: SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggovertwo").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+                i32::try_from(&r["c"]).unwrap(),
+                i32::try_from(&r["m"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64, i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
+}
+
+// multiple_aggregate_over_two_sharded tests the case of more than two aggregate functions being used in
+// the same select query. This effectively tests our ability to appropriately generate multiple
+// MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
+// environment.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_over_two_sharded() {
+    let mut g = start_simple("multiple_aggregate_over_two_sharded").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggovertwosharded: SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggovertwosharded").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+                i32::try_from(&r["c"]).unwrap(),
+                i32::try_from(&r["m"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64, i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
 }
