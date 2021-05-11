@@ -5307,3 +5307,78 @@ async fn multiple_aggregate_over_two_sharded() {
 
     assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
 }
+
+// multiple_aggregate_reuse tests a scenario that would trigger reuse. It tests this by generating
+// an initial select query with multiple aggregates, and then generates another one involving
+// shared nodes. This tests that reuse is being used appropriately in the case of aggregate joins.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn multiple_aggregate_reuse() {
+    let mut g = start_simple_unsharded("multiple_aggregate_reuse").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (number int, value int);
+         VIEW multiaggfirstquery: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("multiaggfirstquery").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(1i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(5i32)],
+        vec![DataType::from(2i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(1i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(1, 5.), (5, 12.5), (12, 30.0)]);
+
+    // Now we install a new recipe with a different aggregate query that should force aggregate
+    // children to update and not be re-used. We're intentionally re-using the same name for the
+    // second aggregate so as much is as similar as possible, to rule out names being different
+    // forcing a false re-use.
+    g.extend_recipe(
+        "VIEW multiaggsecondquery: SELECT sum(value) AS s, max(value) AS a FROM test GROUP BY number;",
+    )
+    .await
+    .unwrap();
+
+    q = g.view("multiaggsecondquery").await.unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["s"]).unwrap(),
+                i32::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 1), (5, 4), (12, 7)]);
+}

@@ -224,6 +224,12 @@ fn mir_node_to_flow_parts(
                         mig,
                     )?
                 }
+                MirNodeInner::JoinAggregates => {
+                    invariant_eq!(mir_node.ancestors.len(), 2);
+                    let left = mir_node.ancestors[0].clone();
+                    let right = mir_node.ancestors[1].clone();
+                    make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
+                }
                 MirNodeInner::ParamFilter {
                     ref col,
                     ref emit_key,
@@ -786,6 +792,87 @@ fn make_join_node(
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
 
     Ok(FlowNode::New(n))
+}
+
+/// Joins two parent aggregate nodes together. Columns that are shared between both parents are
+/// assumed to be group_by columns and all unique columns are considered to be the aggregate
+/// columns themselves.
+fn make_join_aggregates_node(
+    name: &str,
+    left: MirNodeRef,
+    right: MirNodeRef,
+    columns: &[Column],
+    mig: &mut Migration,
+) -> ReadySetResult<FlowNode> {
+    use dataflow::ops::join::JoinSource;
+
+    let column_names = column_names(columns);
+
+    // Build up maps from each parents columns to those columns indices. Necessary for building up
+    // Vec<JoinSource> below.
+    let left_map = node_columns_to_idx_map(left.clone());
+    let right_map = node_columns_to_idx_map(right.clone());
+
+    // We gather up all of the columns from each respective parent. If a column is in both parents,
+    // then we know it was a group_by column and create a JoinSource::B type with the indices from
+    // both parents. Otherwise if the column is exclusively in the left parent (such as the
+    // aggregate column itself), we make a JoinSource::L with the left parent index. We finally
+    // iterate through the right parent and add the columns that were exclusively in the right
+    // parent as JoinSource::R with the right parent index for each given unique column.
+    let join_config = left
+        .borrow()
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            if let Some(j) = right_map.get(&c) {
+                // If the column was found in both, it's a group_by column and gets added as
+                // JoinSource::B.
+                Some(JoinSource::B(i, *j))
+            } else {
+                // Column exclusively in left parent, so gets added as JoinSource::L.
+                Some(JoinSource::L(i))
+            }
+        })
+        .chain(
+            right
+                .borrow()
+                .columns
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    // If column is in left, don't do anything it's already been added.
+                    // If it's in right, add it with right index.
+                    if left_map.contains_key(&c) {
+                        None
+                    } else {
+                        // Column exclusively in right parent, so gets added as JoinSource::R.
+                        Some(JoinSource::R(i))
+                    }
+                }),
+        )
+        .collect();
+
+    let left_na = left.borrow().flow_node_addr().unwrap();
+    let right_na = right.borrow().flow_node_addr().unwrap();
+
+    // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
+    // between parents.
+    let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
+    let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
+
+    Ok(FlowNode::New(n))
+}
+
+// Builds up a map from the nodes columns, to the indices those columns exist at in the nodes
+// columns list.
+fn node_columns_to_idx_map(node: MirNodeRef) -> HashMap<Column, usize> {
+    node.borrow()
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.clone(), i))
+        .collect()
 }
 
 fn make_param_filter_node(

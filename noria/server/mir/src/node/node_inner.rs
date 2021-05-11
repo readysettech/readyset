@@ -59,6 +59,18 @@ pub enum MirNodeInner {
         on_right: Vec<Column>,
         project: Vec<Column>,
     },
+    /// JoinAggregates is a special type of join for joining two aggregates together. This is
+    /// different from other operators in that it doesn't map 1:1 to a SQL operator and there are
+    /// several invariants we follow. It is used to support multiple aggregates in queries by
+    /// joining pairs of aggregates together using custom join logic. We only join nodes with inner
+    /// types of Aggregation, FilterAggregation, or Extremum. For any group of aggregates, we will
+    /// make N-1 JoinAggregates to join them all back together. The first JoinAggregates will join
+    /// the first two aggregates together. The next JoinAggregates will join that JoinAggregates
+    /// node to the next aggregate in the list, so on and so forth. Each aggregate will share
+    /// identical group_by columns which are deduplicated at every join, so by the end we have
+    /// every unique column (the actual aggregate columns) from each aggregate node, and a single
+    /// version of each group_by column in the final join.
+    JoinAggregates,
     /// on left column, on right column, emit columns
     LeftJoin {
         on_left: Vec<Column>,
@@ -303,12 +315,16 @@ impl MirNodeInner {
                         ref project,
                     } => {
                         // TODO(malte): column order does not actually need to match, but this only
-                        our_on_left == on_left && our_on_right == on_right && our_project == project
                         // succeeds if it does.
+                        our_on_left == on_left && our_on_right == on_right && our_project == project
                     }
                     _ => false,
                 }
             }
+            MirNodeInner::JoinAggregates => match *other {
+                MirNodeInner::JoinAggregates => true,
+                _ => false,
+            },
             MirNodeInner::LeftJoin {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,
@@ -519,6 +535,9 @@ impl Debug for MirNodeInner {
                         .join(", "),
                     jc
                 )
+            }
+            MirNodeInner::JoinAggregates => {
+                write!(f, "AGG ⋈")
             }
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
