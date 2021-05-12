@@ -146,7 +146,8 @@ impl Default for Base {
 fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
     match *r {
         TableOperation::Insert(ref row) => Some(&row[col]),
-        TableOperation::Delete { ref key } => Some(&key[i]),
+        TableOperation::DeleteByKey { ref key } => Some(&key[i]),
+        TableOperation::DeleteRow { ref row } => Some(&row[col]),
         TableOperation::Update { ref key, .. } => Some(&key[i]),
         TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
         TableOperation::SetReplicationOffset(_) => None,
@@ -185,7 +186,11 @@ impl Base {
                 match r {
                     TableOperation::Insert(mut r) => {
                         self.fix(&mut r);
-                        records.push(Record::Positive(r))
+                        records.push(Record::Positive(r));
+                    }
+                    TableOperation::DeleteRow { mut row } => {
+                        self.fix(&mut row);
+                        records.push(Record::Negative(row));
                     }
                     TableOperation::SetReplicationOffset(offset) => {
                         offset.try_max_into(&mut replication_offset)?;
@@ -257,17 +262,24 @@ impl Base {
                     if let Some(ref was) = was {
                         eprintln!("base ignoring {:?} since it already has {:?}", row, was);
                     } else {
-                        //assert!(was.is_none());
                         current = Some(Cow::Owned(row));
                     }
                     continue;
                 }
-                TableOperation::Delete { .. } => {
+                TableOperation::DeleteByKey { .. } => {
                     if current.is_some() {
                         current = None;
                     } else {
                         // supposed to delete a non-existing row?
                         // TODO: warn?
+                    }
+                    continue;
+                }
+                TableOperation::DeleteRow { row } => {
+                    if current == Some(Cow::Borrowed(&row)) {
+                        current = None;
+                    } else {
+                        results.push(Record::Negative(row))
                     }
                     continue;
                 }
@@ -367,119 +379,205 @@ mod tests {
         assert_eq!(b.unmodified, true);
     }
 
-    fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
-        use crate::node;
-        use crate::prelude::*;
+    mod process {
+        use super::*;
 
-        // most of this is from MockGraph
-        let mut graph = Graph::new();
-        let source = graph.add_node(Node::new(
-            "source",
-            &["because-type-inference"],
-            node::NodeType::Source,
-        ));
+        fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
+            use crate::node;
+            use crate::prelude::*;
 
-        let b = Base::new(vec![]).with_key(vec![0, 2]);
-        let global = graph.add_node(Node::new("b", &["x", "y", "z"], b));
-        graph.add_edge(source, global, ());
-        let local = unsafe { LocalNodeIndex::make(0_u32) };
-        let mut ip: IndexPair = global.into();
-        ip.set_local(local);
-        graph
-            .node_weight_mut(global)
-            .unwrap()
-            .set_finalized_addr(ip);
+            // most of this is from MockGraph
+            let mut graph = Graph::new();
+            let source = graph.add_node(Node::new(
+                "source",
+                &["because-type-inference"],
+                node::NodeType::Source,
+            ));
 
-        let mut remap = HashMap::new();
-        remap.insert(global, ip);
-        graph.node_weight_mut(global).unwrap().on_commit(&remap);
-        graph.node_weight_mut(global).unwrap().add_to(0.into());
+            let b = Base::new(vec![]).with_key(vec![0, 2]);
+            let global = graph.add_node(Node::new("b", &["x", "y", "z"], b));
+            graph.add_edge(source, global, ());
+            let local = unsafe { LocalNodeIndex::make(0_u32) };
+            let mut ip: IndexPair = global.into();
+            ip.set_local(local);
+            graph
+                .node_weight_mut(global)
+                .unwrap()
+                .set_finalized_addr(ip);
 
-        for (_, index) in graph[global].suggest_indexes(global) {
-            state.add_key(&index, None);
+            let mut remap = HashMap::new();
+            remap.insert(global, ip);
+            graph.node_weight_mut(global).unwrap().on_commit(&remap);
+            graph.node_weight_mut(global).unwrap().add_to(0.into());
+
+            for (_, index) in graph[global].suggest_indexes(global) {
+                state.add_key(&index, None);
+            }
+
+            let mut states = StateMap::new();
+            states.insert(local, state);
+            let n = graph[global].take();
+            let mut n = n.finalize(&graph);
+
+            let mut one = move |u: Vec<TableOperation>| {
+                let mut m = n
+                    .get_base_mut()
+                    .unwrap()
+                    .process(local, u, &states)
+                    .unwrap()
+                    .records;
+                node::materialize(&mut m, None, None, states.get_mut(local));
+                m
+            };
+
+            assert_eq!(
+                one(vec![
+                    TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
+                    TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
+                    TableOperation::Insert(vec![3.into(), "3a".into(), 1.into()]),
+                    TableOperation::DeleteByKey {
+                        key: vec![1.into(), 1.into()],
+                    },
+                    TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
+                    TableOperation::InsertOrUpdate {
+                        row: vec![1.into(), "c".into(), 1.into()],
+                        update: vec![
+                            Modification::None,
+                            Modification::Set("never".into()),
+                            Modification::None,
+                        ],
+                    },
+                    TableOperation::InsertOrUpdate {
+                        row: vec![1.into(), "also never".into(), 1.into()],
+                        update: vec![
+                            Modification::None,
+                            Modification::Set("d".into()),
+                            Modification::None,
+                        ],
+                    },
+                    TableOperation::DeleteRow {
+                        row: vec![3.into(), "3a".into(), 1.into()]
+                    },
+                    TableOperation::Update {
+                        key: vec![1.into(), 1.into()],
+                        set: vec![
+                            Modification::None,
+                            Modification::Set("e".into()),
+                            Modification::None,
+                        ],
+                    },
+                    TableOperation::Update {
+                        key: vec![2.into(), 1.into()],
+                        set: vec![
+                            Modification::None,
+                            Modification::Set("2x".into()),
+                            Modification::None,
+                        ],
+                    },
+                    TableOperation::DeleteByKey {
+                        key: vec![1.into(), 1.into()],
+                    },
+                    TableOperation::DeleteByKey {
+                        key: vec![2.into(), 1.into()],
+                    },
+                ]),
+                Records::default()
+            );
         }
 
-        let mut states = StateMap::new();
-        states.insert(local, state);
-        let n = graph[global].take();
-        let mut n = n.finalize(&graph);
+        #[test]
+        fn lots_of_changes_in_same_batch() {
+            let state = MemoryState::default();
+            test_lots_of_changes_in_same_batch(Box::new(state));
+        }
 
-        let mut one = move |u: Vec<TableOperation>| {
-            let mut m = n
-                .get_base_mut()
-                .unwrap()
-                .process(local, u, &states)
-                .unwrap()
-                .records;
-            node::materialize(&mut m, None, None, states.get_mut(local));
-            m
-        };
+        #[test]
+        fn lots_of_changes_in_same_batch_persistent() {
+            let state = PersistentState::new(
+                String::from("lots_of_changes_in_same_batch_persistent"),
+                None,
+                &PersistenceParameters::default(),
+            );
 
-        assert_eq!(
-            one(vec![
-                TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
-                TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
-                TableOperation::Delete {
-                    key: vec![1.into(), 1.into()],
-                },
-                TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
-                TableOperation::InsertOrUpdate {
-                    row: vec![1.into(), "c".into(), 1.into()],
-                    update: vec![
-                        Modification::None,
-                        Modification::Set("never".into()),
-                        Modification::None,
+            test_lots_of_changes_in_same_batch(Box::new(state));
+        }
+
+        #[test]
+        fn delete_row_unkeyed() {
+            let mut b = Base::new(vec![]);
+
+            let ni = unsafe { LocalNodeIndex::make(0u32) };
+
+            let state: Box<dyn State> = Box::new(PersistentState::new(
+                String::from("delete_row_not_in_batch"),
+                None,
+                &PersistenceParameters::default(),
+            ));
+
+            let mut state_map = Map::new();
+            state_map.insert(ni, state);
+
+            assert_eq!(
+                b.process(
+                    ni,
+                    vec![
+                        TableOperation::Insert(vec![1.into(), 2.into(), 3.into()]),
+                        TableOperation::DeleteRow {
+                            row: vec![2.into(), 3.into(), 4.into()]
+                        }
                     ],
-                },
-                TableOperation::InsertOrUpdate {
-                    row: vec![1.into(), "also never".into(), 1.into()],
-                    update: vec![
-                        Modification::None,
-                        Modification::Set("d".into()),
-                        Modification::None,
-                    ],
-                },
-                TableOperation::Update {
-                    key: vec![1.into(), 1.into()],
-                    set: vec![
-                        Modification::None,
-                        Modification::Set("e".into()),
-                        Modification::None,
-                    ],
-                },
-                TableOperation::Update {
-                    key: vec![2.into(), 1.into()],
-                    set: vec![
-                        Modification::None,
-                        Modification::Set("2x".into()),
-                        Modification::None,
-                    ],
-                },
-                TableOperation::Delete {
-                    key: vec![1.into(), 1.into()],
-                },
-                TableOperation::Delete {
-                    key: vec![2.into(), 1.into()],
-                },
-            ]),
-            Records::default().into()
-        );
-    }
+                    &state_map
+                )
+                .unwrap(),
+                BaseWrite {
+                    records: vec![
+                        Record::Positive(vec![1.into(), 2.into(), 3.into()]),
+                        Record::Negative(vec![2.into(), 3.into(), 4.into()])
+                    ]
+                    .into(),
+                    replication_offset: None,
+                }
+            )
+        }
 
-    #[test]
-    fn lots_of_changes_in_same_batch() {
-        let state = MemoryState::default();
-        test_lots_of_changes_in_same_batch(Box::new(state));
-    }
+        #[test]
+        fn delete_row_not_in_batch_keyed() {
+            let mut b = Base::new(vec![]).with_key(vec![0]);
 
-    #[test]
-    fn lots_of_changes_in_same_batch_persistent() {
-        let state = PersistentState::new(
-            String::from("lots_of_changes_in_same_batch_persistent"),
-            None,
-            &PersistenceParameters::default(),
-        );
+            let ni = unsafe { LocalNodeIndex::make(0u32) };
 
-        test_lots_of_changes_in_same_batch(Box::new(state));
+            let mut state: Box<dyn State> = Box::new(PersistentState::new(
+                String::from("delete_row_not_in_batch"),
+                None,
+                &PersistenceParameters::default(),
+            ));
+
+            state.add_key(&Index::hash_map(vec![0]), None);
+
+            let mut state_map = Map::new();
+            state_map.insert(ni, state);
+
+            assert_eq!(
+                b.process(
+                    ni,
+                    vec![
+                        TableOperation::Insert(vec![1.into(), 2.into(), 3.into()]),
+                        TableOperation::DeleteRow {
+                            row: vec![2.into(), 3.into(), 4.into()]
+                        }
+                    ],
+                    &state_map
+                )
+                .unwrap(),
+                BaseWrite {
+                    records: vec![
+                        Record::Positive(vec![1.into(), 2.into(), 3.into()]),
+                        Record::Negative(vec![2.into(), 3.into(), 4.into()])
+                    ]
+                    .into(),
+                    replication_offset: None,
+                }
+            )
+        }
     }
 }

@@ -725,6 +725,55 @@ async fn it_works_deletion() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn delete_row() {
+    let mut g = start_simple("delete_row").await;
+    g.install_recipe(
+        "
+        CREATE TABLE t1 (x int, y int, z int);
+        VIEW all_rows: SELECT * FROM t1;
+    ",
+    )
+    .await
+    .unwrap();
+    let mut t = g.table("t1").await.unwrap();
+    let mut all_rows = g.view("all_rows").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
+        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
+        vec![DataType::from(4), DataType::from(5), DataType::from(6)],
+    ])
+    .await
+    .unwrap();
+
+    t.delete_row(vec![
+        DataType::from(1),
+        DataType::from(2),
+        DataType::from(3),
+    ])
+    .await
+    .unwrap();
+
+    assert_eq!(
+        all_rows.lookup(&[0.into()], true).await.unwrap(),
+        vec![
+            vec![
+                DataType::from(4),
+                DataType::from(5),
+                DataType::from(6),
+                DataType::from(0)
+            ],
+            vec![
+                DataType::from(1),
+                DataType::from(2),
+                DataType::from(3),
+                DataType::from(0)
+            ],
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_sql_recipe() {
     let mut g = start_simple("it_works_with_sql_recipe").await;
     let sql = "

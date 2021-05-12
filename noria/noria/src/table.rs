@@ -440,12 +440,12 @@ impl Table {
                 .map_err(|_| ReadySetError::WrongPacketDataType)?;
             for op in ops {
                 match op {
-                    TableOperation::Insert(ref row) => {
+                    TableOperation::Insert(ref row) | TableOperation::DeleteRow { ref row } => {
                         if row.len() != ncols {
                             return Err(ReadySetError::WrongColumnCount(ncols, row.len()));
                         }
                     }
-                    TableOperation::Delete { ref key } => {
+                    TableOperation::DeleteByKey { ref key } => {
                         if key.len() != self.key.len() {
                             return Err(ReadySetError::WrongKeyColumnCount(
                                 self.key.len(),
@@ -820,7 +820,19 @@ impl Table {
         I: Into<Vec<DataType>>,
     {
         self.quick_n_dirty(TableRequest::TableOperations(vec![
-            TableOperation::Delete { key: key.into() },
+            TableOperation::DeleteByKey { key: key.into() },
+        ]))
+        .await
+    }
+
+    /// Delete one occurrence of the row matching the *entirety* of the given row from the base
+    /// table.
+    pub async fn delete_row<I>(&mut self, row: I) -> ReadySetResult<()>
+    where
+        I: Into<Vec<DataType>>,
+    {
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::DeleteRow { row: row.into() },
         ]))
         .await
     }
