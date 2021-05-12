@@ -133,7 +133,7 @@ impl Node {
     /// (among other things) to make use of.
     ///
     /// See [`Ingredient::column_source`] for full documentation.
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    pub fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
         let ret = Ingredient::column_source(&**self, cols)?;
         // in debug builds, double-check API invariants are maintained
         match ret {

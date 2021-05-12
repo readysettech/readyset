@@ -34,6 +34,7 @@ pub use common::*;
 pub use noria::internal::*;
 pub use petgraph::graph::NodeIndex;
 pub type Graph = petgraph::Graph<Node, Edge>;
+pub use crate::processing::{ColumnRef, ColumnSource};
 pub use crate::DurabilityMode;
 pub use crate::PersistenceParameters;
 pub use noria::errors::*;
