@@ -108,6 +108,14 @@ pub enum DomainRequest {
         new_tag: Option<(Tag, NodeIndex)>,
     },
 
+    /// Add the target node to the list of nodes
+    /// that should go through the filtering process
+    /// at the given Egress node.
+    AddEgressFilter {
+        egress_node: LocalNodeIndex,
+        target_node: NodeIndex,
+    },
+
     /// Add a shard to a Sharder node.
     ///
     /// Note that this *must* be done *before* the sharder starts being used!

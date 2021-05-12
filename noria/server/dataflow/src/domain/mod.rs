@@ -928,6 +928,16 @@ impl Domain {
                 });
                 Ok(None)
             }
+            DomainRequest::AddEgressFilter {
+                egress_node,
+                target_node,
+            } => {
+                let mut n = self.nodes[egress_node].borrow_mut();
+                n.with_egress_mut(move |e| {
+                    e.add_for_filtering(target_node);
+                });
+                Ok(None)
+            }
             DomainRequest::UpdateSharder { node, new_txs } => {
                 let mut n = self.nodes[node].borrow_mut();
                 n.with_sharder_mut(move |s| {

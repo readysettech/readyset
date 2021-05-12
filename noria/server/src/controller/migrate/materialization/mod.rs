@@ -999,7 +999,7 @@ impl Materializations {
             for index in index_on.drain() {
                 plan.add(index)?;
             }
-            plan.finalize()
+            plan.finalize()?
         };
         // grr `HashMap` doesn't implement `IndexMut`
         self.paths.get_mut(&ni).unwrap().extend(paths);

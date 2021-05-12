@@ -13,7 +13,6 @@ use crate::ReadySetResult;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use noria::{internal, invariant, invariant_eq, ReadySetError};
-use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
