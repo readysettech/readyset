@@ -1477,9 +1477,14 @@ pub enum TableOperation {
     /// Insert the contained row.
     Insert(Vec<DataType>),
     /// Delete a row with the contained key.
-    Delete {
+    DeleteByKey {
         /// The key.
         key: Vec<DataType>,
+    },
+    /// Delete *one* row matching the entirety of the given row
+    DeleteRow {
+        /// The row to delete
+        row: Vec<DataType>,
     },
     /// If a row exists with the same key as the contained row, update it using `update`, otherwise
     /// insert `row`.
@@ -1520,7 +1525,8 @@ impl TableOperation {
     pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
         let key = match self {
             TableOperation::Insert(r) => Some(&r[key_col]),
-            TableOperation::Delete { key } => Some(&key[0]),
+            TableOperation::DeleteByKey { key } => Some(&key[0]),
+            TableOperation::DeleteRow { row } => Some(&row[key_col]),
             TableOperation::Update { key, .. } => Some(&key[0]),
             TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
             TableOperation::SetReplicationOffset(_) => None,
