@@ -877,6 +877,39 @@ fn prepared_select() {
 }
 
 #[test]
+// Test is ignored due to quoted identifier issue
+// https://readysettech.atlassian.net/browse/ENG-165.
+#[ignore]
+fn select_quoting_names() {
+    let d = Deployment::new("select_quoting_names");
+    let opts = setup(&d, true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE test (x INT, y INT)")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    sleep();
+
+    // Test SELECT using unquoted names.
+    let rows = conn.query("SELECT x AS foo FROM test", &[]).unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = rows.first().unwrap();
+    assert_eq!(row.len(), 1);
+    assert_eq!(row.get::<usize, i32>(0), 4);
+
+    // Test SELECT using quoted names.
+    let rows = conn
+        .query("SELECT \"x\" AS \"foo\" FROM \"test\"", &[])
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = rows.first().unwrap();
+    assert_eq!(row.len(), 1);
+    assert_eq!(row.get::<usize, i32>(0), 4);
+}
+
+#[test]
 fn create_view() {
     let d = Deployment::new("create_view");
     let opts = setup(&d, true);

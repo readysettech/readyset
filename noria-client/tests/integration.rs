@@ -1305,3 +1305,26 @@ fn reuse_similar_query() {
         .unwrap();
     assert_eq!(rows, vec![(4, 2)]);
 }
+
+#[test]
+// Test is ignored due to quoted string literal issue
+// https://readysettech.atlassian.net/browse/ENG-164.
+#[ignore]
+fn insert_quoted_string() {
+    let d = Deployment::new("insert_quoted_string");
+    let opts = setup(&d, true);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+    conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data TEXT)")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO Cats (id, data) VALUES (1, '{\"name\": \"Mr. Mistoffelees\"}')")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, String)> = conn.query("SELECT * FROM Cats WHERE Cats.id = 1").unwrap();
+    assert_eq!(
+        rows,
+        vec![(1, "{\"name\": \"Mr. Mistoffelees\"}".to_string())]
+    );
+}
