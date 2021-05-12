@@ -552,7 +552,9 @@ impl<'a> Plan<'a> {
     ///
     /// Returns a list of backfill replays that need to happen before the migration is complete,
     /// and a set of replay paths for this node indexed by tag.
-    pub(super) fn finalize(mut self) -> (Vec<PendingReplay>, HashMap<Tag, Vec<NodeIndex>>) {
+    pub(super) fn finalize(
+        mut self,
+    ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, Vec<NodeIndex>>)> {
         use dataflow::payload::InitialState;
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -609,6 +611,8 @@ impl<'a> Plan<'a> {
             )
             .unwrap();
 
+        self.setup_packet_filter()?;
+
         if !self.partial {
             // if we're constructing a new view, there is no reason to replay any given path more
             // than once. we do need to be careful here though: the fact that the source and
@@ -623,7 +627,7 @@ impl<'a> Plan<'a> {
         } else {
             assert!(self.pending.is_empty());
         }
-        (self.pending, self.paths)
+        Ok((self.pending, self.paths))
     }
 
     pub(super) fn on_join<'b>(
@@ -709,5 +713,56 @@ impl<'a> Plan<'a> {
             // any choice is fine
             Ok(Some(parents[0]))
         }
+    }
+
+    fn setup_packet_filter(&mut self) -> ReadySetResult<()> {
+        // If the node is partial and also a reader, then traverse the
+        // graph upwards to notify the egress node that it should filter
+        // any packet that was not requested.
+        return if self.partial && self.graph[self.node].is_reader() {
+            // Since reader nodes belong to their own domains, their
+            // domains should consist only of them + an ingress node.
+            // It's fair to assume that the reader node has an ingress node as an ancestor.
+            let ingress_opt = self
+                .graph
+                .neighbors_directed(self.node, petgraph::Incoming)
+                .find(|&n| self.graph[n].is_ingress());
+            let ingress = match ingress_opt {
+                None => internal!("The current node is a reader, it MUST belong in its own domain, and therefore must be an ingress node ancestor."),
+                Some(i) => i
+            };
+            // Now we look for the egress node, which should be an ancestor of the ingress node.
+            let egress_opt = self
+                .graph
+                .neighbors_directed(ingress, petgraph::Incoming)
+                .find(|&n| self.graph[n].is_egress());
+            let egress = match egress_opt {
+                // If an ingress node does not have an incoming egress node, that means this reader domain
+                // is behind a shard merger.
+                // We skip the packet filter setup for now.
+                // TODO(fran): Implement packet filtering for shard mergers (https://readysettech.atlassian.net/browse/ENG-183).
+                None => return Ok(()),
+                Some(e) => e,
+            };
+            // Get the egress node's local address within that domain.
+            let egress_local_addr = self.graph[egress].local_addr();
+            // Communicate the egress node's domain that any packet sent
+            // to the reader's domain ingress node should filter any
+            // packets not previously requested.
+            self.domains
+                .get_mut(&self.graph[egress].domain())
+                .unwrap()
+                .send_to_healthy_blocking::<()>(
+                    DomainRequest::AddEgressFilter {
+                        egress_node: egress_local_addr,
+                        target_node: ingress,
+                    },
+                    self.workers,
+                )
+                .unwrap();
+            Ok(())
+        } else {
+            Ok(())
+        };
     }
 }
