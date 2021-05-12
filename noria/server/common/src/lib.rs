@@ -10,6 +10,8 @@ pub use self::local::*;
 pub use self::records::*;
 pub use noria::DataType;
 pub use noria::Map;
+use petgraph::prelude::*;
+use vec1::Vec1;
 
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
@@ -56,6 +58,33 @@ impl SizeOf for Vec<DataType> {
 
     fn is_empty(&self) -> bool {
         false
+    }
+}
+
+/// A reference to a node, and potentially some columns.
+///
+/// The columns are only included if partial materialization is possible; if they're present,
+/// they determine the index required on the node to make partial materialization work.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OptColumnRef {
+    /// The index of the node being referenced.
+    pub node: NodeIndex,
+    /// If partial materialization is possible, the index required for partial materialization.
+    pub cols: Option<Vec1<usize>>,
+}
+
+impl OptColumnRef {
+    /// Make a new `OptColumnRef` with a column index.
+    pub fn partial(node: NodeIndex, cols: Vec1<usize>) -> Self {
+        Self {
+            node,
+            cols: Some(cols),
+        }
+    }
+
+    /// Make a new `OptColumnRef` with just a node.
+    pub fn full(node: NodeIndex) -> Self {
+        Self { node, cols: None }
     }
 }
 
