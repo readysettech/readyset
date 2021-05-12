@@ -146,6 +146,7 @@ pub enum DomainRequest {
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
+        raw_path: Vec<OptColumnRef>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,
@@ -168,6 +169,13 @@ pub enum DomainRequest {
 
     /// Process the packet, as per usual
     Packet(Packet),
+
+    /// Informs a domain that a given node's columns are generated, and upqueries from them
+    /// should use `Ingredient::handle_upquery`.
+    GeneratedColumns {
+        node: LocalNodeIndex,
+        cols: Vec<usize>,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]

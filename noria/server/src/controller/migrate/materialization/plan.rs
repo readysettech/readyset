@@ -282,7 +282,7 @@ impl<'a> Plan<'a> {
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for OptColumnRef { node, cols } in path {
+            for OptColumnRef { node, cols } in path.clone() {
                 let domain = self.graph[node].domain();
                 if last_domain.is_none() || domain != last_domain.unwrap() {
                     segments.push((domain, Vec::new()));
@@ -309,6 +309,35 @@ impl<'a> Plan<'a> {
                     unimplemented!();
                 }
                 seen.insert(domain);
+
+                if i == 0 {
+                    // check to see if the column index is generated; if so, inform the domain
+                    let first = nodes.first().unwrap();
+                    if let Some(ref cols) = first.1 {
+                        let mut generated = false;
+                        if self.graph[first.0].is_internal() {
+                            if let ColumnSource::GeneratedFromColumns(..) =
+                                self.graph[first.0].column_source(cols)?
+                            {
+                                generated = true;
+                            }
+                        }
+                        if generated {
+                            info!(self.m.log, "telling domain about generated columns {:?} on {}",
+                                cols, first.0.index(); "domain" => domain.index());
+
+                            let ctx = self.domains.get_mut(&domain).unwrap();
+                            ctx.send_to_healthy_blocking::<()>(
+                                DomainRequest::GeneratedColumns {
+                                    node: self.graph[first.0].local_addr(),
+                                    cols: cols.clone(),
+                                },
+                                self.workers,
+                            )
+                            .unwrap();
+                        }
+                    }
+                }
 
                 // we're not replaying through the starter node
                 let skip_first = if i == 0 { 1 } else { 0 };
@@ -339,6 +368,7 @@ impl<'a> Plan<'a> {
                     notify_done: false,
                     partial_unicast_sharder,
                     trigger: TriggerEndpoint::None,
+                    raw_path: path.clone(),
                 };
 
                 // the first domain also gets to know source node

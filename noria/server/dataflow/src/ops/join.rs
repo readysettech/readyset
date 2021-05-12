@@ -1,16 +1,17 @@
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::internal;
+use noria::{internal, KeyComparison};
 use std::collections::{HashMap, HashSet};
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::mem;
 use vec1::vec1;
 
 use crate::prelude::*;
-use crate::processing::{ColumnRef, ColumnSource};
+use crate::processing::{ColumnMiss, ColumnRef, ColumnSource};
 use noria::errors::{internal_err, ReadySetResult};
+use vec1::Vec1;
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +50,10 @@ pub struct Join {
     // column is from the left parent, false means from the right
     in_place_left_emit: Vec<(bool, usize)>,
     in_place_right_emit: Vec<(bool, usize)>,
+
+    /// Buffered records from one half of a remapped upquery. The key is (column index,
+    /// is from left side).
+    generated_column_buffer: HashMap<(Vec<usize>, bool), Records>,
 
     kind: JoinType,
 }
@@ -125,6 +130,7 @@ impl Join {
             emit,
             in_place_left_emit,
             in_place_right_emit,
+            generated_column_buffer: Default::default(),
             kind,
         }
     }
@@ -190,6 +196,36 @@ impl Join {
             }
         }
         reuse
+    }
+
+    fn handle_replay_for_generated(
+        &self,
+        left: Records,
+        right: Records,
+    ) -> ReadySetResult<Records> {
+        let mut from_key = vec![];
+        let mut other_key = vec![];
+        let mut ret: Vec<Record> = vec![];
+        for (left_key, right_key) in &self.on {
+            from_key.push(*left_key);
+            other_key.push(*right_key);
+        }
+        for rec in left {
+            let (rec, positive) = rec.extract();
+            invariant!(positive, "replays should only include positive records");
+
+            for other_rec in right
+                .iter()
+                .filter(|r| rec.indices(from_key.clone()) == r.indices(other_key.clone()))
+            {
+                ret.push(Record::Positive(self.generate_row(
+                    &rec,
+                    other_rec.row(),
+                    Preprocessed::Neither,
+                )))
+            }
+        }
+        Ok(ret.into())
     }
 
     // TODO: make non-allocating
@@ -266,13 +302,6 @@ impl Ingredient for Join {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
 
-        if rs.is_empty() {
-            return Ok(ProcessingResult {
-                results: rs,
-                ..Default::default()
-            });
-        }
-
         let other = if from == *self.left {
             *self.right
         } else {
@@ -291,11 +320,13 @@ impl Ingredient for Join {
             }
         }
 
-        let replay_key_cols: Option<Vec<usize>> =
+        let orkc = replay_key_cols;
+
+        let replay_key_cols: Result<Option<Vec<usize>>, ()> =
             replay_key_cols
                 .map(|cols| {
                     cols.iter()
-                        .map(|&col| -> ReadySetResult<_> {
+                        .map(|&col| -> Result<usize, ()> {
                             match self.emit[col] {
                                 (true, l) if from == *self.left => return Ok(l),
                                 (false, r) if from == *self.right => return Ok(r),
@@ -325,13 +356,44 @@ impl Ingredient for Join {
                                     }
                                 }
                             }
-                            internal!(
-                                "we're getting a partial replay, but the replay key doesn't exist in the parent we're getting the replay from?!"
-                            )
+                            Err(())
                         })
                         .collect()
                 })
-            .transpose()?;
+                .transpose();
+
+        let replay_key_cols = match replay_key_cols {
+            Ok(v) => v,
+            Err(_) => {
+                // columns generated!
+                let orkc = orkc.unwrap();
+                let is_left = from == *self.left;
+                return if let Some(other) = self
+                    .generated_column_buffer
+                    .remove(&(orkc.to_vec(), !is_left))
+                {
+                    // we have both sides now
+                    let (left, right) = if is_left { (rs, other) } else { (other, rs) };
+                    let ret = self.handle_replay_for_generated(left, right)?;
+                    Ok(ProcessingResult {
+                        results: ret,
+                        ..Default::default()
+                    })
+                } else {
+                    // store the records for when we get the other upquery response
+                    self.generated_column_buffer
+                        .insert((orkc.to_vec(), is_left), rs);
+                    Ok(Default::default())
+                };
+            }
+        };
+
+        if rs.is_empty() {
+            return Ok(ProcessingResult {
+                results: rs,
+                ..Default::default()
+            });
+        }
 
         // First, we want to be smart about multiple added/removed rows with the same join key
         // value. For example, if we get a -, then a +, for the same key, we don't want to execute
@@ -672,6 +734,68 @@ impl Ingredient for Join {
                 .map(|i| i.to_string())
                 .join(", ")
         )
+    }
+
+    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+        // reminder: this function *only* gets called for column indices that are sourced from
+        // both parents
+
+        let mut flipped_keys = std::iter::repeat(vec![])
+            .take(miss.missed_columns.columns.len())
+            .collect::<Vec<_>>();
+        for i in 0..miss.missed_columns.columns.len() {
+            for keycomparison in miss.missed_key.iter() {
+                match keycomparison.equal() {
+                    Some(lst) => {
+                        flipped_keys[i].push(lst[i].clone());
+                    }
+                    None => {
+                        // TODO(eta): make this work with range queries as well.
+                        internal!("range queries aren't supported by Join's handle_upquery impl")
+                    }
+                }
+            }
+        }
+        let mut keys = flipped_keys.into_iter();
+
+        let mut left_cols = vec![];
+        let mut left_keys = vec![];
+        let mut right_cols = vec![];
+        let mut right_keys = vec![];
+        for col in miss.missed_columns.columns {
+            let key = match keys.next() {
+                Some(k) => k,
+                None => {
+                    internal!("malformed miss passed to Join's handle_upquery");
+                }
+            };
+            let (left_idx, right_idx) = self.resolve_col(col);
+            if let Some(li) = left_idx {
+                left_cols.push(li);
+                left_keys.push(KeyComparison::Equal(Vec1::try_from(key).unwrap()));
+            } else if let Some(ri) = right_idx {
+                right_cols.push(ri);
+                right_keys.push(KeyComparison::Equal(Vec1::try_from(key).unwrap()));
+            } else {
+                internal!("could not resolve col {} in join upquery", col);
+            }
+        }
+        Ok(vec![
+            ColumnMiss {
+                missed_columns: ColumnRef {
+                    node: self.left.as_global(),
+                    columns: Vec1::try_from(left_cols).unwrap(),
+                },
+                missed_key: Vec1::try_from(left_keys).unwrap(),
+            },
+            ColumnMiss {
+                missed_columns: ColumnRef {
+                    node: self.right.as_global(),
+                    columns: Vec1::try_from(right_cols).unwrap(),
+                },
+                missed_key: Vec1::try_from(right_keys).unwrap(),
+            },
+        ])
     }
 
     fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {

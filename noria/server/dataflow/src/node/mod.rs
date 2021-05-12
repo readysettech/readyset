@@ -156,8 +156,7 @@ impl Node {
     /// implementation.
     ///
     /// See [`Ingredient::handle_upquery`] for full documentation.
-    #[allow(dead_code)]
-    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+    pub fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
         Ingredient::handle_upquery(&mut **self, miss)
     }
 
