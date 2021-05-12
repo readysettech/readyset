@@ -65,7 +65,7 @@ impl SizeOf for Vec<DataType> {
 ///
 /// The columns are only included if partial materialization is possible; if they're present,
 /// they determine the index required on the node to make partial materialization work.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OptColumnRef {
     /// The index of the node being referenced.
     pub node: NodeIndex,

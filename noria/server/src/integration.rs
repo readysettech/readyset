@@ -6110,3 +6110,55 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
     let result = w1.install_recipe(query).await;
     assert!(matches!(result, Ok(_)));
 }
+#[tokio::test(flavor = "multi_thread")]
+async fn join_straddled_columns() {
+    use std::convert::TryInto;
+
+    let mut g = start_simple_logging("join_straddled_columns").await;
+
+    g.install_recipe(
+        "CREATE TABLE a (a1 int, a2 int);
+         CREATE TABLE b (b1 int, b2 int);
+         QUERY straddle: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 = ? AND b.b2 = ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut a = g.table("a").await.unwrap();
+    let mut b = g.table("b").await.unwrap();
+    let mut q = g.view("straddle").await.unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    a.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(2i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+    ])
+    .await
+    .unwrap();
+
+    b.insert_many(vec![
+        vec![DataType::from(2i32), DataType::from(1i32)],
+        vec![DataType::from(2i32), DataType::from(2i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[1i32.into(), 1i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                r["a1"].clone().try_into().unwrap(),
+                r["a2"].clone().try_into().unwrap(),
+                r["b2"].clone().try_into().unwrap(),
+            )
+        })
+        .sorted()
+        .collect::<Vec<(i32, i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 2, 1)]);
+}
