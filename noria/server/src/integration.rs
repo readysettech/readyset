@@ -25,6 +25,7 @@ use noria::{
 use crate::internal::DomainIndex;
 use chrono::NaiveDate;
 use petgraph::graph::NodeIndex;
+use serial_test::serial;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -113,8 +114,26 @@ async fn sleep() {
     tokio::time::sleep(get_settle_time()).await;
 }
 
+// TODO: Refactor test utilities to separate file.
+fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
+    let dumped_metric: &DumpedMetric = &metrics_dump.metrics.get(metric).unwrap()[0];
+
+    if let DumpedMetricValue::Counter(v) = dumped_metric.value {
+        v
+    } else {
+        panic!("{} is not a counter", metric);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn it_works_basic() {
+    unsafe {
+        if !NoriaMetricsRecorder::installed() {
+            NoriaMetricsRecorder::install(1024).unwrap();
+        }
+    }
+
     let mut g = start_simple("it_works_basic").await;
     let _ = g
         .migrate(|mig| {
@@ -130,6 +149,9 @@ async fn it_works_basic() {
             (a, b, c)
         })
         .await;
+    let mut metrics_client = MetricsClient::new(g.c.clone().unwrap()).unwrap();
+    let res = metrics_client.reset_metrics().await;
+    assert!(!res.is_err());
 
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
@@ -153,6 +175,13 @@ async fn it_works_basic() {
         vec![vec![1.into(), 2.into()]]
     );
 
+    let metrics = metrics_client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    assert_eq!(
+        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
+        1.0
+    );
+
     // update value again
     mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
         .await
@@ -174,6 +203,14 @@ async fn it_works_basic() {
     assert!(res.iter().all(|r| r["a"] == id));
     assert!(res.iter().any(|r| r["b"] == 2.into()));
     assert!(res.iter().any(|r| r["b"] == 4.into()));
+
+    // This request does not hit the base table.
+    let metrics = metrics_client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    assert_eq!(
+        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
+        1.0
+    );
 
     // Delete first record
     muta.delete(vec![id.clone()]).await.unwrap();
@@ -4814,30 +4851,24 @@ async fn test_view_includes_replicas() {
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
-    let dumped_metric: &DumpedMetric = &metrics_dump
-        .metrics
-        .get(recorded::SERVER_CONTROLLER_REQUESTS)
-        .unwrap()[0];
-
-    if let DumpedMetricValue::Counter(v) = dumped_metric.value {
-        v
-    } else {
-        panic!("External requests count is not counter");
-    }
+    get_counter(recorded::SERVER_CONTROLLER_REQUESTS, metrics_dump)
 }
 
 // FIXME(eta): this test is now slightly hacky after we started making more
 //             external requests as part of the RPC refactor.
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_metrics_client() {
     unsafe {
-        NoriaMetricsRecorder::install(1024).unwrap();
+        if !NoriaMetricsRecorder::installed() {
+            NoriaMetricsRecorder::install(1024).unwrap();
+        }
     }
 
     // Start a local instance of noria and connect the metrics client to it.
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
-    let mut builder = Builder::default();
+    let builder = Builder::default();
     let g = builder.start_local().await.unwrap();
 
     let mut client = MetricsClient::new(g.c.clone().unwrap()).unwrap();

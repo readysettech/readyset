@@ -214,6 +214,7 @@ pub mod recorded {
     /// a migration to the soup graph. Recorded at the controller at the end of
     /// the `commit` call.
     pub const CONTROLLER_MIGRATION_TIME: &str = "controller.migration_time_us";
+
     /// Counter: The number of evicitons performed at a worker. Incremented each
     /// time `do_eviction` is called at the worker.
     ///
@@ -221,10 +222,12 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | domain | The domain that the eviction is performed in. |
     pub const EVICTION_WORKER_EVICTIONS_REQUESTED: &str = "eviction_worker.evictions_requested";
+
     /// Gauge: The amount of bytes the eviction worker is using for the current
     /// state sizes.
     pub const EVICTION_WORKER_PARTIAL_MEMORY_BYTES_USED: &str =
         "eviction_worker.partial_memory_used_bytes";
+
     /// Gauge: The amount of bytes required to store a dataflow node's state.
     ///
     ///
@@ -242,6 +245,7 @@ pub mod recorded {
     /// | domain | The index of the domain. |
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_PARTIAL_STATE_SIZE_BYTES: &str = "domain.partial_state_size_bytes";
+
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
     /// within a domain.
     ///
@@ -250,6 +254,7 @@ pub mod recorded {
     /// | domain | The index of the domain. |
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_READER_STATE_SIZE_BYTES: &str = "domain.reader_state_size_bytes";
+
     /// Gauge: The sum of a domain's total node state and reader state bytes.
     ///
     /// | Tag | Description |
@@ -267,6 +272,16 @@ pub mod recorded {
 
     /// Counter: The number of controller HTTP requests received by the noria-server.
     pub const SERVER_CONTROLLER_REQUESTS: &str = "server.controller_requests";
+
+    /// Counter: The number of lookup requests to a base table nodes state.
+    ///
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | table_name | The name of the base table. |
+    /// | shard | The shard of the base table the lookup is requested in. |
+    /// | node | The LocalNodeIndex of the base table node handling the packet. |
+    pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "base_table.lookup_requests";
 }
 
 /// A dumped metric's kind.

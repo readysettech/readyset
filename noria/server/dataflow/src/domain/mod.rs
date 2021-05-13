@@ -1850,6 +1850,18 @@ impl Domain {
         row.into_owned().into()
     }
 
+    // Records state lookup metrics for specific dataflow nodes.
+    fn record_dataflow_lookup_metrics(&self, node: LocalNodeIndex) {
+        if self.nodes[node].borrow().is_base() {
+            counter!(
+                recorded::BASE_TABLE_LOOKUP_REQUESTS,
+                1,
+                "domain" => self.index.index().to_string(),
+                "node" => node.to_string(),
+            );
+        }
+    }
+
     fn seed_all(
         &mut self,
         tag: Tag,
@@ -1878,6 +1890,7 @@ impl Domain {
                     ))
                 })?;
 
+                self.record_dataflow_lookup_metrics(source);
                 let mut rs = Vec::new();
                 let mut new_keys = HashSet::new();
                 // `misses` is a tuple of (replay_key, miss_key), where `replay_key` is the key we're trying
@@ -2050,6 +2063,8 @@ impl Domain {
                         tag
                     ))
                 })?;
+
+                self.record_dataflow_lookup_metrics(source);
                 let rs = match key.as_ref() {
                     KeyComparison::Equal(equal) => state
                         .lookup(&cols[..], &KeyType::from(equal))
