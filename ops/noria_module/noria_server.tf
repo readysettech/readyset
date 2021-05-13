@@ -29,7 +29,7 @@ resource "aws_security_group" "noria_server" {
     to_port     = 6033
     protocol    = "tcp"
     self        = true
-    cidr_blocks = var.readyset_server_clients_subnets
+    cidr_blocks = var.readyset_server_allowed_cidr_blocks
     security_groups = concat(
       [aws_security_group.noria_mysql.id],
       var.enable_rds_connector ? [
@@ -44,7 +44,7 @@ resource "aws_security_group" "noria_server" {
     to_port     = 65535
     protocol    = "tcp"
     self        = true
-    cidr_blocks = var.readyset_server_clients_subnets
+    cidr_blocks = var.readyset_server_allowed_cidr_blocks
     security_groups = concat(
       [aws_security_group.noria_mysql.id],
       var.enable_rds_connector ? [

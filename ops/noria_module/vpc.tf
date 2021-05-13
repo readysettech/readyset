@@ -2,11 +2,16 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> v2.0"
 
-  name            = "readyset-vpc-${local.random}"
-  cidr            = var.vpc_cidr
-  azs             = ["${var.aws_region}a", "${var.aws_region}b", "${var.aws_region}c"]
-  private_subnets = var.vpc_private_subnets
-  public_subnets  = var.vpc_public_subnets
+  name = format("readyset-vpc-%s", local.random)
+  cidr = var.vpc_cidr_block
+  # TODO: This should be a map of Availability Zones for supported regions
+  #       or a list provided by the consumer. Not all regions have 3 
+  #       availability zones nor use 'a' as the base index. This does not 
+  #       affect the current application of the module but could break in 
+  #       future instances.
+  azs             = formatlist("%s%s", var.aws_region, ["a", "b", "c"])
+  private_subnets = var.vpc_private_cidr_blocks
+  public_subnets  = var.vpc_public_cidr_blocks
 
   # Deploy only one NAT gateway (To save $)
   enable_nat_gateway     = true
@@ -21,7 +26,7 @@ module "vpc" {
   enable_dns_support                     = true
 
   tags = {
-    Name        = "readyset-vpc-${local.random}"
+    Name        = format("readyset-vpc-%s", local.random)
     Terraform   = "true"
     Environment = "dev"
     Owner       = "Readyset"

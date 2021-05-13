@@ -199,22 +199,22 @@ variable "setup_id" {
   }
 }
 
-variable "vpc_cidr" {
+variable "vpc_cidr_block" {
   type        = string
   default     = "10.0.0.0/16"
   description = "The CIDR block for the VPC."
 }
 
-variable "vpc_private_subnets" {
+variable "vpc_private_cidr_blocks" {
   type        = list(string)
   default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  description = "A list of private subnets inside the VPC."
+  description = "A list of private CDIR blocks inside the VPC."
 }
 
-variable "vpc_public_subnets" {
+variable "vpc_public_cidr_blocks" {
   type        = list(string)
   default     = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
-  description = "A list of public subnets inside the VPC."
+  description = "A list of public CIDR blocks inside the VPC."
 }
 
 variable "allow_ssh" {
@@ -223,14 +223,14 @@ variable "allow_ssh" {
   description = "Allow SSH connections from 0.0.0.0/0."
 }
 
-variable "readyset_server_clients_subnets" {
+variable "readyset_server_allowed_cidr_blocks" {
   type        = list(string)
   default     = []
-  description = "List of subnets that are allowed to connect to Readyset server."
+  description = "List of CIDR blocks that are allowed to connect to Readyset server."
 }
 
-variable "zookeeper_clients_subnets" {
+variable "zookeeper_allowed_cidr_blocks" {
   type        = list(string)
   default     = []
-  description = "List of subnets that are allowed to connect to Zookeeper server."
+  description = "List of CIDR blocks that are allowed to connect to Zookeeper server."
 }
