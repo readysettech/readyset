@@ -266,15 +266,21 @@ impl Recipe {
         let mut duplicates = 0;
         let expressions = qs
             .into_iter()
-            .map(|(n, q, is_leaf)| {
+            .map(|(mut n, q, mut is_leaf)| {
                 let qid = hash_query(&q);
                 if !expression_order.contains(&qid) {
                     expression_order.push(qid);
                 } else {
                     duplicates += 1;
                 }
+
+                // Treat views created using CREATE VIEW as leaf views too
+                if let (None, SqlQuery::CreateView(query)) = (&n, &q) {
+                    n = Some(query.name.clone());
+                    is_leaf = true;
+                }
+
                 match n {
-                    None => (),
                     Some(ref name) => {
                         assert!(
                             !aliases.contains_key(name) || aliases[name] == qid,
@@ -283,6 +289,7 @@ impl Recipe {
                         );
                         aliases.insert(name.clone(), qid);
                     }
+                    None => {}
                 }
                 (qid, (n, q, is_leaf))
             })
