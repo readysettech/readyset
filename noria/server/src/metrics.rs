@@ -137,6 +137,14 @@ impl NoriaMetricsRecorder {
         }
     }
 
+    /// Returns if the metrics recorder has been installed.
+    ///
+    /// This function should only be used in tests that may be run out of
+    /// order to verify that a metrics recorder already exists.
+    pub fn installed() -> bool {
+        unsafe { METRICS_RECORDER.is_some() }
+    }
+
     /// Runs `func` with three arguments: a map of counters, a map of gauges,
     /// and a map of histograms.
     ///
