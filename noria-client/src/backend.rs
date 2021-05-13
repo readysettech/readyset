@@ -537,10 +537,6 @@ impl Backend {
                             select_schema,
                         })
                     }
-                    nom_sql::SqlQuery::CreateView(q) => {
-                        self.reader.handle_create_view(q).await?;
-                        Ok(QueryResult::NoriaCreateView)
-                    }
                     nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
@@ -578,7 +574,9 @@ impl Backend {
 
                     // Table Create / Drop (RYW not supported)
                     // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                    nom_sql::SqlQuery::CreateTable(_) | nom_sql::SqlQuery::DropTable(_) => {
+                    nom_sql::SqlQuery::CreateView(_)
+                    | nom_sql::SqlQuery::CreateTable(_)
+                    | nom_sql::SqlQuery::DropTable(_) => {
                         let (num_rows_affected, last_inserted_id, _) =
                             connector.on_query(&parsed_query.to_string(), false).await?;
                         Ok(QueryResult::MySqlWrite {
