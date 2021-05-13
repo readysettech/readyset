@@ -1,4 +1,7 @@
-use nom::character::complete::{digit1, multispace0, multispace1};
+use nom::{
+    bytes::complete::is_not,
+    character::complete::{digit1, multispace0, multispace1},
+};
 use std::fmt;
 use std::str;
 use std::str::FromStr;
@@ -380,11 +383,72 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
     ))
 }
 
+// Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user permissions
+pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
+    /*
+    [ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
+    [DEFINER = user]
+    [SQL SECURITY { DEFINER | INVOKER }]
+
+    If the DEFINER clause is present, the user value should be a MySQL account specified
+    as 'user_name'@'host_name', CURRENT_USER, or CURRENT_USER()
+     */
+    map(
+        tuple((
+            opt(tuple((
+                tag_no_case("ALGORITHM"),
+                multispace0,
+                tag("="),
+                multispace0,
+                alt((
+                    tag_no_case("UNDEFINED"),
+                    tag_no_case("MERGE"),
+                    tag_no_case("TEMPTABLE"),
+                )),
+                multispace1,
+            ))),
+            opt(tuple((
+                tag_no_case("DEFINER"),
+                multispace0,
+                tag("="),
+                multispace0,
+                delimited(tag("`"), is_not("`"), tag("`")),
+                tag("@"),
+                delimited(tag("`"), is_not("`"), tag("`")),
+                multispace1,
+            ))),
+            opt(tuple((
+                tag_no_case("SQL"),
+                multispace1,
+                tag_no_case("SECURITY"),
+                multispace1,
+                alt((tag_no_case("DEFINER"), tag_no_case("INVOKER"))),
+                multispace1,
+            ))),
+        )),
+        |_| (),
+    )(i)
+}
+
 // Parse rule for a SQL CREATE VIEW query.
 pub fn view_creation(i: &[u8]) -> IResult<&[u8], CreateViewStatement> {
-    let (remaining_input, (_, _, _, _, name_slice, _, _, _, def, _)) = tuple((
+    /*
+       CREATE
+       [OR REPLACE]
+       [ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
+       [DEFINER = user]
+       [SQL SECURITY { DEFINER | INVOKER }]
+       VIEW view_name [(column_list)]
+       AS select_statement
+       [WITH [CASCADED | LOCAL] CHECK OPTION]
+    */
+    // Sample query:
+    // CREATE ALGORITHM=UNDEFINED DEFINER=`mysqluser`@`%` SQL SECURITY DEFINER VIEW `myquery2` AS SELECT * FROM employees
+
+    let (remaining_input, (_, _, _, _, _, name_slice, _, _, _, def, _)) = tuple((
         tag_no_case("create"),
         multispace1,
+        opt(create_view_params),
         tag_no_case("view"),
         multispace1,
         sql_identifier,
@@ -821,6 +885,12 @@ mod tests {
                 })),
             }
         );
+    }
+
+    #[test]
+    fn create_view_with_security_params() {
+        let qstring = "CREATE ALGORITHM=UNDEFINED DEFINER=`mysqluser`@`%` SQL SECURITY DEFINER VIEW `myquery2` AS SELECT * FROM employees";
+        view_creation(qstring.as_bytes()).unwrap();
     }
 
     #[test]
