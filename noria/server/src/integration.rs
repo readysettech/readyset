@@ -5251,3 +5251,45 @@ async fn multiple_aggregate_reuse() {
 
     assert_eq!(res, vec![(1, 1), (5, 4), (12, 7)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+// Test is ignored due subquery alias name reuse issue
+// https://readysettech.atlassian.net/browse/ENG-167.
+#[ignore]
+async fn reuse_subquery_alias_name() {
+    let mut g = start_simple("reuse_subquery_alias_name").await;
+
+    // Install two views, 'q1' and 'q2', each using the same subquery alias name 't2_data'.
+    g.install_recipe(
+        "CREATE TABLE t1 (id int, value int);
+         CREATE TABLE t2 (value int, name text, bio text);
+         VIEW q1:
+            SELECT name
+            FROM t1
+            JOIN (SELECT value, name FROM t2) AS t2_data ON t1.value = t2_data.value;
+         VIEW q2:
+            SELECT bio
+            FROM t1
+            JOIN (SELECT value, name, bio FROM t2) AS t2_data ON t1.value = t2_data.value;",
+    )
+    .await
+    .unwrap();
+
+    // TODO Verify that q1 and q2 return correct values.
+}
+
+#[tokio::test(flavor = "multi_thread")]
+// Test is ignored due column parsing bug https://readysettech.atlassian.net/browse/ENG-170.
+#[ignore]
+async fn col_beginning_with_literal() {
+    let mut g = start_simple("col_beginning_with_literal").await;
+
+    g.install_recipe(
+        "CREATE TABLE t1 (id INT, null_hypothesis INT);
+         VIEW q1: SELECT null_hypothesis FROM t1;",
+    )
+    .await
+    .unwrap();
+
+    // TODO Verify that q1 returns correct values.
+}
