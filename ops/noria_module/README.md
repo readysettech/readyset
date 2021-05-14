@@ -69,14 +69,14 @@ in the variable `extra_security_groups`
 | noria\_server\_instance\_type | EC2 instance type to use for the Noria server instance(s) | `string` | `"m5.2xlarge"` | no |
 | noria\_shards | Number of shards to use in Noria (0 = disable sharding) | `number` | `0` | no |
 | rds\_instance\_id | ID of the RDS instance to stream writes from. Required if enable\_rds\_connector is true | `string` | `""` | no |
-| readyset\_server\_clients\_subnets | List of subnets that are allowed to connect to Readyset server. | `list(string)` | `[]` | no |
+| readyset\_server\_allowed\_cidr\_blocks | List of CIDR blocks that are allowed to connect to Readyset server. | `list(string)` | `[]` | no |
 | readyset\_version | Readyset version to deploy (This is a required field, please ask for the latest version). | `string` | n/a | yes |
 | setup\_id | ID of the setup, 5 characters and no special symbols. (Useful for identifying resources). | `string` | `""` | no |
 | tables | List of tables to replicate from RDS | `list(string)` | `[]` | no |
-| vpc\_cidr | The CIDR block for the VPC. | `string` | `"10.0.0.0/16"` | no |
-| vpc\_private\_subnets | A list of private subnets inside the VPC. | `list(string)` | <pre>[<br>  "10.0.1.0/24",<br>  "10.0.2.0/24",<br>  "10.0.3.0/24"<br>]</pre> | no |
-| vpc\_public\_subnets | A list of public subnets inside the VPC. | `list(string)` | <pre>[<br>  "10.0.101.0/24",<br>  "10.0.102.0/24",<br>  "10.0.103.0/24"<br>]</pre> | no |
-| zookeeper\_clients\_subnets | List of subnets that are allowed to connect to Zookeeper server. | `list(string)` | `[]` | no |
+| vpc\_cidr\_block | The CIDR block for the VPC. | `string` | `"10.0.0.0/16"` | no |
+| vpc\_private\_cidr\_blocks | A list of private CDIR blocks inside the VPC. | `list(string)` | <pre>[<br>  "10.0.1.0/24",<br>  "10.0.2.0/24",<br>  "10.0.3.0/24"<br>]</pre> | no |
+| vpc\_public\_cidr\_blocks | A list of public CIDR blocks inside the VPC. | `list(string)` | <pre>[<br>  "10.0.101.0/24",<br>  "10.0.102.0/24",<br>  "10.0.103.0/24"<br>]</pre> | no |
+| zookeeper\_allowed\_cidr\_blocks | List of CIDR blocks that are allowed to connect to Zookeeper server. | `list(string)` | `[]` | no |
 | zookeeper\_disk\_kms\_key\_id | ARN for the KMS key ID to use to encrypt the zookeeper volume. Ignored if encrypt\_zookeeper\_disk = false. | `string` | `""` | no |
 | zookeeper\_disk\_size\_gb | Size of the disk, in gigabytes, to provision for persisting Zookeeper state | `number` | `200` | no |
 | zookeeper\_instance\_type | EC2 instance type to use for the Zookeeper instance(s) | `string` | `"m5.large"` | no |
@@ -99,5 +99,7 @@ in the variable `extra_security_groups`
 | vpc\_id | The ID of the VPC created in the provided AWS Region. |
 | zookeeper\_private\_ip | Zookeper instance private IP. |
 | zookeeper\_public\_ip | Zookeper instance public IP. |
+
+
 
 <!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->
