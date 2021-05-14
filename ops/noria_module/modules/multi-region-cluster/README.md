@@ -9,7 +9,7 @@ To use this Terraform module you will need the following things:
 
 - An AWS user with permissions to deploy EC2 instances in `us-east-2` and `us-west-2` regions.
 - An EC2 key pair with the same name in the aforementioned regions.
-- The Readsyet version hash tag to be deployed.
+- The ReadySet version hash tag to be deployed.
 
 ## How to use this module?
 
