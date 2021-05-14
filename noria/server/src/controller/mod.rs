@@ -435,7 +435,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration::start_simple;
+    use crate::integration_utils::start_simple;
     use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]

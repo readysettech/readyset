@@ -1,7 +1,13 @@
+//! Integration tests for ReadySet that create an in-process instance
+//! of the controller and noria-server component. These tests may be
+//! run in parallel. For tests that modify process-level global objects
+//! consider using integration_serial and having the tests run serially
+//! to prevent flaky behavior.
+
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
-use crate::metrics::NoriaMetricsRecorder;
-use crate::{Builder, Handle};
+use crate::integration_utils::*;
+use crate::Builder;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -14,227 +20,19 @@ use itertools::Itertools;
 use nom_sql::BinaryOperator;
 use noria::consensus::LocalAuthority;
 use noria::{
-    consistency::Timestamp,
-    internal::LocalNodeIndex,
-    metrics::client::MetricsClient,
-    metrics::recorded,
-    metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
-    DataType, KeyComparison, ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
+    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, ViewQuery,
+    ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
 use crate::internal::DomainIndex;
 use chrono::NaiveDate;
 use petgraph::graph::NodeIndex;
-use serial_test::serial;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
-use std::{env, thread};
 use vec1::vec1;
-
-const DEFAULT_SETTLE_TIME_MS: u64 = 200;
-const DEFAULT_SHARDING: usize = 2;
-
-// PersistenceParameters with a log_name on the form of `prefix` + timestamp,
-// avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
-// fail).
-fn get_persistence_params(prefix: &str) -> PersistenceParameters {
-    let mut params = PersistenceParameters::default();
-    params.mode = DurabilityMode::DeleteOnExit;
-    params.log_prefix = String::from(prefix);
-    params
-}
-
-// Builds a local worker with the given log prefix.
-pub async fn start_simple(prefix: &str) -> Handle<LocalAuthority> {
-    build(prefix, Some(DEFAULT_SHARDING), false).await
-}
-
-#[allow(dead_code)]
-pub async fn start_simple_unsharded(prefix: &str) -> Handle<LocalAuthority> {
-    build(prefix, None, false).await
-}
-
-#[allow(dead_code)]
-pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
-    build(prefix, Some(DEFAULT_SHARDING), true).await
-}
-
-async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
-    build_custom(
-        prefix,
-        sharding,
-        log,
-        true,
-        Arc::new(LocalAuthority::new()),
-        None,
-    )
-    .await
-}
-
-async fn build_custom(
-    prefix: &str,
-    sharding: Option<usize>,
-    log: bool,
-    controller: bool,
-    authority: Arc<LocalAuthority>,
-    region: Option<String>,
-) -> Handle<LocalAuthority> {
-    use crate::logger_pls;
-    let mut builder = Builder::default();
-    if log {
-        builder.log_with(logger_pls());
-    }
-    builder.set_sharding(sharding);
-    builder.set_persistence(get_persistence_params(prefix));
-
-    if region.is_some() {
-        builder.set_region(region.unwrap());
-    }
-    if controller {
-        builder.start_local_custom(authority.clone()).await.unwrap()
-    } else {
-        builder.start(authority.clone()).await.unwrap()
-    }
-}
-
-fn get_settle_time() -> Duration {
-    let settle_time: u64 = match env::var("SETTLE_TIME") {
-        Ok(value) => value.parse().unwrap(),
-        Err(_) => DEFAULT_SETTLE_TIME_MS,
-    };
-
-    Duration::from_millis(settle_time)
-}
-
-// Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
-// for the value given through the SETTLE_TIME environment variable.
-async fn sleep() {
-    tokio::time::sleep(get_settle_time()).await;
-}
-
-// TODO: Refactor test utilities to separate file.
-fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
-    let dumped_metric: &DumpedMetric = &metrics_dump.metrics.get(metric).unwrap()[0];
-
-    if let DumpedMetricValue::Counter(v) = dumped_metric.value {
-        v
-    } else {
-        panic!("{} is not a counter", metric);
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn it_works_basic() {
-    unsafe {
-        if !NoriaMetricsRecorder::installed() {
-            NoriaMetricsRecorder::install(1024).unwrap();
-        }
-    }
-
-    let mut g = start_simple("it_works_basic").await;
-    let _ = g
-        .migrate(|mig| {
-            let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-            let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-
-            let mut emits = HashMap::new();
-            emits.insert(a, vec![0, 1]);
-            emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
-            let c = mig.add_ingredient("c", &["a", "b"], u);
-            mig.maintain_anonymous(c, &[0]);
-            (a, b, c)
-        })
-        .await;
-    let mut metrics_client = MetricsClient::new(g.c.clone().unwrap()).unwrap();
-    let res = metrics_client.reset_metrics().await;
-    assert!(!res.is_err());
-
-    let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
-
-    assert_eq!(muta.table_name(), "a");
-    assert_eq!(muta.columns(), &["a", "b"]);
-
-    // send a value on a
-    muta.insert(vec![id.clone(), DataType::try_from(2i32).unwrap()])
-        .await
-        .unwrap();
-
-    // give it some time to propagate
-    sleep().await;
-
-    // send a query to c
-    assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap(),
-        vec![vec![1.into(), 2.into()]]
-    );
-
-    let metrics = metrics_client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert_eq!(
-        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
-        1.0
-    );
-
-    // update value again
-    mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
-        .await
-        .unwrap();
-
-    // give it some time to propagate
-    sleep().await;
-
-    // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).await.unwrap();
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
-
-    // check that looking up columns by name works
-    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap().unwrap() == 1));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 2));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 4));
-    // same with index
-    assert!(res.iter().all(|r| r["a"] == id));
-    assert!(res.iter().any(|r| r["b"] == 2.into()));
-    assert!(res.iter().any(|r| r["b"] == 4.into()));
-
-    // This request does not hit the base table.
-    let metrics = metrics_client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert_eq!(
-        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
-        1.0
-    );
-
-    // Delete first record
-    muta.delete(vec![id.clone()]).await.unwrap();
-
-    // give it some time to propagate
-    sleep().await;
-
-    // send a query to c
-    assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap(),
-        vec![vec![1.into(), 4.into()]]
-    );
-
-    // Update second record
-    // TODO(malte): disabled until we have update support on bases; the current way of doing this
-    // is incompatible with bases' enforcement of the primary key uniqueness constraint.
-    //mutb.update(vec![id.clone(), 6.into()]).await.unwrap();
-
-    // give it some time to propagate
-    //sleep().await;
-
-    // send a query to c
-    //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
@@ -4848,49 +4646,6 @@ async fn test_view_includes_replicas() {
     let result = w1.view_from_region("q", "r2".to_string()).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().node().index(), r2_node.unwrap().index());
-}
-
-fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
-    get_counter(recorded::SERVER_CONTROLLER_REQUESTS, metrics_dump)
-}
-
-// FIXME(eta): this test is now slightly hacky after we started making more
-//             external requests as part of the RPC refactor.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn test_metrics_client() {
-    unsafe {
-        if !NoriaMetricsRecorder::installed() {
-            NoriaMetricsRecorder::install(1024).unwrap();
-        }
-    }
-
-    // Start a local instance of noria and connect the metrics client to it.
-    // We assign it a different port than the rest of the tests to prevent
-    // other tests impacting the metrics collected.
-    let builder = Builder::default();
-    let g = builder.start_local().await.unwrap();
-
-    let mut client = MetricsClient::new(g.c.clone().unwrap()).unwrap();
-    let res = client.reset_metrics().await;
-    assert!(!res.is_err());
-
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    let count = get_external_requests_count(metrics_dump);
-    assert!(get_external_requests_count(metrics_dump) > 0.0);
-
-    // Verify that this value is incrementing.
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    let second_count = get_external_requests_count(metrics_dump);
-    assert!(get_external_requests_count(metrics_dump) > count);
-
-    // Reset the metrics and verify the metrics actually reset.
-    assert!(!client.reset_metrics().await.is_err());
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert!(get_external_requests_count(metrics_dump) < second_count);
 }
 
 #[tokio::test(flavor = "multi_thread")]
