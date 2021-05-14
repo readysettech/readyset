@@ -202,3 +202,524 @@ where
         .enumerate()
         .all(|(i, &col_index)| check(&row[col_index], &keys[i]))
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::prelude::LocalNodeIndex;
+    use common::Link;
+    use common::Tag;
+    use vec1::vec1;
+
+    #[test]
+    fn process_random_packet() {
+        let original_packet = Packet::Spin;
+        let mut processed_packet = original_packet.clone();
+        let ni = NodeIndex::new(3);
+
+        let mut processor = PacketFilter::default();
+
+        let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
+
+        assert!(
+            should_send,
+            "The process should be signaling that the packet can be sent"
+        );
+        assert_eq!(
+            original_packet, processed_packet,
+            "The packet should still be the same"
+        );
+        assert!(
+            processor.whitelist.is_empty(),
+            "The whitelist should not have been modified"
+        );
+    }
+
+    mod update_processing {
+        use super::*;
+        use common::Record;
+        use std::ops::Bound;
+
+        #[test]
+        fn process_no_keys_associated() {
+            let mut records = Vec::new();
+            records.push(Record::Positive(vec![
+                11.into(),
+                "text1-1".into(),
+                "text1-2".into(),
+                12.into(),
+                "text1-3".into(),
+            ]));
+            records.push(Record::Positive(vec![
+                21.into(),
+                "text2-1".into(),
+                "text2-2".into(),
+                22.into(),
+                "text2-3".into(),
+            ]));
+            let mut packet = create_packet(records);
+            let ni = NodeIndex::new(3);
+
+            let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
+            let mut keys = HashSet::new();
+            keys.insert(key);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(ni, WhitelistData::default());
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut packet, None, ni).unwrap();
+
+            assert!(
+                !should_send,
+                "The process should be signaling that the packet should not be sent"
+            );
+        }
+
+        #[test]
+        fn process_filter_all_messages() {
+            let mut records = Vec::new();
+            let record = Record::Positive(vec![
+                11.into(),
+                "text1-1".into(),
+                "text1-2".into(),
+                12.into(),
+                "text1-3".into(),
+            ]);
+            records.push(record);
+            records.push(Record::Positive(vec![
+                21.into(),
+                "text2-1".into(),
+                "text2-2".into(),
+                22.into(),
+                "text2-3".into(),
+            ]));
+            let mut packet = create_packet(records);
+            let column_indexes = vec![1usize, 3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
+            let mut keys = HashSet::new();
+            keys.insert(key);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes, keys);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut packet, None, ni).unwrap();
+
+            assert!(
+                !should_send,
+                "The process should be signaling that the packet should not be sent"
+            );
+        }
+
+        #[test]
+        fn process_filter_one_message() {
+            let mut records = Vec::new();
+            let record = Record::Positive(vec![
+                11.into(),
+                "text1-1".into(),
+                "text1-2".into(),
+                12.into(),
+                "text1-3".into(),
+            ]);
+            records.push(record.clone());
+            records.push(Record::Positive(vec![
+                21.into(),
+                "text2-1".into(),
+                "text2-2".into(),
+                22.into(),
+                "text2-3".into(),
+            ]));
+            let mut packet = create_packet(records);
+            let link = *packet.link_mut();
+            let column_indexes = vec![1usize, 3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let key = KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]);
+            let mut keys = HashSet::new();
+            keys.insert(key);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes, keys);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut packet, None, ni).unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                link,
+                packet.link_mut().clone(),
+                "The links in the packet should still be the same"
+            );
+            let new_records = packet.take_data();
+            assert_eq!(1, new_records.len(), "There should be only one record");
+            let new_record = new_records[0].clone();
+            assert_eq!(record, new_record, "The record in the packet is wrong");
+        }
+
+        #[test]
+        fn process_filter_range_message() {
+            let mut records = Vec::new();
+            let record = Record::Positive(vec![
+                11.into(),
+                "text1-1".into(),
+                "text1-2".into(),
+                12.into(),
+                "text1-3".into(),
+            ]);
+            records.push(record.clone());
+            records.push(Record::Positive(vec![
+                21.into(),
+                "text2-1".into(),
+                "text2-2".into(),
+                22.into(),
+                "text2-3".into(),
+            ]));
+            let mut packet = create_packet(records);
+            let link = *packet.link_mut();
+            let column_indexes = vec![3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let key = KeyComparison::Range((
+                Bound::Included(vec1![10.into()]),
+                Bound::Excluded(vec1![20.into()]),
+            ));
+            let mut keys = HashSet::new();
+            keys.insert(key);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes, keys);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut packet, None, ni).unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                link,
+                *packet.link_mut(),
+                "The links in the packet should still be the same"
+            );
+            let new_records = packet.take_data();
+            assert_eq!(1, new_records.len(), "There should be only one record");
+            let new_record = new_records[0].clone();
+            assert_eq!(record, new_record, "The record in the packet is wrong");
+        }
+
+        fn create_packet(records: Vec<Record>) -> Packet {
+            Packet::Message {
+                link: create_link(),
+                data: records.into(),
+            }
+        }
+    }
+
+    mod replay_processing {
+        use super::*;
+
+        #[test]
+        fn process_replay_no_keyed_by() {
+            let mut keys = HashSet::new();
+            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            let mut packet = create_packet(Some(keys));
+            let ni = NodeIndex::new(3);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: HashMap::new(),
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let result = processor.process(&mut packet, None, ni);
+
+            assert!(result.is_err(), "Calls to process with a replay message packet should always be passed a keyed-by vector of column indexes");
+        }
+
+        #[test]
+        fn process_regular() {
+            let original_packet = create_packet(None);
+            let mut processed_packet = original_packet.clone();
+            let ni = NodeIndex::new(3);
+
+            let mut processor = PacketFilter::default();
+
+            let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+        }
+
+        #[test]
+        fn process_partial_equal_keys() {
+            let mut keys = HashSet::new();
+            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+
+            let col_indexes = vec![1usize, 3usize];
+
+            let original_packet = create_packet(Some(keys.clone()));
+            let mut processed_packet = original_packet.clone();
+            let ni = NodeIndex::new(3);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(ni, WhitelistData::default());
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor
+                .process(&mut processed_packet, Some(&col_indexes), ni)
+                .unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+            let new_whitelist = &processor.whitelist;
+            match new_whitelist.get(&ni) {
+                None => panic!("Filtering should be enabled for the target node"),
+                Some(wd) => match wd.keys.get(&col_indexes) {
+                    None => panic!("The column indexes should be present"),
+                    Some(k) => assert_eq!(keys, k.to_owned(), "The whitelisted keys are wrong"),
+                },
+            }
+        }
+
+        fn create_packet(keys: Option<HashSet<KeyComparison>>) -> Packet {
+            let context = if let Some(k) = keys {
+                ReplayPieceContext::Partial {
+                    for_keys: k,
+                    requesting_shard: 0,
+                    unishard: false,
+                    ignore: false,
+                }
+            } else {
+                ReplayPieceContext::Regular { last: false }
+            };
+            Packet::ReplayPiece {
+                link: create_link(),
+                tag: Tag::new(1),
+                data: Default::default(),
+                context,
+            }
+        }
+    }
+
+    mod evict_processing {
+        use super::*;
+
+        #[test]
+        fn process_evict_all_keys() {
+            let mut keys = HashSet::new();
+            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+
+            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let mut processed_packet = original_packet.clone();
+            let column_indexes = vec![1usize, 3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes.clone(), keys);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+            match processor.whitelist.get(&ni) {
+                None => panic!("Filtering should be enabled for the target node"),
+                Some(wd) => match wd.keys.get(&column_indexes) {
+                    None => panic!("The column indexes should be present"),
+                    Some(k) => assert!(k.is_empty(), "There should be no more whitelisted keys"),
+                },
+            }
+        }
+
+        #[test]
+        fn process_evict_some_keys() {
+            let mut keys = HashSet::new();
+            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+
+            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let mut processed_packet = original_packet.clone();
+            let key = KeyComparison::Equal(vec1!["text2-2".into(), 22.into()]);
+            keys.insert(key.clone());
+
+            let column_indexes = vec![1usize, 3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes.clone(), keys.clone());
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let mut processor = PacketFilter { whitelist };
+
+            let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+            let new_whitelist = processor.whitelist;
+            assert_eq!(
+                1,
+                new_whitelist.len(),
+                "There should be only one entry for whitelisted nodes"
+            );
+            match new_whitelist.get(&ni) {
+                None => panic!("Filtering should be enabled for the target node"),
+                Some(wd) => match wd.keys.get(&column_indexes) {
+                    None => panic!("The column indexes should be present"),
+                    Some(k) => {
+                        assert_eq!(1, k.len(), "There should be only one whitelisted key");
+                        assert_eq!(
+                            key,
+                            k.iter().next().unwrap().to_owned(),
+                            "The whitelisted key is wrong"
+                        );
+                    }
+                },
+            }
+        }
+
+        #[test]
+        fn process_evict_no_keys() {
+            let mut keys = HashSet::new();
+            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+
+            let mut original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let mut processed_packet = original_packet.clone();
+
+            let column_indexes = vec![1usize, 3usize];
+
+            let ni = NodeIndex::new(3);
+
+            let mut keys_by_col_index = HashMap::new();
+            keys_by_col_index.insert(column_indexes, keys);
+
+            let mut whitelist = HashMap::new();
+            whitelist.insert(
+                ni,
+                WhitelistData {
+                    keys: keys_by_col_index,
+                },
+            );
+
+            let ni_alt = NodeIndex::new(4);
+
+            let mut processor = PacketFilter {
+                whitelist: whitelist.clone(),
+            };
+
+            let should_send = processor
+                .process(&mut processed_packet, None, ni_alt)
+                .unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+            assert_eq!(
+                whitelist, processor.whitelist,
+                "The whitelist shouldn't have changed"
+            );
+        }
+
+        fn create_packet(keys: Vec<KeyComparison>) -> Packet {
+            Packet::EvictKeys {
+                link: create_link(),
+                tag: Tag::new(1),
+                keys,
+            }
+        }
+    }
+
+    fn create_link() -> Link {
+        Link {
+            src: unsafe { LocalNodeIndex::make(1) },
+            dst: unsafe { LocalNodeIndex::make(2) },
+        }
+    }
+}
