@@ -406,7 +406,7 @@ steps:
     key: test-noria
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir
+    - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir -- --skip integration_serial
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -425,6 +425,31 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
+  - label: ':rust: Test noria-integration-serial'
+    key: test-noria-integration-serial
+    command:
+    - 'echo +++ :rust: Running cargo test'
+    - cargo test -v -p noria-server integration_serial -- --test-threads=1
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    - build-noria
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+    env:
+      SCCACHE_BUCKET: readyset-sccache
+
+
 
   - label: ':rust: Check noria-client'
     key: build-noria-client

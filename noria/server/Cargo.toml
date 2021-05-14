@@ -75,7 +75,6 @@ noria = { version = "0.7.0", path = "../noria" }
 launchpad = { path = "../../launchpad" }
 maplit = "1.0.2"
 tokio-stream = "0.1.5"
-serial_test = "0.5.1"
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
@@ -85,6 +84,7 @@ tempfile = "3.0.2"
 mysql = "18.0.0"
 proptest = "0.10.1"
 chrono = "0.4.19"
+serial_test = "0.5.1"
 
 [lib]
 name = "noria_server"

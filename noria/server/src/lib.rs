@@ -376,6 +376,10 @@ mod worker;
 
 #[cfg(test)]
 mod integration;
+#[cfg(test)]
+mod integration_serial;
+#[cfg(test)]
+mod integration_utils;
 pub mod metrics;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
