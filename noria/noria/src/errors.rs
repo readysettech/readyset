@@ -336,6 +336,10 @@ pub enum ReadySetError {
              (did the replication log name change?)"
     )]
     ReplicationOffsetLogDifferent(String, String),
+
+    /// An error that was encountered in the mysql_async crate during snapshot/binlog replication proccess
+    #[error("MySQL Error during replication: {0}")]
+    ReplicationFailed(String),
 }
 
 impl ReadySetError {
@@ -598,5 +602,13 @@ impl From<SendError> for ReadySetError {
 impl From<url::ParseError> for ReadySetError {
     fn from(e: url::ParseError) -> ReadySetError {
         ReadySetError::UrlParseFailed(e.to_string())
+    }
+}
+
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
+impl From<mysql_async::Error> for ReadySetError {
+    fn from(e: mysql_async::Error) -> ReadySetError {
+        ReadySetError::ReplicationFailed(e.to_string())
     }
 }

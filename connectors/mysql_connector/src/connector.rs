@@ -3,6 +3,7 @@ use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::proto::MySerialize;
+use noria::ReadySetResult;
 use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -92,8 +93,8 @@ impl PartialOrd for BinlogPosition {
 
         // Otherwise we compare the suffix, which if valid must be a valid number
         // probably u32 would suffice
-        let suffix = u64::from_str_radix(suffix, 10).ok()?;
-        let other_suffix = u64::from_str_radix(other_suffix, 10).ok()?;
+        let suffix = suffix.parse::<u64>().ok()?;
+        let other_suffix = other_suffix.parse::<u64>().ok()?;
 
         suffix.partial_cmp(&other_suffix)
     }
@@ -153,23 +154,14 @@ impl MySqlBinlogConnector {
     }
 
     /// Connect to a given MySQL database and subscribe to the binlog
-    pub async fn connect<S: Into<String>, S2: Into<String>, T: Into<String>, T2: Into<String>>(
-        addr: S,
-        port: u16,
-        user: Option<T>,
-        password: Option<T2>,
-        schemas: Vec<S2>,
+    pub async fn connect<S: Into<String>, O: Into<mysql::Opts>>(
+        mysql_opts: O,
+        schemas: Vec<S>,
         next_position: Option<BinlogPosition>,
         server_id: Option<u32>,
-    ) -> mysql::Result<Self> {
-        let opts = mysql::OptsBuilder::default()
-            .ip_or_hostname(addr)
-            .tcp_port(port)
-            .user(user)
-            .pass(password);
-
+    ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
-            connection: mysql::Conn::new(opts).await?,
+            connection: mysql::Conn::new(mysql_opts).await?,
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
             next_position,
