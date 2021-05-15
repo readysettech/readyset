@@ -48,6 +48,7 @@ proptest = "0.10.1"
 derive_more = "0.99.11"
 backoff = "0.3.0"
 url = { version = "2.2", features = ["serde"] }
+mysql_async = { git = "https://github.com/readysettech/mysql_async" }
 
 # consensus/
 slog = "2.4.0"

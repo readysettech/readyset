@@ -1,12 +1,15 @@
 pub mod connector;
 pub mod noria_adapter;
+pub mod snapshot;
 
 use connector::BinlogPosition;
 
 use clap::{App, Arg};
 
+const DEFAULT_BINLOG_START: &str = "4"; // All binlogs start at offset 4, because the first four bytes are the magic number
+
 #[tokio::main]
-async fn main() -> mysql_async::Result<()> {
+async fn main() -> noria::ReadySetResult<()> {
     tracing_subscriber::fmt().init();
 
     let matches = App::new("noria-mysql-connector")
@@ -65,6 +68,9 @@ async fn main() -> mysql_async::Result<()> {
                 .env("NORIA_DEPLOYMENT")
                 .help("Noria deployment ID to attach to."),
         )
+        .arg(Arg::from_usage("--snapshot").help(
+            "If passed, will replicate the target database to Noria before listening on the binlog",
+        ))
         .arg(
             Arg::with_name("db-name")
                 .long("db-name")
@@ -85,7 +91,7 @@ async fn main() -> mysql_async::Result<()> {
                 .long("binlog-position")
                 .takes_value(true)
                 .env("BINLOG_POS")
-                .default_value("4")
+                .default_value(DEFAULT_BINLOG_START)
                 .help("The offset withing the binlog file."),
         )
         .get_matches();
@@ -108,7 +114,8 @@ async fn main() -> mysql_async::Result<()> {
         .with_zookeeper_addr(Some(zookeeper_address))
         .with_deployment(Some(deployment))
         .with_database(Some(schema))
-        .with_position(binlog_position);
+        .with_position(binlog_position)
+        .with_snapshot(matches.is_present("snapshot"));
 
     builder.start().await
 }

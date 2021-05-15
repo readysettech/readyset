@@ -1,12 +1,15 @@
 use crate::connector::{BinlogAction, BinlogPosition, MySqlBinlogConnector};
-use noria::{ControllerHandle, ReadySetError, Table, ZookeeperAuthority};
+use crate::snapshot::MySqlReplicator;
+use noria::consensus::Authority;
+use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
+use std::collections::hash_map;
 use std::collections::HashMap;
 use tracing::info;
 
 /// An adapter that converts binlog actions into Noria API calls
-pub struct MySqlNoriaAdapter {
+pub struct MySqlNoriaAdapter<A: Authority + 'static> {
     /// The Noria API handle
-    noria: ControllerHandle<ZookeeperAuthority>,
+    noria: ControllerHandle<A>,
     /// The binlog reader
     connector: MySqlBinlogConnector,
     /// A map of cached table mutators
@@ -17,6 +20,7 @@ pub struct MySqlNoriaAdapter {
 pub struct Builder {
     addr: String,
     port: u16,
+    snapshot: bool,
     user: Option<String>,
     password: Option<String>,
     db_name: Option<String>,
@@ -84,27 +88,62 @@ impl Builder {
         self
     }
 
+    /// If true, will replicate the target database in its entirety to Noria before listening on the binlog
+    /// The replication happens in stages:
+    /// * READ LOCK is acquired on the database
+    /// * Next binlog position is read
+    /// * The recipe (schema) DDL is replicated and installed in Noria (replacing current recipe)
+    /// * Each table is individually replicated into Noria
+    /// * READ LOCK is released
+    /// * Adapter keeps reading binlog from the next position keeping Noria up to date
+    pub fn with_snapshot(mut self, do_snapshot: bool) -> Self {
+        self.snapshot = do_snapshot;
+        self
+    }
+
     /// Finish the build and begin monitoring the binlog for changes
-    pub async fn start(self) -> Result<(), mysql_async::Error> {
+    pub async fn start(self) -> ReadySetResult<()> {
         let zookeeper_address = self
             .zookeeper_address
             .unwrap_or_else(|| "127.0.0.1:2181".into());
-        let deployment = self.deployment.ok_or("Missing depoyement")?;
-        let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment))
-            .map_err(|err| format!("Zookeeper error {}", err))?;
-        let noria = noria::ControllerHandle::new(authority)
-            .await
-            .map_err(|err| format!("Controller error {}", err))?;
 
-        info!("Noria connected");
+        let deployment = self
+            .deployment
+            .ok_or_else(|| ReadySetError::ReplicationFailed("Missing deployment".into()))?;
+
+        let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment))?;
+        let mut noria = noria::ControllerHandle::new(authority).await?;
+
+        let mysql_options = mysql_async::OptsBuilder::default()
+            .ip_or_hostname(self.addr)
+            .tcp_port(self.port)
+            .user(self.user)
+            .pass(self.password);
+
+        // In case the snapshot option was specified, take the snapshot and then keep reading from
+        // the binlog position specified in the snapshot
+        let pos = if self.snapshot {
+            info!("Taking database snapshot");
+            let replicator_options = mysql_options
+                .clone()
+                .db_name(self.db_name.clone())
+                .compression(Some(mysql_async::Compression::new(7)));
+
+            let pool = mysql_async::Pool::new(replicator_options);
+            let replicator = MySqlReplicator { pool, tables: None };
+            Some(replicator.replicate_to_noria(&mut noria, true).await?)
+        } else {
+            self.position
+        };
+
+        if let Some(pos) = &pos {
+            info!("Binlog position {:?}", pos);
+        }
 
         let connector = MySqlBinlogConnector::connect(
-            self.addr,
-            self.port,
-            self.user,
-            self.password,
+            mysql_options,
             self.db_name.map(|s| vec![s]).unwrap_or_default(),
-            self.position,
+            pos,
             self.server_id,
         )
         .await?;
@@ -116,11 +155,12 @@ impl Builder {
             connector,
             mutator_map: HashMap::new(),
         };
+
         adapter.main_loop().await
     }
 }
 
-impl MySqlNoriaAdapter {
+impl<A: Authority> MySqlNoriaAdapter<A> {
     /// Handle a single BinlogAction by calling the proper Noria RPC
     async fn handle_action(&mut self, action: BinlogAction) -> Result<(), ReadySetError> {
         match action {
@@ -169,7 +209,7 @@ impl MySqlNoriaAdapter {
     }
 
     /// Loop over the actions
-    async fn main_loop(&mut self) -> Result<(), mysql_async::Error> {
+    async fn main_loop(&mut self) -> ReadySetResult<()> {
         loop {
             let (action, _position) = self.connector.next_action().await?;
             info!("{:?}", action);
@@ -192,13 +232,14 @@ impl MySqlNoriaAdapter {
         name: String,
     ) -> Result<(&mut Table, &[usize]), ReadySetError> {
         match self.mutator_map.entry(name) {
-            std::collections::hash_map::Entry::Occupied(o) => {
+            hash_map::Entry::Occupied(o) => {
                 let (table, key_indices) = o.into_mut();
                 Ok((table, key_indices))
             }
-            std::collections::hash_map::Entry::Vacant(v) => {
+            hash_map::Entry::Vacant(v) => {
                 let table = self.noria.table(v.key()).await?;
-                let key_indices = key_indices_for_schema(table.schema().unwrap())?;
+                let key_indices =
+                    key_indices_for_schema(table.schema().expect("Schema for base table"))?;
                 let (table, key_indices) = v.insert((table, key_indices));
                 Ok((table, key_indices))
             }
