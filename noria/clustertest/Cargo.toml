@@ -1,0 +1,13 @@
+[package]
+name = "clustertest"
+version = "0.1.0"
+authors = ["justin@readyset.io"]
+edition = "2018"
+
+[dependencies]
+shiplift = "0.7.0"
+tokio = { version = "1.5", features = ["full"] }
+futures = "0.3.0"
+futures-util = "0.3.0"
+anyhow = "1.0"
+serial_test = "0.5.1"
