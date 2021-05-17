@@ -404,7 +404,7 @@ macro_rules! __location_info {
         $crate::__location_info!(" (in {})")
     };
     ($fstr: literal) => {
-        if cfg!(debug) {
+        if cfg!(debug_assertions) {
             format!(
                 $fstr,
                 format!("{}:{}:{}", std::file!(), std::line!(), std::column!(),)
@@ -610,5 +610,19 @@ impl From<url::ParseError> for ReadySetError {
 impl From<mysql_async::Error> for ReadySetError {
     fn from(e: mysql_async::Error) -> ReadySetError {
         ReadySetError::ReplicationFailed(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{internal, ReadySetResult};
+
+    #[test]
+    #[should_panic(expected = "errors.rs")]
+    fn it_reports_location_info() {
+        fn example() -> ReadySetResult<()> {
+            internal!("honk")
+        }
+        example().unwrap();
     }
 }
