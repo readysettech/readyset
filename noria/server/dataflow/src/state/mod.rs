@@ -16,7 +16,7 @@ use ahash::RandomState;
 use common::SizeOf;
 use derive_more::From;
 use hashbag::HashBag;
-use noria::KeyComparison;
+use noria::{KeyComparison, ReplicationOffset};
 
 pub use partial_map::PartialMap;
 
@@ -45,14 +45,14 @@ pub(crate) trait State: SizeOf + Send {
         &mut self,
         records: &mut Records,
         partial_tag: Option<Tag>,
-        replication_offset: Option<usize>,
+        replication_offset: Option<ReplicationOffset>,
     );
 
     /// Returns the current replication offset written to this state.
     ///
     ///  See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
-    fn replication_offset(&self) -> Option<usize> {
+    fn replication_offset(&self) -> Option<&ReplicationOffset> {
         None
     }
 

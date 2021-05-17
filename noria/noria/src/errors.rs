@@ -326,6 +326,16 @@ pub enum ReadySetError {
     /// An error was encountered when working with URLs.
     #[error("URL parse failed: {0}")]
     UrlParseFailed(String),
+
+    /// An attempt was made to compare replication offsets from different logs.
+    ///
+    /// See the documentation for [`ReplicationOffset`](noria::ReplicationOffset) for why this might
+    /// happen
+    #[error(
+        "Cannot compare replication offsets from different logs: expected {0}, but got {1} \
+             (did the replication log name change?)"
+    )]
+    ReplicationOffsetLogDifferent(String, String),
 }
 
 impl ReadySetError {

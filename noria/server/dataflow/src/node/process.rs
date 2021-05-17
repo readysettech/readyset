@@ -6,7 +6,7 @@ use core::convert::TryInto;
 use launchpad::hash::hash;
 use noria::consistency::Timestamp;
 use noria::errors::ReadySetResult;
-use noria::{internal, KeyComparison, PacketData, ReadySetError};
+use noria::{internal, KeyComparison, PacketData, ReadySetError, ReplicationOffset};
 use slog::Logger;
 use std::collections::HashSet;
 use std::mem;
@@ -505,7 +505,7 @@ impl Node {
 // crate visibility due to use by tests
 pub(crate) fn materialize(
     rs: &mut Records,
-    replication_offset: Option<usize>,
+    replication_offset: Option<ReplicationOffset>,
     partial: Option<Tag>,
     state: Option<&mut Box<dyn State>>,
 ) {
