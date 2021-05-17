@@ -17,10 +17,11 @@
 
 use itertools::Itertools;
 use launchpad::intervals::BoundFunctor;
-use noria::KeyComparison;
+use noria::{KeyComparison, ReplicationOffset};
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };
+use std::borrow::Cow;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 
@@ -46,7 +47,7 @@ const DEFAULT_CF: &str = "default";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 100_000;
 
-fn get_meta(db: &rocksdb::DB) -> PersistentMeta {
+fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
     db.get_pinned(META_KEY)
         .unwrap()
         .map(|data| bincode::deserialize(data.as_ref()).unwrap())
@@ -97,7 +98,7 @@ where
 
 /// Load the saved [`PersistentMeta`] from the database, increment its
 /// [epoch](PersistentMeta::epoch) by one, and return it
-fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta {
+fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta<'static> {
     let mut meta = get_meta(db);
     meta.epoch += 1;
     save_meta(db, &meta);
@@ -106,14 +107,14 @@ fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta {
 
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Default, Serialize, Deserialize)]
-struct PersistentMeta {
+struct PersistentMeta<'a> {
     /// Index information is stored in RocksDB to avoid rebuilding indices on recovery
     indices: Vec<Vec<usize>>,
     epoch: IndexEpoch,
 
     /// The latest replication offset that has been written to the base table backed by this
     /// [`PersistentState`]. Corresponds to [`PersistentState::replication_offset`]
-    replication_offset: usize,
+    replication_offset: Option<Cow<'a, ReplicationOffset>>,
 }
 
 #[derive(Clone)]
@@ -138,7 +139,7 @@ pub struct PersistentState {
     epoch: IndexEpoch,
     /// The latest replication offset that has been written to the base table backed by this
     /// [`PersistentState`]
-    replication_offset: usize,
+    replication_offset: Option<ReplicationOffset>,
     has_unique_index: bool,
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
@@ -150,7 +151,7 @@ impl State for PersistentState {
         &mut self,
         records: &mut Records,
         partial_tag: Option<Tag>,
-        replication_offset: Option<usize>,
+        replication_offset: Option<ReplicationOffset>,
     ) {
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
         if records.len() == 0 {
@@ -179,8 +180,8 @@ impl State for PersistentState {
         tokio::task::block_in_place(|| self.db().write_opt(batch, &opts)).unwrap();
     }
 
-    fn replication_offset(&self) -> Option<usize> {
-        Some(self.replication_offset)
+    fn replication_offset(&self) -> Option<&ReplicationOffset> {
+        self.replication_offset.as_ref()
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
@@ -442,7 +443,7 @@ impl PersistentState {
                 indices,
                 has_unique_index: primary_key.is_some(),
                 epoch: meta.epoch,
-                replication_offset: meta.replication_offset,
+                replication_offset: meta.replication_offset.map(|ro| ro.into_owned()),
                 db_opts: opts,
                 db: Some(db),
                 _directory: directory,
@@ -548,11 +549,11 @@ impl PersistentState {
     /// * The columns of the indices
     /// * The epoch
     /// * The replication offset
-    fn meta(&self) -> PersistentMeta {
+    fn meta(&self) -> PersistentMeta<'_> {
         PersistentMeta {
             indices: self.indices.iter().map(|i| i.columns.clone()).collect(),
             epoch: self.epoch,
-            replication_offset: self.replication_offset,
+            replication_offset: self.replication_offset().map(Cow::Borrowed),
         }
     }
 
@@ -565,10 +566,10 @@ impl PersistentState {
 
     /// Add an operation to the given [`WriteBatch`] to set the [replication
     /// offset](PersistentMeta::replication_offset) to the given value.
-    fn set_replication_offset(&mut self, batch: &mut WriteBatch, offset: usize) {
+    fn set_replication_offset(&mut self, batch: &mut WriteBatch, offset: ReplicationOffset) {
         // It's ok to read and update meta in two steps here since each State can (currently) only
         // be modified by a single thread.
-        self.replication_offset = offset;
+        self.replication_offset = Some(offset);
         save_meta(batch, &self.meta());
     }
 
@@ -1367,10 +1368,13 @@ mod tests {
         let mut state = setup_persistent("replication_offset_roundtrip");
         state.add_key(&Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
-        let replication_offset = Some(12);
-        state.process_records(&mut records, None, replication_offset);
+        let replication_offset = ReplicationOffset {
+            offset: 12,
+            replication_log_name: "binlog".to_owned(),
+        };
+        state.process_records(&mut records, None, Some(replication_offset.clone()));
         let result = state.replication_offset();
-        assert_eq!(result, replication_offset);
+        assert_eq!(result, Some(&replication_offset));
     }
 
     #[test]

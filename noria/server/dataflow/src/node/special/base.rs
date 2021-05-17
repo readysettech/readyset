@@ -2,10 +2,9 @@ use crate::prelude::*;
 use itertools::Either;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
-use noria::internal;
-use noria::{Modification, Operation, TableOperation};
+use noria::{internal, Modification, Operation, ReplicationOffset, TableOperation};
 use std::borrow::Cow;
-use std::cmp::{self, Ordering};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::iter;
@@ -24,7 +23,7 @@ pub struct BaseWrite {
     ///
     /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
-    pub replication_offset: Option<usize>,
+    pub replication_offset: Option<ReplicationOffset>,
 }
 
 impl From<Records> for BaseWrite {
@@ -179,7 +178,7 @@ impl Base {
         mut ops: Vec<TableOperation>,
         state: &StateMap,
     ) -> ReadySetResult<BaseWrite> {
-        let mut replication_offset = None;
+        let mut replication_offset: Option<ReplicationOffset> = None;
         if self.primary_key.is_none() || ops.is_empty() {
             let mut records = Vec::with_capacity(ops.len());
             for r in ops {
@@ -189,7 +188,7 @@ impl Base {
                         records.push(Record::Positive(r))
                     }
                     TableOperation::SetReplicationOffset(offset) => {
-                        replication_offset = cmp::max(replication_offset, Some(offset));
+                        offset.try_max_into(&mut replication_offset)?;
                     }
                     _ => {
                         internal!("unkeyed base got non-insert operation {:?}", r);
@@ -281,7 +280,7 @@ impl Base {
                     update
                 }
                 TableOperation::SetReplicationOffset(offset) => {
-                    replication_offset = cmp::max(replication_offset, Some(offset));
+                    offset.try_max_into(&mut replication_offset)?;
                     continue;
                 }
             };

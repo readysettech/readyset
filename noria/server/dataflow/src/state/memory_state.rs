@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use noria::KeyComparison;
+use noria::{KeyComparison, ReplicationOffset};
 use rand::{self, Rng};
 
 use crate::prelude::*;
@@ -82,7 +82,7 @@ impl State for MemoryState {
         &mut self,
         records: &mut Records,
         partial_tag: Option<Tag>,
-        _replication_offset: Option<usize>,
+        _replication_offset: Option<ReplicationOffset>,
     ) {
         if self.is_partial() {
             records.retain(|r| {
