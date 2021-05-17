@@ -9,6 +9,7 @@ members = [
     "noria/noria",
     "noria/server",
     "noria/applications",
+    "noria/clustertest",
     "noria/tools",
     "noria/noria-logictest",
     "noria/timestamp_service",
