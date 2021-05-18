@@ -3,7 +3,7 @@ use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::proto::MySerialize;
-use noria::ReadySetResult;
+use noria::{ReadySetError, ReadySetResult};
 use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -51,26 +51,24 @@ pub enum BinlogAction {
     /// Database schema has changed (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`)
     /// the contained value is the raw MySQL query
     SchemaChange(String),
-    /// Write new rows to the base table, each element in the vector contains the
-    /// entire row to be inserted
+    /// Write new rows to the base table, each element in the vector contains is
+    /// of type [`TableOperation::Insert`](noria::TableOperation)
     WriteRows {
         /// Base table name
         table: String,
-        rows: Vec<Vec<noria::DataType>>,
+        rows: Vec<noria::TableOperation>,
     },
-    /// Delete rows from the base table, each element in the vector contains the
-    /// entire row to be matched and deleted
+    /// Delete rows from the base table, each element in the vector contains is
+    /// of type [`TableOperation::DeleteRow`](noria::TableOperation)
     DeleteRows {
         table: String,
-        rows: Vec<Vec<noria::DataType>>,
+        rows: Vec<noria::TableOperation>,
     },
-    /// Update rows in the base table, the contained `Vec` holds tuples
-    /// of the changed rows, where the left element is the value of the row
-    /// before change, and the right element is the value of the row after
-    /// the change
+    /// Update rows in the base table, the vector contains pairs of DeleteRow and
+    /// Insert operations
     UpdateRows {
         table: String,
-        rows: Vec<(Vec<noria::DataType>, Vec<noria::DataType>)>,
+        rows: Vec<noria::TableOperation>,
     },
 }
 
@@ -97,6 +95,28 @@ impl PartialOrd for BinlogPosition {
         let other_suffix = other_suffix.parse::<u64>().ok()?;
 
         suffix.partial_cmp(&other_suffix)
+    }
+}
+
+impl TryFrom<&BinlogPosition> for noria::ReplicationOffset {
+    type Error = ReadySetError;
+
+    /// `ReplicationOffset` is a filename and a u128 offset
+    /// We use the binlog basefile name as the filename, and we use the binlog suffix for the top
+    /// 64 bits of the offset and the actual binlog offset for the lower 64 bits
+    fn try_from(value: &BinlogPosition) -> Result<Self, Self::Error> {
+        let (basename, suffix) = value.binlog_file.rsplit_once('.').ok_or_else(|| {
+            ReadySetError::ReplicationFailed(format!("Invalid binlog name {}", value.binlog_file))
+        })?;
+
+        let suffix = suffix.parse::<u128>().map_err(|_| {
+            ReadySetError::ReplicationFailed(format!("Invalid binlog suffix {}", value.binlog_file))
+        })?;
+
+        Ok(noria::ReplicationOffset {
+            offset: (suffix << 64) + (value.position as u128),
+            replication_log_name: basename.to_string(),
+        })
     }
 }
 
@@ -135,7 +155,9 @@ impl MySqlBinlogConnector {
 
         let mut buf = Vec::new();
         cmd.serialize(&mut buf);
-        self.connection.write_command_raw(buf).await
+        self.connection.write_command_raw(buf).await?;
+        self.connection.read_packet().await?;
+        Ok(())
     }
 
     /// Compute the checksum of the event and compare to the supplied checksum
@@ -211,6 +233,7 @@ impl MySqlBinlogConnector {
                     // This occurs when someone issues a FLUSH LOGS statement or the current binary log file becomes too large.
                     // The maximum size is determined by max_binlog_size.
                     let ev: events::RotateEvent = binlog_event.read_event()?;
+
                     self.next_position = Some(BinlogPosition {
                         binlog_file: ev.name().to_string(),
                         // This should never happen, but better to panic than to get the wrong position
@@ -269,9 +292,9 @@ impl MySqlBinlogConnector {
 
                     for row in ev.rows(&tme) {
                         // For each row in the event we produce a vector of Noria types that represent that row
-                        inserted_rows.push(binlog_row_to_noria_row(
+                        inserted_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
                             &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
-                        )?);
+                        )?));
                     }
 
                     return Ok((
@@ -296,26 +319,31 @@ impl MySqlBinlogConnector {
                         continue;
                     }
 
-                    let mut rows = Vec::new();
+                    let mut updated_rows = Vec::new();
 
                     for row in ev.rows(&tme) {
-                        // For each row in the event we produce a vector of Noria types that represent that row
+                        // For each row in the event we produce a pair of Noria table operations to
+                        // delete the previous entry and insert the new one
                         let row = &row?;
-                        let before = binlog_row_to_noria_row(row.0.as_ref().ok_or(format!(
-                            "Missing before rows in UPDATE_ROWS_EVENT {:?}",
-                            row
-                        ))?)?;
-                        let after = binlog_row_to_noria_row(row.1.as_ref().ok_or(format!(
-                            "Missing after rows in UPDATE_ROWS_EVENT {:?}",
-                            row
-                        ))?)?;
-                        rows.push((before, after))
+                        updated_rows.push(noria::TableOperation::DeleteRow {
+                            row: binlog_row_to_noria_row(row.0.as_ref().ok_or(format!(
+                                "Missing before rows in UPDATE_ROWS_EVENT {:?}",
+                                row
+                            ))?)?,
+                        });
+
+                        updated_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
+                            row.1.as_ref().ok_or(format!(
+                                "Missing after rows in UPDATE_ROWS_EVENT {:?}",
+                                row
+                            ))?,
+                        )?));
                     }
 
                     return Ok((
                         BinlogAction::UpdateRows {
                             table: tme.table_name().to_string(),
-                            rows,
+                            rows: updated_rows,
                         },
                         self.next_position.as_ref(),
                     ));
@@ -338,9 +366,11 @@ impl MySqlBinlogConnector {
 
                     for row in ev.rows(&tme) {
                         // For each row in the event we produce a vector of Noria types that represent that row
-                        deleted_rows.push(binlog_row_to_noria_row(
-                            &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
-                        )?);
+                        deleted_rows.push(noria::TableOperation::DeleteRow {
+                            row: binlog_row_to_noria_row(
+                                &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
+                            )?,
+                        });
                     }
 
                     return Ok((

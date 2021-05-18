@@ -1,9 +1,9 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::ReadySetResult;
+use noria::{consensus::Authority, ReadySetResult, ReplicationOffset};
 use tracing::info;
 
 use super::BinlogPosition;
@@ -159,9 +159,9 @@ impl MySqlReplicator {
     /// * `noria`: The target Noria deployment
     /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
     ///
-    pub async fn replicate_to_noria(
+    pub async fn replicate_to_noria<A: Authority>(
         mut self,
-        noria: &mut noria::ControllerHandle<noria::ZookeeperAuthority>,
+        noria: &mut noria::ControllerHandle<A>,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         // We must hold the locking connection open until replication is finished,
@@ -171,6 +171,7 @@ impl MySqlReplicator {
         info!("Acquired read lock");
 
         let binlog_position = self.get_binlog_position().await?;
+        let repl_offset: ReplicationOffset = (&binlog_position).try_into()?;
 
         // Even if we don't install the recipe, this will load the tables from the database
         let recipe = self.load_recipe().await?;
@@ -186,9 +187,13 @@ impl MySqlReplicator {
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
             let dumper = self.dump_table(&table_name).await?;
-            let table_mutator = noria.table(&table_name).await?;
+            let mut table_mutator = noria.table(&table_name).await?;
 
             info!("Replicating table `{}`", table_name);
+
+            table_mutator
+                .set_replication_offset(repl_offset.clone())
+                .await?;
 
             replication_tasks.push(tokio::spawn(Self::replicate_table(dumper, table_mutator)));
         }
