@@ -217,8 +217,7 @@ impl Base {
         let mut this_key: Vec<_> = match ops
             .iter()
             .map(|op| key_of(key_cols, op))
-            .filter(|k| k.len() != 0)
-            .next()
+            .find(|k| k.len() != 0)
         {
             Some(key) => key.cloned().collect(),
             None => {
