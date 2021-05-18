@@ -174,12 +174,13 @@ impl ColumnSpecification {
 
 fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let (remaining_input, (i, _, f)) = tuple((digit1, tag("."), digit1))(i)?;
-
+    let precision = f.len();
     Ok((
         remaining_input,
         Literal::FixedPoint(Real {
             integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
             fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap(),
+            precision: precision as i32,
         }),
     ))
 }
