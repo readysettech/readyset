@@ -310,7 +310,13 @@ async fn check_query(
                         DataType::UnsignedInt(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
                         DataType::UnsignedBigInt(i) => i.to_string(),
-                        DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
+                        DataType::Real(i, f, p) => {
+                            format!(
+                                "{num:.prec$}",
+                                num = i as f64 + (f as f64 * 1.0e-9),
+                                prec = p as usize
+                            )
+                        }
                         DataType::Text(_) | DataType::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()

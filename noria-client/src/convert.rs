@@ -36,8 +36,8 @@ impl ToDataType for Literal {
             Literal::FixedPoint(Real {
                 integral,
                 fractional,
-                _,
-            }) => DataType::Real(integral as i64, fractional as i32),
+                precision,
+            }) => DataType::Real(integral as i64, fractional as i32, precision as u8),
             Literal::CurrentDate => {
                 DataType::Timestamp(chrono::Local::today().and_hms(0, 0, 0).naive_local())
             }
