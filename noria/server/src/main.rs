@@ -166,7 +166,15 @@ If specified, overrides the value of --external-address"))
                 .help("Verbose log output."),
         )
         .arg(
+            Arg::with_name("primary-region")
+                .long("primary-region")
+                .takes_value(true)
+                .env("NORIA_PRIMARY_REGION")
+                .help("The region where the controller is hosted in."),
+        )
+        .arg(
             Arg::with_name("region")
+                .long("region")
             .default_value("")
             .env("NORIA_REGION")
             .help("The region the worker is hosted in. Required to route view requests to specific regions."),
@@ -224,6 +232,10 @@ If specified, overrides the value of --external-address"))
 
     if let Some(r) = matches.value_of("region") {
         builder.set_region(r.into());
+    }
+
+    if let Some(pr) = matches.value_of("primary-region") {
+        builder.set_primary_region(pr.into());
     }
 
     let mut persistence_params = noria_server::PersistenceParameters::new(
