@@ -5346,3 +5346,246 @@ async fn col_beginning_with_literal() {
 
     // TODO Verify that q1 returns correct values.
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_int_to_int() {
+    let mut g = start_simple_unsharded("round_int_to_int").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int);
+         VIEW roundinttoint: SELECT round(value, -3) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundinttoint").await.unwrap();
+
+    t.insert(vec![DataType::try_from(888i32).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![1000]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_float_to_float() {
+    let mut g = start_simple_unsharded("round_float_to_float").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value double);
+         VIEW roundfloattofloat: SELECT round(value, 2) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundfloattofloat").await.unwrap();
+
+    t.insert(vec![DataType::try_from(2.2222_f64).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| f64::try_from(&r["r"]).unwrap())
+        .collect::<Vec<f64>>();
+
+    assert_eq!(res, vec![2.22_f64]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_float_to_int() {
+    let mut g = start_simple_unsharded("round_float_to_int").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value double);
+         VIEW roundfloattoint: SELECT round(value, 0) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundfloattoint").await.unwrap();
+
+    t.insert(vec![DataType::try_from(2.2222_f64).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![2]);
+}
+
+// This test checks a behavior that MySQL has of coercing floats into ints if the expected field
+// type should be int. This means we should be able to pass in a float as the precision and have it
+// rounded to an int for us.
+#[tokio::test(flavor = "multi_thread")]
+async fn round_with_precision_float() {
+    let mut g = start_simple_unsharded("round_with_precision_float").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value double);
+         VIEW roundwithprecisionfloat: SELECT round(value, -1.0) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundwithprecisionfloat").await.unwrap();
+
+    t.insert(vec![DataType::try_from(123.0_f64).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![120]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_bigint_to_bigint() {
+    let mut g = start_simple_unsharded("round_bigint_to_bigint").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value bigint);
+         VIEW roundbiginttobigint: SELECT round(value, -3) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundbiginttobigint").await.unwrap();
+
+    t.insert(vec![DataType::try_from(888i32).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i64::try_from(&r["r"]).unwrap())
+        .collect::<Vec<i64>>();
+
+    assert_eq!(res, vec![1000]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_unsignedint_to_unsignedint() {
+    let mut g = start_simple_unsharded("round_unsignedint_to_unsignedint").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int unsigned);
+         VIEW roundunsignedtounsigned: SELECT round(value, -3) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundunsignedtounsigned").await.unwrap();
+
+    t.insert(vec![DataType::try_from(888i32).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| u32::try_from(&r["r"]).unwrap())
+        .collect::<Vec<u32>>();
+
+    assert_eq!(res, vec![1000]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_unsignedbigint_to_unsignedbitint() {
+    let mut g = start_simple_unsharded("round_unsignedbigint_to_unsignedbitint").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value bigint unsigned);
+         VIEW roundunsignedbiginttounsignedbigint: SELECT round(value, -3) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundunsignedbiginttounsignedbigint").await.unwrap();
+
+    t.insert(vec![DataType::try_from(888i32).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| u64::try_from(&r["r"]).unwrap())
+        .collect::<Vec<u64>>();
+
+    assert_eq!(res, vec![1000]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn round_with_no_precision() {
+    let mut g = start_simple_unsharded("round_with_no_precision").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value bigint unsigned);
+         VIEW roundwithnoprecision: SELECT round(value) as r FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("roundwithnoprecision").await.unwrap();
+
+    t.insert(vec![DataType::try_from(56.2578_f64).unwrap()])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![56]);
+}

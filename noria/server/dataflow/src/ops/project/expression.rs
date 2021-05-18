@@ -1,5 +1,5 @@
-use std::borrow::Cow;
 use std::fmt;
+use std::{borrow::Cow, cmp::min};
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
@@ -29,6 +29,8 @@ pub enum BuiltinFunction {
     Timediff(Box<ProjectExpression>, Box<ProjectExpression>),
     /// addtime(expr, expr)
     Addtime(Box<ProjectExpression>, Box<ProjectExpression>),
+    /// round(expr, prec)
+    Round(Box<ProjectExpression>, Box<ProjectExpression>),
 }
 
 impl BuiltinFunction {
@@ -77,6 +79,16 @@ impl BuiltinFunction {
                     Box::new(args.next().ok_or_else(arity_error)?),
                 ))
             }
+            "round" => {
+                let arity_error = || ReadySetError::ArityError("round".to_owned());
+                Ok(Self::Round(
+                    Box::new(args.next().ok_or_else(arity_error)?),
+                    Box::new(
+                        args.next()
+                            .unwrap_or(ProjectExpression::Literal(DataType::Int(0))),
+                    ),
+                ))
+            }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
         }
     }
@@ -104,6 +116,9 @@ impl fmt::Display for BuiltinFunction {
             }
             Addtime(arg1, arg2) => {
                 write!(f, "addtime({}, {})", arg1, arg2)
+            }
+            Round(arg1, precision) => {
+                write!(f, "round({}, {})", arg1, precision)
             }
         }
     }
@@ -295,6 +310,62 @@ impl ProjectExpression {
                         )))))
                     }
                 }
+                BuiltinFunction::Round(arg1, arg2) => {
+                    let expr = arg1.eval(record)?;
+                    let param2 = arg2.eval(record)?;
+                    let rnd_prec = match non_null!(param2) {
+                        DataType::Int(inner) => *inner as i32,
+                        DataType::UnsignedInt(inner) => *inner as i32,
+                        DataType::BigInt(inner) => *inner as i32,
+                        DataType::UnsignedBigInt(inner) => *inner as i32,
+                        DataType::Real(m, e, s, _) => {
+                            ((*m as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)).round() as i32
+                        }
+                        _ => 0,
+                    };
+
+                    match non_null!(expr) {
+                        DataType::Real(val, dec, prec) => {
+                            if rnd_prec > 0 {
+                                // If rounding precision is positive, than we keep the returned
+                                // type as a float. We never return greater precision than was
+                                // stored so we choose the minimum of stored precision or rounded
+                                // precision.
+                                let out_prec = min(*prec, rnd_prec as u8);
+                                let out_dec = (*dec as f64
+                                    / 10_i32.pow(num_len(*dec) - out_prec as u32) as f64)
+                                    .round() as i32;
+                                Ok(Cow::Owned(DataType::Real(*val, out_dec, out_prec)))
+                            } else {
+                                // Rounding precision is negative, so we need to convert to a
+                                // rounded int.
+                                let rounded = ((*val as f64 + (*dec as f64 * 1e-9))
+                                    / 10_i32.pow(-rnd_prec as u32) as f64)
+                                    .round() as i32
+                                    * 10_i32.pow(-rnd_prec as u32);
+                                Ok(Cow::Owned(DataType::Int(rounded)))
+                            }
+                        }
+                        DataType::Int(val) => {
+                            if rnd_prec > 0 {
+                                // We never display a precision greater than stored.
+                                Ok(Cow::Owned(DataType::Int(*val)))
+                            } else {
+                                // We've gotten a negative precision, so we should integer round
+                                // accordingly.
+                                let rounded = (*val as f64 / 10_i32.pow(-rnd_prec as u32) as f64)
+                                    .round() as i32
+                                    * 10_i32.pow(-rnd_prec as u32);
+                                Ok(Cow::Owned(DataType::Int(rounded)))
+                            }
+                        }
+                        _ => Err(ReadySetError::ProjectExpressionBuiltInFunctionError {
+                            function: "round".to_string(),
+                            message: "expression does not result in a type that can be rounded."
+                                .to_string(),
+                        }),
+                    }
+                }
             },
         }
     }
@@ -318,6 +389,61 @@ impl ProjectExpression {
                 BuiltinFunction::Month(_) => Ok(Some(SqlType::Int(32))),
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
+                BuiltinFunction::Round(e1, prec) => match **e1 {
+                    ProjectExpression::Literal(DataType::Real(_, _, _)) => {
+                        match **prec {
+                            // Precision should always be coercable to a DataType::Int.
+                            ProjectExpression::Literal(DataType::Int(p)) => {
+                                if p < 0 {
+                                    // Precision is negative, which means that we will be returning a rounded Int.
+                                    Ok(Some(SqlType::Int(32)))
+                                } else {
+                                    // Precision is positive so we will continue to return a Real.
+                                    Ok(Some(SqlType::Real))
+                                }
+                            }
+                            ProjectExpression::Literal(DataType::BigInt(p)) => {
+                                if p < 0 {
+                                    // Precision is negative, which means that we will be returning a rounded Int.
+                                    Ok(Some(SqlType::Int(32)))
+                                } else {
+                                    // Precision is positive so we will continue to return a Real.
+                                    Ok(Some(SqlType::Real))
+                                }
+                            }
+                            ProjectExpression::Literal(DataType::UnsignedInt(_)) => {
+                                // Precision is positive so we will continue to return a Real.
+                                Ok(Some(SqlType::Real))
+                            }
+                            ProjectExpression::Literal(DataType::UnsignedBigInt(_)) => {
+                                // Precision is positive so we will continue to return a Real.
+                                Ok(Some(SqlType::Real))
+                            }
+                            ProjectExpression::Literal(DataType::Real(_, _, s, _)) => {
+                                if s < 0 {
+                                    // Precision is negative, which means that we will be returning a rounded Int.
+                                    Ok(Some(SqlType::Int(32)))
+                                } else {
+                                    // Precision is positive so we will continue to return a Real.
+                                    Ok(Some(SqlType::Real))
+                                }
+                            }
+                            _ => e1.sql_type(parent_column_type),
+                        }
+                    }
+                    // For all other numeric types we always return the same type as they are.
+                    ProjectExpression::Literal(DataType::UnsignedInt(_)) => {
+                        Ok(Some(SqlType::UnsignedInt(32)))
+                    }
+                    ProjectExpression::Literal(DataType::UnsignedBigInt(_)) => {
+                        Ok(Some(SqlType::UnsignedBigint(32)))
+                    }
+                    ProjectExpression::Literal(DataType::BigInt(_)) => {
+                        Ok(Some(SqlType::Bigint(32)))
+                    }
+                    ProjectExpression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(32))),
+                    _ => e1.sql_type(parent_column_type),
+                },
             },
         }
     }
@@ -383,6 +509,17 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MysqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
     time1.add(*time2)
+}
+
+// num_len gets the length of a number in an efficient way not involving string conversion.
+fn num_len(num: i32) -> u32 {
+    let mut len = 0_u32;
+    let mut n = num;
+    while n > 0 {
+        n /= 10;
+        len += 1;
+    }
+    len
 }
 
 #[cfg(test)]
@@ -788,6 +925,70 @@ mod tests {
                 (param2 * 1_000_000_f64) as i64
             ))))
         );
+    }
+
+    #[test]
+    fn eval_call_round() {
+        let expr = Call(BuiltinFunction::Round(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let number = 4.12345;
+        let precision = 3;
+        let param1 = DataType::try_from(number).unwrap();
+        let param2 = DataType::Int(precision);
+        let want = Cow::Owned(DataType::try_from(4.123_f64).unwrap());
+        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+    }
+
+    #[test]
+    fn eval_call_round_with_negative_precision() {
+        let expr = Call(BuiltinFunction::Round(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let number = 52.12345;
+        let precision = -1;
+        let param1 = DataType::try_from(number).unwrap();
+        let param2 = DataType::Int(precision);
+        let want = Cow::Owned(DataType::try_from(50).unwrap());
+        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+    }
+
+    #[test]
+    fn eval_call_round_with_float_precision() {
+        let expr = Call(BuiltinFunction::Round(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let number = 52.12345;
+        let precision = -1.0_f64;
+        let param1 = DataType::try_from(number).unwrap();
+        let param2 = DataType::try_from(precision).unwrap();
+        let want = Cow::Owned(DataType::try_from(50).unwrap());
+        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+    }
+
+    // This is actually straight from MySQL:
+    // mysql> SELECT ROUND(123.3, "banana");
+    // +------------------------+
+    // | ROUND(123.3, "banana") |
+    // +------------------------+
+    // |                    123 |
+    // +------------------------+
+    // 1 row in set, 2 warnings (0.00 sec)
+    #[test]
+    fn eval_call_round_with_banana() {
+        let expr = Call(BuiltinFunction::Round(
+            Box::new(Column(0)),
+            Box::new(Column(1)),
+        ));
+        let number = 52.12345;
+        let precision = "banana";
+        let param1 = DataType::try_from(number).unwrap();
+        let param2 = DataType::try_from(precision).unwrap();
+        let want = Cow::Owned(DataType::try_from(52).unwrap());
+        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
     }
 
     #[test]
