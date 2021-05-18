@@ -422,6 +422,7 @@ pub(crate) struct Config {
     pub(crate) quorum: usize,
     pub(crate) reuse: ReuseConfigType,
     pub(crate) threads: Option<usize>,
+    pub(crate) primary_region: Option<String>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -446,6 +447,7 @@ impl Default for Config {
             threads: Some(2),
             #[cfg(not(any(debug_assertions, test)))]
             threads: None,
+            primary_region: None,
         }
     }
 }

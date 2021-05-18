@@ -122,6 +122,11 @@ impl Builder {
         self.region = Some(region);
     }
 
+    /// Sets the primary region for Noria.
+    pub fn set_primary_region(&mut self, region: String) {
+        self.config.primary_region = Some(region);
+    }
+
     /// Start a server instance and return a handle to it.
     #[must_use]
     pub fn start<A: Authority + 'static>(
