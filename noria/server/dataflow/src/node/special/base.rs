@@ -154,7 +154,10 @@ fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
     }
 }
 
-fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
+fn key_of<'a>(
+    key_cols: &'a [usize],
+    r: &'a TableOperation,
+) -> impl Iterator<Item = &'a DataType> + ExactSizeIterator {
     if matches!(r, TableOperation::SetReplicationOffset(_)) {
         Either::Left(iter::empty())
     } else {
@@ -211,7 +214,31 @@ impl Base {
         ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
 
         // starting key
-        let mut this_key: Vec<_> = key_of(key_cols, &ops[0]).cloned().collect();
+        let mut this_key: Vec<_> = match ops
+            .iter()
+            .map(|op| key_of(key_cols, op))
+            .filter(|k| k.len() != 0)
+            .next()
+        {
+            Some(key) => key.cloned().collect(),
+            None => {
+                // Only ops without a key, so just iterate through them finding the max
+                // replication offset and return that
+                let replication_offset =
+                    ops.iter()
+                        .try_fold(None, |mut offs, op| -> ReadySetResult<_> {
+                            if let TableOperation::SetReplicationOffset(offset) = op {
+                                offset.try_max_into(&mut offs)?;
+                            }
+                            Ok(offs)
+                        })?;
+
+                return Ok(BaseWrite {
+                    records: Default::default(),
+                    replication_offset,
+                });
+            }
+        };
 
         // starting record state
         let db = match state.get(us) {

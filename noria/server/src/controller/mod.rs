@@ -466,7 +466,7 @@ mod tests {
             noria
                 .extend_recipe(
                     "CREATE TABLE t1 (id int);
-             CREATE TABLE t2 (id int);",
+                     CREATE TABLE t2 (id int);",
                 )
                 .await
                 .unwrap();
@@ -499,12 +499,40 @@ mod tests {
         }
 
         #[tokio::test(flavor = "multi_thread")]
+        async fn same_log_with_pkey() {
+            let mut noria = start_simple("replication_offsets").await;
+            noria
+                .extend_recipe("CREATE TABLE t1 (id int primary key);")
+                .await
+                .unwrap();
+            let mut t1 = noria.table("t1").await.unwrap();
+
+            t1.set_replication_offset(ReplicationOffset {
+                offset: 1,
+                replication_log_name: "binlog".to_owned(),
+            })
+            .await
+            .unwrap();
+
+            sleep().await;
+
+            let offset = noria.replication_offset().await.unwrap();
+            assert_eq!(
+                offset,
+                Some(ReplicationOffset {
+                    offset: 1,
+                    replication_log_name: "binlog".to_owned(),
+                })
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
         async fn different_log() {
             let mut noria = start_simple("replication_offsets").await;
             noria
                 .extend_recipe(
                     "CREATE TABLE t1 (id int);
-             CREATE TABLE t2 (id int);",
+                     CREATE TABLE t2 (id int);",
                 )
                 .await
                 .unwrap();
