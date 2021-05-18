@@ -1,9 +1,9 @@
 use crate::connector::{BinlogAction, BinlogPosition, MySqlBinlogConnector};
 use crate::snapshot::MySqlReplicator;
-use noria::consensus::Authority;
+use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
-use std::collections::hash_map;
 use std::collections::HashMap;
+use std::{collections::hash_map, convert::TryInto};
 use tracing::info;
 
 /// An adapter that converts binlog actions into Noria API calls
@@ -13,7 +13,7 @@ pub struct MySqlNoriaAdapter<A: Authority + 'static> {
     /// The binlog reader
     connector: MySqlBinlogConnector,
     /// A map of cached table mutators
-    mutator_map: HashMap<String, (Table, Vec<usize>)>,
+    mutator_map: HashMap<String, Table>,
 }
 
 #[derive(Default)]
@@ -162,7 +162,11 @@ impl Builder {
 
 impl<A: Authority> MySqlNoriaAdapter<A> {
     /// Handle a single BinlogAction by calling the proper Noria RPC
-    async fn handle_action(&mut self, action: BinlogAction) -> Result<(), ReadySetError> {
+    async fn handle_action(
+        &mut self,
+        action: BinlogAction,
+        pos: Option<ReplicationOffset>,
+    ) -> Result<(), ReadySetError> {
         match action {
             BinlogAction::SchemaChange(schema) => {
                 // Send the query to Noria as is
@@ -171,39 +175,16 @@ impl<A: Authority> MySqlNoriaAdapter<A> {
                 Ok(())
             }
 
-            BinlogAction::WriteRows { table, rows } => {
+            BinlogAction::WriteRows { table, mut rows }
+            | BinlogAction::DeleteRows { table, mut rows }
+            | BinlogAction::UpdateRows { table, mut rows } => {
                 // Send the rows as are
-                let (table_mutator, _) = self.mutator_for_table(table).await?;
-                table_mutator.insert_many(rows).await
-            }
-
-            BinlogAction::DeleteRows { table, rows } => {
-                // For delete operations we must first convert the "before_cols" to key cols
-                let (table_mutator, key_indices) = self.mutator_for_table(table).await?;
-
-                for row in rows {
-                    table_mutator
-                        .delete(cols_to_key_cols(row, &key_indices))
-                        .await?;
+                let table_mutator = self.mutator_for_table(table).await?;
+                if let Some(offset) = pos {
+                    // Update the replication offset
+                    rows.push(TableOperation::SetReplicationOffset(offset));
                 }
-                Ok(())
-            }
-
-            BinlogAction::UpdateRows { table, rows } => {
-                // For update operations we must first convert the "before_cols" to key cols
-                let (table_mutator, key_indices) = self.mutator_for_table(table).await?;
-
-                for row in rows {
-                    let (before, after) = row;
-                    table_mutator
-                        .update(
-                            cols_to_key_cols(before, &key_indices),
-                            cols_to_modification_vec(after),
-                        )
-                        .await?;
-                }
-
-                Ok(())
+                table_mutator.perform_all(rows).await
             }
         }
     }
@@ -211,9 +192,10 @@ impl<A: Authority> MySqlNoriaAdapter<A> {
     /// Loop over the actions
     async fn main_loop(&mut self) -> ReadySetResult<()> {
         loop {
-            let (action, _position) = self.connector.next_action().await?;
+            let (action, position) = self.connector.next_action().await?;
             info!("{:?}", action);
-            if let Err(err) = self.handle_action(action).await {
+            let offset = position.map(|r| r.try_into()).transpose()?;
+            if let Err(err) = self.handle_action(action, offset).await {
                 tracing::error!("{}", err);
             }
         }
@@ -227,70 +209,13 @@ impl<A: Authority> MySqlNoriaAdapter<A> {
 
     /// Get a mutator for a noria table from the cache if available, or fetch a new one
     /// from the controller and cache it
-    async fn mutator_for_table(
-        &mut self,
-        name: String,
-    ) -> Result<(&mut Table, &[usize]), ReadySetError> {
+    async fn mutator_for_table(&mut self, name: String) -> Result<&mut Table, ReadySetError> {
         match self.mutator_map.entry(name) {
-            hash_map::Entry::Occupied(o) => {
-                let (table, key_indices) = o.into_mut();
-                Ok((table, key_indices))
-            }
+            hash_map::Entry::Occupied(o) => Ok(o.into_mut()),
             hash_map::Entry::Vacant(v) => {
                 let table = self.noria.table(v.key()).await?;
-                let key_indices =
-                    key_indices_for_schema(table.schema().expect("Schema for base table"))?;
-                let (table, key_indices) = v.insert((table, key_indices));
-                Ok((table, key_indices))
+                Ok(v.insert(table))
             }
         }
     }
-}
-
-/// Attempt to decide which column indices of the schema are the key columns
-fn key_indices_for_schema(
-    schema: &nom_sql::CreateTableStatement,
-) -> Result<Vec<usize>, ReadySetError> {
-    let mut key_indices = Vec::with_capacity(2); // Most tables will have 1 key column, few have 2
-    let primary_key_columns = schema
-        .keys
-        .as_ref()
-        .and_then(|keys| {
-            keys.iter().find_map(|key| match key {
-                // Right now noria is unable to perform updates on tables with no primary key defined
-                nom_sql::TableKey::PrimaryKey(ref cols) => Some(cols),
-                _ => None,
-            })
-        })
-        .ok_or(ReadySetError::EmptyKey)?;
-
-    for (idx, field) in schema.fields.iter().enumerate() {
-        if primary_key_columns.contains(&field.column) {
-            key_indices.push(idx)
-        }
-    }
-
-    Ok(key_indices)
-}
-
-fn cols_to_modification_vec(sql_cols: Vec<noria::DataType>) -> Vec<(usize, noria::Modification)> {
-    sql_cols
-        .into_iter()
-        .enumerate()
-        .map(|(idx, val)| (idx, noria::Modification::Set(val)))
-        .collect::<Vec<_>>()
-}
-
-fn cols_to_key_cols(sql_cols: Vec<noria::DataType>, key_indices: &[usize]) -> Vec<noria::DataType> {
-    sql_cols
-        .into_iter()
-        .enumerate()
-        .filter_map(|(idx, val)| {
-            if key_indices.contains(&idx) {
-                Some(val)
-            } else {
-                None
-            }
-        })
-        .collect()
 }
