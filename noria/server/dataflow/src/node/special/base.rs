@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use itertools::Either;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
 use noria::{internal, Modification, Operation, ReplicationOffset, TableOperation};
@@ -7,7 +6,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::iter;
 use vec_map::VecMap;
 
 /// A batch of writes to be persisted to the state backing a [`Base`] node
@@ -154,36 +152,29 @@ fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
     }
 }
 
-fn key_of<'a>(
-    key_cols: &'a [usize],
-    r: &'a TableOperation,
-) -> impl Iterator<Item = &'a DataType> + ExactSizeIterator {
-    if matches!(r, TableOperation::SetReplicationOffset(_)) {
-        Either::Left(iter::empty())
-    } else {
-        Either::Right(
-            key_cols
-                .iter()
-                .enumerate()
-                // unwrap: we already know it's not a SetReplicationOffset
-                .map(move |(i, col)| key_val(i, *col, r).unwrap()),
-        )
-    }
+fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
+    key_cols
+        .iter()
+        .enumerate()
+        .filter_map(move |(i, col)| key_val(i, *col, r))
 }
 
 impl Base {
-    pub(in crate::node) fn take(&mut self) -> Self {
+    pub(in crate::node) fn take(&self) -> Self {
         Clone::clone(self)
     }
 
+    /// Apply the list of `TableOperation` to the base table
     pub(in crate::node) fn process(
         &mut self,
         us: LocalNodeIndex,
         mut ops: Vec<TableOperation>,
         state: &StateMap,
     ) -> ReadySetResult<BaseWrite> {
+        // Keep track of the maximal replication offset in the list, if any
         let mut replication_offset: Option<ReplicationOffset> = None;
         if self.primary_key.is_none() || ops.is_empty() {
+            // This is a non keyed table, can only apply non-keyed operations
             let mut records = Vec::with_capacity(ops.len());
             for r in ops {
                 match r {
@@ -211,29 +202,22 @@ impl Base {
         }
 
         let key_cols = &self.primary_key.as_ref().unwrap()[..];
+        // Sort all of the operations lexicographically by key types, all unkeyed operations will move
+        // to the front of the vector (which can only be `SetReplicationOffset`)
         ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
+        let mut ops = ops.into_iter().peekable();
 
-        // starting key
-        let mut this_key: Vec<_> = match ops
-            .iter()
-            .map(|op| key_of(key_cols, op))
-            .find(|k| k.len() != 0)
-        {
-            Some(key) => key.cloned().collect(),
+        while let Some(TableOperation::SetReplicationOffset(offset)) = ops.peek() {
+            // Process all of the `SetReplicationOffset` ops, then proceed to the keyed operations as usual
+            offset.try_max_into(&mut replication_offset)?;
+            ops.next();
+        }
+
+        let mut this_key: Vec<_> = match ops.peek() {
+            Some(op) => key_of(key_cols, op).cloned().collect(),
             None => {
-                // Only ops without a key, so just iterate through them finding the max
-                // replication offset and return that
-                let replication_offset =
-                    ops.iter()
-                        .try_fold(None, |mut offs, op| -> ReadySetResult<_> {
-                            if let TableOperation::SetReplicationOffset(offset) = op {
-                                offset.try_max_into(&mut offs)?;
-                            }
-                            Ok(offs)
-                        })?;
-
                 return Ok(BaseWrite {
-                    records: Default::default(),
+                    records: Records::default(),
                     replication_offset,
                 });
             }

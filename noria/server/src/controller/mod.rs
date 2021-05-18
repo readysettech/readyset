@@ -507,10 +507,18 @@ mod tests {
                 .unwrap();
             let mut t1 = noria.table("t1").await.unwrap();
 
-            t1.set_replication_offset(ReplicationOffset {
-                offset: 1,
-                replication_log_name: "binlog".to_owned(),
-            })
+            t1.perform_all(vec![
+                noria::TableOperation::Insert(vec![noria::DataType::BigInt(10)]),
+                noria::TableOperation::SetReplicationOffset(ReplicationOffset {
+                    offset: 1,
+                    replication_log_name: "binlog".to_owned(),
+                }),
+                noria::TableOperation::Insert(vec![noria::DataType::BigInt(20)]),
+                noria::TableOperation::SetReplicationOffset(ReplicationOffset {
+                    offset: 6,
+                    replication_log_name: "binlog".to_owned(),
+                }),
+            ])
             .await
             .unwrap();
 
@@ -520,7 +528,7 @@ mod tests {
             assert_eq!(
                 offset,
                 Some(ReplicationOffset {
-                    offset: 1,
+                    offset: 6,
                     replication_log_name: "binlog".to_owned(),
                 })
             );
