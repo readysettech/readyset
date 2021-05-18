@@ -151,6 +151,7 @@ mod tests {
                     Expression::Literal(Literal::FixedPoint(Real {
                         integral: -19216,
                         fractional: 5479744,
+                        precision: 7,
                     }),),
                 ),],
                 where_clause: expected_where_cond,

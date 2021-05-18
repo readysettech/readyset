@@ -95,6 +95,7 @@ impl fmt::Display for SqlType {
 pub struct Real {
     pub integral: i32,
     pub fractional: i32,
+    pub precision: i32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -906,6 +907,7 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
                 unpack(tup.1)
             },
             fractional: unpack(tup.3) as i32,
+            precision: tup.3.len() as i32,
         })
     })(i)
 }
