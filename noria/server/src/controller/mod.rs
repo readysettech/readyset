@@ -12,8 +12,9 @@ use noria::ControllerDescriptor;
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread::{self, sleep, JoinHandle};
 use std::time;
+use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
 use url::Url;
@@ -292,20 +293,14 @@ where
                 // note: the campaign sender gets closed when we become the leader, so don't
                 // try to receive from it any more
                 req = self.campaign_rx.recv(), if self.inner.is_none() => {
-                    if let Some(req) = req {
-                        self.handle_campaign_update(req).await?;
-                    }
-                    else {
-                        if self.inner.is_some() {
-                            info!(self.log, "leadership campaign terminated normally");
-                        }
-                        else {
-                            // this shouldn't ever happen: if the leadership campaign thread fails,
-                            // it should send a `CampaignError` that we handle above first before
-                            // ever hitting this bit
-                            // still, good to be doubly sure
-                            internal!("leadership sender dropped without being elected");
-                        }
+                    match req {
+                        Some(req) => self.handle_campaign_update(req).await?,
+                        None if self.inner.is_some() => info!(self.log, "leadership campaign terminated normally"),
+                        // this shouldn't ever happen: if the leadership campaign thread fails,
+                        // it should send a `CampaignError` that we handle above first before
+                        // ever hitting this bit
+                        // still, good to be doubly sure
+                        _ => internal!("leadership sender dropped without being elected"),
                     }
                 }
                 _ = shutdown_stream.next() => {
@@ -330,8 +325,10 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
     descriptor: ControllerDescriptor,
     config: Config,
     rt_handle: tokio::runtime::Handle,
+    region: Option<String>,
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
+    let handle = rt_handle.clone();
     let campaign_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
         let payload_to_event = |payload: Vec<u8>| -> Result<CampaignUpdate, anyhow::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
@@ -340,13 +337,16 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
             Ok(CampaignUpdate::LeaderChange(state, descriptor))
         };
 
+        let mut retries = 5;
         loop {
             // WORKER STATE - watch for leadership changes
             //
             // If there is currently a leader, then loop until there is a period without a
             // leader, notifying the main thread every time a leader change occurs.
+            eprintln!("Checking if there's a leader");
             let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
+                retries = 5;
                 epoch = leader.0;
                 rt_handle.block_on(async {
                     event_tx
@@ -364,6 +364,31 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
                     }
                     Ok::<(), anyhow::Error>(())
                 })?;
+            }
+
+            // We check if there's a primary region configured
+            if let Some(pr) = &config.primary_region {
+                match &region {
+                    // If there's a primary region configured and we are in the same region,
+                    // then we can try to become leader.
+                    Some(r) if pr == r => (),
+                    // Otherwise, we won't participate on leader election, and will
+                    // only continue checking if the leader changed.
+                    _ => {
+                        // We decrease our retry counter.
+                        retries -= 1;
+                        // If we reached the maximum number of retries, this means no other Worker
+                        // was present on the primary region to take over as the new Controller.
+                        // Hence, we just return an error and exit.
+                        if retries <= 0 {
+                            internal!("After five attempts to find a leader, no leader was elected in the primary region.")
+                        }
+                        // If we didn't reach the maximum number of retries, then sleep
+                        // for a while before starting the whole process again.
+                        sleep(Duration::from_secs(5));
+                        continue;
+                    }
+                }
             }
 
             // ELECTION STATE - attempt to become leader
@@ -426,7 +451,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
         .name("srv-zk".to_owned())
         .spawn(move || {
             if let Err(e) = campaign_inner(event_tx.clone()) {
-                let _ = event_tx.send(CampaignUpdate::CampaignError(e));
+                let _ = handle.block_on(event_tx.send(CampaignUpdate::CampaignError(e)));
             }
         })
         .unwrap()
