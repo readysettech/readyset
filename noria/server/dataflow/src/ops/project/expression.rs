@@ -347,17 +347,20 @@ impl ProjectExpression {
                             }
                         }
                         DataType::Int(val) => {
-                            if rnd_prec > 0 {
-                                // We never display a precision greater than stored.
-                                Ok(Cow::Owned(DataType::Int(*val)))
-                            } else {
-                                // We've gotten a negative precision, so we should integer round
-                                // accordingly.
-                                let rounded = (*val as f64 / 10_i32.pow(-rnd_prec as u32) as f64)
-                                    .round() as i32
-                                    * 10_i32.pow(-rnd_prec as u32);
-                                Ok(Cow::Owned(DataType::Int(rounded)))
-                            }
+                            let rounded = integer_rnd(*val as i64, rnd_prec) as i32;
+                            Ok(Cow::Owned(DataType::Int(rounded)))
+                        }
+                        DataType::BigInt(val) => {
+                            let rounded = integer_rnd(*val, rnd_prec);
+                            Ok(Cow::Owned(DataType::BigInt(rounded)))
+                        }
+                        DataType::UnsignedInt(val) => {
+                            let rounded = unsigned_rnd(*val as u64, rnd_prec) as u32;
+                            Ok(Cow::Owned(DataType::UnsignedInt(rounded)))
+                        }
+                        DataType::UnsignedBigInt(val) => {
+                            let rounded = unsigned_rnd(*val, rnd_prec);
+                            Ok(Cow::Owned(DataType::UnsignedBigInt(rounded)))
                         }
                         _ => Err(ReadySetError::ProjectExpressionBuiltInFunctionError {
                             function: "round".to_string(),
@@ -509,6 +512,26 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MysqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
     time1.add(*time2)
+}
+
+// Round the given integer provided negative precision. No-op if precision is positive (decimal
+// rounding)
+fn integer_rnd(val: i64, prec: i32) -> i64 {
+    if prec > 0 {
+        // No-op case.
+        return val;
+    }
+    ((val as f64 / 10.0_f64.powf(-(prec as f64))).round() * 10.0_f64.powf(-(prec as f64))) as i64
+}
+
+// Round the given unsigned integer provided negative precision. No-op if precision is positive (decimal
+// rounding)
+fn unsigned_rnd(val: u64, prec: i32) -> u64 {
+    if prec > 0 {
+        // No-op case.
+        return val;
+    }
+    ((val as f64 / 10.0_f64.powf(-(prec as f64))).round() * 10.0_f64.powf(-(prec as f64))) as u64
 }
 
 // num_len gets the length of a number in an efficient way not involving string conversion.
