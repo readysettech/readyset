@@ -149,8 +149,9 @@ mod tests {
                 fields: vec![(
                     Column::from("hotness"),
                     Expression::Literal(Literal::FixedPoint(Real {
-                        integral: -19216,
-                        fractional: 5479744,
+                        mantissa: 5282204485892035,
+                        exponent: -38,
+                        sign: -1,
                         precision: 7,
                     }),),
                 ),],

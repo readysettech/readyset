@@ -149,7 +149,7 @@ impl AverageDataPair {
         if self.count > DataType::Int(0) {
             &self.sum / &self.count
         } else {
-            Ok(DataType::Real(0, 0, 0))
+            Ok(DataType::Real(0, 0, 0, 0))
         }
     }
 }
@@ -224,7 +224,7 @@ impl GroupedOperation for Aggregator {
                 .borrow_mut()
                 .entry(diff.group_hash)
                 .or_insert(AverageDataPair {
-                    sum: DataType::Real(0, 0, 0),
+                    sum: DataType::Real(0, 0, 0, 0),
                     count: DataType::Int(0),
                 })
                 .apply_diff(diff)
@@ -886,28 +886,34 @@ mod tests {
 
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5);
+        let precision = Some(10.0_f64.powf(2.0_f64));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == DataType::try_from(2.25).unwrap()
+            r[0] == 1.into()
+                && r[1].equal_under_error_margin(&DataType::try_from(2.25).unwrap(), precision)
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == DataType::try_from(5.25).unwrap()
+            r[0] == 1.into()
+                && r[1].equal_under_error_margin(&DataType::try_from(5.25).unwrap(), precision)
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == DataType::try_from(5.5).unwrap()
+            r[0] == 2.into()
+                && r[1].equal_under_error_margin(&DataType::try_from(5.5).unwrap(), precision)
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == DataType::try_from(5.25).unwrap()
+            r[0] == 2.into()
+                && r[1].equal_under_error_margin(&DataType::try_from(5.25).unwrap(), precision)
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == DataType::try_from(3.0).unwrap()
+            r[0] == 3.into()
+                && r[1].equal_under_error_margin(&DataType::try_from(3.0).unwrap(), precision)
         } else {
             false
         }));

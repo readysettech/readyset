@@ -34,10 +34,11 @@ impl ToDataType for Literal {
             Literal::Integer(i) => i.into(),
             Literal::UnsignedInteger(i) => i.into(),
             Literal::FixedPoint(Real {
-                integral,
-                fractional,
+                mantissa,
+                exponent,
+                sign,
                 precision,
-            }) => DataType::Real(integral as i64, fractional as i32, precision as u8),
+            }) => DataType::Real(mantissa, exponent, sign, precision),
             Literal::CurrentDate => {
                 DataType::Timestamp(chrono::Local::today().and_hms(0, 0, 0).naive_local())
             }

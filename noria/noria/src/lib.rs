@@ -406,7 +406,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         }
         // a bit hacky: send all NULL values to the first shard
         DataType::None => 0,
-        DataType::Real(_, _, _) | DataType::Time(_) => {
+        DataType::Real(_, _, _, _) | DataType::Time(_) => {
             use std::hash::{Hash, Hasher};
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             dt.hash(&mut hasher);
