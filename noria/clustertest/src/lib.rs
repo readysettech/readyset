@@ -1,19 +1,47 @@
-use anyhow::Result;
-use shiplift::{ContainerOptions, Docker, RmContainerOptions};
+mod cargo_builder;
+mod docker;
+
+use docker::{kill_zookeeper, start_zookeeper};
+use std::path::PathBuf;
+
+/// Source of the noria-server binary.
+pub enum NoriaServerSource {
+    /// Use a prebuilt binary specified by the path.
+    Existing(PathBuf),
+    /// Build the binary based on `BuildParams`.
+    Build(BuildParams),
+}
+
+/// Parameters required to build noria-server.
+pub struct BuildParams {
+    /// The path to the root project to build noria-server from.
+    root_project_path: PathBuf,
+    /// The target directory to store the noria-server binary.
+    target_dir: PathBuf,
+    /// Whether we build the release version of the binary.
+    release: bool,
+    /// Rebuild if the binary already exists.
+    rebuild: bool,
+}
 
 /// Set of parameters defining an entire cluster's topology.
 pub struct DeploymentParams {
     /// Name of the cluster, cluster resources will be prefixed
     /// with this name.
     name: String,
+
+    /// Source of the noria-server binary. `start_multi_process`
+    /// may be required to do more work based on this value.
+    noria_server_source: NoriaServerSource,
     // TODO(justin): Add parameters for the servers in the
     // deployment.
 }
 
 impl DeploymentParams {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, noria_server_source: NoriaServerSource) -> Self {
         Self {
             name: name.to_string(),
+            noria_server_source,
         }
     }
 }
@@ -47,55 +75,21 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     kill_zookeeper(&params.name).await?;
     start_zookeeper(&params.name).await?;
 
+    let _noria_server_path = match params.noria_server_source {
+        // TODO(justin): Make building the noria container start in a seperate
+        // thread to parallelize zookeeper startup and binary building.
+        NoriaServerSource::Build(build_params) => cargo_builder::build_noria_server(
+            &build_params.root_project_path,
+            &build_params.target_dir,
+            build_params.release,
+            build_params.rebuild,
+        )?,
+        NoriaServerSource::Existing(path) => path,
+    };
+
     Ok(DeploymentHandle {
         name: params.name.clone(),
     })
-}
-
-fn prefix_to_zookeeper_container(prefix: &str) -> String {
-    prefix.to_string() + "-zookeeper"
-}
-
-/// Creates and starts a new zookeeper container, this does not
-/// check for container conflicts and will error if a container
-/// with the same name '`name_prefix`-zookeeper' already exist.
-async fn start_zookeeper(name_prefix: &str) -> Result<()> {
-    let docker = Docker::new();
-    let image = "zookeeper";
-    let container_name = prefix_to_zookeeper_container(name_prefix);
-
-    docker
-        .containers()
-        .create(
-            &ContainerOptions::builder(image)
-                .name(&container_name)
-                .restart_policy("always", 10)
-                .expose(2181, "tcp", 2181)
-                .build(),
-        )
-        .await?;
-
-    docker.containers().get(container_name).start().await?;
-    Ok(())
-}
-
-/// Stops an existing zookeeper instance and removes the container.
-/// This function returns an `Ok` result if the container does not
-/// exist or was not running.
-async fn kill_zookeeper(name_prefix: &str) -> Result<()> {
-    let docker = Docker::new();
-    let container_name = prefix_to_zookeeper_container(name_prefix);
-    let container = docker.containers().get(container_name);
-    if let Ok(d) = container.inspect().await {
-        if d.state.running {
-            container.stop(None).await?;
-        }
-
-        container
-            .remove(RmContainerOptions::builder().force(true).build())
-            .await?;
-    }
-    Ok(())
 }
 
 // These tests currently require that a docker daemon is already setup
@@ -105,60 +99,8 @@ async fn kill_zookeeper(name_prefix: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prefix_to_zookeeper_container;
+    use docker::prefix_to_zookeeper_container;
     use serial_test::serial;
-
-    // Creates a new zookeeper client that checks if a container, `name`,
-    // is running.
-    async fn zookeeper_container_running(name: &str) -> bool {
-        let docker = Docker::new();
-        match docker.containers().get(name).inspect().await {
-            Err(e) => {
-                eprintln!("Error inspecting container: {}", e);
-                false
-            }
-            Ok(d) => d.state.running,
-        }
-    }
-
-    // Checks if the container already exists.
-    async fn zookeeper_container_exists(name: &str) -> bool {
-        let docker = Docker::new();
-        // Inspects a container, this will return a 404 error
-        // if the container does not exist.
-        !docker.containers().get(name).inspect().await.is_err()
-    }
-
-    // This test verifies that we can create and teardown a zookeeper
-    // docker container. It does not verify that the container is
-    // set up properly.
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
-    async fn zookeeper_operations() {
-        // Create a zookeeper container, verify that it is running.
-        let container_prefix = "start_zookeeper_test";
-        let name = prefix_to_zookeeper_container(container_prefix);
-        let res = start_zookeeper(container_prefix).await;
-        assert!(
-            !res.is_err(),
-            "Error starting zookeeper: {}",
-            res.err().unwrap()
-        );
-        // This only verifies that the zookeeper container is running, it
-        // does not verify connectivity or that zookeeper is running
-        // successfully in the container.
-        assert!(zookeeper_container_running(&name).await);
-
-        // Kill and remove the zookeeper container,
-        let res = kill_zookeeper(container_prefix).await;
-        assert!(
-            !res.is_err(),
-            "Error killing zookeeper: {}",
-            res.err().unwrap()
-        );
-        assert!(!zookeeper_container_exists(&name).await);
-    }
-
     // Verifies that the wrappers that create and teardown the deployment
     // correctly setup zookeeper containers.
     #[tokio::test(flavor = "multi_thread")]
@@ -166,13 +108,17 @@ mod tests {
     async fn deployment_handle_startup_teardown() {
         let cluster_name = "handle_cleanup_test";
         let zookeeper_container_name = prefix_to_zookeeper_container(cluster_name);
-        let handle = start_multi_process(DeploymentParams::new(cluster_name)).await;
+        let handle = start_multi_process(DeploymentParams::new(
+            cluster_name,
+            NoriaServerSource::Existing(PathBuf::from("/")),
+        ))
+        .await;
         assert!(
             !handle.is_err(),
             "Error starting deployment: {}",
             handle.err().unwrap()
         );
-        assert!(zookeeper_container_running(&zookeeper_container_name).await);
+        assert!(docker::zookeeper_container_running(&zookeeper_container_name).await);
 
         let res = handle.unwrap().teardown().await;
         assert!(
@@ -180,6 +126,6 @@ mod tests {
             "Error tearing down deployment: {}",
             res.err().unwrap()
         );
-        assert!(!zookeeper_container_exists(&zookeeper_container_name).await);
+        assert!(!docker::zookeeper_container_exists(&zookeeper_container_name).await);
     }
 }
