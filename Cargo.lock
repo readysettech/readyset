@@ -823,6 +823,9 @@ dependencies = [
  "anyhow",
  "futures 0.3.14",
  "futures-util",
+ "noria",
+ "port_scanner",
+ "rand 0.3.23",
  "serial_test",
  "shiplift",
  "tokio 1.5.0",
@@ -4584,6 +4587,12 @@ dependencies = [
  "wepoll-sys",
  "winapi 0.3.9",
 ]
+
+[[package]]
+name = "port_scanner"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "325a6d2ac5dee293c3b2612d4993b98aec1dff096b0a2dae70ed7d95784a05da"
 
 [[package]]
 name = "postgres"
