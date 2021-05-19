@@ -3,7 +3,10 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use crate::common::{column_identifier_no_alias, parse_comment, sql_identifier, Literal, SqlType};
+use crate::common::{
+    column_identifier_no_alias, parse_comment, real_from_f64, sql_identifier, type_identifier,
+    Literal, SqlType,
+};
 use crate::keywords::escape_if_keyword;
 use crate::FunctionExpression;
 use nom::bytes::complete::{tag_no_case, take_until};
@@ -13,8 +16,6 @@ use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{alt, complete, do_parse, map, named, opt, tag, tag_no_case, IResult};
 use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
-
-use crate::{common::type_identifier, Real};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -175,13 +176,12 @@ impl ColumnSpecification {
 fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let (remaining_input, (i, _, f)) = tuple((digit1, tag("."), digit1))(i)?;
     let precision = f.len();
+    let int = i32::from_str(str::from_utf8(i).unwrap()).unwrap();
+    let dec = i32::from_str(str::from_utf8(f).unwrap()).unwrap();
+    let float = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
     Ok((
         remaining_input,
-        Literal::FixedPoint(Real {
-            integral: i32::from_str(str::from_utf8(i).unwrap()).unwrap(),
-            fractional: i32::from_str(str::from_utf8(f).unwrap()).unwrap(),
-            precision: precision as i32,
-        }),
+        Literal::FixedPoint(real_from_f64(float, precision as u8)),
     ))
 }
 

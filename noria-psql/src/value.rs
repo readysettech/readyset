@@ -37,7 +37,7 @@ impl TryFrom<Value> for ps::Value {
             }
             (ps::ColType::Int(_), DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (ps::ColType::Bigint(_), DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
-            (ps::ColType::Double, v @ DataType::Real(_, _, _)) => Ok(ps::Value::Double(
+            (ps::ColType::Double, v @ DataType::Real(_, _, _, _)) => Ok(ps::Value::Double(
                 f64::try_from(v)
                     .map_err(|e: ReadySetError| ps::Error::InternalError(e.to_string()))?,
             )),

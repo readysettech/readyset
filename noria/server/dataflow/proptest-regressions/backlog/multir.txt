@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 547f6c5bf475216ef410911f619162cc6bb7fd2c22f67709fae7053675534f0e # shrinks to x = 0, y = 0
+cc 683a36f70fb9265dd865100ad5158fcb5fa82465053864d79eaf5ec26ba13b17 # shrinks to key = (Real(-inf), None), val = []

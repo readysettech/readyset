@@ -325,24 +325,26 @@ impl ProjectExpression {
                     };
 
                     match non_null!(expr) {
-                        DataType::Real(val, dec, prec) => {
+                        DataType::Real(mant, exp, sign, prec) => {
+                            // We convert back to original float for all rounding math.
+                            let float = (*mant as f64) * (*sign as f64) * 2.0_f64.powf(*exp as f64);
                             if rnd_prec > 0 {
                                 // If rounding precision is positive, than we keep the returned
                                 // type as a float. We never return greater precision than was
                                 // stored so we choose the minimum of stored precision or rounded
                                 // precision.
                                 let out_prec = min(*prec, rnd_prec as u8);
-                                let out_dec = (*dec as f64
-                                    / 10_i32.pow(num_len(*dec) - out_prec as u32) as f64)
-                                    .round() as i32;
-                                Ok(Cow::Owned(DataType::Real(*val, out_dec, out_prec)))
+                                let rounded_float = (float * 10.0_f64.powf(out_prec as f64))
+                                    .round()
+                                    / 10.0_f64.powf(out_prec as f64);
+                                let real = DataType::try_from(rounded_float).unwrap();
+                                Ok(Cow::Owned(real))
                             } else {
                                 // Rounding precision is negative, so we need to convert to a
                                 // rounded int.
-                                let rounded = ((*val as f64 + (*dec as f64 * 1e-9))
-                                    / 10_i32.pow(-rnd_prec as u32) as f64)
-                                    .round() as i32
-                                    * 10_i32.pow(-rnd_prec as u32);
+                                let rounded = ((float / 10_f64.powf(-rnd_prec as f64)).round()
+                                    * 10_f64.powf(-rnd_prec as f64))
+                                    as i32;
                                 Ok(Cow::Owned(DataType::Int(rounded)))
                             }
                         }
@@ -393,7 +395,7 @@ impl ProjectExpression {
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
-                    ProjectExpression::Literal(DataType::Real(_, _, _)) => {
+                    ProjectExpression::Literal(DataType::Real(_, _, _, _)) => {
                         match **prec {
                             // Precision should always be coercable to a DataType::Int.
                             ProjectExpression::Literal(DataType::Int(p)) => {
@@ -532,17 +534,6 @@ fn unsigned_rnd(val: u64, prec: i32) -> u64 {
         return val;
     }
     ((val as f64 / 10.0_f64.powf(-(prec as f64))).round() * 10.0_f64.powf(-(prec as f64))) as u64
-}
-
-// num_len gets the length of a number in an efficient way not involving string conversion.
-fn num_len(num: i32) -> u32 {
-    let mut len = 0_u32;
-    let mut n = num;
-    while n > 0 {
-        n /= 10;
-        len += 1;
-    }
-    len
 }
 
 #[cfg(test)]

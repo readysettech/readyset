@@ -93,9 +93,10 @@ impl fmt::Display for SqlType {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Real {
-    pub integral: i32,
-    pub fractional: i32,
-    pub precision: i32,
+    pub mantissa: u64,
+    pub exponent: i16,
+    pub sign: i8,
+    pub precision: u8,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -171,7 +172,11 @@ impl ToString for Literal {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
             Literal::UnsignedInteger(ref i) => format!("{}", i),
-            Literal::FixedPoint(ref f) => format!("{}.{}", f.integral, f.fractional),
+            Literal::FixedPoint(ref f) => {
+                let float = (f.mantissa as f64) * (f.sign as f64) * 2.0_f64.powf(f.exponent as f64);
+                let precision = if f.precision < 30 { f.precision } else { 30 };
+                format!("{f:.prec$}", f = float, prec = precision as usize)
+            }
             Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
             Literal::Blob(ref bv) => bv
                 .iter()
@@ -900,16 +905,32 @@ fn unpack(v: &[u8]) -> i32 {
 // Floating point literal value
 pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     map(tuple((opt(tag("-")), digit1, tag("."), digit1)), |tup| {
-        Literal::FixedPoint(Real {
-            integral: if (tup.0).is_some() {
-                -unpack(tup.1)
-            } else {
-                unpack(tup.1)
-            },
-            fractional: unpack(tup.3) as i32,
-            precision: tup.3.len() as i32,
-        })
+        let sign = if (tup.0).is_some() { -1.0 } else { 1.0 };
+        let int = unpack(tup.1);
+        let dec = unpack(tup.3);
+        let prec = tup.3.len();
+        let float = ((int as f64) + (dec as f64) / 10.0_f64.powf(prec as f64)) * sign;
+        Literal::FixedPoint(real_from_f64(float, tup.3.len() as u8))
     })(i)
+}
+
+pub fn real_from_f64(float: f64, precision: u8) -> Real {
+    let bits: u64 = float.to_bits();
+    let sign: i8 = if bits >> 63 == 0 { 1 } else { -1 };
+    let mut exponent: i16 = ((bits >> 52) & 0x7ff) as i16;
+    let mantissa = if exponent == 0 {
+        (bits & 0xfffffffffffff) << 1
+    } else {
+        (bits & 0xfffffffffffff) | 0x10000000000000
+    };
+
+    exponent -= 1023 + 52;
+    Real {
+        mantissa,
+        exponent,
+        sign,
+        precision,
+    }
 }
 
 /// String literal value

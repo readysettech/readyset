@@ -6,15 +6,14 @@ use itertools::Either;
 use crate::{ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
-use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
+use std::{borrow::Cow, mem};
 use std::{fmt, iter};
 
 use proptest::prelude::{prop_oneof, Arbitrary};
 
-const FLOAT_PRECISION: f64 = 1_000_000_000.0;
 const TINYTEXT_WIDTH: usize = 15;
 
 /// The main type used for user data throughout the codebase.
@@ -42,10 +41,12 @@ pub enum DataType {
     BigInt(i64),
     /// An unsigned signed 64-bit numeric value.
     UnsignedBigInt(u64),
-    /// A fixed point real value. The first field is the integer part, while the second is the
-    /// fractional and must be between -999999999 and 999999999. The third field is the precision
-    /// level with which to display the final output.
-    Real(i64, i32, u8),
+    /// A fixed point real value. We internally represent a 64 bit float as a
+    /// mantissa-exponent-sign triplet, which allows us to support both Eq and Hash, and store 64
+    /// bit floats in a fully lossless way. The fourth field holds the input precision, which is
+    /// useful for supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE behave in
+    /// MySQL.
+    Real(u64, i16, i8, u8),
     /// A reference-counted string-like value.
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
@@ -69,24 +70,9 @@ impl fmt::Display for DataType {
             DataType::UnsignedInt(n) => write!(f, "{}", n),
             DataType::BigInt(n) => write!(f, "{}", n),
             DataType::UnsignedBigInt(n) => write!(f, "{}", n),
-            DataType::Real(i, frac, prec) => {
-                if i == 0 && frac < 0 {
-                    // We have to insert the negative sign ourselves.
-                    write!(
-                        f,
-                        "-0.{frac:0prec$}",
-                        prec = prec as usize,
-                        frac = frac.abs()
-                    )
-                } else {
-                    write!(
-                        f,
-                        "{}.{frac:0prec$}",
-                        i,
-                        prec = prec as usize,
-                        frac = frac.abs()
-                    )
-                }
+            DataType::Real(mant, exp, sign, _) => {
+                let float = (mant as f64) * (sign as f64) * 2.0_f64.powf(exp as f64);
+                write!(f, "{}", float)
             }
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
             DataType::Time(ref t) => {
@@ -138,7 +124,7 @@ impl DataType {
                 chrono::naive::MIN_DATE,
                 NaiveTime::from_hms(0, 0, 0),
             )),
-            DataType::Real(..) => DataType::Real(i64::min_value(), i32::max_value(), 0),
+            DataType::Real(..) => DataType::Real(9007199254740991, 971, -1, 0),
             DataType::Int(_) => DataType::Int(i32::min_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
             DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
@@ -158,7 +144,7 @@ impl DataType {
                 chrono::naive::MAX_DATE,
                 NaiveTime::from_hms(23, 59, 59),
             )),
-            DataType::Real(..) => DataType::Real(i64::max_value(), i32::max_value(), 9),
+            DataType::Real(..) => DataType::Real(9007199254740991, 971, 1, 0),
             DataType::Int(_) => DataType::Int(i32::max_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(u32::max_value()),
             DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
@@ -190,7 +176,7 @@ impl DataType {
 
     /// Checks if this value is of a real data type (i.e., can be converted into `f64`).
     pub fn is_real(&self) -> bool {
-        matches!(*self, DataType::Real(_, _, _))
+        matches!(*self, DataType::Real(_, _, _, _))
     }
 
     /// Checks if this value is of a string data type (i.e., can be converted into `String` and
@@ -209,6 +195,46 @@ impl DataType {
         matches!(*self, DataType::Time(_))
     }
 
+    /// Checks if the given DataType::Real is equal to another DataType::Real under an acceptable
+    /// error margin. If None is supplied, we use f64::EPSILON.
+    pub fn equal_under_error_margin(&self, other: &DataType, error_margin: Option<f64>) -> bool {
+        match self {
+            DataType::Real(am, ae, asi, ap) => {
+                match other {
+                    DataType::Real(bm, be, bsi, bp) => {
+                        if *asi != *bsi {
+                            // If signs don't match at all, bail early.
+                            return false;
+                        }
+
+                        let self_float = (*am as f64) * (*asi as f64) * 2.0_f64.powf(*ae as f64);
+                        let other_float = (*bm as f64) * (*bsi as f64) * 2.0_f64.powf(*be as f64);
+
+                        // Handle NaN and infinite case.
+                        if self_float.is_nan()
+                            || other_float.is_nan()
+                            || self_float.is_infinite()
+                            || other_float.is_infinite()
+                        {
+                            // If either self or other is either NaN or some version of infinite,
+                            // compare internals instead. This is in part to help us pass prop testing.
+                            // If we simply try to say that NaN == NaN, or +Inf == +Inf, or -Inf ==
+                            // -Inf, then we fail prop testing that tries to inject junk data and
+                            // expects to match on internals.
+                            return *am == *bm && *ae == *be && *ap == *bp;
+                        }
+
+                        // Now that we've validated that both floats are valid numbers, and
+                        // finite, we can compare within a margin of error.
+                        (self_float - other_float).abs() < error_margin.unwrap_or(f64::EPSILON)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
     /// Returns the SqlType for this DataType, or None if [`DataType::None`] (which is valid for any
     /// type)
     pub fn sql_type(&self) -> Option<SqlType> {
@@ -219,7 +245,7 @@ impl DataType {
             Self::UnsignedInt(_) => Some(UnsignedInt(32)),
             Self::BigInt(_) => Some(Bigint(64)),
             Self::UnsignedBigInt(_) => Some(UnsignedBigint(64)),
-            Self::Real(_, _, _) => Some(Real),
+            Self::Real(_, _, _, _) => Some(Real),
             Self::Text(_) => Some(Text),
             Self::TinyText(_) => Some(Tinytext),
             Self::Timestamp(_) => Some(Timestamp),
@@ -248,7 +274,7 @@ impl DataType {
     /// use noria::DataType;
     /// use nom_sql::SqlType;
     ///
-    /// let real = DataType::Real(123, 0, 0);
+    /// let real = DataType::Real(123, 0, 1, 0);
     /// let int = real.coerce_to(&SqlType::Int(32)).unwrap();
     /// assert_eq!(int.into_owned(), DataType::Int(123));
     /// ```
@@ -405,26 +431,35 @@ impl DataType {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
-            (Self::Real(n, 0, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
-                Ok(Cow::Owned(DataType::Int(i32::try_from(*n).map_err(
-                    |e| mk_err("Could not convert numeric types".to_owned(), Some(e.into())),
-                )?)))
+            (Self::Real(n, e, s, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
+                Ok(Cow::Owned(DataType::Int(
+                    i32::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
+                        .map_err(|e| {
+                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                        })?,
+                )))
             }
-            (Self::Real(n, 0, _), Some(Real), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(*n))),
+            (Self::Real(n, e, s, _), Some(Real), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(
+                ((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64,
+            ))),
             (
-                Self::Real(n, 0, _),
+                Self::Real(n, e, s, _),
                 Some(Real),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
             ) => Ok(Cow::Owned(DataType::UnsignedInt(
-                u32::try_from(*n).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?,
+                u32::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
+                    .map_err(|e| {
+                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                    })?,
             ))),
-            (Self::Real(n, 0, _), Some(Real), UnsignedBigint(_)) => Ok(Cow::Owned(
-                DataType::UnsignedBigInt(u64::try_from(*n).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?),
-            )),
+            (Self::Real(n, e, s, _), Some(Real), UnsignedBigint(_)) => {
+                Ok(Cow::Owned(DataType::UnsignedBigInt(
+                    u64::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
+                        .map_err(|e| {
+                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                        })?,
+                )))
+            }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<i8>()
@@ -529,7 +564,7 @@ impl DataType {
 impl PartialEq for DataType {
     fn eq(&self, other: &DataType) -> bool {
         unsafe {
-            use std::{mem, slice};
+            use std::slice;
             // if the two datatypes are byte-for-byte identical, they're the same.
             let a: &[u8] =
                 slice::from_raw_parts(&*self as *const _ as *const u8, mem::size_of::<Self>());
@@ -573,8 +608,16 @@ impl PartialEq for DataType {
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
             }
-            (&DataType::Real(ai, af, ap), &DataType::Real(bi, bf, bp)) => {
-                ai == bi && af == bf && ap == bp
+            (&DataType::Real(_, _, _, ap), &DataType::Real(_, _, _, _)) => {
+                // Two floats are not directly comparable. Instead, we compare at the greater
+                // margin of error resulting from the underlying precision, or EPSILON for a
+                // f64 (default for equal_under_error_margin), which is the difference between
+                // 1.0 and the next larger representable number.
+                //
+                // We should not try to compare floats ever at a precision greater than EPSILON.
+                let p = 10.0_f64.powf(-(ap as f64));
+                let prec = if p > f64::EPSILON { Some(p) } else { None };
+                self.equal_under_error_margin(other, prec)
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
@@ -630,8 +673,28 @@ impl Ord for DataType {
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a.cmp(&b)
             }
-            (&DataType::Real(ai, af, ap), &DataType::Real(ref bi, ref bf, ref bp)) => {
-                ai.cmp(bi).then_with(|| af.cmp(bf)).then_with(|| ap.cmp(bp))
+            (&DataType::Real(am, ae, asi, _), &DataType::Real(ref bm, ref be, ref bsi, _)) => {
+                if asi < 0 && *bsi < 0 {
+                    // Both are negative, so larger exponent and mantissa means smaller.
+                    (*be)
+                        .cmp(&ae)
+                        .then_with(|| (*bm).cmp(&am))
+                        // We account for sign as well to pass prop testing that likes to inject
+                        // random values into the sign.
+                        .then_with(|| (*bsi).cmp(&asi))
+                } else if asi < 0 && *bsi >= 0 {
+                    // Self is negative and other is either 0 or positive so self is strictly less.
+                    Ordering::Less
+                } else if asi >= 0 && *bsi >= 0 {
+                    // Self non-negative and other non-negative. We can compare in normal direction
+                    // for exponent, mantissa and sign.
+                    ae.cmp(be)
+                        .then_with(|| am.cmp(bm))
+                        .then_with(|| asi.cmp(bsi))
+                } else {
+                    // asi is non-negative and bsi is negative, so self is strictly greater.
+                    Ordering::Greater
+                }
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
@@ -667,9 +730,10 @@ impl Hash for DataType {
                 let n: u64 = <u64>::try_from(self).unwrap();
                 n.hash(state)
             }
-            DataType::Real(i, f, p) => {
-                i.hash(state);
-                f.hash(state);
+            DataType::Real(m, e, s, p) => {
+                m.hash(state);
+                e.hash(state);
+                s.hash(state);
                 p.hash(state);
             }
             DataType::Text(..) | DataType::TinyText(..) => {
@@ -792,20 +856,20 @@ impl TryFrom<f64> for DataType {
                 details: "".to_string(),
             });
         }
-        let mut i = f.trunc() as i64;
-        let mut frac = (f.fract() * FLOAT_PRECISION).round() as i32;
-        if frac == 1_000_000_000 {
-            i += 1;
-            frac = 0;
-        } else if frac == -1_000_000_000 {
-            i -= 1;
-            frac = 0;
-        }
+        let bits: u64 = f.to_bits();
+        let sign: i8 = if bits >> 63 == 0 { 1 } else { -1 };
+        let mut exponent: i16 = ((bits >> 52) & 0x7ff) as i16;
+        let mantissa = if exponent == 0 {
+            (bits & 0xfffffffffffff) << 1
+        } else {
+            (bits & 0xfffffffffffff) | 0x10000000000000
+        };
 
-        // TODO(peter): Make sure this isn't the determining factor for assigning internal
-        // precision for the Real data type. This should come from the user (string). For instance
-        // "2.22" would be a precision of 2.
-        Ok(DataType::Real(i, frac, 9))
+        exponent -= 1023 + 52;
+
+        let precision = if exponent < 0 { -exponent as u8 } else { 0 };
+
+        Ok(DataType::Real(mantissa, exponent, sign, precision))
     }
 }
 
@@ -831,11 +895,9 @@ impl<'a> From<&'a Literal> for DataType {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
             }
-            Literal::FixedPoint(ref r) => DataType::Real(
-                i64::from(r.integral),
-                r.fractional as i32,
-                r.precision as u8,
-            ),
+            Literal::FixedPoint(ref r) => {
+                DataType::Real(r.mantissa, r.exponent, r.sign, r.precision)
+            }
             _ => unimplemented!(),
         }
     }
@@ -857,10 +919,11 @@ impl TryFrom<DataType> for Literal {
             DataType::UnsignedInt(i) => Ok(Literal::UnsignedInteger(i as _)),
             DataType::BigInt(i) => Ok(Literal::Integer(i)),
             DataType::UnsignedBigInt(i) => Ok(Literal::Integer(i as _)),
-            DataType::Real(integral, fractional, precision) => Ok(Literal::FixedPoint(Real {
-                integral: integral as _,
-                fractional,
-                precision: precision as _,
+            DataType::Real(mantissa, exponent, sign, precision) => Ok(Literal::FixedPoint(Real {
+                mantissa,
+                exponent,
+                sign,
+                precision,
             })),
             DataType::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
             DataType::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
@@ -1226,7 +1289,7 @@ impl TryFrom<&'_ DataType> for f64 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Real(i, f, p) => Ok(i as f64 + f64::from(f) / 10_i32.pow(p as u32) as f64),
+            DataType::Real(m, e, s, _) => Ok((m as f64) * (s as f64) * 2.0_f64.powf(e as f64)),
             DataType::UnsignedInt(i) => Ok(f64::from(i)),
             DataType::Int(i) => Ok(f64::from(i)),
             DataType::UnsignedBigInt(i) => Ok(i as f64),
@@ -1593,7 +1656,7 @@ impl Arbitrary for DataType {
             any::<u32>().prop_map(UnsignedInt),
             any::<i64>().prop_map(BigInt),
             any::<u64>().prop_map(UnsignedBigInt),
-            any::<(i64, i32, u8)>().prop_map(|(i, f, p)| Real(i, f, p)),
+            any::<(u64, i16, i8, u8)>().prop_map(|(m, e, s, p)| Real(m, e, s, p)),
             any::<String>().prop_map(DataType::from),
             arbitrary_naive_date_time().prop_map(Timestamp),
             arbitrary_duration()
@@ -1682,10 +1745,10 @@ mod tests {
     #[test]
     fn real_to_string() {
         let a: DataType = DataType::try_from(2.5).unwrap();
-        let b: DataType = DataType::try_from(-2.01).unwrap();
+        let b: DataType = DataType::try_from(-2.015).unwrap();
         let c: DataType = DataType::try_from(-0.012_345_678).unwrap();
-        assert_eq!(a.to_string(), "2.500000000");
-        assert_eq!(b.to_string(), "-2.010000000");
+        assert_eq!(a.to_string(), "2.5");
+        assert_eq!(b.to_string(), "-2.015");
         assert_eq!(c.to_string(), "-0.012345678");
     }
 
@@ -1832,7 +1895,7 @@ mod tests {
         let big_int = DataType::BigInt(5);
         assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
         assert_eq!(format!("{:?}", text), "Text(\"I contain \\' and \\\"\")");
-        assert_eq!(format!("{:?}", real), "Real(-0.050000000)");
+        assert_eq!(format!("{:?}", real), "Real(-0.05)");
         assert_eq!(
             format!("{:?}", timestamp),
             "Timestamp(1970-01-01T00:00:00.042)"
@@ -1851,7 +1914,7 @@ mod tests {
         let big_int = DataType::BigInt(5);
         assert_eq!(format!("{}", tiny_text), "\"hi\"");
         assert_eq!(format!("{}", text), "\"this is a very long text indeed\"");
-        assert_eq!(format!("{}", real), "-0.050000000");
+        assert_eq!(format!("{}", real), "-0.05");
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
@@ -2413,7 +2476,8 @@ mod tests {
 
         #[proptest]
         fn real_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
-            let real = DataType::Real(whole_part.into(), 0, 9);
+            let sign = if whole_part > 0 { 1 } else { -1 };
+            let real = DataType::Real(whole_part.abs() as u64, 0, sign, 0);
             let result = real.coerce_to(&int_type).unwrap();
             assert_eq!(i32::try_from(result.into_owned()).unwrap(), whole_part);
         }
@@ -2430,7 +2494,7 @@ mod tests {
 
         #[proptest]
         fn real_to_unsigned(whole_part: u32, #[strategy(unsigned_type())] unsigned_type: SqlType) {
-            let real = DataType::Real(whole_part as i64, 0, 9);
+            let real = DataType::Real(whole_part as u64, 0, 1, 0);
             let result = real.coerce_to(&unsigned_type).unwrap();
             assert_eq!(u32::try_from(result.into_owned()).unwrap(), whole_part);
         }
