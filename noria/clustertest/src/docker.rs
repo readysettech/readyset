@@ -13,7 +13,7 @@ pub fn prefix_to_zookeeper_container(prefix: &str) -> String {
 /// Creates and starts a new zookeeper container, this does not
 /// check for container conflicts and will error if a container
 /// with the same name '`name_prefix`-zookeeper' already exist.
-pub async fn start_zookeeper(name_prefix: &str) -> Result<()> {
+pub async fn start_zookeeper(name_prefix: &str, port: u16) -> Result<()> {
     let docker = Docker::new();
     let image = "zookeeper";
     let container_name = prefix_to_zookeeper_container(name_prefix);
@@ -24,7 +24,7 @@ pub async fn start_zookeeper(name_prefix: &str) -> Result<()> {
             &ContainerOptions::builder(image)
                 .name(&container_name)
                 .restart_policy("always", 10)
-                .expose(2181, "tcp", 2181)
+                .expose(2181, "tcp", port as u32)
                 .build(),
         )
         .await?;
@@ -82,18 +82,17 @@ pub async fn zookeeper_container_exists(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     // This test verifies that we can create and teardown a zookeeper
     // docker container. It does not verify that the container is
     // set up properly.
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[ignore]
     async fn zookeeper_operations() {
         // Create a zookeeper container, verify that it is running.
         let container_prefix = "start_zookeeper_test";
         let name = prefix_to_zookeeper_container(container_prefix);
-        let res = start_zookeeper(container_prefix).await;
+        let res = start_zookeeper(container_prefix, 2184).await;
         assert!(
             !res.is_err(),
             "Error starting zookeeper: {}",

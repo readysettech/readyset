@@ -11,3 +11,8 @@ futures = "0.3.0"
 futures-util = "0.3.0"
 anyhow = "1.0"
 serial_test = "0.5.1"
+port_scanner = "0.1.5"
+rand = "*"
+
+# local deps 
+noria = { version = "0.7.0" , path = "../noria" }
