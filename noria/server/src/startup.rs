@@ -167,7 +167,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         readers,
         valve: valve.clone(),
         domains: Default::default(),
-        region,
+        region: region.clone(),
     };
 
     tokio::spawn(worker.run().map_err(|e| {
@@ -197,6 +197,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         our_descriptor,
         config,
         tokio::runtime::Handle::current(),
+        region,
     );
 
     tokio::spawn(controller.run().map_err(|e| {
