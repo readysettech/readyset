@@ -178,7 +178,9 @@ impl MySqlReplicator {
         info!("Loaded recipe:\n{}", recipe);
 
         if install_recipe {
-            noria.install_recipe(&recipe).await?;
+            noria
+                .install_recipe_with_offset(&recipe, Some(repl_offset.clone()))
+                .await?;
             info!("Recipe installed");
         }
 

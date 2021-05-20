@@ -4,7 +4,7 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::proto::MySerialize;
 use noria::{ReadySetError, ReadySetResult};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct BinlogPosition {
@@ -101,22 +101,60 @@ impl PartialOrd for BinlogPosition {
 impl TryFrom<&BinlogPosition> for noria::ReplicationOffset {
     type Error = ReadySetError;
 
-    /// `ReplicationOffset` is a filename and a u128 offset
-    /// We use the binlog basefile name as the filename, and we use the binlog suffix for the top
-    /// 64 bits of the offset and the actual binlog offset for the lower 64 bits
+    /// `ReplicationOffset` is a filename and a u128 offset   
+    /// We use the binlog basefile name as the filename, and we use the binlog suffix len for
+    /// the top 5 bits, which can be as big as 31 digits in theory, but we only allow up to 17
+    /// decimal digits, which is more than enough for the binlog spec. This is required to be
+    /// able to properly format the integer back to string, including any leading zeroes.
+    /// The following 59 bits are used for the numerical value of the suffix, finally the last
+    /// 64 bits of the offset are the actual binlog offset.
     fn try_from(value: &BinlogPosition) -> Result<Self, Self::Error> {
         let (basename, suffix) = value.binlog_file.rsplit_once('.').ok_or_else(|| {
             ReadySetError::ReplicationFailed(format!("Invalid binlog name {}", value.binlog_file))
         })?;
+
+        let suffix_len = suffix.len() as u128;
+
+        if suffix_len > 17 {
+            // 17 digit decimal number is the most we can fit into 59 bits
+            return Err(ReadySetError::ReplicationFailed(format!(
+                "Invalid binlog suffix {}",
+                value.binlog_file
+            )));
+        }
 
         let suffix = suffix.parse::<u128>().map_err(|_| {
             ReadySetError::ReplicationFailed(format!("Invalid binlog suffix {}", value.binlog_file))
         })?;
 
         Ok(noria::ReplicationOffset {
-            offset: (suffix << 64) + (value.position as u128),
+            offset: (suffix_len << 123) + (suffix << 64) + (value.position as u128),
             replication_log_name: basename.to_string(),
         })
+    }
+}
+
+impl TryFrom<BinlogPosition> for noria::ReplicationOffset {
+    type Error = ReadySetError;
+
+    fn try_from(value: BinlogPosition) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl From<noria::ReplicationOffset> for BinlogPosition {
+    fn from(val: noria::ReplicationOffset) -> Self {
+        let suffix_len = (val.offset >> 123) as usize;
+        let suffix = (val.offset >> 64) as u32;
+        let position = val.offset as u32;
+
+        // To get the binlog filename back we use `replication_log_name` as the basename and append the suffix
+        // which is encoded in bits 64:123 of `offset`, and format it as a zero padded decimal integer with
+        // `suffix_len` characters (encoded in the top 5 bits of the offset)
+        BinlogPosition {
+            binlog_file: format!("{0}.{1:02$}", val.replication_log_name, suffix, suffix_len),
+            position,
+        }
     }
 }
 

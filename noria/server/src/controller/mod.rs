@@ -7,8 +7,11 @@ use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult};
 use futures_util::StreamExt;
 use hyper::{self, Method, StatusCode};
-use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::ControllerDescriptor;
+use noria::{
+    consensus::{Authority, Epoch, STATE_KEY},
+    ReplicationOffset,
+};
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
@@ -36,6 +39,7 @@ pub(crate) struct ControllerState {
 
     recipe_version: usize,
     recipes: Vec<String>,
+    replication_offset: Option<ReplicationOffset>,
 }
 
 pub struct Worker {
@@ -419,6 +423,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
                         epoch,
                         recipe_version: 0,
                         recipes: vec![],
+                        replication_offset: None,
                     }),
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {
@@ -494,7 +499,10 @@ mod tests {
     }
 
     mod replication_offsets {
+        use std::convert::TryInto;
+
         use super::*;
+        use mysql_connector::BinlogPosition;
         use noria::ReplicationOffset;
 
         #[tokio::test(flavor = "multi_thread")]
@@ -569,6 +577,60 @@ mod tests {
                     replication_log_name: "binlog".to_owned(),
                 })
             );
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn schema_offset() {
+            let mut noria = start_simple("replication_offsets").await;
+            let mut binlog = BinlogPosition {
+                binlog_file: "mysql-binlog.000006".to_string(),
+                position: 100,
+            };
+
+            noria
+                .extend_recipe_with_offset(
+                    "CREATE TABLE t1 (id int);
+                     CREATE TABLE t2 (id int);",
+                    Some((&binlog).try_into().unwrap()),
+                )
+                .await
+                .unwrap();
+
+            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
+            assert_eq!(offset, binlog);
+
+            let mut t1 = noria.table("t1").await.unwrap();
+            let mut t2 = noria.table("t2").await.unwrap();
+
+            binlog.position = 200;
+
+            t1.set_replication_offset((&binlog).try_into().unwrap())
+                .await
+                .unwrap();
+
+            binlog.position = 300;
+
+            t2.set_replication_offset((&binlog).try_into().unwrap())
+                .await
+                .unwrap();
+
+            sleep().await;
+
+            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
+            assert_eq!(offset, binlog);
+
+            binlog.position = 400;
+
+            noria
+                .extend_recipe_with_offset(
+                    "CREATE VIEW v AS SELECT * FROM t1 WHERE id = 5;",
+                    Some((&binlog).try_into().unwrap()),
+                )
+                .await
+                .unwrap();
+
+            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
+            assert_eq!(offset, binlog);
         }
 
         #[tokio::test(flavor = "multi_thread")]
