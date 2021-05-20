@@ -3543,9 +3543,9 @@ dependencies = [
  "mysql_common 0.27.0",
  "nom-sql",
  "noria",
+ "slog",
+ "slog-term",
  "tokio 1.5.0",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
