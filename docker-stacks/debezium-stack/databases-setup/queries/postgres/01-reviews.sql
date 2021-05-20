@@ -1,6 +1,0 @@
-INSERT INTO review VALUES (1, 1, 3);
-INSERT INTO review VALUES (2, 1, 2);
-INSERT INTO review VALUES (3, 1, 2);
-INSERT INTO review VALUES (4, 2, 3);
-INSERT INTO review VALUES (5, 2, 3);
-INSERT INTO review VALUES (6, 3, 3);

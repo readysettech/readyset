@@ -11,14 +11,12 @@ use noria_client::backend::{
     Writer,
 };
 
-/// This example demonstrates setting Noria up with a separate MySQL database and debezium.
-/// Run `ryw-setup.sh` and then `ryw-start-dbz.sh` once noria is running to configure all of the
+/// This example demonstrates setting Noria up with a separate MySQL database.
+/// Run `ryw-setup.sh` once noria is running to configure all of the
 /// needed components of the system before running this script.
-/// Note that currently timestamps do not update, so both the client and the view nodes in noria
-/// will retain the empty timestamp, and all reads will go through.
 #[tokio::main]
 async fn main() {
-    // This is the URL to connect to the setup alternate mysql db with debezium connector installed
+    // This is the URL to connect to the setup alternate mysql db
     // MUST be able to read information_schema.innodb_trx table. Here, has root access.
     let mysql_url = "mysql://root:debezium@127.0.0.1:3306/inventory";
 
