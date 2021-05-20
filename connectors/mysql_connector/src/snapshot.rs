@@ -6,7 +6,7 @@ use mysql_async as mysql;
 use noria::{consensus::Authority, ReadySetResult, ReplicationOffset};
 use slog::{info, Logger};
 
-use super::BinlogPosition;
+use crate::connector::BinlogPosition;
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
 

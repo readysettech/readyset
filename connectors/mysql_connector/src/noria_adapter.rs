@@ -1,4 +1,4 @@
-use crate::connector::{BinlogAction, BinlogPosition, MySqlBinlogConnector};
+use crate::connector::{BinlogAction, MySqlBinlogConnector};
 use crate::snapshot::MySqlReplicator;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
@@ -22,13 +22,11 @@ pub struct MySqlNoriaAdapter<A: Authority + 'static> {
 pub struct Builder {
     addr: String,
     port: u16,
-    snapshot: bool,
     user: Option<String>,
     password: Option<String>,
     db_name: Option<String>,
     zookeeper_address: Option<String>,
     deployment: Option<String>,
-    position: Option<BinlogPosition>,
     server_id: Option<u32>,
     log: Option<Logger>,
 }
@@ -79,28 +77,9 @@ impl Builder {
         self
     }
 
-    /// The position where to start reading the binlog
-    pub fn with_position(mut self, position: Option<BinlogPosition>) -> Self {
-        self.position = position;
-        self
-    }
-
     /// The binlog replica must be assigned a unique `server_id` in the replica topology
     pub fn with_server_id(mut self, server_id: Option<u32>) -> Self {
         self.server_id = server_id;
-        self
-    }
-
-    /// If true, will replicate the target database in its entirety to Noria before listening on the binlog
-    /// The replication happens in stages:
-    /// * READ LOCK is acquired on the database
-    /// * Next binlog position is read
-    /// * The recipe (schema) DDL is replicated and installed in Noria (replacing current recipe)
-    /// * Each table is individually replicated into Noria
-    /// * READ LOCK is released
-    /// * Adapter keeps reading binlog from the next position keeping Noria up to date
-    pub fn with_snapshot(mut self, do_snapshot: bool) -> Self {
-        self.snapshot = do_snapshot;
         self
     }
 
@@ -109,7 +88,18 @@ impl Builder {
         self
     }
 
+    ///
     /// Finish the build and begin monitoring the binlog for changes
+    /// If noria has no replication offset information, it will replicate the target database in its
+    /// entirety to Noria before listening on the binlog
+    /// The replication happens in stages:
+    /// * READ LOCK is acquired on the database
+    /// * Next binlog position is read
+    /// * The recipe (schema) DDL is replicated and installed in Noria (replacing current recipe)
+    /// * Each table is individually replicated into Noria
+    /// * READ LOCK is released
+    /// * Adapter keeps reading binlog from the next position keeping Noria up to date
+    ///
     pub async fn start(self) -> ReadySetResult<()> {
         let zookeeper_address = self
             .zookeeper_address
@@ -130,34 +120,34 @@ impl Builder {
 
         let log = self.log.unwrap_or_else(|| Logger::root(Discard, o!()));
 
-        // In case the snapshot option was specified, take the snapshot and then keep reading from
-        // the binlog position specified in the snapshot
-        let pos = if self.snapshot {
-            info!(log, "Taking database snapshot");
-            let replicator_options = mysql_options
-                .clone()
-                .db_name(self.db_name.clone())
-                .compression(Some(mysql_async::Compression::new(7)));
+        // Attempt to retreive the latest replication offset from noria, if none is present
+        // begin the snapshot process
+        let pos = match noria.replication_offset().await?.map(Into::into) {
+            None => {
+                info!(log, "Taking database snapshot");
 
-            let pool = mysql_async::Pool::new(replicator_options);
-            let replicator = MySqlReplicator {
-                pool,
-                tables: None,
-                log: log.clone(),
-            };
-            Some(replicator.replicate_to_noria(&mut noria, true).await?)
-        } else {
-            self.position
+                let replicator_options = mysql_options.clone();
+                let pool = mysql_async::Pool::new(replicator_options);
+                let replicator = MySqlReplicator {
+                    pool,
+                    tables: None,
+                    log: log.clone(),
+                };
+
+                replicator.replicate_to_noria(&mut noria, true).await?
+            }
+            Some(pos) => pos,
         };
 
-        if let Some(pos) = &pos {
-            info!(log, "Binlog position {:?}", pos);
-        }
+        info!(log, "Binlog position {:?}", pos);
 
+        // TODO: it is possible that the binlog position from noria is no longer
+        // present on the primary, in which case the connection will fail, and we would
+        // need to perform a new snapshot
         let connector = MySqlBinlogConnector::connect(
             mysql_options,
             self.db_name.map(|s| vec![s]).unwrap_or_default(),
-            pos,
+            Some(pos),
             self.server_id,
         )
         .await?;
