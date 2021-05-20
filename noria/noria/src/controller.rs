@@ -572,6 +572,13 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         self.rpc("workers", ())
     }
 
+    /// Get a list of all registered worker URIs that are currently healthy.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn healthy_workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
+        self.rpc("healthy_workers", ())
+    }
+
     /// Get the maximum replication offset that has been written to any of the tables in this Noria
     /// instance
     ///

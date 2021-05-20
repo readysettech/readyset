@@ -89,8 +89,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn zookeeper_operations() {
-        // Create a zookeeper container, verify that it is running.
         let container_prefix = "start_zookeeper_test";
+        // Kill the container first to prevent conflicts with previous
+        // test runs that may not have cleaned up the container.
+        let _ = kill_zookeeper(container_prefix).await;
+
+        // Create a zookeeper container, verify that it is running.
         let name = prefix_to_zookeeper_container(container_prefix);
         let res = start_zookeeper(container_prefix, 2184).await;
         assert!(

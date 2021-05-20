@@ -825,10 +825,11 @@ dependencies = [
  "futures-util",
  "noria",
  "port_scanner",
- "rand 0.3.23",
+ "rand 0.8.3",
  "serial_test",
  "shiplift",
  "tokio 1.5.0",
+ "url 2.2.2",
 ]
 
 [[package]]

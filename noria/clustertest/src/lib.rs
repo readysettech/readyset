@@ -8,12 +8,12 @@ use futures::executor;
 use noria::consensus::ZookeeperAuthority;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
-use server::{NoriaServerRunner, ServerHandle};
-use std::{
-    path::PathBuf,
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use server::{NoriaServerRunner, ServerProcessHandle};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+use url::Url;
 
 #[cfg(test)]
 use std::env;
@@ -42,6 +42,17 @@ pub struct BuildParams {
 pub struct ServerParams {
     /// A server's region string, passed in via --region.
     region: Option<String>,
+}
+
+impl ServerParams {
+    pub fn default() -> Self {
+        Self { region: None }
+    }
+
+    pub fn with_region(mut self, region: &str) -> Self {
+        self.region = Some(region.to_string());
+        self
+    }
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -85,24 +96,92 @@ impl DeploymentParams {
     }
 }
 
+/// A handle to a single server in the deployment.
+pub struct ServerHandle {
+    /// The external address of the server.
+    pub addr: Url,
+    /// The local process the server is running in.
+    pub process: ServerProcessHandle,
+}
+
 /// A handle to a deployment created with `start_multi_process`.
 pub struct DeploymentHandle {
     /// A handle to the current controller of the deployment.
     pub handle: ControllerHandle<ZookeeperAuthority>,
     /// Metrics client for aggregating metrics across the deployment.
     pub metrics: MetricsClient<ZookeeperAuthority>,
+    /// Map from a noria server's address to a handle to the server.
+    noria_server_handles: HashMap<Url, ServerHandle>,
     /// The name of the deployment, cluster resources are prefixed
     /// by `name`.
     name: String,
+    /// The zookeeper connect string for the deployment.
+    zookeeper_addr: String,
     /// A handle to each noria server in the deployment.
-    // TODO(justin): Add API function to support querying status
-    // and killing specific servers.
-    noria_server_handles: Vec<ServerHandle>,
     /// True if this deployment has already been torn down.
     shutdown: bool,
+    /// The source of the noria-server binary. Stored here to allow
+    /// new servers to be started up.
+    noria_server_path: PathBuf,
+    /// Dataflow sharding for new servers.
+    sharding: Option<usize>,
+    /// The primary region of the deployment.
+    primary_region: Option<String>,
+    /// Next new server port.
+    port: u16,
 }
 
 impl DeploymentHandle {
+    /// Start a new noria-server instance in the deployment.
+    pub async fn start_server(&mut self, params: ServerParams) -> anyhow::Result<Url> {
+        let port = get_next_good_port(Some(self.port));
+        self.port = port;
+        let handle = start_server(
+            &params,
+            &self.noria_server_path,
+            &self.name,
+            self.sharding,
+            self.primary_region.as_ref(),
+            &self.zookeeper_addr,
+            port,
+        )?;
+        let server_addr = handle.addr.clone();
+        self.noria_server_handles
+            .insert(server_addr.clone(), handle);
+
+        // Wait until the worker has been created and is visible over rpc.
+        wait_until_worker_count(
+            &mut self.handle,
+            Duration::from_secs(15),
+            self.noria_server_handles.len(),
+        )
+        .await?;
+        Ok(server_addr)
+    }
+
+    /// Kill an existing noria-server instance in the deployment referenced
+    /// by `ServerHandle`.
+    pub async fn kill_server(&mut self, server_addr: Url) -> anyhow::Result<()> {
+        if !self.noria_server_handles.contains_key(&server_addr) {
+            return Err(anyhow!("Server handle does not exist in deployment"));
+        }
+
+        let mut handle = self.noria_server_handles.remove(&server_addr).unwrap();
+        handle.process.kill()?;
+
+        // Wait until the server is no longer visible in the deployment.
+        // This must be at least the value of the deployment's state.config.healthcheck_every,
+        // the interval where a worker's liveliness status changes.
+        wait_until_worker_count(
+            &mut self.handle,
+            Duration::from_secs(15),
+            self.noria_server_handles.len(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
     /// Tears down any resources associated with the deployment.
     pub async fn teardown(&mut self) -> anyhow::Result<()> {
         if self.shutdown {
@@ -112,7 +191,7 @@ impl DeploymentHandle {
         for h in &mut self.noria_server_handles {
             // Drop any errors on failure to kill so we complete
             // cleanup.
-            let _ = h.kill();
+            let _ = h.1.process.kill();
         }
         kill_zookeeper(&self.name).await?;
         self.shutdown = true;
@@ -132,14 +211,14 @@ impl Drop for DeploymentHandle {
 }
 
 // Queries the number of workers every half second until `max_wait`.
-pub async fn wait_until_workers_alive(
+async fn wait_until_worker_count(
     handle: &mut ControllerHandle<ZookeeperAuthority>,
     max_wait: Duration,
     num_workers: usize,
 ) -> Result<()> {
     let start = Instant::now();
     loop {
-        let workers = handle.workers().await.unwrap().len();
+        let workers = handle.healthy_workers().await.unwrap().len();
         if workers == num_workers {
             return Ok(());
         }
@@ -152,9 +231,67 @@ pub async fn wait_until_workers_alive(
         sleep(Duration::from_millis(500));
     }
 
-    Err(anyhow!(
-        "Exceeded maximum waiting time for workers to be alive"
-    ))
+    Err(anyhow!("Exceeded maximum time to wait for workers"))
+}
+
+fn start_server(
+    server_params: &ServerParams,
+    noria_server_path: &Path,
+    deployment_name: &str,
+    sharding: Option<usize>,
+    primary_region: Option<&String>,
+    zookeeper_addr: &str,
+    port: u16,
+) -> Result<ServerHandle> {
+    let mut runner = NoriaServerRunner::new(noria_server_path);
+    runner.set_deployment(deployment_name);
+    runner.set_external_port(port);
+    runner.set_zookeeper(zookeeper_addr);
+    if let Some(shard) = sharding {
+        runner.set_shards(shard);
+    }
+    if let Some(region) = server_params.region.as_ref() {
+        runner.set_region(&region);
+    }
+    if let Some(region) = primary_region.as_ref() {
+        runner.set_primary_region(region);
+    }
+
+    let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
+    Ok(ServerHandle {
+        addr,
+        process: runner.start()?,
+    })
+}
+
+/// Checks the set of deployment params for invalid configurations
+pub fn check_deployment_params(params: &DeploymentParams) -> anyhow::Result<()> {
+    match &params.primary_region {
+        Some(pr) => {
+            // If the primary region is set, at least one server should match that
+            // region.
+            if params
+                .servers
+                .iter()
+                .all(|s| s.region.as_ref().filter(|region| region == &pr).is_none())
+            {
+                return Err(anyhow!(
+                    "Primary region specified, but no servers match
+                    the region."
+                ));
+            }
+        }
+        None => {
+            // If the primary region is not set, servers should not include a `region`
+            // parameter. Otherwise, a controller will not be elected.
+            if params.servers.iter().any(|s| s.region.is_some()) {
+                return Err(anyhow!(
+                    "Servers have region without a deployment primary region"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Finds the next available port after `port` (if supplied).
@@ -163,7 +300,7 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
     let mut port = port.map(|p| p + 1).unwrap_or_else(|| {
         use rand::Rng;
         let mut rng = rand::thread_rng();
-        rng.gen_range(20000, 60000)
+        rng.gen_range(20000..60000)
     });
     while !port_scanner::local_port_available(port) {
         port += 1;
@@ -181,11 +318,12 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
 // TODO(justin): Add support for multiple concurrent multi-process clusters by
 // dynamically assigning port ranges.
 pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<DeploymentHandle> {
+    check_deployment_params(&params)?;
     let mut port = get_next_good_port(None);
 
     // Kill and remove any containers with the same name to prevent
     // container conflicts errors.
-    let zookeeper_addr = "127.0.0.1:".to_string() + &port.to_string();
+    let zookeeper_addr = format!("127.0.0.1:{}", &port);
     kill_zookeeper(&params.name).await?;
     start_zookeeper(&params.name, port).await?;
 
@@ -202,35 +340,30 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     };
 
     // Create the noria-server instances.
-    let mut handles = Vec::new();
-
+    let mut handles = HashMap::new();
     for server in &params.servers {
         port = get_next_good_port(Some(port));
-        let mut runner = NoriaServerRunner::new(&noria_server_path);
-        runner.set_zookeeper(&zookeeper_addr);
-        runner.set_deployment(&params.name);
-        runner.set_external_port(port);
-        if let Some(shard) = &params.sharding {
-            runner.set_shards(*shard);
-        }
-        if let Some(region) = server.region.as_ref() {
-            runner.set_region(&region);
-        }
-        if let Some(region) = params.primary_region.as_ref() {
-            runner.set_primary_region(region);
-        }
+        let handle = start_server(
+            server,
+            &noria_server_path,
+            &params.name,
+            params.sharding,
+            params.primary_region.as_ref(),
+            &zookeeper_addr,
+            port,
+        )?;
 
-        handles.push(runner.start()?);
+        handles.insert(handle.addr.clone(), handle);
     }
 
-    let zookeeper_path = zookeeper_addr + "/" + &params.name;
-    let authority = ZookeeperAuthority::new(&zookeeper_path)?;
+    let zookeeper_connect_str = format!("{}/{}", &zookeeper_addr, &params.name);
+    let authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
     let mut handle = ControllerHandle::new(authority).await?;
-    wait_until_workers_alive(&mut handle, Duration::from_secs(15), params.servers.len()).await?;
+    wait_until_worker_count(&mut handle, Duration::from_secs(15), params.servers.len()).await?;
 
     // Duplicate the authority and handle creation as the metrics client
     // owns its own handle.
-    let metrics_authority = ZookeeperAuthority::new(&zookeeper_path)?;
+    let metrics_authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
     let metrics_handle = ControllerHandle::new(metrics_authority).await?;
     let metrics = MetricsClient::new(metrics_handle).unwrap();
 
@@ -238,8 +371,13 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
         handle,
         metrics,
         name: params.name.clone(),
+        zookeeper_addr,
         noria_server_handles: handles,
         shutdown: false,
+        noria_server_path,
+        sharding: params.sharding,
+        primary_region: params.primary_region,
+        port,
     })
 }
 
@@ -280,8 +418,8 @@ mod tests {
                 rebuild: false,
             }),
         );
-        deployment.add_server(ServerParams { region: None });
-        deployment.add_server(ServerParams { region: None });
+        deployment.add_server(ServerParams::default());
+        deployment.add_server(ServerParams::default());
 
         let deployment = start_multi_process(deployment).await;
         assert!(
@@ -298,7 +436,7 @@ mod tests {
         assert_eq!(metrics.len(), 2);
 
         // Check that the controller can respond to an rpc.
-        let workers = deployment.handle.workers().await.unwrap();
+        let workers = deployment.handle.healthy_workers().await.unwrap();
         assert_eq!(workers.len(), 2);
 
         let res = deployment.teardown().await;
@@ -323,8 +461,8 @@ mod tests {
                 rebuild: false,
             }),
         );
-        deployment.add_server(ServerParams { region: None });
-        deployment.add_server(ServerParams { region: None });
+        deployment.add_server(ServerParams::default());
+        deployment.add_server(ServerParams::default());
 
         let mut deployment = start_multi_process(deployment).await.unwrap();
         deployment.teardown().await.unwrap();
@@ -344,14 +482,66 @@ mod tests {
             }),
         );
         deployment.set_primary_region("r1");
-        deployment.add_server(ServerParams {
-            region: Some("r1".to_string()),
-        });
-        deployment.add_server(ServerParams {
-            region: Some("r2".to_string()),
-        });
+        deployment.add_server(ServerParams::default().with_region("r1"));
+        deployment.add_server(ServerParams::default().with_region("r2"));
 
         let mut deployment = start_multi_process(deployment).await.unwrap();
         deployment.teardown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn clustertest_server_management() {
+        let cluster_name = "ct_server_management";
+        let mut deployment = DeploymentParams::new(
+            cluster_name,
+            NoriaServerSource::Build(BuildParams {
+                root_project_path: get_project_root(),
+                target_dir: get_project_root().join("test_target"),
+                release: true,
+                rebuild: false,
+            }),
+        );
+        deployment.set_primary_region("r1");
+        deployment.add_server(ServerParams::default().with_region("r1"));
+        deployment.add_server(ServerParams::default().with_region("r2"));
+
+        let mut deployment = start_multi_process(deployment).await.unwrap();
+
+        // Check that we currently have two workers.
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+
+        // Start up a new server.
+        let server_handle = deployment
+            .start_server(ServerParams::default().with_region("r3"))
+            .await
+            .unwrap();
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 3);
+
+        // Now kill that server we started up.
+        deployment.kill_server(server_handle).await.unwrap();
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+
+        deployment.teardown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn clustertest_no_server_in_primary_region_test() {
+        let mut deployment =
+            DeploymentParams::new("fake_cluster", NoriaServerSource::Existing("/".into()));
+        deployment.set_primary_region("r1");
+        deployment.add_server(ServerParams::default().with_region("r2"));
+        deployment.add_server(ServerParams::default().with_region("r3"));
+        assert!(start_multi_process(deployment).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn clustertest_server_region_without_primary_region() {
+        let mut deployment =
+            DeploymentParams::new("fake_cluster", NoriaServerSource::Existing("/".into()));
+        deployment.add_server(ServerParams::default().with_region("r1"));
+        deployment.add_server(ServerParams::default().with_region("r2"));
+
+        assert!(start_multi_process(deployment).await.is_err());
     }
 }

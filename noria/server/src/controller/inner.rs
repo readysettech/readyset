@@ -204,6 +204,17 @@ impl ControllerInner {
                 &self.workers.keys().collect::<Vec<_>>(),
             )
             .unwrap())),
+            (Method::GET, "/healthy_workers") | (Method::POST, "/healthy_workers") => {
+                Ok(Ok(bincode::serialize(
+                    &self
+                        .workers
+                        .iter()
+                        .filter(|w| w.1.healthy)
+                        .map(|w| w.0)
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap()))
+            }
             (Method::GET, "/nodes") => {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this

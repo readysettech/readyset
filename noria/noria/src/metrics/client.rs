@@ -36,7 +36,7 @@ where
 
     /// Retrieves the RPC URI for each noria-server in the deployment.
     pub async fn get_workers(&mut self) -> ReadySetResult<Vec<Url>> {
-        self.controller.workers().await
+        self.controller.healthy_workers().await
     }
 
     /// Retrieves metrics from each noria-server in a deployment and aggregates the results
