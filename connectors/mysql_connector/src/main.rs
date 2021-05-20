@@ -5,13 +5,12 @@ pub mod snapshot;
 use connector::BinlogPosition;
 
 use clap::{App, Arg};
+use slog::*;
 
 const DEFAULT_BINLOG_START: &str = "4"; // All binlogs start at offset 4, because the first four bytes are the magic number
 
 #[tokio::main]
 async fn main() -> noria::ReadySetResult<()> {
-    tracing_subscriber::fmt().init();
-
     let matches = App::new("noria-mysql-connector")
         .version("0.0.1")
         .arg(
@@ -108,6 +107,9 @@ async fn main() -> noria::ReadySetResult<()> {
         position: clap::value_t!(matches.value_of("binlog-position"), u32).unwrap(),
     });
 
+    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
+    let log = Logger::root(slog_term::FullFormat::new(plain).build().fuse(), o!());
+
     let builder = noria_adapter::Builder::new(addr, port)
         .with_user(user_name)
         .with_password(user_password)
@@ -115,7 +117,8 @@ async fn main() -> noria::ReadySetResult<()> {
         .with_deployment(Some(deployment))
         .with_database(Some(schema))
         .with_position(binlog_position)
-        .with_snapshot(matches.is_present("snapshot"));
+        .with_snapshot(matches.is_present("snapshot"))
+        .with_logger(log);
 
     builder.start().await
 }

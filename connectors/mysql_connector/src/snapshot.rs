@@ -4,7 +4,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
 use noria::{consensus::Authority, ReadySetResult, ReplicationOffset};
-use tracing::info;
+use slog::{info, Logger};
 
 use super::BinlogPosition;
 
@@ -17,9 +17,10 @@ enum TableKind {
 
 pub struct MySqlReplicator {
     /// This is the underlying (regular) MySQL connection
-    pub pool: mysql::Pool,
+    pub(crate) pool: mysql::Pool,
     /// If Some then only snapshot those tables, otherwise will snapshot all tables
-    pub tables: Option<Vec<String>>,
+    pub(crate) tables: Option<Vec<String>>,
+    pub(crate) log: Logger,
 }
 
 impl MySqlReplicator {
@@ -123,6 +124,7 @@ impl MySqlReplicator {
     async fn replicate_table(
         mut dumper: TableDumper,
         mut table_mutator: noria::Table,
+        log: Logger,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
         let mut row_stream = dumper.stream().await?;
@@ -144,6 +146,7 @@ impl MySqlReplicator {
         }
 
         info!(
+            log,
             "Replication for table `{}` finished, rows replicated: {}",
             table_mutator.table_name(),
             cnt
@@ -168,20 +171,20 @@ impl MySqlReplicator {
         // if dropped, it would probably remain open in the pool, but we can't risk it
         let _lock = self.flush_and_read_lock().await?;
 
-        info!("Acquired read lock");
+        info!(self.log, "Acquired read lock");
 
         let binlog_position = self.get_binlog_position().await?;
         let repl_offset: ReplicationOffset = (&binlog_position).try_into()?;
 
         // Even if we don't install the recipe, this will load the tables from the database
         let recipe = self.load_recipe().await?;
-        info!("Loaded recipe:\n{}", recipe);
+        info!(self.log, "Loaded recipe:\n{}", recipe);
 
         if install_recipe {
             noria
                 .install_recipe_with_offset(&recipe, Some(repl_offset.clone()))
                 .await?;
-            info!("Recipe installed");
+            info!(self.log, "Recipe installed");
         }
 
         let mut replication_tasks = FuturesUnordered::new();
@@ -191,13 +194,18 @@ impl MySqlReplicator {
             let dumper = self.dump_table(&table_name).await?;
             let mut table_mutator = noria.table(&table_name).await?;
 
-            info!("Replicating table `{}`", table_name);
+            let log = self.log.new(slog::o!("table" => table_name.clone()));
+            info!(log, "Replicating table");
 
             table_mutator
                 .set_replication_offset(repl_offset.clone())
                 .await?;
 
-            replication_tasks.push(tokio::spawn(Self::replicate_table(dumper, table_mutator)));
+            replication_tasks.push(tokio::spawn(Self::replicate_table(
+                dumper,
+                table_mutator,
+                log,
+            )));
         }
 
         while let Some(task_result) = replication_tasks.next().await {
