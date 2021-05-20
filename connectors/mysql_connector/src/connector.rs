@@ -15,7 +15,6 @@ pub struct BinlogPosition {
 const CHECKSUM_QUERY: &str = "SET @master_binlog_checksum='CRC32'";
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 
-///
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
 ///
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to `full`.
@@ -28,7 +27,6 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 /// `REPLICATION CLIENT` - to use SHOW MASTER STATUS, SHOW SLAVE STATUS, and SHOW BINARY LOGS;
 ///
 /// The connector must also be assigned a unique `server_id` value
-///
 pub struct MySqlBinlogConnector {
     /// This is the underlying (regular) MySQL connection
     connection: mysql::Conn,

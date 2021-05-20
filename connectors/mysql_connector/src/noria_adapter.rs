@@ -138,7 +138,6 @@ impl Builder {
         adapter.main_loop().await
     }
 
-    ///
     /// Finish the build and begin monitoring the binlog for changes
     /// If noria has no replication offset information, it will replicate the target database in its
     /// entirety to Noria before listening on the binlog
@@ -149,7 +148,6 @@ impl Builder {
     /// * Each table is individually replicated into Noria
     /// * READ LOCK is released
     /// * Adapter keeps reading binlog from the next position keeping Noria up to date
-    ///
     pub async fn start(self) -> ReadySetResult<()> {
         let zookeeper_address = self
             .zookeeper_address
@@ -175,12 +173,10 @@ impl Builder {
         Self::start_inner(mysql_options, noria, self.server_id, log).await
     }
 
-    ///
     /// Same as [`start`](Builder::start), but accepts a MySQL url for options
     /// and externally supplied Noria `ControllerHandle` and `log`.
     /// The MySQL url must contain the database name, and user and password if applicable.
     /// i.e. `mysql://user:pass%20word@localhost/database_name`
-    ///
     pub async fn start_with_url<A: Authority>(
         mysql_url: &str,
         noria: ControllerHandle<A>,

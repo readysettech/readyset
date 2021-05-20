@@ -96,6 +96,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     _memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
     region: Option<String>,
+    mysql_url: Option<String>,
 ) -> Result<Handle<A>, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -189,6 +190,8 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         handle_rx,
         our_descriptor: our_descriptor.clone(),
         valve: valve.clone(),
+        mysql_url,
+        replicator_task: None,
     };
 
     crate::controller::instance_campaign(
