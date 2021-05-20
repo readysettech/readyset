@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 /// Wrapper for a single server process.
-pub struct ServerHandle {
+pub struct ServerProcessHandle {
+    /// Child process handle running the server.
     process: Child,
 }
 
-impl ServerHandle {
+impl ServerProcessHandle {
     pub fn kill(&mut self) -> Result<()> {
         self.process.kill()?;
         Ok(())
@@ -31,8 +32,8 @@ impl NoriaServerRunner {
         }
     }
 
-    pub fn start(&self) -> anyhow::Result<ServerHandle> {
-        Ok(ServerHandle {
+    pub fn start(&self) -> anyhow::Result<ServerProcessHandle> {
+        Ok(ServerProcessHandle {
             process: Command::new(&self.binary)
                 .args(&self.args)
                 .spawn()
