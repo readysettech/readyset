@@ -2,12 +2,8 @@ pub mod connector;
 pub mod noria_adapter;
 pub mod snapshot;
 
-use connector::BinlogPosition;
-
 use clap::{App, Arg};
 use slog::*;
-
-const DEFAULT_BINLOG_START: &str = "4"; // All binlogs start at offset 4, because the first four bytes are the magic number
 
 #[tokio::main]
 async fn main() -> noria::ReadySetResult<()> {
@@ -67,9 +63,6 @@ async fn main() -> noria::ReadySetResult<()> {
                 .env("NORIA_DEPLOYMENT")
                 .help("Noria deployment ID to attach to."),
         )
-        .arg(Arg::from_usage("--snapshot").help(
-            "If passed, will replicate the target database to Noria before listening on the binlog",
-        ))
         .arg(
             Arg::with_name("db-name")
                 .long("db-name")
@@ -77,21 +70,6 @@ async fn main() -> noria::ReadySetResult<()> {
                 .required(true)
                 .env("DB_NAME")
                 .help("The db name."),
-        )
-        .arg(
-            Arg::with_name("binlog-file")
-                .long("binlog-file")
-                .takes_value(true)
-                .env("BINLOG_FILE")
-                .help("The binlog filename."),
-        )
-        .arg(
-            Arg::with_name("binlog-position")
-                .long("binlog-position")
-                .takes_value(true)
-                .env("BINLOG_POS")
-                .default_value(DEFAULT_BINLOG_START)
-                .help("The offset withing the binlog file."),
         )
         .get_matches();
 
@@ -102,10 +80,6 @@ async fn main() -> noria::ReadySetResult<()> {
     let zookeeper_address = matches.value_of("zookeeper-address").unwrap();
     let deployment = matches.value_of("deployment").unwrap();
     let schema = matches.value_of("db-name").unwrap();
-    let binlog_position = matches.value_of("binlog-file").map(|f| BinlogPosition {
-        binlog_file: f.to_string(),
-        position: clap::value_t!(matches.value_of("binlog-position"), u32).unwrap(),
-    });
 
     let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
     let log = Logger::root(slog_term::FullFormat::new(plain).build().fuse(), o!());
@@ -116,8 +90,6 @@ async fn main() -> noria::ReadySetResult<()> {
         .with_zookeeper_addr(Some(zookeeper_address))
         .with_deployment(Some(deployment))
         .with_database(Some(schema))
-        .with_position(binlog_position)
-        .with_snapshot(matches.is_present("snapshot"))
         .with_logger(log);
 
     builder.start().await
