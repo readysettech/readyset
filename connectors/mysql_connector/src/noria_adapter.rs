@@ -170,7 +170,7 @@ impl<A: Authority> MySqlNoriaAdapter<A> {
         match action {
             BinlogAction::SchemaChange(schema) => {
                 // Send the query to Noria as is
-                self.noria.extend_recipe(&schema).await?;
+                self.noria.extend_recipe_with_offset(&schema, pos).await?;
                 self.clear_mutator_cache();
                 Ok(())
             }

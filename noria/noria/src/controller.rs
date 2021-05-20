@@ -1,4 +1,3 @@
-use crate::consensus::{self, Authority};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
@@ -6,6 +5,10 @@ use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
+use crate::{
+    consensus::{self, Authority},
+    RecipeSpec,
+};
 use crate::{
     internal, rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec,
     ReadySetResult, ReplicationOffset, ViewFilter, ViewRequest,
@@ -489,7 +492,28 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         &mut self,
         recipe_addition: &str,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        self.rpc("extend_recipe", recipe_addition)
+        let request = RecipeSpec {
+            recipe: recipe_addition,
+            replication_offset: None,
+        };
+
+        self.rpc("extend_recipe", request)
+    }
+
+    /// Extend the existing recipe with the given set of queries and an optional replication offset
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn extend_recipe_with_offset(
+        &mut self,
+        recipe_addition: &str,
+        replication_offset: Option<ReplicationOffset>,
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+        let request = RecipeSpec {
+            recipe: recipe_addition,
+            replication_offset,
+        };
+
+        self.rpc("extend_recipe", request)
     }
 
     /// Replace the existing recipe with this one.
@@ -499,7 +523,28 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         &mut self,
         new_recipe: &str,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        self.rpc("install_recipe", new_recipe)
+        let request = RecipeSpec {
+            recipe: new_recipe,
+            replication_offset: None,
+        };
+
+        self.rpc("install_recipe", request)
+    }
+
+    /// Replace the existing recipe with this one.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn install_recipe_with_offset(
+        &mut self,
+        new_recipe: &str,
+        replication_offset: Option<ReplicationOffset>,
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+        let request = RecipeSpec {
+            recipe: new_recipe,
+            replication_offset,
+        };
+
+        self.rpc("install_recipe", request)
     }
 
     /// Fetch a graphviz description of the dataflow graph.

@@ -4018,6 +4018,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "mysql 18.2.0",
+ "mysql_connector",
  "nom 5.1.2",
  "nom-sql",
  "noria",

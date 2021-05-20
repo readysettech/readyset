@@ -14,9 +14,12 @@ use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest
 use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::{self, Method, StatusCode};
 use nom_sql::ColumnSpecification;
-use noria::consensus::{Authority, Epoch, STATE_KEY};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset};
+use noria::{
+    consensus::{Authority, Epoch, STATE_KEY},
+    RecipeSpec,
+};
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use slog::Logger;
@@ -54,6 +57,8 @@ pub struct ControllerInner {
 
     /// Current recipe
     recipe: Recipe,
+    /// Latest replication position for the schema if from replica or binlog
+    replication_offset: Option<ReplicationOffset>,
 
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
     pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
@@ -633,6 +638,8 @@ impl ControllerInner {
             pending_recovery,
             last_checked_workers: Instant::now(),
             read_addrs: Default::default(),
+
+            replication_offset: state.replication_offset,
         }
     }
 
@@ -1311,14 +1318,20 @@ impl ControllerInner {
     fn extend_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
-        add_txt: String,
+        add_txt_spec: RecipeSpec,
     ) -> Result<ActivationResult, ReadySetError> {
         let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
+        let add_txt = add_txt_spec.recipe;
+
         match new.extend(&add_txt) {
             Ok(new) => match self.apply_recipe(new) {
                 Ok(x) => {
+                    if let Some(offset) = &add_txt_spec.replication_offset {
+                        offset.try_max_into(&mut self.replication_offset)?
+                    }
+
                     if authority
                         .read_modify_write(
                             STATE_KEY,
@@ -1327,7 +1340,12 @@ impl ControllerInner {
                                 Some(ref state) if state.epoch > self.epoch => Err(()),
                                 Some(mut state) => {
                                     state.recipe_version = self.recipe.version();
-                                    state.recipes.push(add_txt.clone());
+                                    state.recipes.push(add_txt.to_string());
+                                    if let Some(offset) = &add_txt_spec.replication_offset {
+                                        offset
+                                            .try_max_into(&mut state.replication_offset)
+                                            .map_err(|_| ())?;
+                                    }
                                     Ok(state)
                                 }
                             },
@@ -1355,8 +1373,10 @@ impl ControllerInner {
     fn install_recipe<A: Authority + 'static>(
         &mut self,
         authority: &Arc<A>,
-        r_txt: String,
+        r_txt_spec: RecipeSpec,
     ) -> Result<ActivationResult, ReadySetError> {
+        let r_txt = r_txt_spec.recipe;
+
         match Recipe::from_str(&r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let _old = self.recipe.clone();
@@ -1371,7 +1391,12 @@ impl ControllerInner {
                                     Some(ref state) if state.epoch > self.epoch => Err(()),
                                     Some(mut state) => {
                                         state.recipe_version = self.recipe.version();
-                                        state.recipes = vec![r_txt.clone()];
+                                        state.recipes = vec![r_txt.to_string()];
+                                        // When installing a recipe, the new replication offset overwrites the existing
+                                        // offset entirely
+                                        state.replication_offset =
+                                            r_txt_spec.replication_offset.clone();
+
                                         Ok(state)
                                     }
                                 }
@@ -1592,7 +1617,7 @@ impl ControllerInner {
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
             .try_fold(
-                None,
+                self.replication_offset.clone(),
                 |acc: Option<ReplicationOffset>, domain_offs| async move {
                     // NOTE(grfn): domain_offs is a vec per-shard here - ostensibly, every time we
                     // do an update to a replication offset that applies to every shard - meaning

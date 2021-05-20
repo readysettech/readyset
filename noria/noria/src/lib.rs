@@ -355,6 +355,15 @@ pub struct ReaderReplicationResult {
     pub new_readers: HashMap<String, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
+/// Represents a request to install or extend a recipe
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RecipeSpec<'a> {
+    /// The recipe string
+    pub recipe: &'a str,
+    /// Optional replication offset if recipe is installed from replication or binlog
+    pub replication_offset: Option<ReplicationOffset>,
+}
+
 /// Filters that can be used to filter the type of
 /// view returned.
 #[derive(Clone, Debug, Deserialize, Serialize)]
