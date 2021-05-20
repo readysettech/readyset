@@ -1,7 +1,9 @@
 use crate::node::special::packet_filter::PacketFilter;
 use crate::prelude::*;
+use metrics::counter;
 use noria::errors::{internal_err, ReadySetResult};
 use noria::invariant;
+use noria::metrics::recorded;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -117,8 +119,18 @@ impl Egress {
             // Take the packet through the filter. The filter will make any necessary modifications
             // to the packet to be sent, and tell us if we should send the packet or drop it.
             if !packet_filter.process(m.as_mut(), keyed_by, tx.node)? {
+                counter!(
+                    recorded::EGRESS_NODE_DROPPED_PACKETS,
+                    1,
+                    "node" => tx.node.index().to_string(),
+                );
                 continue;
             }
+            counter!(
+                recorded::EGRESS_NODE_SENT_PACKETS,
+                1,
+                "node" => tx.node.index().to_string(),
+            );
             output.send(tx.dest, m);
             if take {
                 break;
