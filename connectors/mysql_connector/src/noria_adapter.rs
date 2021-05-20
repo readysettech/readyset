@@ -88,6 +88,56 @@ impl Builder {
         self
     }
 
+    async fn start_inner<A: Authority>(
+        mysql_options: mysql_async::Opts,
+        mut noria: ControllerHandle<A>,
+        server_id: Option<u32>,
+        log: slog::Logger,
+    ) -> ReadySetResult<()> {
+        // Attempt to retreive the latest replication offset from noria, if none is present
+        // begin the snapshot process
+        let pos = match noria.replication_offset().await?.map(Into::into) {
+            None => {
+                info!(log, "Taking database snapshot");
+
+                let replicator_options = mysql_options.clone();
+                let pool = mysql_async::Pool::new(replicator_options);
+                let replicator = MySqlReplicator {
+                    pool,
+                    tables: None,
+                    log: log.clone(),
+                };
+
+                replicator.replicate_to_noria(&mut noria, true).await?
+            }
+            Some(pos) => pos,
+        };
+
+        info!(log, "Binlog position {:?}", pos);
+
+        let schemas = mysql_options
+            .db_name()
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default();
+
+        // TODO: it is possible that the binlog position from noria is no longer
+        // present on the primary, in which case the connection will fail, and we would
+        // need to perform a new snapshot
+        let connector =
+            MySqlBinlogConnector::connect(mysql_options, schemas, Some(pos), server_id).await?;
+
+        info!(log, "MySQL connected");
+
+        let mut adapter = MySqlNoriaAdapter {
+            noria,
+            connector,
+            mutator_map: HashMap::new(),
+            log,
+        };
+
+        adapter.main_loop().await
+    }
+
     ///
     /// Finish the build and begin monitoring the binlog for changes
     /// If noria has no replication offset information, it will replicate the target database in its
@@ -110,58 +160,38 @@ impl Builder {
             .ok_or_else(|| ReadySetError::ReplicationFailed("Missing deployment".into()))?;
 
         let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment))?;
-        let mut noria = noria::ControllerHandle::new(authority).await?;
+        let noria = noria::ControllerHandle::new(authority).await?;
 
         let mysql_options = mysql_async::OptsBuilder::default()
             .ip_or_hostname(self.addr)
             .tcp_port(self.port)
             .user(self.user)
-            .pass(self.password);
+            .pass(self.password)
+            .db_name(self.db_name)
+            .into();
 
         let log = self.log.unwrap_or_else(|| Logger::root(Discard, o!()));
 
-        // Attempt to retreive the latest replication offset from noria, if none is present
-        // begin the snapshot process
-        let pos = match noria.replication_offset().await?.map(Into::into) {
-            None => {
-                info!(log, "Taking database snapshot");
+        Self::start_inner(mysql_options, noria, self.server_id, log).await
+    }
 
-                let replicator_options = mysql_options.clone();
-                let pool = mysql_async::Pool::new(replicator_options);
-                let replicator = MySqlReplicator {
-                    pool,
-                    tables: None,
-                    log: log.clone(),
-                };
+    ///
+    /// Same as [`start`](Builder::start), but accepts a MySQL url for options
+    /// and externally supplied Noria `ControllerHandle` and `log`.
+    /// The MySQL url must contain the database name, and user and password if applicable.
+    /// i.e. `mysql://user:pass%20word@localhost/database_name`
+    ///
+    pub async fn start_with_url<A: Authority>(
+        mysql_url: &str,
+        noria: ControllerHandle<A>,
+        server_id: Option<u32>,
+        log: slog::Logger,
+    ) -> ReadySetResult<()> {
+        let mysql_options = mysql_async::Opts::from_url(mysql_url).map_err(|e| {
+            ReadySetError::ReplicationFailed(format!("Invalid MySQL URL format {}", e))
+        })?;
 
-                replicator.replicate_to_noria(&mut noria, true).await?
-            }
-            Some(pos) => pos,
-        };
-
-        info!(log, "Binlog position {:?}", pos);
-
-        // TODO: it is possible that the binlog position from noria is no longer
-        // present on the primary, in which case the connection will fail, and we would
-        // need to perform a new snapshot
-        let connector = MySqlBinlogConnector::connect(
-            mysql_options,
-            self.db_name.map(|s| vec![s]).unwrap_or_default(),
-            Some(pos),
-            self.server_id,
-        )
-        .await?;
-
-        info!(log, "MySQL connected");
-
-        let mut adapter = MySqlNoriaAdapter {
-            noria,
-            connector,
-            mutator_map: HashMap::new(),
-            log,
-        };
-
-        adapter.main_loop().await
+        Self::start_inner(mysql_options, noria, server_id, log).await
     }
 }
 

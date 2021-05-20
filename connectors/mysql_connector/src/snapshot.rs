@@ -145,12 +145,7 @@ impl MySqlReplicator {
             table_mutator.insert_many(rows).await?;
         }
 
-        info!(
-            log,
-            "Replication for table `{}` finished, rows replicated: {}",
-            table_mutator.table_name(),
-            cnt
-        );
+        info!(log, "Replication finished, rows replicated: {}", cnt);
 
         Ok(())
     }
