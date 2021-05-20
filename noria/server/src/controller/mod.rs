@@ -346,7 +346,6 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
             //
             // If there is currently a leader, then loop until there is a period without a
             // leader, notifying the main thread every time a leader change occurs.
-            eprintln!("Checking if there's a leader");
             let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
                 retries = 5;
