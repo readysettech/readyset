@@ -282,6 +282,22 @@ pub mod recorded {
     /// | shard | The shard of the base table the lookup is requested in. |
     /// | node | The LocalNodeIndex of the base table node handling the packet. |
     pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "base_table.lookup_requests";
+
+    /// Counter: The number of packets dropped by an egress node.
+    ///
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | node | The NodeIndex of the ingress node that was supposed to receive the packet. |
+    pub const EGRESS_NODE_DROPPED_PACKETS: &str = "egress.dropped_packets";
+
+    /// Counter: The number of packets sent by an egress node.
+    ///
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | node | The NodeIndex of the ingress node were the packet was sent. |
+    pub const EGRESS_NODE_SENT_PACKETS: &str = "egress.sent_packets";
 }
 
 /// A dumped metric's kind.

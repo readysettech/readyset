@@ -51,6 +51,15 @@ async fn it_works_basic() {
         .await
         .unwrap();
 
+    // send a value on a that won't be used.
+    // We expect the egress node to drop it.
+    muta.insert(vec![
+        DataType::try_from(2i32).unwrap(),
+        DataType::try_from(2i32).unwrap(),
+    ])
+    .await
+    .unwrap();
+
     // give it some time to propagate
     sleep().await;
 
@@ -64,6 +73,14 @@ async fn it_works_basic() {
     let metrics_dump = &metrics[0].metrics;
     assert_eq!(
         get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
+        1.0
+    );
+    assert_eq!(
+        get_counter(recorded::EGRESS_NODE_DROPPED_PACKETS, metrics_dump),
+        2.0
+    );
+    assert_eq!(
+        get_counter(recorded::EGRESS_NODE_SENT_PACKETS, metrics_dump),
         1.0
     );
 
