@@ -16,7 +16,6 @@ members = [
     "psql-srv",
     "unbounded-interval-tree",
     "launchpad",
-    "connectors/debezium_connector",
     "connectors/mysql_connector",
     "query_generator",
     "taster",

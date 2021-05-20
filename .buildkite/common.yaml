@@ -675,47 +675,6 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: ':rust: Check debezium connector'
-    key: build-debezium-connector
-    commands:
-    - 'echo +++ :rust: Running cargo check'
-    - RUSTFLAGS='-D warnings' cargo check -v -p debezium_connector
-    depends_on:
-    - build-noria
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test debezium connector'
-    key: test-debezium-connector
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p debezium_connector
-    depends_on:
-    - build-debezium-connector
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-
   - label: ':rust: Check msql-srv'
     key: build-msql-srv
     commands:
