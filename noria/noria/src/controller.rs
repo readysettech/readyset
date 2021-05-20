@@ -254,11 +254,11 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `ControllerHandle::from_zk` instead.
-    pub async fn new(authority: A) -> ReadySetResult<Self>
+    pub async fn new<I: Into<Arc<A>>>(authority: I) -> ReadySetResult<Self>
     where
         A: Send + 'static,
     {
-        Self::make(Arc::new(authority)).await
+        Self::make(authority.into()).await
     }
 
     /// Enumerate all known base tables.

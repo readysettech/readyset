@@ -150,13 +150,11 @@ impl MySqlReplicator {
         Ok(())
     }
 
-    ///
     /// This function replicates an entire MySQL database into a clean
     /// noria deployment.
     /// # Arguments
     /// * `noria`: The target Noria deployment
     /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
-    ///
     pub async fn replicate_to_noria<A: Authority>(
         mut self,
         noria: &mut noria::ControllerHandle<A>,

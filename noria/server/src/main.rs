@@ -178,6 +178,13 @@ If specified, overrides the value of --external-address"))
             .default_value("")
             .env("NORIA_REGION")
             .help("The region the worker is hosted in. Required to route view requests to specific regions."),
+        ).arg(
+            Arg::with_name("mysql-url")
+                .long("mysql-url")
+                .takes_value(true)
+                .required(false)
+                .env("MYSQL_URL")
+                .help("Host for mysql connection. Should include username and password if necessary."),
         )
         .get_matches();
 
@@ -253,6 +260,10 @@ If specified, overrides the value of --external-address"))
         .value_of("log-dir")
         .and_then(|p| Some(PathBuf::from(p)));
     builder.set_persistence(persistence_params);
+
+    if let Some(url) = matches.value_of("mysql-url") {
+        builder.set_mysql_url(url.into());
+    }
 
     if verbose {
         authority.log_with(log.clone());

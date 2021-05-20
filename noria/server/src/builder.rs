@@ -18,6 +18,7 @@ pub struct Builder {
     external_addr: SocketAddr,
     log: slog::Logger,
     region: Option<String>,
+    mysql_url: Option<String>,
 }
 impl Default for Builder {
     fn default() -> Self {
@@ -29,6 +30,7 @@ impl Default for Builder {
             memory_limit: None,
             memory_check_frequency: None,
             region: None,
+            mysql_url: None,
         }
     }
 }
@@ -127,10 +129,15 @@ impl Builder {
         self.config.primary_region = Some(region);
     }
 
+    /// Sets the primary MySQL server to replicate from.
+    pub fn set_mysql_url(&mut self, url: String) {
+        self.mysql_url = Some(url);
+    }
+
     /// Start a server instance and return a handle to it.
     #[must_use]
     pub fn start<A: Authority + 'static>(
-        &self,
+        self,
         authority: Arc<A>,
     ) -> impl Future<Output = Result<Handle<A>, anyhow::Error>> {
         let Builder {
@@ -140,8 +147,9 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             ref log,
-            ref region,
-        } = *self;
+            region,
+            mysql_url,
+        } = self;
 
         let config = config.clone();
         let log = log.clone();
@@ -154,21 +162,22 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             log,
-            region.clone(),
+            region,
+            mysql_url,
         )
     }
 
     /// Start a local-only worker, and return a handle to it.
     #[must_use]
     pub fn start_local(
-        &self,
+        self,
     ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {
         self.start_local_custom(Arc::new(LocalAuthority::new()))
     }
 
     /// Start a local-only worker using a custom authority, and return a handle to it.
     pub fn start_local_custom(
-        &self,
+        self,
         authority: Arc<LocalAuthority>,
     ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {
         let fut = self.start(authority);

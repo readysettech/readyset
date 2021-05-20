@@ -143,6 +143,10 @@ pub struct ControllerOuter<A> {
     pub(crate) our_descriptor: ControllerDescriptor,
     /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
     pub(crate) valve: Valve,
+    /// Primary MySQL server connection URL
+    pub(crate) mysql_url: Option<String>,
+    /// A handle to the replicator task
+    pub(crate) replicator_task: Option<tokio::task::JoinHandle<()>>,
 }
 impl<A> ControllerOuter<A>
 where
@@ -238,6 +242,57 @@ where
         Ok(())
     }
 
+    async fn stop_replication_task(&mut self) {
+        if let Some(handle) = self.replicator_task.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    /// Start replication/binlog synchronization in an infinite loop
+    /// on any error the task will retry again and again, because in case
+    /// a connection to the primary was lost for any reason, all we want is to
+    /// connect again, and catch up from the binlog
+    ///
+    /// TODO: how to handle the case where we need a full new replica
+    fn start_replication_task(&mut self) {
+        let url = match &self.mysql_url {
+            Some(url) => url.to_string(),
+            None => {
+                info!(self.log, "No primary instance specified");
+                return;
+            }
+        };
+
+        let authority = Arc::clone(&self.authority);
+        let log = self.log.clone();
+
+        self.replicator_task = Some(tokio::spawn(async move {
+            loop {
+                let noria: noria::ControllerHandle<A> =
+                    match noria::ControllerHandle::new(Arc::clone(&authority)).await {
+                        Ok(noria) => noria,
+                        Err(err) => {
+                            // On each replication error we wait for 30 seconds and then try again
+                            error!(log, "Replication unable to get ControllerHandle {}", err);
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                            continue;
+                        }
+                    };
+
+                match mysql_connector::Builder::start_with_url(&url, noria, None, log.clone()).await
+                {
+                    Ok(()) => unreachable!(), // connector runs in infinite loop, so it will never finish normally
+                    Err(err) => {
+                        // On each replication error we wait for 30 seconds and then try again
+                        error!(log, "Replication error {}", err);
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                }
+            }
+        }));
+    }
+
     async fn handle_campaign_update(&mut self, msg: CampaignUpdate) -> ReadySetResult<()> {
         match msg {
             CampaignUpdate::LeaderChange(state, descr) => {
@@ -258,6 +313,10 @@ where
                     epoch: state.epoch,
                 })
                 .await?;
+
+                // After the controller becomes the leader, we need it to start listening on
+                // the binlog, it should stop doing it if it stops being a leader
+                self.start_replication_task();
             }
             CampaignUpdate::CampaignError(e) => {
                 // the campaign can't be restarted, so the controller should hard-exit
@@ -314,6 +373,8 @@ where
             }
         }
         if self.inner.is_some() {
+            self.stop_replication_task().await;
+
             if let Err(e) = self.authority.surrender_leadership() {
                 error!(self.log, "failed to surrender leadership");
                 internal!("failed to surrender leadership: {}", e)
