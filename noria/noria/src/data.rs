@@ -4,6 +4,7 @@ use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Either;
 
 use crate::{ReadySetError, ReadySetResult};
+use maths::float::{decode_f64, encode_f64};
 use nom_sql::{Literal, Real, SqlType};
 
 use std::convert::TryFrom;
@@ -71,8 +72,7 @@ impl fmt::Display for DataType {
             DataType::BigInt(n) => write!(f, "{}", n),
             DataType::UnsignedBigInt(n) => write!(f, "{}", n),
             DataType::Real(mant, exp, sign, _) => {
-                let float = (mant as f64) * (sign as f64) * 2.0_f64.powf(exp as f64);
-                write!(f, "{}", float)
+                write!(f, "{}", encode_f64(mant, exp, sign))
             }
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
             DataType::Time(ref t) => {
@@ -431,33 +431,30 @@ impl DataType {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
-            (Self::Real(n, e, s, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
+            (Self::Real(m, e, s, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(
-                    i32::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
-                        .map_err(|e| {
-                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                        })?,
+                    i32::try_from(encode_f64(*m, *e, *s).round() as i64).map_err(|e| {
+                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                    })?,
                 )))
             }
-            (Self::Real(n, e, s, _), Some(Real), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(
-                ((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64,
+            (Self::Real(m, e, s, _), Some(Real), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(
+                encode_f64(*m, *e, *s).round() as i64,
             ))),
             (
-                Self::Real(n, e, s, _),
+                Self::Real(m, e, s, _),
                 Some(Real),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
             ) => Ok(Cow::Owned(DataType::UnsignedInt(
-                u32::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
-                    .map_err(|e| {
+                u32::try_from(encode_f64(*m, *e, *s).round() as i64).map_err(|e| {
+                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                })?,
+            ))),
+            (Self::Real(m, e, s, _), Some(Real), UnsignedBigint(_)) => {
+                Ok(Cow::Owned(DataType::UnsignedBigInt(
+                    u64::try_from(encode_f64(*m, *e, *s).round() as i64).map_err(|e| {
                         mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                     })?,
-            ))),
-            (Self::Real(n, e, s, _), Some(Real), UnsignedBigint(_)) => {
-                Ok(Cow::Owned(DataType::UnsignedBigInt(
-                    u64::try_from(((*n as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)) as i64)
-                        .map_err(|e| {
-                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                        })?,
                 )))
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
@@ -856,16 +853,7 @@ impl TryFrom<f64> for DataType {
                 details: "".to_string(),
             });
         }
-        let bits: u64 = f.to_bits();
-        let sign: i8 = if bits >> 63 == 0 { 1 } else { -1 };
-        let mut exponent: i16 = ((bits >> 52) & 0x7ff) as i16;
-        let mantissa = if exponent == 0 {
-            (bits & 0xfffffffffffff) << 1
-        } else {
-            (bits & 0xfffffffffffff) | 0x10000000000000
-        };
-
-        exponent -= 1023 + 52;
+        let (mantissa, exponent, sign) = decode_f64(f);
 
         let precision = if exponent < 0 { -exponent as u8 } else { 0 };
 
@@ -1289,7 +1277,7 @@ impl TryFrom<&'_ DataType> for f64 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Real(m, e, s, _) => Ok((m as f64) * (s as f64) * 2.0_f64.powf(e as f64)),
+            DataType::Real(m, e, s, _) => Ok(encode_f64(m, e, s)),
             DataType::UnsignedInt(i) => Ok(f64::from(i)),
             DataType::Int(i) => Ok(f64::from(i)),
             DataType::UnsignedBigInt(i) => Ok(i as f64),

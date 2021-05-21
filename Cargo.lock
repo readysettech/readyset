@@ -2895,6 +2895,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
 
 [[package]]
+name = "maths"
+version = "0.0.1"
+
+[[package]]
 name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3698,6 +3702,7 @@ version = "0.0.11"
 dependencies = [
  "derive_more",
  "itertools 0.10.0",
+ "maths",
  "nom 5.1.2",
  "pratt",
  "pretty_assertions 0.5.1",
@@ -3735,6 +3740,7 @@ dependencies = [
  "itertools 0.10.0",
  "launchpad",
  "lazy_static",
+ "maths",
  "metrics",
  "metrics-util",
  "msql-srv",
@@ -3890,6 +3896,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
+ "maths",
  "metrics",
  "msql-srv",
  "nom-sql",
@@ -3932,6 +3939,7 @@ dependencies = [
  "hex 0.4.3",
  "itertools 0.10.0",
  "maplit",
+ "maths",
  "md5 0.7.0",
  "msql-srv",
  "mysql 20.1.0",
@@ -4015,6 +4023,7 @@ dependencies = [
  "itertools 0.10.0",
  "launchpad",
  "maplit",
+ "maths",
  "metrics",
  "metrics-util",
  "mysql 18.2.0",

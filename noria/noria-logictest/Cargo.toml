@@ -22,6 +22,7 @@ noria-client = { path = "../../noria-client/" }
 noria = { version = "0.7", path = "../noria/" }
 nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
 msql-srv = { path = "../../msql-srv" }
+maths = { version =  "0.0.1", path = "../../maths" }
 query_generator = { path = "../../query_generator" }
 tokio = { version = "1.5.0", features = ["signal", "rt-multi-thread", "time", "net"] }
 itertools = "0.10.0"

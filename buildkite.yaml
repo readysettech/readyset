@@ -32,6 +32,14 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':rust: Build maths'
+              exclude:
+                - "ops/**"
+
+            - label: ':rust: Test maths'
+              exclude:
+                - "ops/**"
+
             - label: ':rust: Build noria-logictest'
               exclude:
                 - "ops/**"
@@ -163,6 +171,8 @@ steps:
       - build-image
       - check-rustfmt
       - check-clippy
+      - check-maths
+      - test-maths
       - build-noria-logictest
       - test-noria-logictest
       - build-query-generator

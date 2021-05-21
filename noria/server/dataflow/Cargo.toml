@@ -28,6 +28,7 @@ lazy_static = "1.0.0"
 itertools = "0.9"
 metrics = "0.14"
 nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
+maths = { version = "0.0.1", path = "../../../maths" }
 indexmap = "1.1.0"
 rand = "0.7"
 regex = "1"

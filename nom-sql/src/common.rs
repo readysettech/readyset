@@ -2,6 +2,7 @@ use std::str;
 use std::str::FromStr;
 
 use itertools::Itertools;
+use maths::float::{decode_f64, encode_f64};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
@@ -173,9 +174,12 @@ impl ToString for Literal {
             Literal::Integer(ref i) => format!("{}", i),
             Literal::UnsignedInteger(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => {
-                let float = (f.mantissa as f64) * (f.sign as f64) * 2.0_f64.powf(f.exponent as f64);
                 let precision = if f.precision < 30 { f.precision } else { 30 };
-                format!("{f:.prec$}", f = float, prec = precision as usize)
+                format!(
+                    "{f:.prec$}",
+                    f = encode_f64(f.mantissa, f.exponent, f.sign),
+                    prec = precision as usize
+                )
             }
             Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
             Literal::Blob(ref bv) => bv
@@ -910,27 +914,14 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
         let dec = unpack(tup.3);
         let prec = tup.3.len();
         let float = ((int as f64) + (dec as f64) / 10.0_f64.powf(prec as f64)) * sign;
-        Literal::FixedPoint(real_from_f64(float, tup.3.len() as u8))
+        let (mantissa, exponent, sign) = decode_f64(float);
+        Literal::FixedPoint(Real {
+            mantissa,
+            exponent,
+            sign,
+            precision: tup.3.len() as u8,
+        })
     })(i)
-}
-
-pub fn real_from_f64(float: f64, precision: u8) -> Real {
-    let bits: u64 = float.to_bits();
-    let sign: i8 = if bits >> 63 == 0 { 1 } else { -1 };
-    let mut exponent: i16 = ((bits >> 52) & 0x7ff) as i16;
-    let mantissa = if exponent == 0 {
-        (bits & 0xfffffffffffff) << 1
-    } else {
-        (bits & 0xfffffffffffff) | 0x10000000000000
-    };
-
-    exponent -= 1023 + 52;
-    Real {
-        mantissa,
-        exponent,
-        sign,
-        precision,
-    }
 }
 
 /// String literal value

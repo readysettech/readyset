@@ -3,6 +3,7 @@ use std::{borrow::Cow, cmp::min};
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
+use maths::{float::encode_f64, int::integer_rnd};
 use msql_srv::MysqlTime;
 use nom_sql::{ArithmeticOperator, SqlType};
 use noria::{DataType, ReadySetError, ReadySetResult};
@@ -318,16 +319,14 @@ impl ProjectExpression {
                         DataType::UnsignedInt(inner) => *inner as i32,
                         DataType::BigInt(inner) => *inner as i32,
                         DataType::UnsignedBigInt(inner) => *inner as i32,
-                        DataType::Real(m, e, s, _) => {
-                            ((*m as f64) * (*s as f64) * 2.0_f64.powf(*e as f64)).round() as i32
-                        }
+                        DataType::Real(m, e, s, _) => encode_f64(*m, *e, *s).round() as i32,
                         _ => 0,
                     };
 
                     match non_null!(expr) {
                         DataType::Real(mant, exp, sign, prec) => {
                             // We convert back to original float for all rounding math.
-                            let float = (*mant as f64) * (*sign as f64) * 2.0_f64.powf(*exp as f64);
+                            let float = encode_f64(*mant, *exp, *sign);
                             if rnd_prec > 0 {
                                 // If rounding precision is positive, than we keep the returned
                                 // type as a float. We never return greater precision than was
@@ -349,19 +348,19 @@ impl ProjectExpression {
                             }
                         }
                         DataType::Int(val) => {
-                            let rounded = integer_rnd(*val as i64, rnd_prec) as i32;
+                            let rounded = integer_rnd(*val as i128, rnd_prec) as i32;
                             Ok(Cow::Owned(DataType::Int(rounded)))
                         }
                         DataType::BigInt(val) => {
-                            let rounded = integer_rnd(*val, rnd_prec);
+                            let rounded = integer_rnd(*val as i128, rnd_prec) as i64;
                             Ok(Cow::Owned(DataType::BigInt(rounded)))
                         }
                         DataType::UnsignedInt(val) => {
-                            let rounded = unsigned_rnd(*val as u64, rnd_prec) as u32;
+                            let rounded = integer_rnd(*val as i128, rnd_prec) as u32;
                             Ok(Cow::Owned(DataType::UnsignedInt(rounded)))
                         }
                         DataType::UnsignedBigInt(val) => {
-                            let rounded = unsigned_rnd(*val, rnd_prec);
+                            let rounded = integer_rnd(*val as i128, rnd_prec) as u64;
                             Ok(Cow::Owned(DataType::UnsignedBigInt(rounded)))
                         }
                         _ => Err(ReadySetError::ProjectExpressionBuiltInFunctionError {
@@ -514,26 +513,6 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MysqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
     time1.add(*time2)
-}
-
-// Round the given integer provided negative precision. No-op if precision is positive (decimal
-// rounding)
-fn integer_rnd(val: i64, prec: i32) -> i64 {
-    if prec > 0 {
-        // No-op case.
-        return val;
-    }
-    ((val as f64 / 10.0_f64.powf(-(prec as f64))).round() * 10.0_f64.powf(-(prec as f64))) as i64
-}
-
-// Round the given unsigned integer provided negative precision. No-op if precision is positive (decimal
-// rounding)
-fn unsigned_rnd(val: u64, prec: i32) -> u64 {
-    if prec > 0 {
-        // No-op case.
-        return val;
-    }
-    ((val as f64 / 10.0_f64.powf(-(prec as f64))).round() * 10.0_f64.powf(-(prec as f64))) as u64
 }
 
 #[cfg(test)]
