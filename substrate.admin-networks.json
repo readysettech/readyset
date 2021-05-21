@@ -1,0 +1,20 @@
+{
+	"#": "managed by Substrate; do not edit by hand",
+	"IPv4SubnetMaskLength": 21,
+	"Networks": [
+		{
+			"Region": "us-east-2",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.0.0/21"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.8.0/21"
+		}
+	],
+	"RFC1918": "192.168.0.0/16",
+	"SubstrateVersion": "2021.05"
+}

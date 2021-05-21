@@ -1,0 +1,56 @@
+{
+	"#": "managed by Substrate; do not edit by hand",
+	"IPv4SubnetMaskLength": 18,
+	"Networks": [
+		{
+			"Region": "us-east-2",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.0.0.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.0.64.0/18"
+		},
+		{
+			"Region": "us-east-2",
+			"Environment": "dev",
+			"Quality": "default",
+			"IPv4": "10.0.128.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "dev",
+			"Quality": "default",
+			"IPv4": "10.0.192.0/18"
+		},
+		{
+			"Region": "us-east-2",
+			"Environment": "stage",
+			"Quality": "default",
+			"IPv4": "10.1.0.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "stage",
+			"Quality": "default",
+			"IPv4": "10.1.64.0/18"
+		},
+		{
+			"Region": "us-east-2",
+			"Environment": "prod",
+			"Quality": "default",
+			"IPv4": "10.1.128.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "prod",
+			"Quality": "default",
+			"IPv4": "10.1.192.0/18"
+		}
+	],
+	"RFC1918": "10.0.0.0/8",
+	"SubstrateVersion": "2021.05"
+}
