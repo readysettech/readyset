@@ -147,7 +147,7 @@ impl Worker {
             let uri = wes.controller_uri.join("/worker_rx/heartbeat")?;
             let body = bincode::serialize(&HeartbeatPayload {
                 epoch: wes.epoch,
-                worker_uri: wes.controller_uri.clone(),
+                worker_uri: self.worker_uri.clone(),
             })?;
             let log = self.log.clone();
             // this happens in a background task to avoid deadlocks
