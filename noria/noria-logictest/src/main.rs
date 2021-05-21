@@ -148,6 +148,12 @@ struct Verify {
     /// Enable logging in both noria and noria-mysql
     #[clap(long, short)]
     verbose: bool,
+
+    /// Enable a mysql backend for the client, with binlog replication to Noria
+    /// all writes will go to mysql first and then replicated to Noria using binlog
+    /// the parameter to this argument is a mysql url with no database specified.
+    #[clap(long)]
+    binlog_mysql: Option<String>,
 }
 
 impl Verify {
@@ -185,6 +191,7 @@ impl Into<RunOptions> for &Verify {
         opts.mysql_db = self.mysql_db.clone();
         opts.verbose = self.verbose;
         opts.disable_reuse = self.no_reuse;
+        opts.binlog_url = self.binlog_mysql.clone();
         opts
     }
 }
