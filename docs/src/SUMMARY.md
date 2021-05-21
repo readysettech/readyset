@@ -21,3 +21,5 @@
     - [Node.js Client Library](js_client.md)
     - [MySQL Adapter](./mysql_adapter.md)
     - [PostgreSQL Adapter](./psql_adapter.md)
+- [Testing](./testing.md)
+  - [Clustertest](./clustertest.md)
