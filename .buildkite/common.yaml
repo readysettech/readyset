@@ -672,6 +672,28 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
+  - label: 'Run logictest with binlog replication'
+    key: logictest-binlog
+    command:
+    - 'echo +++ Running noria-logictest with binlog replication'
+    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql:3307 logictests --zookeeper-host zookeeper
+    depends_on:
+    - build-image
+    - build-noria-mysql
+    - build-noria-logictest
+    - build-noria
+    plugins:
+      - docker-compose#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          run: app
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+          config: noria-mysql/build/docker-compose.yaml
+      - ecr#v2.2.0:
+          login: true
+
   - label: ':rust: Check debezium connector'
     key: build-debezium-connector
     commands:

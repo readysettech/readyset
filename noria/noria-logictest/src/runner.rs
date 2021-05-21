@@ -178,7 +178,7 @@ impl TestScript {
             if needs_sleep {
                 // When binlog replication is enabled, we need to give the queries some time
                 // to propagate (TODO: only write queries should be affected)
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(30));
             }
         }
         Ok(())

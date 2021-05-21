@@ -194,6 +194,7 @@ steps:
       - build-noria-psql
       - test-noria-psql
       - logictest
+      - logictest-binlog
       - build-debezium-connector
       - test-debezium-connector
       - build-msql-srv
