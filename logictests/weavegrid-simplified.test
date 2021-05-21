@@ -2,7 +2,7 @@
 
 statement ok
 CREATE TABLE `users` (
-  `user_id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `email_address` varchar(64) NOT NULL,
   `signup_date` date DEFAULT NULL,
   `user_first_name` varchar(32) DEFAULT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE `registrations` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`registration_id`),
-  UNIQUE KEY `user_oem` (`user_id`,`oem_id`),
+  UNIQUE KEY `user_oem` (`user_id`,`oem_id`)
 )
 
 statement ok
@@ -83,7 +83,7 @@ CREATE TABLE `vehicles` (
   `is_active` tinyint(1) DEFAULT 1,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`vehicle_id`),
+  PRIMARY KEY (`vehicle_id`)
 )
 
 statement ok
@@ -99,5 +99,5 @@ CREATE TABLE `vehicle_load_profiles` (
   `soc_added` float DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `last_updated_at` timestamp NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`vehicle_load_profile_id`),
+  PRIMARY KEY (`vehicle_load_profile_id`)
 )
