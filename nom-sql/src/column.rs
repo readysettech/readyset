@@ -3,12 +3,16 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use crate::common::{
-    column_identifier_no_alias, parse_comment, real_from_f64, sql_identifier, type_identifier,
-    Literal, SqlType,
-};
 use crate::keywords::escape_if_keyword;
 use crate::FunctionExpression;
+use crate::{
+    common::{
+        column_identifier_no_alias, parse_comment, sql_identifier, type_identifier, Literal,
+        SqlType,
+    },
+    Real,
+};
+use maths::float::decode_f64;
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
@@ -179,9 +183,15 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let int = i32::from_str(str::from_utf8(i).unwrap()).unwrap();
     let dec = i32::from_str(str::from_utf8(f).unwrap()).unwrap();
     let float = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
+    let (mantissa, exponent, sign) = decode_f64(float);
     Ok((
         remaining_input,
-        Literal::FixedPoint(real_from_f64(float, precision as u8)),
+        Literal::FixedPoint(Real {
+            mantissa,
+            exponent,
+            sign,
+            precision: precision as u8,
+        }),
     ))
 }
 

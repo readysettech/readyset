@@ -18,6 +18,7 @@ members = [
     "connectors/debezium_connector",
     "connectors/mysql_connector",
     "query_generator",
+    "maths",
 ]
 [profile.release]
 debug=true
