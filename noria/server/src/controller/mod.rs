@@ -332,12 +332,15 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
     let campaign_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
         let payload_to_event = |payload: Vec<u8>| -> Result<CampaignUpdate, anyhow::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
-            let state: ControllerState =
-                serde_json::from_slice(&authority.try_read(STATE_KEY).unwrap().unwrap())?;
+            let leader_state = authority
+                .try_read(STATE_KEY)?
+                .ok_or_else(|| anyhow!("Key does not yet exist"))?;
+            let state: ControllerState = serde_json::from_slice(&leader_state)?;
             Ok(CampaignUpdate::LeaderChange(state, descriptor))
         };
 
         let mut retries = 5;
+        let mut leader_state_retries = 5;
         loop {
             // WORKER STATE - watch for leadership changes
             //
@@ -348,7 +351,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
             if let Some(leader) = authority.try_get_leader()? {
                 retries = 5;
                 epoch = leader.0;
-                rt_handle.block_on(async {
+                if let Err(e) = rt_handle.block_on(async {
                     event_tx
                         .send(payload_to_event(leader.1)?)
                         .await
@@ -363,7 +366,17 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
                             .map_err(|_| format_err!("send failed"))?;
                     }
                     Ok::<(), anyhow::Error>(())
-                })?;
+                }) {
+                    // If there is an error reading from the state key, or communicating
+                    // with the leader, we retry up to 5 times.
+                    leader_state_retries -= 1;
+                    if leader_state_retries <= 0 {
+                        internal!(
+                            "After five attempts to read from the leader, we are still unable to. Last error: {}", e
+                        )
+                    }
+                    continue;
+                }
             }
 
             // We check if there's a primary region configured
