@@ -807,7 +807,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        // Add [2, 2.25]
+        // Add [2, 5.5]
         let u: Record = vec![2.into(), DataType::try_from(5.5).unwrap()].into();
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 1);
