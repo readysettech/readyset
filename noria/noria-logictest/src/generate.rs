@@ -63,7 +63,7 @@ impl DatabaseConnection {
 
     fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
         match self {
-            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn),
+            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, false),
         }
     }
 }

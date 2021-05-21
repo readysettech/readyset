@@ -19,6 +19,7 @@ use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
+use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
 use noria_server::{Builder, ReuseConfigType};
@@ -44,6 +45,7 @@ pub struct RunOptions {
     pub mysql_db: String,
     pub disable_reuse: bool,
     pub verbose: bool,
+    pub binlog_url: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -59,6 +61,7 @@ impl Default for RunOptions {
             mysql_db: "sqllogictest".to_string(),
             disable_reuse: false,
             verbose: false,
+            binlog_url: None,
         }
     }
 }
@@ -144,7 +147,7 @@ impl TestScript {
             mysql::Conn::new(conn_opts).with_context(|| "connecting to noria-mysql")?
         };
 
-        self.run_on_mysql(&mut conn)?;
+        self.run_on_mysql(&mut conn, opts.binlog_url.is_some())?;
 
         println!(
             "{}",
@@ -159,7 +162,7 @@ impl TestScript {
         Ok(())
     }
 
-    pub fn run_on_mysql(&self, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+    pub fn run_on_mysql(&self, conn: &mut mysql::Conn, needs_sleep: bool) -> anyhow::Result<()> {
         for record in &self.records {
             match record {
                 Record::Statement(stmt) => self
@@ -170,6 +173,12 @@ impl TestScript {
                     .with_context(|| format!("Running query {}", query.query))?,
                 Record::HashThreshold(_) => {}
                 Record::Halt => break,
+            }
+
+            if needs_sleep {
+                // When binlog replication is enabled, we need to give the queries some time
+                // to propagate (TODO: only write queries should be affected)
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
         Ok(())
@@ -283,6 +292,26 @@ impl TestScript {
         let b = barrier.clone();
         let zk_addr = run_opts.zookeeper_addr();
         let disable_reuse = run_opts.disable_reuse;
+
+        let binlog_url = if let Some(binlog_url) = &run_opts.binlog_url {
+            let mysql_opt = mysql::Opts::from_url(binlog_url).unwrap();
+            let mut create_db_conn = mysql::Conn::new(mysql_opt.clone()).unwrap();
+            let _ = create_db_conn
+                .query_drop(format!("DROP DATABASE {}", run_opts.mysql_db))
+                .with_context(|| "dropping database");
+
+            create_db_conn
+                .query_drop(format!("CREATE DATABASE {}", run_opts.mysql_db))
+                .with_context(|| "creating database")
+                .unwrap();
+
+            // Append the database name to the binlog mysql url
+            Some(format!("{}/{}", binlog_url, run_opts.mysql_db))
+        } else {
+            None
+        };
+
+        let _binlog_url = binlog_url.clone(); // So we can move to both threads
         thread::spawn(move || {
             let mut authority = ZookeeperAuthority::new(&format!("{}/{}", &zk_addr, n)).unwrap();
             let mut builder = Builder::default();
@@ -291,6 +320,11 @@ impl TestScript {
 
             if disable_reuse {
                 builder.set_reuse(ReuseConfigType::NoReuse)
+            }
+
+            if let Some(url) = _binlog_url {
+                // Add the data base name to the mysql url, and set as binlog source
+                builder.set_mysql_url(url);
             }
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -331,10 +365,18 @@ impl TestScript {
                 query_cache.clone(),
                 None,
             );
-            let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);
 
-            let backend = BackendBuilder::new()
-                .writer(rt.block_on(writer))
+            let backend_builder = BackendBuilder::new();
+
+            let backend_builder = if let Some(url) = binlog_url {
+                let writer = MySqlConnector::new(url.into());
+                backend_builder.writer(rt.block_on(writer))
+            } else {
+                let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);
+                backend_builder.writer(rt.block_on(writer))
+            };
+
+            let backend = backend_builder
                 .reader(rt.block_on(reader))
                 .require_authentication(false)
                 .build();
