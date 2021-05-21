@@ -330,6 +330,7 @@ impl MySqlBinlogConnector {
                         // For each row in the event we produce a vector of Noria types that represent that row
                         inserted_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
                             &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
+                            tme,
                         )?));
                     }
 
@@ -362,10 +363,13 @@ impl MySqlBinlogConnector {
                         // delete the previous entry and insert the new one
                         let row = &row?;
                         updated_rows.push(noria::TableOperation::DeleteRow {
-                            row: binlog_row_to_noria_row(row.0.as_ref().ok_or(format!(
-                                "Missing before rows in UPDATE_ROWS_EVENT {:?}",
-                                row
-                            ))?)?,
+                            row: binlog_row_to_noria_row(
+                                row.0.as_ref().ok_or(format!(
+                                    "Missing before rows in UPDATE_ROWS_EVENT {:?}",
+                                    row
+                                ))?,
+                                tme,
+                            )?,
                         });
 
                         updated_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
@@ -373,6 +377,7 @@ impl MySqlBinlogConnector {
                                 "Missing after rows in UPDATE_ROWS_EVENT {:?}",
                                 row
                             ))?,
+                            tme,
                         )?));
                     }
 
@@ -405,6 +410,7 @@ impl MySqlBinlogConnector {
                         deleted_rows.push(noria::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
                                 &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
+                                tme,
                             )?,
                         });
                     }
@@ -483,19 +489,69 @@ impl MySqlBinlogConnector {
     }
 }
 
+fn binlog_val_to_noria_val(
+    val: &mysql_common::value::Value,
+    col_kind: mysql_common::constants::ColumnType,
+    meta: &[u8],
+) -> mysql::Result<noria::DataType> {
+    // Not all values are coereced to the value expected by Noria directly
+
+    use mysql_common::constants::ColumnType;
+
+    let buf = match val {
+        mysql_common::value::Value::Bytes(b) => b,
+        _ => {
+            return Ok(val
+                .try_into()
+                .map_err(|e| format!("Unable to coerce value {}", e))?)
+        }
+    };
+
+    match (col_kind, meta) {
+        (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
+            //https://github.com/blackbeam/rust_mysql_common/blob/408effed435c059d80a9e708bcfa5d974527f476/src/binlog/value.rs#L144
+            // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX EPOCH)
+            let epoch = String::from_utf8_lossy(buf).parse::<i64>().unwrap(); // Can unwrap because we know the format is integer
+            let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
+            Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
+        }
+        (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
+            // When meta is anything else, `mysql_common` encodes this value as number of seconds.microseconds (since UNIX EPOCH)
+            let s = String::from_utf8_lossy(buf);
+            let (secs, usecs) = s.split_once(".").unwrap(); // safe to unwrap because format is fixed
+            let secs = secs.parse::<i64>().unwrap();
+            let usecs = usecs.parse::<u32>().unwrap();
+            let time = chrono::naive::NaiveDateTime::from_timestamp(secs, usecs * 32);
+            Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
+        }
+        _ => Ok(val
+            .try_into()
+            .map_err(|e| format!("Unable to coerce value {}", e))?),
+    }
+}
+
 fn binlog_row_to_noria_row(
     binlog_row: &binlog::row::BinlogRow,
+    tme: &binlog::events::TableMapEvent<'static>,
 ) -> mysql::Result<Vec<noria::DataType>> {
     let mut noria_row = Vec::with_capacity(binlog_row.len());
+
     for idx in 0..binlog_row.len() {
-        if let binlog::value::BinlogValue::Value(val) = binlog_row.as_ref(idx).unwrap() {
-            noria_row.push(
-                noria::DataType::try_from(val)
-                    .map_err(|e| format!("Unable to coerce value {}", e))?,
-            );
-        } else {
-            return Err(format!("Expected a value in WRITE_ROWS_EVENT {:?}", binlog_row).into());
-        }
+        let val = match binlog_row.as_ref(idx).unwrap() {
+            binlog::value::BinlogValue::Value(val) => val,
+            _ => {
+                return Err(format!("Expected a value in WRITE_ROWS_EVENT {:?}", binlog_row).into())
+            }
+        };
+
+        let (kind, meta) = (
+            tme.get_column_type(idx)
+                .map_err(|e| format!("Unable to get column type {}", e))?
+                .unwrap(),
+            tme.get_column_metadata(idx).unwrap(),
+        );
+
+        noria_row.push(binlog_val_to_noria_val(val, kind, meta)?);
     }
     Ok(noria_row)
 }
