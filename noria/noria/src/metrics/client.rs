@@ -39,6 +39,27 @@ where
         self.controller.healthy_workers().await
     }
 
+    /// Retrieves metrics for a single noria-server in a deployment.
+    pub async fn get_metrics_for_server(&mut self, url: Url) -> ReadySetResult<TaggedMetricsDump> {
+        let metrics_endpoint = url.join("metrics_dump")?;
+        let res = self
+            .client
+            .post(metrics_endpoint.as_str())
+            .send()
+            .await
+            .map_err(|e| e.into())
+            .map_err(rpc_err!("MetricsClient::get_metrics"))?;
+
+        let json = res
+            .json::<MetricsDump>()
+            .await
+            .map_err(|e| ReadySetError::SerializationFailed(e.to_string()))?;
+        Ok(TaggedMetricsDump {
+            addr: url,
+            metrics: json,
+        })
+    }
+
     /// Retrieves metrics from each noria-server in a deployment and aggregates the results
     /// into a single json string.
     pub async fn get_metrics(&mut self) -> ReadySetResult<Vec<TaggedMetricsDump>> {
@@ -47,23 +68,7 @@ where
         // TODO(justin): Do these concurrently and join.
         let mut metrics_dumps: Vec<TaggedMetricsDump> = Vec::with_capacity(noria_servers.len());
         for uri in noria_servers {
-            let metrics_endpoint = uri.join("metrics_dump")?;
-            let res = self
-                .client
-                .post(metrics_endpoint.as_str())
-                .send()
-                .await
-                .map_err(|e| e.into())
-                .map_err(rpc_err!("MetricsClient::get_metrics"))?;
-
-            let json = res
-                .json::<MetricsDump>()
-                .await
-                .map_err(|e| ReadySetError::SerializationFailed(e.to_string()))?;
-            metrics_dumps.push(TaggedMetricsDump {
-                addr: uri,
-                metrics: json,
-            });
+            metrics_dumps.push(self.get_metrics_for_server(uri).await?);
         }
 
         Ok(metrics_dumps)

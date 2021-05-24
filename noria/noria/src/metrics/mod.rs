@@ -298,10 +298,35 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | node | The NodeIndex of the ingress node were the packet was sent. |
     pub const EGRESS_NODE_SENT_PACKETS: &str = "egress.sent_packets";
+
+    /// How the view processed a query;
+    pub enum ViewQueryResultTag {
+        /// A replay was required to serve the ViewQuery.
+        Replay,
+        /// The ViewQuery was served entirely from cache.
+        ServedFromCache,
+    }
+    impl ViewQueryResultTag {
+        /// Returns the enum tag as a &str for use in metrics labels.
+        pub fn value(&self) -> &str {
+            match self {
+                ViewQueryResultTag::Replay => "replay",
+                ViewQueryResultTag::ServedFromCache => "served_from_cache",
+            }
+        }
+    }
+
+    /// Counter: The number of times a specific view query result occured at a
+    /// server.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | result | ViewQueryResultTag |
+    pub const SERVER_VIEW_QUERY_RESULT: &str = "server.view_query_result";
 }
 
 /// A dumped metric's kind.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DumpedMetricValue {
     /// Counters that can be incremented or decremented
     Counter(f64),
@@ -329,6 +354,7 @@ pub struct MetricsDump {
     /// The actual metrics.
     pub metrics: HashMap<String, Vec<DumpedMetric>>,
 }
+
 fn convert_key(k: Key) -> (String, HashMap<String, String>) {
     let key_data = k.into_owned();
     let (name_parts, labels) = key_data.into_parts();
@@ -342,6 +368,7 @@ fn convert_key(k: Key) -> (String, HashMap<String, String>) {
         .collect();
     (name, labels)
 }
+
 impl MetricsDump {
     /// Build a [`MetricsDump`] from a map containing values for counters, and another map
     /// containing values for gauges
@@ -406,5 +433,87 @@ impl MetricsDump {
     /// Return an iterator over all the metric keys in this [`MetricsDump`]
     pub fn keys(&self) -> impl Iterator<Item = &String> {
         self.metrics.keys()
+    }
+
+    /// Returns the `DumpedMetricValue` for a specific metric and set of labels.
+    /// None is returned if the metric is not found.
+    pub fn metric_with_labels<K>(
+        &self,
+        metric: &K,
+        labels: Vec<(&K, &str)>,
+    ) -> Option<DumpedMetricValue>
+    where
+        String: Borrow<K>,
+        K: Hash + Eq + ?Sized,
+    {
+        match self.metrics.get(metric) {
+            None => {
+                return None;
+            }
+            Some(dm) => {
+                for m in dm {
+                    if labels.iter().all(|l| match m.labels.get(l.0) {
+                        None => false,
+                        Some(metric_label) => l.1 == metric_label,
+                    }) {
+                        return Some(m.value.clone());
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
+/// Checks a metrics dump for a specified metric with a set of labels.
+/// If the metric exists, returns Some(DumpedMetricValue), otherwise returns
+/// None.
+///
+/// The first two parameters are MetricsDump, MetricsName. After which,
+/// any number of labels can be specified. Labels are specified with the
+/// syntax: label1 => label_value.
+///
+/// Example usage:
+///    get_metric!(
+///         metrics_dump,
+///         recorded::SERVER_VIEW_QUERY_RESULT,
+///         "result" => recorded::ViewQueryResult::REPLAY);
+#[macro_export]
+macro_rules! get_metric {
+    (
+        $metrics_dump:expr,
+        $metrics_name:expr
+        $(, $label:expr => $value:expr)*
+    ) => {
+        {
+            #[allow(unused_mut)]
+            let mut labels = Vec::new();
+            $(
+                labels.push(($label, $value));
+            )*
+            $metrics_dump.metric_with_labels($metrics_name, labels)
+        }
+    };
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // Tests the syntax of the get_metric macro.
+    #[test]
+    fn test_metric_macro() {
+        let md = MetricsDump {
+            metrics: HashMap::new(),
+        };
+        let metrics_name = recorded::SERVER_CONTROLLER_REQUESTS;
+        assert_eq!(
+            get_metric!(md, metrics_name, "test1" => "test2", "test3" => "test4"),
+            None
+        );
+        assert_eq!(get_metric!(md, metrics_name, "test1" => "test2"), None);
+
+        assert_eq!(get_metric!(md, metrics_name), None);
     }
 }
