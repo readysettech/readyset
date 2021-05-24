@@ -70,4 +70,9 @@ impl NoriaServerRunner {
         self.args.push("--external-port".to_string());
         self.args.push(external_port.to_string());
     }
+
+    pub fn set_log_dir(&mut self, path: &Path) {
+        self.args.push("--log-dir".to_string());
+        self.args.push(path.to_str().unwrap().to_string());
+    }
 }
