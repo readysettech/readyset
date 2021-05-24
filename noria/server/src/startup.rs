@@ -169,6 +169,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         valve: valve.clone(),
         domains: Default::default(),
         region: region.clone(),
+        reader_only: false,
     };
 
     tokio::spawn(worker.run().map_err(|e| {

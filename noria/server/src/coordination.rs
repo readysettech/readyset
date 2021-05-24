@@ -17,6 +17,8 @@ pub struct RegisterPayload {
     pub reader_addr: SocketAddr,
     /// The region the worker is located in.
     pub region: Option<String>,
+    /// Whether or not this worker is used only to hold reader domains.
+    pub reader_only: bool,
 }
 
 /// Worker heartbeat request body, sent from workers to controllers.

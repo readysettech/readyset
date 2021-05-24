@@ -134,6 +134,8 @@ pub struct Worker {
     pub(crate) valve: Valve,
     /// The region this worker is in.
     pub(crate) region: Option<String>,
+    /// Whether or not this worker is used only to hold reader domains.
+    pub(crate) reader_only: bool,
 
     /// Handles to domains currently being run by this worker.
     ///
@@ -201,6 +203,7 @@ impl Worker {
                                 worker_uri: self.worker_uri.clone(),
                                 reader_addr: self.reader_addr.clone(),
                                 region: self.region.clone(),
+                                reader_only: self.reader_only,
                             })?),
                     )
                     .map_err(move |e| {
