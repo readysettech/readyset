@@ -2,6 +2,9 @@ mod cargo_builder;
 mod docker;
 mod server;
 
+#[cfg(test)]
+mod readyset;
+
 use anyhow::{anyhow, Result};
 use docker::{kill_zookeeper, start_zookeeper};
 use futures::executor;
@@ -111,7 +114,7 @@ pub struct DeploymentHandle {
     /// Metrics client for aggregating metrics across the deployment.
     pub metrics: MetricsClient<ZookeeperAuthority>,
     /// Map from a noria server's address to a handle to the server.
-    noria_server_handles: HashMap<Url, ServerHandle>,
+    pub noria_server_handles: HashMap<Url, ServerHandle>,
     /// The name of the deployment, cluster resources are prefixed
     /// by `name`.
     name: String,
@@ -194,8 +197,14 @@ impl DeploymentHandle {
             let _ = h.1.process.kill();
         }
         kill_zookeeper(&self.name).await?;
+        std::fs::remove_dir_all(&get_log_path(&self.name))?;
+
         self.shutdown = true;
         Ok(())
+    }
+
+    pub fn server_addrs(&self) -> Vec<Url> {
+        self.noria_server_handles.keys().cloned().collect()
     }
 }
 
@@ -234,6 +243,11 @@ async fn wait_until_worker_count(
     Err(anyhow!("Exceeded maximum time to wait for workers"))
 }
 
+/// Returns the path `temp_dir()`/deployment_name.
+fn get_log_path(deployment_name: &str) -> PathBuf {
+    std::env::temp_dir().join(deployment_name)
+}
+
 fn start_server(
     server_params: &ServerParams,
     noria_server_path: &Path,
@@ -256,6 +270,9 @@ fn start_server(
     if let Some(region) = primary_region.as_ref() {
         runner.set_primary_region(region);
     }
+    let log_path = get_log_path(deployment_name).join(port.to_string());
+    std::fs::create_dir_all(&log_path)?;
+    runner.set_log_dir(&log_path);
 
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
