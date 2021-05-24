@@ -48,16 +48,18 @@ pub struct Worker {
     uri: Url,
     http: reqwest::Client,
     region: Option<String>,
+    reader_only: bool,
 }
 
 impl Worker {
-    pub fn new(instance_uri: Url, region: Option<String>) -> Self {
+    pub fn new(instance_uri: Url, region: Option<String>, reader_only: bool) -> Self {
         Worker {
             healthy: true,
             last_heartbeat: time::Instant::now(),
             uri: instance_uri,
             http: reqwest::Client::new(),
             region,
+            reader_only,
         }
     }
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {

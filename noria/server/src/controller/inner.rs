@@ -317,6 +317,7 @@ impl ControllerInner {
             worker_uri,
             reader_addr,
             region,
+            reader_only,
         } = msg;
 
         info!(
@@ -333,7 +334,7 @@ impl ControllerInner {
             });
         }
 
-        let ws = Worker::new(worker_uri.clone(), region);
+        let ws = Worker::new(worker_uri.clone(), region, reader_only);
 
         self.workers.insert(worker_uri.clone(), ws);
         self.read_addrs.insert(worker_uri, reader_addr);
