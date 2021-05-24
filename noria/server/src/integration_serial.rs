@@ -12,7 +12,8 @@ use crate::Builder;
 use crate::DataType;
 use dataflow::node::special::Base;
 use dataflow::ops::union::Union;
-use noria::metrics::{recorded, MetricsDump};
+use noria::get_metric;
+use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use serial_test::serial;
 
 use std::collections::HashMap;
@@ -83,6 +84,23 @@ async fn it_works_basic() {
         get_counter(recorded::EGRESS_NODE_SENT_PACKETS, metrics_dump),
         1.0
     );
+    assert_eq!(
+        get_metric!(
+            metrics_dump,
+            recorded::SERVER_VIEW_QUERY_RESULT,
+            "result" => recorded::ViewQueryResultTag::Replay.value()
+        )
+        .unwrap(),
+        DumpedMetricValue::Counter(1.0)
+    );
+    assert_eq!(
+        get_metric!(
+            metrics_dump,
+            recorded::SERVER_VIEW_QUERY_RESULT,
+            "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
+        ),
+        None
+    );
 
     // update value again
     mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
@@ -112,6 +130,15 @@ async fn it_works_basic() {
     assert_eq!(
         get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
         1.0
+    );
+    assert_eq!(
+        get_metric!(
+            metrics_dump,
+            recorded::SERVER_VIEW_QUERY_RESULT,
+            "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
+        )
+        .unwrap(),
+        DumpedMetricValue::Counter(1.0)
     );
 
     // Delete first record

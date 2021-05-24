@@ -9,7 +9,9 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
+use metrics::counter;
 use noria::consistency::Timestamp;
+use noria::metrics::recorded;
 use noria::util::like::LikePattern;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
@@ -274,11 +276,23 @@ fn handle_normal_read_query(
 
         // Hit on all the keys and were RYW consistent
         if !consistency_miss && miss_keys.is_empty() {
+            counter!(
+                recorded::SERVER_VIEW_QUERY_RESULT,
+                1,
+                "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
+            );
+
             return Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Ok(ret)),
             });
         }
+
+        counter!(
+            recorded::SERVER_VIEW_QUERY_RESULT,
+            1,
+            "result" => recorded::ViewQueryResultTag::Replay.value(),
+        );
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {
