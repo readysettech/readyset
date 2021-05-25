@@ -2,9 +2,9 @@ use std::fmt;
 use std::str;
 
 use crate::column::Column;
-use crate::condition::ConditionExpression;
 use crate::select::{JoinClause, SelectStatement};
 use crate::table::Table;
+use crate::Expression;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
@@ -67,7 +67,7 @@ impl fmt::Display for JoinOperator {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinConstraint {
-    On(ConditionExpression),
+    On(Expression),
     Using(Vec<Column>),
 }
 
@@ -107,25 +107,22 @@ pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{BinaryOperator, FieldDefinitionExpression};
-    use crate::condition::ConditionBase::*;
-    use crate::condition::ConditionExpression::{self, *};
-    use crate::condition::ConditionTree;
+    use crate::common::FieldDefinitionExpression;
     use crate::select::{selection, JoinClause, SelectStatement};
+    use crate::BinaryOperator;
 
     #[test]
     fn inner_join() {
         let qstring = "SELECT tags.* FROM tags \
-                       INNER JOIN taggings ON tags.id = taggings.tag_id";
+                       INNER JOIN taggings ON (tags.id = taggings.tag_id)";
 
         let res = selection(qstring.as_bytes());
 
-        let ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("tags.id")))),
-            right: Box::new(Base(Field(Column::from("taggings.tag_id")))),
-            operator: BinaryOperator::Equal,
+        let join_cond = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("tags.id"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Column(Column::from("taggings.tag_id"))),
         };
-        let join_cond = ConditionExpression::ComparisonOp(ct);
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("tags")],
             fields: vec![FieldDefinitionExpression::AllInTable("tags".into())],

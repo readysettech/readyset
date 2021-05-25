@@ -1,8 +1,8 @@
 use nom_sql::{
-    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, DeleteStatement,
-    SelectStatement, SqlQuery, UpdateStatement,
+    BinaryOperator, DeleteStatement, Expression, FunctionExpression, InValue, SelectStatement,
+    SqlQuery, UnaryOperator, UpdateStatement,
 };
-use ConditionExpression::*;
+use Expression::*;
 
 /// Things that contain subexpressions of type `ConditionExpression` that can be targeted for the
 /// desugaring of BETWEEN
@@ -21,14 +21,14 @@ pub trait RewriteBetween {
     /// ```
     ///
     /// Invariant: The return value will have no recursive subexpressions of type
-    /// `ConditionExpression::Between`
+    /// [`Expression::Between`]
     fn rewrite_between(self) -> Self;
 }
 
 impl RewriteBetween for SelectStatement {
     fn rewrite_between(mut self) -> Self {
         if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_condition(where_clause));
+            self.where_clause = Some(rewrite_expression(where_clause));
         }
         self
     }
@@ -37,7 +37,7 @@ impl RewriteBetween for SelectStatement {
 impl RewriteBetween for DeleteStatement {
     fn rewrite_between(mut self) -> Self {
         if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_condition(where_clause));
+            self.where_clause = Some(rewrite_expression(where_clause));
         }
         self
     }
@@ -46,7 +46,7 @@ impl RewriteBetween for DeleteStatement {
 impl RewriteBetween for UpdateStatement {
     fn rewrite_between(mut self) -> Self {
         if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_condition(where_clause));
+            self.where_clause = Some(rewrite_expression(where_clause));
         }
         self
     }
@@ -69,48 +69,105 @@ impl RewriteBetween for SqlQuery {
     }
 }
 
-fn rewrite_condition(cond: ConditionExpression) -> ConditionExpression {
-    match cond {
-        ComparisonOp(mut tree) => {
-            tree.left = Box::new(rewrite_condition(*tree.left));
-            tree.right = Box::new(rewrite_condition(*tree.right));
-            ComparisonOp(tree)
-        }
-        LogicalOp(mut tree) => {
-            tree.left = Box::new(rewrite_condition(*tree.left));
-            tree.right = Box::new(rewrite_condition(*tree.right));
-            LogicalOp(tree)
-        }
-        NegationOp(expr) => NegationOp(Box::new(rewrite_condition(*expr))),
-        Base(ConditionBase::NestedSelect(sel)) => {
-            Base(ConditionBase::NestedSelect(Box::new(sel.rewrite_between())))
-        }
-        base @ Base(_) => base,
-        ari @ Arithmetic(_) => ari,
-        Bracketed(cond) => rewrite_condition(*cond),
-        Between { operand, min, max } => rewrite_between_condition(*operand, *min, *max),
-        ExistsOp(select_stmt) => ExistsOp(Box::new(select_stmt.rewrite_between())),
+fn rewrite_expression(expr: Expression) -> Expression {
+    match expr {
+        BinaryOp { lhs, rhs, op } => BinaryOp {
+            lhs: Box::new(rewrite_expression(*lhs)),
+            op,
+            rhs: Box::new(rewrite_expression(*rhs)),
+        },
+        UnaryOp { op, rhs } => UnaryOp {
+            op,
+            rhs: Box::new(rewrite_expression(*rhs)),
+        },
+        Between {
+            operand,
+            min,
+            max,
+            negated: false,
+        } => rewrite_between_condition(*operand, *min, *max),
+        Between {
+            operand,
+            min,
+            max,
+            negated: true,
+        } => UnaryOp {
+            op: UnaryOperator::Not,
+            rhs: Box::new(rewrite_between_condition(*operand, *min, *max)),
+        },
+        Exists(select_stmt) => Exists(Box::new(select_stmt.rewrite_between())),
+        Call(fexpr) => Call(match fexpr {
+            FunctionExpression::Avg { expr, distinct } => FunctionExpression::Avg {
+                expr: Box::new(rewrite_expression(*expr)),
+                distinct,
+            },
+            FunctionExpression::Count { expr, distinct } => FunctionExpression::Count {
+                expr: Box::new(rewrite_expression(*expr)),
+                distinct,
+            },
+            FunctionExpression::CountStar => FunctionExpression::CountStar,
+            FunctionExpression::Sum { expr, distinct } => FunctionExpression::Sum {
+                expr: Box::new(rewrite_expression(*expr)),
+                distinct,
+            },
+            FunctionExpression::Max(expr) => {
+                FunctionExpression::Max(Box::new(rewrite_expression(*expr)))
+            }
+            FunctionExpression::Min(expr) => {
+                FunctionExpression::Min(Box::new(rewrite_expression(*expr)))
+            }
+            FunctionExpression::GroupConcat { expr, separator } => {
+                FunctionExpression::GroupConcat {
+                    expr: Box::new(rewrite_expression(*expr)),
+                    separator,
+                }
+            }
+            FunctionExpression::Cast(expr, typ) => {
+                FunctionExpression::Cast(Box::new(rewrite_expression(*expr)), typ)
+            }
+            FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
+                name,
+                arguments: arguments.into_iter().map(rewrite_expression).collect(),
+            },
+        }),
+        Literal(_) | Column(_) => expr,
+        CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
+        } => CaseWhen {
+            condition: Box::new(rewrite_expression(*condition)),
+            then_expr: Box::new(rewrite_expression(*then_expr)),
+            else_expr: else_expr.map(|else_expr| Box::new(rewrite_expression(*else_expr))),
+        },
+        NestedSelect(sel) => NestedSelect(Box::new(sel.rewrite_between())),
+        In { lhs, rhs, negated } => In {
+            lhs: Box::new(rewrite_expression(*lhs)),
+            rhs: match rhs {
+                InValue::Subquery(sel) => InValue::Subquery(Box::new(sel.rewrite_between())),
+                InValue::List(exprs) => {
+                    InValue::List(exprs.into_iter().map(rewrite_expression).collect())
+                }
+            },
+            negated,
+        },
     }
 }
 
-fn rewrite_between_condition(
-    operand: ConditionExpression,
-    min: ConditionExpression,
-    max: ConditionExpression,
-) -> ConditionExpression {
-    ConditionExpression::LogicalOp(ConditionTree {
-        operator: BinaryOperator::And,
-        left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            operator: BinaryOperator::GreaterOrEqual,
-            left: Box::new(operand.clone()),
-            right: Box::new(rewrite_condition(min)),
-        })),
-        right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            operator: BinaryOperator::LessOrEqual,
-            left: Box::new(operand.clone()),
-            right: Box::new(rewrite_condition(max)),
-        })),
-    })
+fn rewrite_between_condition(operand: Expression, min: Expression, max: Expression) -> Expression {
+    Expression::BinaryOp {
+        lhs: Box::new(Expression::BinaryOp {
+            lhs: Box::new(operand.clone()),
+            op: BinaryOperator::GreaterOrEqual,
+            rhs: Box::new(rewrite_expression(min)),
+        }),
+        op: BinaryOperator::And,
+        rhs: Box::new(Expression::BinaryOp {
+            lhs: Box::new(operand.clone()),
+            op: BinaryOperator::LessOrEqual,
+            rhs: Box::new(rewrite_expression(max)),
+        }),
+    }
 }
 
 #[cfg(test)]

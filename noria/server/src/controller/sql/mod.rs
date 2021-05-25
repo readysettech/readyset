@@ -10,7 +10,7 @@ use ::mir::Column;
 use ::mir::MirNodeRef;
 use dataflow::prelude::DataType;
 use nom_sql::analysis::ReferredTables;
-use nom_sql::parser as sql_parser;
+use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
@@ -855,7 +855,7 @@ impl SqlIncorporator {
     /// Runs some standard rewrite passes on the query.
     fn rewrite_query(
         &mut self,
-        q: SqlQuery,
+        mut q: SqlQuery,
         query_name: &str,
         mig: &mut Migration,
     ) -> Result<SqlQuery, ReadySetError> {
@@ -871,21 +871,51 @@ impl SqlIncorporator {
 
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
-        let mut fq = q.clone();
-        for sq in fq.extract_subqueries() {
-            use self::passes::subqueries::{
-                field_with_table_name, query_from_condition_base, Subquery,
-            };
+        for sq in q.extract_subqueries() {
+            use self::passes::subqueries::{query_from_expr, Subquery};
             use nom_sql::JoinRightSide;
             let default_name = format!("q_{}", self.num_queries);
             match sq {
-                Subquery::InComparison(cond_base) => {
-                    let (sq, column) = query_from_condition_base(&cond_base);
+                Subquery::InExpr(expr) => {
+                    let (sq, column) = query_from_expr(&expr);
 
                     let qfp = self
                         .nodes_for_named_query(sq, default_name, false, false, mig)
                         .expect("failed to add subquery");
-                    *cond_base = field_with_table_name(qfp.name.clone(), column);
+
+                    *expr = Expression::Column(nom_sql::Column {
+                        table: Some(qfp.name.clone()),
+                        ..column
+                    });
+                }
+                Subquery::InIn(in_val) => {
+                    let (sq, column) = match in_val {
+                        InValue::Subquery(stmt) => {
+                            let col = stmt
+                                .fields
+                                .iter()
+                                .map(|fe| match fe {
+                                    FieldDefinitionExpression::Expression {
+                                        expr: Expression::Column(c),
+                                        ..
+                                    } => c.clone(),
+                                    _ => unreachable!(),
+                                })
+                                .next()
+                                .unwrap();
+                            (SqlQuery::Select((**stmt).clone()), col)
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    let qfp = self
+                        .nodes_for_named_query(sq, default_name, false, false, mig)
+                        .expect("failed to add subquery");
+
+                    *in_val = InValue::List(vec![Expression::Column(nom_sql::Column {
+                        table: Some(qfp.name.clone()),
+                        ..column
+                    })])
                 }
                 Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
@@ -922,7 +952,7 @@ impl SqlIncorporator {
         // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
         // replaced with a view rather than the table itself in order to prevent ambiguity. (This
         // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = fq.rewrite_table_aliases(query_name, mig.context());
+        let table_alias_rewrites = q.rewrite_table_aliases(query_name, mig.context());
         for r in table_alias_rewrites {
             match r {
                 TableAliasRewrite::ToView {
@@ -954,7 +984,7 @@ impl SqlIncorporator {
         // Check that all tables mentioned in the query exist.
         // This must happen before the rewrite passes are applied because some of them rely on
         // having the table schema available in `self.view_schemas`.
-        match fq {
+        match q {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
@@ -978,9 +1008,8 @@ impl SqlIncorporator {
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        Ok(fq
-            .rewrite_between()
-            .remove_negation()
+        Ok(q.rewrite_between()
+            .remove_negation()?
             .strip_post_filters()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
@@ -1111,7 +1140,7 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{Column, Expression, FunctionExpression, Literal};
+    use nom_sql::{BinaryOperator, Column, Expression, FunctionExpression, Literal};
 
     use crate::controller::Migration;
     use crate::integration_utils;
@@ -1639,13 +1668,11 @@ mod tests {
 
             // Add a new query
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
-            assert!(res.is_ok());
             let leaf = res.unwrap().query_leaf;
 
             // Add the same query again
             let ncount = mig.graph().node_count();
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;", None, mig);
-            assert!(res.is_ok());
             // should have added no more nodes
             let qfp = res.unwrap();
             assert_eq!(qfp.new_nodes, vec![]);
@@ -2440,7 +2467,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_count() {
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g =
             integration_utils::start_simple("it_incorporates_aggregation_filter_count").await;
@@ -2465,19 +2491,20 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
-                    condition: ConditionExpression::ComparisonOp(
-                        ConditionTree {
-                            operator: BinaryOperator::Equal,
-                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+            let f = Box::new(FunctionExpression::Count{
+                expr: Box::new(Expression::CaseWhen {
+                    condition: Box::new(
+                        Expression::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
+                            rhs: Box::new(Expression::Literal(5.into())),
                         }
                     ),
                     then_expr: Box::new(Expression::Column(Column::from("votes.aid"))),
                     else_expr: None,
                 }),
                 distinct: false
- });
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2502,7 +2529,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_sum() {
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g = integration_utils::start_simple("it_incorporates_aggregation_filter_sum").await;
         g.migrate(|mig| {
@@ -2527,11 +2553,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
-                    condition: ConditionExpression::ComparisonOp(
-                        ConditionTree {
-                            operator: BinaryOperator::Equal,
-                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+                    condition: Box::new(
+                        Expression::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
+                            rhs: Box::new(Expression::Literal(5.into())),
                         }
                     ),
                     then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
@@ -2563,7 +2589,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_sum_else() {
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g =
             integration_utils::start_simple("it_incorporates_aggregation_filter_sum_else").await;
@@ -2571,8 +2596,8 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
-                .is_ok());
+                    .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                    .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -2588,19 +2613,20 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
-                    condition: ConditionExpression::ComparisonOp(
-                        ConditionTree {
-                            operator: BinaryOperator::Equal,
-                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.aid")))),
-                            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(5.into()))),
+            let f = Box::new(FunctionExpression::Sum{
+                expr: Box::new(Expression::CaseWhen {
+                    condition: Box::new(
+                        Expression::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
+                            rhs: Box::new(Expression::Literal(5.into())),
                         }
                     ),
                     then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
                     else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
                 }),
                 distinct: false
- });
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2620,7 +2646,7 @@ mod tests {
             assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
-        .await;
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2781,7 +2807,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_logical_op() {
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
         // set up graph
         let mut g =
             integration_utils::start_simple("it_incorporates_aggregation_filter_sum_else").await;
@@ -2809,26 +2834,26 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let filter_cond = ConditionExpression::LogicalOp(ConditionTree {
-                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.story_id")))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Null))),
-                    operator: BinaryOperator::Equal,
-                })),
-                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("votes.vote")))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(0)))),
-                    operator: BinaryOperator::Equal,
-                })),
-                operator: BinaryOperator::And,
-            });
+            let filter_cond = Expression::BinaryOp {
+                lhs: Box::new(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("votes.story_id"))),
+                    op: BinaryOperator::Is,
+                    rhs: Box::new(Expression::Literal(Literal::Null)),
+                }),
+                op: BinaryOperator::And,
+                rhs: Box::new(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("votes.vote"))),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                }),
+            };
             let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
-                    condition: filter_cond,
+                    condition: Box::new(filter_cond),
                     then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                     else_expr: None,
                 }),
                 distinct: false
- });
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.comment_id")],
@@ -3365,8 +3390,7 @@ mod tests {
                     .new_nodes
                     .iter()
                     .filter(|ni| mig.graph()[**ni].description(true) == "π[0, lit: 0]")
-                    .collect::<Vec<_>>()
-                    .len(),
+                    .count(),
                 1
             );
         })

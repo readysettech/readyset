@@ -11,11 +11,11 @@ use crate::common::{
     as_alias, field_definition_expr, field_list, schema_table_reference, sql_identifier,
     statement_terminator, table_list, unsigned_number, ws_sep_comma, FieldDefinitionExpression,
 };
-use crate::condition::{condition_expr, ConditionExpression};
+use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
-use crate::Column;
+use crate::{Column, Expression};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -25,7 +25,7 @@ use nom::IResult;
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
-    pub having: Option<ConditionExpression>,
+    pub having: Option<Expression>,
 }
 
 impl fmt::Display for GroupByClause {
@@ -92,7 +92,7 @@ pub struct SelectStatement {
     pub distinct: bool,
     pub fields: Vec<FieldDefinitionExpression>,
     pub join: Vec<JoinClause>,
-    pub where_clause: Option<ConditionExpression>,
+    pub where_clause: Option<Expression>,
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
@@ -146,15 +146,11 @@ impl fmt::Display for SelectStatement {
     }
 }
 
-fn having_clause(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
-    let (remaining_input, (_, _, _, ce)) = tuple((
-        multispace0,
-        tag_no_case("having"),
-        multispace1,
-        condition_expr,
-    ))(i)?;
+fn having_clause(i: &[u8]) -> IResult<&[u8], Expression> {
+    let (remaining_input, (_, _, _, expr)) =
+        tuple((multispace0, tag_no_case("having"), multispace1, expression))(i)?;
 
-    Ok((remaining_input, ce))
+    Ok((remaining_input, expr))
 }
 
 // Parse GROUP BY clause
@@ -211,10 +207,10 @@ fn join_constraint(i: &[u8]) -> IResult<&[u8], JoinConstraint> {
     let on_condition = alt((
         delimited(
             terminated(tag("("), multispace0),
-            condition_expr,
+            expression,
             preceded(multispace0, tag(")")),
         ),
-        preceded(multispace1, condition_expr),
+        preceded(multispace1, expression),
     ));
     let on_clause = map(tuple((tag_no_case("on"), on_condition)), |t| {
         JoinConstraint::On(t.1)
@@ -268,13 +264,9 @@ fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
 }
 
 // Parse WHERE clause of a selection
-pub fn where_clause(i: &[u8]) -> IResult<&[u8], ConditionExpression> {
-    let (remaining_input, (_, _, _, where_condition)) = tuple((
-        multispace0,
-        tag_no_case("where"),
-        multispace1,
-        condition_expr,
-    ))(i)?;
+pub fn where_clause(i: &[u8]) -> IResult<&[u8], Expression> {
+    let (remaining_input, (_, _, _, where_condition)) =
+        tuple((multispace0, tag_no_case("where"), multispace1, expression))(i)?;
 
     Ok((remaining_input, where_condition))
 }
@@ -447,17 +439,11 @@ pub fn nested_selection(i: &[u8]) -> IResult<&[u8], SelectStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
-    use crate::common::{
-        BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal, SqlType,
-    };
-    use crate::condition::ConditionBase::*;
-    use crate::condition::ConditionExpression::{Base, Bracketed, ComparisonOp, LogicalOp};
-    use crate::condition::ConditionTree;
+    use crate::common::{FieldDefinitionExpression, ItemPlaceholder, Literal, SqlType};
     use crate::order::OrderType;
     use crate::table::Table;
-    use crate::{Expression, FunctionExpression};
+    use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -624,12 +610,11 @@ mod tests {
     fn where_clause_with_variable_placeholder(qstring: &str, literal: Literal) {
         let res = selection(qstring.as_bytes());
 
-        let expected_left = Base(Field(Column::from("email")));
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(expected_left),
-            right: Box::new(Base(Literal(literal))),
-            operator: BinaryOperator::Equal,
-        }));
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column("email".into())),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(literal)),
+        });
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -775,14 +760,13 @@ mod tests {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
         let res = selection(qstring.as_bytes());
-        let expected_left = Base(Field(Column::from("paperId")));
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column("paperId".into())),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
-        }));
+            ))),
+        });
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -801,27 +785,25 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let left_ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("paperId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let left_comp = Box::new(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("paperId"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
-        };
-        let left_comp = Box::new(ComparisonOp(left_ct));
-        let right_ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("paperStorageId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+            ))),
+        });
+        let right_comp = Box::new(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("paperStorageId"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
-        };
-        let right_comp = Box::new(ComparisonOp(right_ct));
-        let expected_where_cond = Some(LogicalOp(ConditionTree {
-            left: left_comp,
-            right: right_comp,
-            operator: BinaryOperator::And,
-        }));
+            ))),
+        });
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: left_comp,
+            op: BinaryOperator::And,
+            rhs: right_comp,
+        });
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -842,14 +824,14 @@ mod tests {
             limit: 10,
             offset: 0,
         });
-        let ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("id")))),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let ct = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("id"))),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
+            ))),
+            op: BinaryOperator::Equal,
         };
-        let expected_where_cond = Some(ComparisonOp(ct));
+        let expected_where_cond = Some(ct);
 
         assert_eq!(
             res.unwrap().1,
@@ -943,16 +925,16 @@ mod tests {
             "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
         let res = selection(qstring.as_bytes());
 
-        let filter_cond = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("vote_id")))),
-            right: Box::new(Base(Literal(Literal::Integer(10.into())))),
-            operator: BinaryOperator::Greater,
-        });
+        let filter_cond = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("vote_id"))),
+            op: BinaryOperator::Greater,
+            rhs: Box::new(Expression::Literal(Literal::Integer(10.into()))),
+        };
         let agg_expr = FunctionExpression::Count {
             expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
-                condition: filter_cond,
+                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -974,16 +956,16 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let filter_cond = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("sign")))),
-            right: Box::new(Base(Literal(Literal::Integer(1.into())))),
-            operator: BinaryOperator::Equal,
-        });
+        let filter_cond = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("sign"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(Literal::Integer(1.into()))),
+        };
         let agg_expr = FunctionExpression::Sum {
             expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: None,
-                condition: filter_cond,
+                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1006,16 +988,16 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let filter_cond = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("sign")))),
-            right: Box::new(Base(Literal(Literal::Integer(1.into())))),
-            operator: BinaryOperator::Equal,
-        });
+        let filter_cond = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("sign"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Literal(Literal::Integer(1.into()))),
+        };
         let agg_expr = FunctionExpression::Sum {
             expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
                 else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
-                condition: filter_cond,
+                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1040,24 +1022,24 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let filter_cond = LogicalOp(ConditionTree {
-            left: Box::new(ComparisonOp(ConditionTree {
-                left: Box::new(Base(Field(Column::from("votes.story_id")))),
-                right: Box::new(Base(Literal(Literal::Null))),
-                operator: BinaryOperator::Equal,
-            })),
-            right: Box::new(ComparisonOp(ConditionTree {
-                left: Box::new(Base(Field(Column::from("votes.vote")))),
-                right: Box::new(Base(Literal(Literal::Integer(0)))),
-                operator: BinaryOperator::Equal,
-            })),
-            operator: BinaryOperator::And,
-        });
+        let filter_cond = Expression::BinaryOp {
+            lhs: Box::new(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("votes.story_id"))),
+                op: BinaryOperator::Is,
+                rhs: Box::new(Expression::Literal(Literal::Null)),
+            }),
+            rhs: Box::new(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("votes.vote"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+            }),
+            op: BinaryOperator::And,
+        };
         let agg_expr = FunctionExpression::Count {
             expr: Box::new(Expression::CaseWhen {
                 then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                 else_expr: None,
-                condition: filter_cond,
+                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1125,21 +1107,21 @@ mod tests {
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
 
         let res = selection(qstring.as_bytes());
-        let expected_where_cond = Some(LogicalOp(ConditionTree {
-            left: Box::new(ComparisonOp(ConditionTree {
-                left: Box::new(Base(Field(Column::from("item.i_a_id")))),
-                right: Box::new(Base(Field(Column::from("author.a_id")))),
-                operator: BinaryOperator::Equal,
-            })),
-            right: Box::new(ComparisonOp(ConditionTree {
-                left: Box::new(Base(Field(Column::from("item.i_subject")))),
-                right: Box::new(Base(Literal(Literal::Placeholder(
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("item.i_a_id"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Column(Column::from("author.a_id"))),
+            }),
+            rhs: Box::new(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("item.i_subject"))),
+                rhs: Box::new(Expression::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
-                )))),
-                operator: BinaryOperator::Equal,
-            })),
-            operator: BinaryOperator::And,
-        }));
+                ))),
+                op: BinaryOperator::Equal,
+            }),
+            op: BinaryOperator::And,
+        });
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -1185,19 +1167,17 @@ mod tests {
                        order by contactId;";
 
         let res = selection(qstring.as_bytes());
-        let ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("PCMember.contactId")))),
-            right: Box::new(Base(Field(Column::from("PaperReview.contactId")))),
-            operator: BinaryOperator::Equal,
-        };
-        let join_cond = ConditionExpression::ComparisonOp(ct);
         let expected = SelectStatement {
             tables: vec![Table::from("PCMember")],
             fields: columns(&["PCMember.contactId"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::Table(Table::from("PaperReview")),
-                constraint: JoinConstraint::On(join_cond),
+                constraint: JoinConstraint::On(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("PCMember.contactId"))),
+                    rhs: Box::new(Expression::Column(Column::from("PaperReview.contactId"))),
+                    op: BinaryOperator::Equal,
+                }),
             }],
             order: Some(OrderClause {
                 columns: vec![("contactId".into(), OrderType::OrderAscending)],
@@ -1224,14 +1204,14 @@ mod tests {
                        using (contactId) where ContactInfo.contactId=?;";
 
         let res = selection(qstring.as_bytes());
-        let ct = ConditionTree {
-            left: Box::new(Base(Field(Column::from("ContactInfo.contactId")))),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let ct = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("ContactInfo.contactId"))),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
+            ))),
+            op: BinaryOperator::Equal,
         };
-        let expected_where_cond = Some(ComparisonOp(ct));
+        let expected_where_cond = Some(ct);
         let mkjoin = |tbl: &str, col: &str| -> JoinClause {
             JoinClause {
                 operator: JoinOperator::LeftJoin,
@@ -1268,11 +1248,11 @@ mod tests {
                     WHERE orders.o_id = order_line.ol_o_id);";
 
         let res = selection(qstr.as_bytes());
-        let inner_where_clause = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("orders.o_id")))),
-            right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
-            operator: BinaryOperator::Equal,
-        });
+        let inner_where_clause = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Column(Column::from("order_line.ol_o_id"))),
+        };
 
         let inner_select = SelectStatement {
             tables: vec![Table::from("orders"), Table::from("order_line")],
@@ -1281,11 +1261,11 @@ mod tests {
             ..Default::default()
         };
 
-        let outer_where_clause = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
-            right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
-            operator: BinaryOperator::In,
-        });
+        let outer_where_clause = Expression::In {
+            lhs: Box::new(Expression::Column(Column::from("orders.o_c_id"))),
+            rhs: InValue::Subquery(Box::new(inner_select)),
+            negated: false,
+        };
 
         let outer_select = SelectStatement {
             tables: vec![Table::from("orders"), Table::from("order_line")],
@@ -1313,23 +1293,23 @@ mod tests {
             ..Default::default()
         };
 
-        let cop1 = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("orders.o_id")))),
-            right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
-            operator: BinaryOperator::Equal,
-        });
+        let cop1 = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expression::Column(Column::from("order_line.ol_o_id"))),
+        };
 
-        let cop2 = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("orders.o_id")))),
-            right: Box::new(Base(NestedSelect(Box::new(recursive_select)))),
-            operator: BinaryOperator::Greater,
-        });
+        let cop2 = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+            op: BinaryOperator::Greater,
+            rhs: Box::new(Expression::NestedSelect(Box::new(recursive_select))),
+        };
 
-        let inner_where_clause = LogicalOp(ConditionTree {
-            left: Box::new(cop1),
-            right: Box::new(cop2),
-            operator: BinaryOperator::And,
-        });
+        let inner_where_clause = Expression::BinaryOp {
+            lhs: Box::new(cop1),
+            op: BinaryOperator::And,
+            rhs: Box::new(cop2),
+        };
 
         let inner_select = SelectStatement {
             tables: vec![Table::from("orders"), Table::from("order_line")],
@@ -1338,11 +1318,11 @@ mod tests {
             ..Default::default()
         };
 
-        let outer_where_clause = ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
-            right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
-            operator: BinaryOperator::In,
-        });
+        let outer_where_clause = Expression::In {
+            lhs: Box::new(Expression::Column(Column::from("orders.o_c_id"))),
+            rhs: InValue::Subquery(Box::new(inner_select)),
+            negated: false,
+        };
 
         let outer_select = SelectStatement {
             tables: vec![Table::from("orders"), Table::from("order_line")],
@@ -1386,11 +1366,11 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("ids".into())),
-                constraint: JoinConstraint::On(Bracketed(Box::new(ComparisonOp(ConditionTree {
-                    operator: BinaryOperator::Equal,
-                    left: Box::new(Base(Field(Column::from("orders.o_id")))),
-                    right: Box::new(Base(Field(Column::from("ids.ol_i_id")))),
-                })))),
+                constraint: JoinConstraint::On(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Column(Column::from("ids.ol_i_id"))),
+                }),
             }],
             ..Default::default()
         };
@@ -1405,15 +1385,13 @@ mod tests {
 
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Arithmetic(
-                Arithmetic {
-                    op: ArithmeticOperator::Subtract,
-                    left: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
-                        Expression::Column("o_id".into()),
-                    )))),
-                    right: Box::new(Expression::Literal(3333.into())),
-                },
-            ))],
+            fields: vec![FieldDefinitionExpression::from(Expression::BinaryOp {
+                lhs: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
+                    Expression::Column("o_id".into()),
+                )))),
+                op: BinaryOperator::Subtract,
+                rhs: Box::new(Expression::Literal(3333.into())),
+            })],
             ..Default::default()
         };
 
@@ -1429,13 +1407,13 @@ mod tests {
             tables: vec![Table::from("orders")],
             fields: vec![FieldDefinitionExpression::Expression {
                 alias: Some(String::from("double_max")),
-                expr: Expression::Arithmetic(Arithmetic {
-                    op: ArithmeticOperator::Multiply,
-                    left: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
+                expr: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
                         Expression::Column("o_id".into()),
                     )))),
-                    right: Box::new(Expression::Literal(2.into())),
-                }),
+                    op: BinaryOperator::Multiply,
+                    rhs: Box::new(Expression::Literal(2.into())),
+                },
             }],
             ..Default::default()
         };
@@ -1452,11 +1430,13 @@ mod tests {
                     WHERE `auth_permission`.`content_type_id` IN (0);";
         let res = selection(qstr.as_bytes());
 
-        let expected_where_clause = Some(ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
-            right: Box::new(Base(LiteralList(vec![0.into()]))),
-            operator: BinaryOperator::In,
-        }));
+        let expected_where_clause = Some(Expression::In {
+            lhs: Box::new(Expression::Column(Column::from(
+                "auth_permission.content_type_id",
+            ))),
+            rhs: InValue::List(vec![Expression::Literal(0.into())]),
+            negated: false,
+        });
 
         let expected = SelectStatement {
             tables: vec![Table::from("auth_permission")],
@@ -1467,17 +1447,43 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::Table(Table::from("django_content_type")),
-                constraint: JoinConstraint::On(Bracketed(Box::new(ComparisonOp(ConditionTree {
-                    operator: BinaryOperator::Equal,
-                    left: Box::new(Base(Field(Column::from("auth_permission.content_type_id")))),
-                    right: Box::new(Base(Field(Column::from("django_content_type.id")))),
-                })))),
+                constraint: JoinConstraint::On(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expression::Column(Column::from(
+                        "auth_permission.content_type_id",
+                    ))),
+                    rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
+                }),
             }],
             where_clause: expected_where_clause,
             ..Default::default()
         };
 
         assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn where_call_in_list() {
+        let qstr = b"SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)";
+        let res = selection(qstr);
+        let (rem, res) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(
+            res.where_clause,
+            Some(Expression::In {
+                lhs: Box::new(Expression::Call(FunctionExpression::Avg {
+                    expr: Box::new(Expression::Column("y".into())),
+                    distinct: false
+                })),
+                rhs: InValue::List(vec![
+                    Expression::Literal(Literal::Placeholder(
+                        ItemPlaceholder::QuestionMark
+                    ));
+                    3
+                ]),
+                negated: false
+            })
+        );
     }
 
     #[test]
@@ -1499,13 +1505,13 @@ mod tests {
                         )),
                     },
                 ],
-                where_clause: Some(ComparisonOp(ConditionTree {
-                    left: Box::new(Base(Field(Column::from("id")))),
-                    right: Box::new(Base(Literal(Literal::Placeholder(
+                where_clause: Some(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("id"))),
+                    rhs: Box::new(Expression::Literal(Literal::Placeholder(
                         ItemPlaceholder::QuestionMark
-                    )))),
-                    operator: BinaryOperator::Equal,
-                })),
+                    ))),
+                    op: BinaryOperator::Equal,
+                }),
                 ..Default::default()
             }
         )

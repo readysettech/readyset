@@ -184,8 +184,7 @@ mod tests {
     mod pull_required_base_columns {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use nom_sql::{
-            BinaryOperator, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-            Expression, FunctionExpression, Literal, SqlType,
+            BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, SqlType,
         };
 
         use crate::node::node_inner::MirNodeInner;
@@ -250,13 +249,11 @@ mod tests {
                 vec![],
             );
 
-            let condition_expression_1 = ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Integer(1),
-                ))),
-            });
+            let condition_expression_1 = Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column("a".into())),
+                rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            };
 
             // σ[a = 1]
             let fil = MirNode::new(

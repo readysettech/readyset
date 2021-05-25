@@ -408,8 +408,8 @@ impl MirNode {
                 }
                 for (_, expr) in expressions {
                     for c in expr.referred_columns() {
-                        if !columns.iter().any(|col| col == c.as_ref()) {
-                            columns.push(c.into_owned().into());
+                        if !columns.iter().any(|col| col == c) {
+                            columns.push(c.clone().into());
                         }
                     }
                 }
@@ -639,18 +639,16 @@ mod tests {
         use crate::Column;
         use crate::MirNodeRef;
         use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, Literal};
+        use nom_sql::{BinaryOperator, Expression, Literal};
 
-        fn setup_filter(cond: (usize, ConditionExpression)) -> MirNodeRef {
+        fn setup_filter(cond: (usize, Expression)) -> MirNodeRef {
             let cols: Vec<nom_sql::Column> = vec!["x".into(), "agg".into()];
 
-            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                    cols[cond.0].clone(),
-                ))),
-                right: Box::new(cond.1.clone()),
-            });
+            let condition_expression = Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(cols[cond.0].clone())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(cond.1.clone()),
+            };
 
             let parent = MirNode::new(
                 "parent",
@@ -681,20 +679,13 @@ mod tests {
 
         #[test]
         fn filter_reorders_condition_lhs() {
-            let node = setup_filter((
-                1,
-                ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(1))),
-            ));
+            let node = setup_filter((1, Expression::Literal(Literal::Integer(1))));
 
-            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                    "agg".into(),
-                ))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Integer(1),
-                ))),
-            });
+            let condition_expression = Expression::BinaryOp {
+                lhs: Box::new(Expression::Column("agg".into())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            };
 
             node.borrow_mut().add_column("y".into());
 
@@ -712,16 +703,13 @@ mod tests {
 
         #[test]
         fn filter_reorders_condition_comparison_rhs() {
-            let node = setup_filter((
-                0,
-                ConditionExpression::Base(ConditionBase::Field("y".into())),
-            ));
+            let node = setup_filter((0, Expression::Column("y".into())));
 
-            let condition_expression = ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field("x".into()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Field("y".into()))),
-            });
+            let condition_expression = Expression::BinaryOp {
+                lhs: Box::new(Expression::Column("x".into())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Column("y".into())),
+            };
 
             node.borrow_mut().add_column("y".into());
 

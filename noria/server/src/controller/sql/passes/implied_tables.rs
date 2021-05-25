@@ -1,6 +1,6 @@
 use nom_sql::{
-    Arithmetic, Column, ConditionExpression, ConditionTree, Expression, FieldDefinitionExpression,
-    FunctionExpression, JoinRightSide, SelectStatement, SqlQuery, Table,
+    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinRightSide,
+    SelectStatement, SqlQuery, Table,
 };
 
 use crate::errors::ReadySetResult;
@@ -14,57 +14,11 @@ pub trait ImpliedTableExpansion {
     ) -> ReadySetResult<SqlQuery>;
 }
 
-fn rewrite_arithmetic<F>(expand_columns: &F, ari: &mut Arithmetic, avail_tables: &[Table])
-where
-    F: Fn(&mut Column, &[Table]),
-{
-    rewrite_expression(expand_columns, &mut ari.left, avail_tables);
-    rewrite_expression(expand_columns, &mut ari.right, avail_tables);
-}
-
-fn rewrite_conditional<F>(expand_columns: &F, ce: &mut ConditionExpression, avail_tables: &[Table])
-where
-    F: Fn(&mut Column, &[Table]),
-{
-    use nom_sql::ConditionBase::*;
-    use nom_sql::ConditionExpression::*;
-
-    match ce {
-        ComparisonOp(ConditionTree { left, right, .. })
-        | LogicalOp(ConditionTree { left, right, .. }) => {
-            rewrite_conditional(expand_columns, left, avail_tables);
-            rewrite_conditional(expand_columns, right, avail_tables);
-        }
-        Bracketed(ce) => {
-            rewrite_conditional(expand_columns, ce, avail_tables);
-        }
-        NegationOp(box ce) => {
-            rewrite_conditional(expand_columns, ce, avail_tables);
-        }
-        ExistsOp(_) => {}
-        Base(Field(f)) => {
-            expand_columns(f, avail_tables);
-        }
-        Base(_) => {}
-        Arithmetic(ari) => {
-            rewrite_arithmetic(expand_columns, ari, avail_tables);
-        }
-        Between { operand, min, max } => {
-            rewrite_conditional(expand_columns, operand, avail_tables);
-            rewrite_conditional(expand_columns, min, avail_tables);
-            rewrite_conditional(expand_columns, max, avail_tables);
-        }
-    }
-}
-
 fn rewrite_expression<F>(expand_columns: &F, expr: &mut Expression, avail_tables: &[Table])
 where
     F: Fn(&mut Column, &[Table]),
 {
     match expr {
-        Expression::Arithmetic(ari) => {
-            rewrite_arithmetic(expand_columns, ari, avail_tables);
-        }
         Expression::Call(f)
         | Expression::Column(Column {
             function: Some(box f),
@@ -92,7 +46,7 @@ where
             then_expr,
             else_expr,
         } => {
-            rewrite_conditional(expand_columns, condition, avail_tables);
+            rewrite_expression(expand_columns, condition, avail_tables);
             rewrite_expression(expand_columns, then_expr, avail_tables);
             if let Some(else_expr) = else_expr {
                 rewrite_expression(expand_columns, else_expr, avail_tables);
@@ -101,6 +55,33 @@ where
         Expression::Column(col) => {
             expand_columns(col, avail_tables);
         }
+        Expression::BinaryOp { lhs, rhs, .. } => {
+            rewrite_expression(expand_columns, lhs, avail_tables);
+            rewrite_expression(expand_columns, rhs, avail_tables);
+        }
+        Expression::UnaryOp { rhs, .. } => {
+            rewrite_expression(expand_columns, rhs, avail_tables);
+        }
+        Expression::Between {
+            operand, min, max, ..
+        } => {
+            rewrite_expression(expand_columns, operand, avail_tables);
+            rewrite_expression(expand_columns, min, avail_tables);
+            rewrite_expression(expand_columns, max, avail_tables);
+        }
+        Expression::In { lhs, rhs, .. } => {
+            rewrite_expression(expand_columns, lhs, avail_tables);
+            match rhs {
+                InValue::Subquery(_) => {}
+                InValue::List(exprs) => {
+                    for expr in exprs {
+                        rewrite_expression(expand_columns, expr, avail_tables);
+                    }
+                }
+            }
+        }
+        Expression::Exists(_) => {}
+        Expression::NestedSelect(_) => {}
     }
 }
 
@@ -268,7 +249,7 @@ fn rewrite_selection(
     }
     // Expand within WHERE clause
     if let Some(wc) = &mut sq.where_clause {
-        rewrite_conditional(&expand_columns, wc, &tables);
+        rewrite_expression(&expand_columns, wc, &tables);
     }
     // Expand within GROUP BY clause
     if let Some(gbc) = &mut sq.group_by {
@@ -276,7 +257,7 @@ fn rewrite_selection(
             expand_columns(col, &tables)
         }
         if let Some(hc) = &mut gbc.having {
-            rewrite_conditional(&expand_columns, hc, &tables)
+            rewrite_expression(&expand_columns, hc, &tables)
         }
     }
 
@@ -322,18 +303,14 @@ impl ImpliedTableExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::ImpliedTableExpansion;
+    use super::*;
     use maplit::hashmap;
     use nom_sql::{parse_query, Column, FieldDefinitionExpression, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]
     fn it_expands_implied_tables_for_select() {
-        use nom_sql::{
-            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, SelectStatement,
-        };
-
-        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
+        use nom_sql::{BinaryOperator, SelectStatement};
 
         // SELECT name, title FROM users, articles WHERE users.id = author;
         // -->
@@ -344,11 +321,11 @@ mod tests {
                 FieldDefinitionExpression::from(Column::from("name")),
                 FieldDefinitionExpression::from(Column::from("title")),
             ],
-            where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: wrap(ConditionBase::Field(Column::from("users.id"))),
-                right: wrap(ConditionBase::Field(Column::from("author"))),
-            })),
+            where_clause: Some(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("users.id"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Column(Column::from("author"))),
+            }),
             ..Default::default()
         };
         let mut schema = HashMap::new();
@@ -373,11 +350,11 @@ mod tests {
                 );
                 assert_eq!(
                     tq.where_clause,
-                    Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: BinaryOperator::Equal,
-                        left: wrap(ConditionBase::Field(Column::from("users.id"))),
-                        right: wrap(ConditionBase::Field(Column::from("articles.author"))),
-                    }))
+                    Some(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("users.id"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Column(Column::from("articles.author"))),
+                    })
                 );
             }
             // if we get anything other than a selection query back, something really weird is up

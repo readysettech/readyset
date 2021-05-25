@@ -1,6 +1,4 @@
-use nom_sql::{
-    BinaryOperator, ConditionBase, ConditionExpression, ItemPlaceholder, Literal, SqlQuery,
-};
+use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SqlQuery};
 
 use launchpad::or_else_result;
 use noria::{unsupported, ReadySetResult};
@@ -8,101 +6,95 @@ use std::mem;
 
 fn collapse_where_in_recursive(
     leftmost_param_index: &mut usize,
-    expr: &mut ConditionExpression,
+    expr: &mut Expression,
     rewrite_literals: bool,
 ) -> ReadySetResult<Option<(usize, Vec<Literal>)>> {
     Ok(match *expr {
-        ref x @ ConditionExpression::Arithmetic(_) => {
-            unsupported!("arithmetic not supported yet: {}", x)
-        }
-        ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(_))) => {
+        Expression::Literal(Literal::Placeholder(_)) => {
             *leftmost_param_index += 1;
             None
         }
-        ConditionExpression::Base(ConditionBase::NestedSelect(ref mut sq)) => {
+        Expression::NestedSelect(ref mut sq) => {
             if let Some(ref mut w) = sq.where_clause {
                 collapse_where_in_recursive(leftmost_param_index, w, rewrite_literals)?
             } else {
                 None
             }
         }
-        ConditionExpression::Base(ConditionBase::LiteralList(ref list)) => {
-            *leftmost_param_index += list
-                .iter()
-                .filter(|&l| matches!(l, Literal::Placeholder(_)))
-                .count();
-            None
+        Expression::UnaryOp { ref mut rhs, .. } => {
+            collapse_where_in_recursive(leftmost_param_index, rhs, rewrite_literals)?
         }
-        ConditionExpression::Base(_) => None,
-        ConditionExpression::NegationOp(ref mut ce)
-        | ConditionExpression::Bracketed(ref mut ce) => {
-            collapse_where_in_recursive(leftmost_param_index, ce, rewrite_literals)?
-        }
-        ConditionExpression::LogicalOp(ref mut ct) => {
+        Expression::BinaryOp {
+            ref mut lhs,
+            ref mut rhs,
+            ..
+        } => {
             or_else_result(
-                collapse_where_in_recursive(leftmost_param_index, &mut *ct.left, rewrite_literals)?,
+                collapse_where_in_recursive(leftmost_param_index, lhs, rewrite_literals)?,
                 || {
                     // we can't also try rewriting ct.right, as it'd make it hard to recover
                     // literals: if we rewrote WHERE x IN (a, b) in left and WHERE y IN (1, 2) in
                     // right into WHERE x = ? ... y = ?, then what param values should we use?
-                    collapse_where_in_recursive(
-                        leftmost_param_index,
-                        &mut *ct.right,
-                        rewrite_literals,
-                    )
+                    // TODO(grfn): what does the above comment mean?
+                    collapse_where_in_recursive(leftmost_param_index, rhs, rewrite_literals)
                 },
             )?
         }
-        ConditionExpression::ComparisonOp(ref mut ct) if ct.operator != BinaryOperator::In => {
-            or_else_result(
-                collapse_where_in_recursive(leftmost_param_index, &mut *ct.left, rewrite_literals)?,
-                || {
-                    collapse_where_in_recursive(
-                        leftmost_param_index,
-                        &mut *ct.right,
-                        rewrite_literals,
-                    )
-                },
-            )?
-        }
-        ConditionExpression::ComparisonOp(ref mut ct) => {
+        Expression::In {
+            ref mut lhs,
+            ref mut rhs,
+            negated: false,
+        } => {
             let mut do_it = false;
-            let literals =
-                if let ConditionExpression::Base(ConditionBase::LiteralList(ref mut list)) =
-                    *ct.right
+            let literals = if let InValue::List(list) = rhs {
+                if rewrite_literals
+                    || (list
+                        .iter()
+                        .all(|l| matches!(l, Expression::Literal(Literal::Placeholder(_)))))
                 {
-                    if rewrite_literals
-                        || (list.iter().all(|l| matches!(l, Literal::Placeholder(_))))
-                    {
-                        do_it = true;
-                        mem::replace(list, Vec::new())
-                    } else {
-                        Vec::new()
-                    }
+                    do_it = true;
+                    mem::replace(list, Vec::new())
+                        .into_iter()
+                        .map(|expr| -> ReadySetResult<_> {
+                            match expr {
+                                Expression::Literal(lit) => Ok(lit),
+                                _ => unsupported!("IN only supported on literals, got: {}", expr),
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
                 } else {
                     Vec::new()
-                };
+                }
+            } else {
+                Vec::new()
+            };
 
             if !do_it {
                 return or_else_result(
-                    collapse_where_in_recursive(
-                        leftmost_param_index,
-                        &mut *ct.left,
-                        rewrite_literals,
-                    )?,
-                    || {
-                        collapse_where_in_recursive(
-                            leftmost_param_index,
-                            &mut *ct.right,
-                            rewrite_literals,
-                        )
+                    collapse_where_in_recursive(leftmost_param_index, lhs, rewrite_literals)?,
+                    || match rhs {
+                        InValue::Subquery(sq) => {
+                            if let Some(ref mut w) = sq.where_clause {
+                                collapse_where_in_recursive(
+                                    leftmost_param_index,
+                                    w,
+                                    rewrite_literals,
+                                )
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        InValue::List(exprs) => {
+                            *leftmost_param_index += exprs
+                                .iter()
+                                .filter(|&l| {
+                                    matches!(l, Expression::Literal(Literal::Placeholder(_)))
+                                })
+                                .count();
+                            Ok(None)
+                        }
                     },
                 );
-            }
-
-            if let ConditionExpression::Base(ConditionBase::Field(_)) = *ct.left {
-            } else {
-                unsupported!("unsupported condition expression: {:?}", ct.left);
             }
 
             if literals.is_empty() {
@@ -110,26 +102,31 @@ fn collapse_where_in_recursive(
                 unsupported!("spotted empty WHERE IN ()");
             }
 
-            ct.operator = BinaryOperator::Equal;
-            // NOTE: Replacing the right side with ItemPlaceholder::QuestionMark may result in the
-            // modified query containing placeholders of mixed types (i.e. with some placeholders
-            // of type QuestionMark while others are of type DollarNumber). This will work ok for
-            // now because all placeholder types are treated as equivalent by noria and
-            // noria-client. In addition, standardizing the placeholder type here may help reduce
-            // the impact of certain query reuse bugs.
-            ct.right = Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                Literal::Placeholder(ItemPlaceholder::QuestionMark),
-            )));
+            *expr = Expression::BinaryOp {
+                lhs: mem::replace(lhs, Box::new(Expression::Literal(Literal::Null))),
+                op: BinaryOperator::Equal,
+                // NOTE: Replacing the right side with ItemPlaceholder::QuestionMark may result in the
+                // modified query containing placeholders of mixed types (i.e. with some placeholders
+                // of type QuestionMark while others are of type DollarNumber). This will work ok for
+                // now because all placeholder types are treated as equivalent by noria and
+                // noria-client. In addition, standardizing the placeholder type here may help reduce
+                // the impact of certain query reuse bugs.
+                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                    ItemPlaceholder::QuestionMark,
+                ))),
+            };
 
             Some((*leftmost_param_index, literals))
         }
-        ref x @ ConditionExpression::ExistsOp(_) => {
+        Expression::In { negated: true, .. } => unsupported!("NOT IN not supported yet"),
+        ref x @ Expression::Exists(_) => {
             unsupported!("EXISTS not supported yet: {}", x)
         }
-        ConditionExpression::Between {
+        Expression::Between {
             ref mut operand,
             ref mut min,
             ref mut max,
+            ..
         } => or_else_result(
             collapse_where_in_recursive(leftmost_param_index, &mut *operand, rewrite_literals)?,
             || {
@@ -145,6 +142,10 @@ fn collapse_where_in_recursive(
                 )
             },
         )?,
+        Expression::Column(_) | Expression::Literal(_) => None,
+        Expression::Call(_) | Expression::CaseWhen { .. } => {
+            unsupported!("Unsupported condition: {}", expr)
+        }
     })
 }
 

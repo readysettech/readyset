@@ -3,7 +3,6 @@ use std::{fmt, str};
 
 use crate::column::Column;
 use crate::common::{assignment_expr_list, statement_terminator, table_reference};
-use crate::condition::ConditionExpression;
 use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
@@ -17,7 +16,7 @@ use nom::IResult;
 pub struct UpdateStatement {
     pub table: Table,
     pub fields: Vec<(Column, Expression)>,
-    pub where_clause: Option<ConditionExpression>,
+    pub where_clause: Option<Expression>,
 }
 
 impl fmt::Display for UpdateStatement {
@@ -67,13 +66,10 @@ pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
-    use crate::common::{BinaryOperator, ItemPlaceholder, Literal, Real};
-    use crate::condition::ConditionBase::*;
-    use crate::condition::ConditionExpression::{Base, ComparisonOp};
-    use crate::condition::ConditionTree;
+    use crate::common::{ItemPlaceholder, Literal, Real};
     use crate::table::Table;
+    use crate::BinaryOperator;
 
     #[test]
     fn simple_update() {
@@ -98,12 +94,12 @@ mod tests {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
 
         let res = updating(qstring.as_bytes());
-        let expected_left = Base(Field(Column::from("id")));
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Integer(1)))),
-            operator: BinaryOperator::Equal,
-        }));
+        let expected_left = Expression::Column(Column::from("id"));
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(expected_left),
+            rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            op: BinaryOperator::Equal,
+        });
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
@@ -116,7 +112,6 @@ mod tests {
                     ),
                 ],
                 where_clause: expected_where_cond,
-                ..Default::default()
             }
         );
     }
@@ -124,7 +119,7 @@ mod tests {
     #[test]
     fn format_update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
-        let expected = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
+        let expected = "UPDATE users SET id = 42, name = 'test' WHERE (id = 1)";
         let res = updating(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
@@ -134,14 +129,14 @@ mod tests {
         let qstring = "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
 
         let res = updating(qstring.as_bytes());
-        let expected_left = Base(Field(Column::from("stories.id")));
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(expected_left),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let expected_left = Expression::Column(Column::from("stories.id"));
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(expected_left),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
-        }));
+            ))),
+            op: BinaryOperator::Equal,
+        });
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
@@ -166,27 +161,26 @@ mod tests {
         let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
 
         let res = updating(qstring.as_bytes());
-        let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Box::new(Base(Field(Column::from("users.id")))),
-            right: Box::new(Base(Literal(Literal::Placeholder(
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("users.id"))),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
-            )))),
-            operator: BinaryOperator::Equal,
-        }));
+            ))),
+            op: BinaryOperator::Equal,
+        });
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![(
                     Column::from("karma"),
-                    Expression::Arithmetic(Arithmetic {
-                        op: ArithmeticOperator::Add,
-                        left: Box::new(Expression::Column(Column::from("karma"))),
-                        right: Box::new(Expression::Literal(1.into())),
-                    }),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("karma"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
                 ),],
                 where_clause: expected_where_cond,
-                ..Default::default()
             }
         );
     }
@@ -202,11 +196,11 @@ mod tests {
                 table: Table::from("users"),
                 fields: vec![(
                     Column::from("karma"),
-                    Expression::Arithmetic(Arithmetic {
-                        op: ArithmeticOperator::Add,
-                        left: Box::new(Expression::Column(Column::from("karma"))),
-                        right: Box::new(Expression::Literal(1.into())),
-                    }),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("karma"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
                 ),],
                 ..Default::default()
             }

@@ -3704,6 +3704,7 @@ dependencies = [
  "assert_approx_eq",
  "derive_more",
  "itertools 0.10.0",
+ "maplit",
  "maths",
  "nom 5.1.2",
  "pratt",

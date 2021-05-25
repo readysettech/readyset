@@ -1,9 +1,6 @@
-use nom_sql::ConditionExpression::{
-    Base, Between, Bracketed, ComparisonOp, ExistsOp, LogicalOp, NegationOp,
-};
 use nom_sql::{
-    Arithmetic, BinaryOperator, ColumnConstraint, ColumnSpecification, ConditionBase,
-    ConditionExpression, ConditionTree, Expression, FunctionExpression, Literal, OrderType,
+    BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, Literal,
+    OrderType, UnaryOperator,
 };
 use std::collections::HashMap;
 
@@ -180,7 +177,7 @@ fn mir_node_to_flow_parts(
                         mig,
                         table_mapping,
                         Some(conditions.clone()),
-                        remapped_exprs_to_parent_names.clone(),
+                        remapped_exprs_to_parent_names.as_ref(),
                     )?
                 }
                 MirNodeInner::Filter {
@@ -196,7 +193,7 @@ fn mir_node_to_flow_parts(
                         mir_node.columns.as_slice(),
                         conditions.clone(),
                         mig,
-                        remapped_exprs_to_parent_names.clone(),
+                        remapped_exprs_to_parent_names.as_ref(),
                     )?
                 }
                 MirNodeInner::Identity => {
@@ -555,9 +552,9 @@ fn make_filter_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    conditions: ConditionExpression,
+    conditions: Expression,
     mig: &mut Migration,
-    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+    remapped_exprs_to_parent_names: Option<&HashMap<FunctionExpression, String>>,
 ) -> ReadySetResult<FlowNode> {
     let mut fields = parent.borrow().columns().to_vec();
     let parent_na = parent.borrow().flow_node_addr().unwrap();
@@ -588,8 +585,8 @@ fn make_grouped_node(
     kind: GroupedNodeType,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    conditions: Option<ConditionExpression>,
-    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+    conditions: Option<Expression>,
+    remapped_exprs_to_parent_names: Option<&HashMap<FunctionExpression, String>>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
     invariant!(match kind {
@@ -935,24 +932,11 @@ fn make_latest_node(
     Ok(FlowNode::New(na))
 }
 
-/// Converts a nom_sql Expression into a ProjectExpression
-fn arithmetic_to_project_expression(
-    parent: &MirNodeRef,
-    arithmetic: Arithmetic,
-) -> ReadySetResult<ProjectExpression> {
-    Ok(ProjectExpression::Op {
-        op: arithmetic.op.clone(),
-        left: Box::new(generate_project_expression(parent, *arithmetic.left)?),
-        right: Box::new(generate_project_expression(parent, *arithmetic.right)?),
-    })
-}
-
 fn generate_project_expression(
     parent: &MirNodeRef,
     expr: Expression,
 ) -> ReadySetResult<ProjectExpression> {
     match expr {
-        Expression::Arithmetic(ari) => arithmetic_to_project_expression(parent, ari),
         Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(ProjectExpression::Cast(
             Box::new(generate_project_expression(parent, (*arg).into())?),
             ty,
@@ -979,8 +963,20 @@ fn generate_project_expression(
                 .borrow()
                 .column_id_for_column(&Column::new(table.as_deref(), &name), None),
         )),
-        Expression::CaseWhen { .. } => {
-            unsupported!("CASE WHEN expressions not currently supported in projections")
+        Expression::BinaryOp { lhs, op, rhs } => Ok(ProjectExpression::Op {
+            op,
+            left: Box::new(generate_project_expression(parent, *lhs)?),
+            right: Box::new(generate_project_expression(parent, *rhs)?),
+        }),
+        Expression::CaseWhen { .. }
+        | Expression::UnaryOp { .. }
+        | Expression::Between { .. }
+        | Expression::Exists(_)
+        | Expression::In { .. } => {
+            unsupported!("Unsupported projected expression: {}", expr)
+        }
+        Expression::NestedSelect(_) => {
+            internal!("Nested selection should have been rewritten earlier")
         }
     }
 }
@@ -1147,35 +1143,13 @@ fn materialize_leaf_node(
     }
 }
 
-/// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
-/// and adds it to a vector of conditions.
+/// Converts a condition tree stored in the `Expression` returned by the SQL parser and adds it to a
+/// vector of conditions.
 fn extract_conditions(
-    conditions: &ConditionExpression,
+    conditions: &Expression,
     fields: &mut Vec<Column>,
     parent: &MirNodeRef,
-    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
-) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
-    match conditions {
-        LogicalOp(ref ct) => logical_op_to_conditions(ct, fields, &parent),
-        ComparisonOp(ref ct) => to_conditions(ct, fields, &parent, remapped_exprs_to_parent_names),
-        Bracketed(ce) => extract_conditions(&ce, fields, parent, remapped_exprs_to_parent_names),
-        NegationOp(_) => unreachable!("negation should have been removed earlier"),
-        ExistsOp(_) | ConditionExpression::Arithmetic(_) | Base(_) => {
-            Err(MirUnsupportedCondition {
-                expression: conditions.to_string,
-            })
-        }
-        Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
-    }
-}
-
-/// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
-/// and adds it to a vector of conditions.
-fn to_conditions(
-    ct: &ConditionTree,
-    columns: &mut Vec<Column>,
-    parent: &MirNodeRef,
-    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
+    remapped_exprs_to_parent_names: Option<&HashMap<FunctionExpression, String>>,
 ) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
     use dataflow::ops::filter;
 
@@ -1190,7 +1164,7 @@ fn to_conditions(
             }
         }
 
-        let absolute_column_ids: Vec<usize> = columns
+        let absolute_column_ids: Vec<usize> = fields
             .iter()
             .map(|c| {
                 // grr NLL
@@ -1200,7 +1174,7 @@ fn to_conditions(
             })
             .collect();
 
-        if let Some(pos) = columns
+        if let Some(pos) = fields
             .iter()
             .rposition(|c| *c.name == *name && c.table == col.table)
         {
@@ -1210,80 +1184,112 @@ fn to_conditions(
             // aggregations.  We assume that the column is appended at the end, unless we
             // have an aggregation, in which case it needs to go before the computed column,
             // which is last.
-            let col: Column = col.clone().into();
+            let col = mir::Column::from(col.clone());
             let pos = parent.borrow_mut().add_column(col.clone());
-            columns.insert(pos, col);
+            fields.insert(pos, col);
             pos
         }
     };
 
-    // TODO(malte): we only support one level of condition nesting at this point :(
-    let l = match *ct.left.as_ref() {
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => Ok(column_from_parent(f)),
-        ref left => Err(MirUnsupportedCondition {
-            expression: left.to_string(),
-        }),
-    }?;
-    let f = match *ct.right.as_ref() {
-        ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => Some(
-            FilterCondition::Comparison(ct.operator, filter::Value::Constant(DataType::from(*i))),
-        ),
-        ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
-            Some(FilterCondition::Comparison(
-                ct.operator,
-                filter::Value::Constant(DataType::from(s.clone())),
-            ))
+    match conditions {
+        Expression::BinaryOp {
+            lhs,
+            op: BinaryOperator::And,
+            rhs,
+        } => {
+            let mut conds =
+                extract_conditions(lhs.as_ref(), fields, parent, remapped_exprs_to_parent_names)?;
+            conds.append(&mut extract_conditions(
+                rhs.as_ref(),
+                fields,
+                parent,
+                remapped_exprs_to_parent_names,
+            )?);
+            Ok(conds)
         }
-        ConditionExpression::Base(ConditionBase::Literal(Literal::Null)) => Some(
-            FilterCondition::Comparison(ct.operator, filter::Value::Constant(DataType::None)),
-        ),
-        ConditionExpression::Base(ConditionBase::LiteralList(ref ll)) => Some(FilterCondition::In(
-            ll.iter().map(|l| DataType::from(l.clone())).collect(),
-        )),
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => Some(
-            FilterCondition::Comparison(ct.operator, filter::Value::Column(column_from_parent(f))),
-        ),
-        _ => None,
-    }
-    .ok_or_else(|| MirUnsupportedCondition {
-        expression: ct.right.to_string(),
-    })?;
-
-    let mut filters = Vec::new();
-    filters.push((l, f));
-    Ok(filters)
-}
-
-fn logical_op_to_conditions(
-    ct: &ConditionTree,
-    columns: &mut Vec<Column>,
-    n: &MirNodeRef,
-) -> ReadySetResult<Vec<(usize, FilterCondition)>> {
-    match ct.operator {
-        BinaryOperator::And => {
-            let mut left_filter = match ct.left.as_ref() {
-                ConditionExpression::LogicalOp(ref ct2) => {
-                    logical_op_to_conditions(ct2, columns, n)
+        Expression::BinaryOp { lhs, op, rhs } => {
+            let l = match **lhs {
+                Expression::Column(ref f) => column_from_parent(f),
+                Expression::Call(ref f) =>
+                // FIXME(ENG-215): Replace this with some sort of projected expression to column
+                // name mapping once we get rid of nom_sql::Column::function
+                {
+                    column_from_parent(&nom_sql::Column {
+                        function: Some(Box::new(f.clone())),
+                        name: f.to_string(),
+                        table: None,
+                    })
                 }
-                ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
-                ref left => Err(MirUnsupportedCondition {
-                    expression: left.to_string(),
-                }),
-            }?;
-            let mut right_filter = match ct.right.as_ref() {
-                ConditionExpression::LogicalOp(ref ct2) => {
-                    logical_op_to_conditions(ct2, columns, n)
+                ref lhs => {
+                    return Err(MirUnsupportedCondition {
+                        expression: lhs.to_string(),
+                    })
                 }
-                ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
-                ref right => Err(MirUnsupportedCondition {
-                    expression: right.to_string(),
-                }),
-            }?;
-            left_filter.append(&mut right_filter);
-            Ok(left_filter)
+            };
+
+            let f = match **rhs {
+                Expression::Literal(Literal::Integer(ref i)) => {
+                    FilterCondition::Comparison(*op, filter::Value::Constant(DataType::from(*i)))
+                }
+                Expression::Literal(Literal::String(ref s)) => FilterCondition::Comparison(
+                    *op,
+                    filter::Value::Constant(DataType::from(s.clone())),
+                ),
+                Expression::Literal(Literal::Null) => {
+                    FilterCondition::Comparison(*op, filter::Value::Constant(DataType::None))
+                }
+                Expression::Column(ref f) => {
+                    FilterCondition::Comparison(*op, filter::Value::Column(column_from_parent(f)))
+                }
+                ref rhs => {
+                    return Err(MirUnsupportedCondition {
+                        expression: rhs.to_string(),
+                    })
+                }
+            };
+            Ok(vec![(l, f)])
         }
-        _ => Err(MirUnsupportedCondition {
-            expression: ct.to_string(),
+        Expression::In {
+            lhs,
+            rhs: nom_sql::InValue::List(exprs),
+            negated: false,
+        } => {
+            let l = match **lhs {
+                Expression::Column(ref f) => column_from_parent(f),
+                ref lhs => {
+                    return Err(MirUnsupportedCondition {
+                        expression: lhs.to_string(),
+                    })
+                }
+            };
+
+            let f = FilterCondition::In(
+                exprs
+                    .iter()
+                    .map(|expr| match expr {
+                        Expression::Literal(lit) => Ok(DataType::from(lit.clone())),
+                        expr => Err(MirUnsupportedCondition {
+                            expression: expr.to_string(),
+                        }),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+
+            Ok(vec![(l, f)])
+        }
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            ..
+        } => internal!("negation should have been removed earlier"),
+        Expression::Between { .. } => internal!("BETWEEN should have been removed earlier"),
+        Expression::Call(_)
+        | Expression::Literal(_)
+        | Expression::CaseWhen { .. }
+        | Expression::Column(_)
+        | Expression::Exists(_)
+        | Expression::NestedSelect(_)
+        | Expression::In { .. } => Err(MirUnsupportedCondition {
+            expression: conditions.to_string(),
         }),
     }
 }

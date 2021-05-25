@@ -293,7 +293,7 @@ impl Ingredient for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::ArithmeticOperator;
+    use nom_sql::BinaryOperator;
     use ProjectExpression::{Column, Literal, Op};
 
     use crate::ops;
@@ -336,7 +336,7 @@ mod tests {
         g
     }
 
-    fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
+    fn setup_column_arithmetic(op: BinaryOperator) -> ops::test::MockGraph {
         let expression = ProjectExpression::Op {
             left: Box::new(ProjectExpression::Column(0)),
             right: Box::new(Column(1)),
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn it_describes_arithmetic() {
-        let p = setup_column_arithmetic(ArithmeticOperator::Add);
+        let p = setup_column_arithmetic(BinaryOperator::Add);
         assert_eq!(p.node().description(true), "π[0, 1, (0 + 1)]");
     }
 
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn it_forwards_addition_arithmetic() {
-        let mut p = setup_column_arithmetic(ArithmeticOperator::Add);
+        let mut p = setup_column_arithmetic(BinaryOperator::Add);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn it_forwards_subtraction_arithmetic() {
-        let mut p = setup_column_arithmetic(ArithmeticOperator::Subtract);
+        let mut p = setup_column_arithmetic(BinaryOperator::Subtract);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn it_forwards_multiplication_arithmetic() {
-        let mut p = setup_column_arithmetic(ArithmeticOperator::Multiply);
+        let mut p = setup_column_arithmetic(BinaryOperator::Multiply);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn it_forwards_division_arithmetic() {
-        let mut p = setup_column_arithmetic(ArithmeticOperator::Divide);
+        let mut p = setup_column_arithmetic(BinaryOperator::Divide);
         let rec = vec![10.into(), 2.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -462,7 +462,7 @@ mod tests {
         let expression = ProjectExpression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Literal(number)),
-            op: ArithmeticOperator::Multiply,
+            op: BinaryOperator::Multiply,
         };
 
         let mut p = setup_arithmetic(expression);
@@ -480,7 +480,7 @@ mod tests {
         let expression = ProjectExpression::Op {
             left: Box::new(Literal(a)),
             right: Box::new(Literal(b)),
-            op: ArithmeticOperator::Divide,
+            op: BinaryOperator::Divide,
         };
 
         let mut p = setup_arithmetic(expression);
@@ -606,7 +606,7 @@ mod tests {
         let expressions = Some(vec![ProjectExpression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Column(1)),
-            op: ArithmeticOperator::Add,
+            op: BinaryOperator::Add,
         }]);
 
         let state = Box::new(MemoryState::default());
@@ -621,7 +621,7 @@ mod tests {
         let expressions = Some(vec![ProjectExpression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Column(1)),
-            op: ArithmeticOperator::Add,
+            op: BinaryOperator::Add,
         }]);
 
         let state = Box::new(PersistentState::new(
@@ -638,11 +638,11 @@ mod tests {
     #[test]
     fn it_queries_nested_expressions() {
         let expression = Op {
-            op: ArithmeticOperator::Multiply,
+            op: BinaryOperator::Multiply,
             left: Box::new(Op {
                 left: Box::new(Column(0)),
                 right: Box::new(Column(1)),
-                op: ArithmeticOperator::Add,
+                op: BinaryOperator::Add,
             }),
             right: Box::new(Literal(DataType::Int(2))),
         };

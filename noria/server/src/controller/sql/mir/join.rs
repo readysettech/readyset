@@ -1,9 +1,8 @@
 use crate::controller::sql::mir::SqlToMirConverter;
-use crate::controller::sql::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
+use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
 use crate::ReadySetResult;
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
-use nom_sql::ConditionTree;
 use noria::invariant;
 use std::collections::{HashMap, HashSet};
 
@@ -104,10 +103,10 @@ pub(super) fn make_joins_for_aggregates(
     Ok(join_nodes)
 }
 
-fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a [ConditionTree]) {
+fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a [JoinPredicate]) {
     match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join(jps) => (JoinType::Inner, jps),
-        QueryGraphEdge::LeftJoin(jps) => (JoinType::Left, jps),
+        QueryGraphEdge::Join { on } => (JoinType::Inner, on),
+        QueryGraphEdge::LeftJoin { on } => (JoinType::Left, on),
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }

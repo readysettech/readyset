@@ -1,66 +1,105 @@
-use nom_sql::ConditionBase::NestedSelect;
-use nom_sql::ConditionExpression::*;
+use std::iter;
+
+use itertools::Either;
 use nom_sql::{
-    Column, ConditionBase, ConditionExpression, Expression, FieldDefinitionExpression,
-    JoinRightSide, SqlQuery,
+    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinRightSide,
+    SqlQuery,
 };
 
 #[derive(Debug, PartialEq)]
 pub enum Subquery<'a> {
     InJoin(&'a mut JoinRightSide),
-    InComparison(&'a mut ConditionBase),
+    InIn(&'a mut InValue),
+    InExpr(&'a mut Expression),
 }
 
 pub trait SubQueries {
     fn extract_subqueries(&mut self) -> Vec<Subquery>;
 }
 
-fn extract_subqueries_from_condition(ce: &mut ConditionExpression) -> Vec<Subquery> {
-    match *ce {
-        ComparisonOp(ref mut ct) | LogicalOp(ref mut ct) => {
-            let lb = extract_subqueries_from_condition(&mut *ct.left);
-            let rb = extract_subqueries_from_condition(&mut *ct.right);
+fn extract_subqueries_from_function_call(call: &mut FunctionExpression) -> Vec<Subquery> {
+    match call {
+        FunctionExpression::Avg { expr, .. }
+        | FunctionExpression::Count { expr, .. }
+        | FunctionExpression::Sum { expr, .. }
+        | FunctionExpression::Max(expr)
+        | FunctionExpression::Min(expr)
+        | FunctionExpression::GroupConcat { expr, .. }
+        | FunctionExpression::Cast(expr, _) => extract_subqueries_from_expression(expr),
+        FunctionExpression::CountStar => vec![],
+        FunctionExpression::Call { arguments, .. } => arguments
+            .iter_mut()
+            .flat_map(extract_subqueries_from_expression)
+            .collect(),
+    }
+}
+
+fn extract_subqueries_from_expression(expr: &mut Expression) -> Vec<Subquery> {
+    match expr {
+        Expression::BinaryOp { lhs, rhs, .. } => {
+            let lb = extract_subqueries_from_expression(lhs);
+            let rb = extract_subqueries_from_expression(rhs);
 
             lb.into_iter().chain(rb.into_iter()).collect()
         }
-        NegationOp(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
-        Bracketed(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
-        Base(ref mut cb) => match *cb {
-            NestedSelect(_) => vec![Subquery::InComparison(cb)],
-            _ => vec![],
-        },
-        Arithmetic(_) => unimplemented!(),
-        ExistsOp(_) => unimplemented!(),
-        Between {
-            ref mut operand,
-            ref mut min,
-            ref mut max,
+        Expression::UnaryOp { rhs, .. } => extract_subqueries_from_expression(rhs),
+        Expression::Between {
+            operand, min, max, ..
         } => {
-            let ob = extract_subqueries_from_condition(operand);
-            let minb = extract_subqueries_from_condition(min);
-            let maxb = extract_subqueries_from_condition(max);
+            let ob = extract_subqueries_from_expression(operand);
+            let minb = extract_subqueries_from_expression(min);
+            let maxb = extract_subqueries_from_expression(max);
             ob.into_iter()
                 .chain(minb.into_iter())
                 .chain(maxb.into_iter())
                 .collect()
         }
+        Expression::CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
+        } => extract_subqueries_from_expression(condition)
+            .into_iter()
+            .chain(extract_subqueries_from_expression(then_expr))
+            .chain(match else_expr {
+                Some(else_expr) => {
+                    Either::Left(extract_subqueries_from_expression(else_expr).into_iter())
+                }
+                None => Either::Right(iter::empty()),
+            })
+            .collect(),
+        Expression::Exists(_) => unimplemented!(),
+        Expression::NestedSelect(_) => vec![Subquery::InExpr(expr)],
+        Expression::Call(call) => extract_subqueries_from_function_call(call),
+        Expression::In {
+            lhs,
+            rhs: rhs @ InValue::Subquery(_),
+            ..
+        } => extract_subqueries_from_expression(lhs)
+            .into_iter()
+            .chain(iter::once(Subquery::InIn(rhs)))
+            .collect(),
+        Expression::In {
+            lhs,
+            rhs: InValue::List(exprs),
+            ..
+        } => extract_subqueries_from_expression(lhs)
+            .into_iter()
+            .chain(
+                exprs
+                    .iter_mut()
+                    .flat_map(extract_subqueries_from_expression),
+            )
+            .collect(),
+        Expression::Literal(_) | Expression::Column(_) => vec![],
     }
 }
 
-pub fn field_with_table_name(name: String, column: Column) -> ConditionBase {
-    ConditionBase::Field(Column {
-        name: column.name.clone(),
-        table: Some(name),
-        function: column.function,
-    })
-}
-
-pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
-    let (sq, column);
-    match *cond {
-        NestedSelect(ref bst) => {
-            sq = SqlQuery::Select(*bst.clone());
-            column = bst
+pub fn query_from_expr(expr: &Expression) -> (SqlQuery, Column) {
+    match *expr {
+        Expression::NestedSelect(ref bst) => {
+            let sq = SqlQuery::Select(*bst.clone());
+            let column = bst
                 .fields
                 .iter()
                 .map(|fe| match fe {
@@ -72,11 +111,10 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
                 })
                 .next()
                 .unwrap();
+            (sq, column)
         }
         _ => unreachable!(),
-    };
-
-    (sq, column)
+    }
 }
 
 impl SubQueries for SqlQuery {
@@ -89,7 +127,7 @@ impl SubQueries for SqlQuery {
                 }
             }
             if let Some(ref mut ce) = st.where_clause {
-                subqueries.extend(extract_subqueries_from_condition(ce));
+                subqueries.extend(extract_subqueries_from_expression(ce));
             }
         }
 
@@ -100,47 +138,42 @@ impl SubQueries for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::ConditionBase::*;
     use nom_sql::{
-        BinaryOperator, Column, ConditionTree, FieldDefinitionExpression, SelectStatement,
-        SqlQuery, Table,
+        BinaryOperator, Column, FieldDefinitionExpression, SelectStatement, SqlQuery, Table,
     };
 
-    fn wrap(cb: ConditionBase) -> Box<ConditionExpression> {
-        Box::new(Base(cb))
-    }
     #[test]
     fn it_extracts_subqueries() {
         // select userid from role where type=1
         let sq = SelectStatement {
             tables: vec![Table::from("role")],
             fields: vec![FieldDefinitionExpression::from(Column::from("userid"))],
-            where_clause: Some(ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: wrap(Field(Column::from("type"))),
-                right: wrap(Literal(1.into())),
-            })),
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column(Column::from("type"))),
+                rhs: Box::new(Expression::Literal(1.into())),
+            }),
             ..Default::default()
         };
 
-        let mut expected = NestedSelect(Box::new(sq.clone()));
+        let mut expected = InValue::Subquery(Box::new(sq.clone()));
 
         // select pid from post where author in (select userid from role where type=1)
         let st = SelectStatement {
             tables: vec![Table::from("post")],
             fields: vec![FieldDefinitionExpression::from(Column::from("pid"))],
-            where_clause: Some(ComparisonOp(ConditionTree {
-                operator: BinaryOperator::In,
-                left: wrap(Field(Column::from("author"))),
-                right: wrap(expected.clone()),
-            })),
+            where_clause: Some(Expression::In {
+                lhs: Box::new(Expression::Column(Column::from("author"))),
+                rhs: expected.clone(),
+                negated: false,
+            }),
             ..Default::default()
         };
 
         let mut q = SqlQuery::Select(st);
         let res = q.extract_subqueries();
 
-        assert_eq!(res, vec![Subquery::InComparison(&mut expected)]);
+        assert_eq!(res, vec![Subquery::InIn(&mut expected)]);
     }
 
     #[test]
@@ -149,11 +182,11 @@ mod tests {
         let mut q = SqlQuery::Select(SelectStatement {
             tables: vec![Table::from("role")],
             fields: vec![FieldDefinitionExpression::from(Column::from("userid"))],
-            where_clause: Some(ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: wrap(Field(Column::from("type"))),
-                right: wrap(Literal(1.into())),
-            })),
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column(Column::from("type"))),
+                rhs: Box::new(Expression::Literal(1.into())),
+            }),
             ..Default::default()
         });
 
@@ -181,19 +214,19 @@ mod tests {
                 FieldDefinitionExpression::from(Column::from("articles.title")),
                 FieldDefinitionExpression::from(Column::from("votes.uid")),
             ],
-            where_clause: Some(LogicalOp(ConditionTree {
-                left: Box::new(ComparisonOp(ConditionTree {
-                    left: wrap(Field(Column::from("users.id"))),
-                    right: wrap(Field(Column::from("articles.author"))),
-                    operator: BinaryOperator::Equal,
-                })),
-                right: Box::new(ComparisonOp(ConditionTree {
-                    left: wrap(Field(Column::from("votes.aid"))),
-                    right: wrap(Field(Column::from("articles.aid"))),
-                    operator: BinaryOperator::Equal,
-                })),
-                operator: BinaryOperator::And,
-            })),
+            where_clause: Some(Expression::BinaryOp {
+                lhs: Box::new(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("users.id"))),
+                    rhs: Box::new(Expression::Column(Column::from("articles.author"))),
+                    op: BinaryOperator::Equal,
+                }),
+                rhs: Box::new(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
+                    rhs: Box::new(Expression::Column(Column::from("articles.aid"))),
+                    op: BinaryOperator::Equal,
+                }),
+                op: BinaryOperator::And,
+            }),
             ..Default::default()
         });
 

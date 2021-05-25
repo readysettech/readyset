@@ -5,7 +5,7 @@ use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use maths::{float::encode_f64, int::integer_rnd};
 use msql_srv::MysqlTime;
-use nom_sql::{ArithmeticOperator, SqlType};
+use nom_sql::{BinaryOperator, SqlType};
 use noria::{DataType, ReadySetError, ReadySetResult};
 use std::convert::TryFrom;
 use std::fmt::Formatter;
@@ -136,7 +136,7 @@ pub enum ProjectExpression {
 
     /// A binary operation
     Op {
-        op: ArithmeticOperator,
+        op: BinaryOperator,
         left: Box<ProjectExpression>,
         right: Box<ProjectExpression>,
     },
@@ -204,18 +204,15 @@ impl ProjectExpression {
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
                 match op {
-                    ArithmeticOperator::Add => {
-                        Ok(Cow::Owned((non_null!(left) + non_null!(right))?))
-                    }
-                    ArithmeticOperator::Subtract => {
+                    BinaryOperator::Add => Ok(Cow::Owned((non_null!(left) + non_null!(right))?)),
+                    BinaryOperator::Subtract => {
                         Ok(Cow::Owned((non_null!(left) - non_null!(right))?))
                     }
-                    ArithmeticOperator::Multiply => {
+                    BinaryOperator::Multiply => {
                         Ok(Cow::Owned((non_null!(left) * non_null!(right))?))
                     }
-                    ArithmeticOperator::Divide => {
-                        Ok(Cow::Owned((non_null!(left) / non_null!(right))?))
-                    }
+                    BinaryOperator::Divide => Ok(Cow::Owned((non_null!(left) / non_null!(right))?)),
+                    _ => todo!(),
                 }
             }
             Cast(expr, ty) => match expr.eval(record)? {
@@ -548,9 +545,9 @@ mod tests {
             right: Box::new(Op {
                 left: Box::new(Column(1)),
                 right: Box::new(Literal(3.into())),
-                op: ArithmeticOperator::Add,
+                op: BinaryOperator::Add,
             }),
-            op: ArithmeticOperator::Add,
+            op: BinaryOperator::Add,
         };
         assert_eq!(
             expr.eval(&[1.into(), 2.into()]).unwrap(),

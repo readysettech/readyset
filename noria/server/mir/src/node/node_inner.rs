@@ -4,8 +4,7 @@ use common::DataType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, ConditionExpression, Expression, FunctionExpression,
-    Literal, OrderType,
+    BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
 };
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -31,7 +30,7 @@ pub enum MirNodeInner {
     },
     /// filter conditions (one for each parent column)
     Filter {
-        conditions: ConditionExpression,
+        conditions: Expression,
         // Maps the Columns that contained function calls into the
         // names of the projected columns that contain the evaluated results.
         // This is the 2nd return value of `project_expressions`.
@@ -45,7 +44,7 @@ pub enum MirNodeInner {
         group_by: Vec<Column>,
         // kind is same as a normal aggregation (sum, count, avg)
         kind: Aggregation,
-        conditions: ConditionExpression,
+        conditions: Expression,
         // Maps the Columns that contained function calls into the
         // names of the projected columns that contain the evaluated results.
         // This is the 2nd return value of `project_expressions`.

@@ -1,86 +1,60 @@
-use std::borrow::Cow;
+use maplit::hashset;
+use std::collections::HashSet;
 
-use crate::{
-    Arithmetic, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FunctionExpression, SqlQuery, Table,
-};
+use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
 
 pub trait ReferredTables {
-    fn referred_tables(&self) -> Vec<Table>;
+    fn referred_tables(&self) -> HashSet<Table>;
 }
 
 impl ReferredTables for SqlQuery {
-    fn referred_tables(&self) -> Vec<Table> {
+    fn referred_tables(&self) -> HashSet<Table> {
         match *self {
-            SqlQuery::CreateTable(ref ctq) => vec![ctq.table.clone()],
-            SqlQuery::AlterTable(ref atq) => vec![atq.table.clone()],
-            SqlQuery::Insert(ref iq) => vec![iq.table.clone()],
-            SqlQuery::Select(ref sq) => sq.tables.to_vec(),
-            SqlQuery::CompoundSelect(ref csq) => {
-                csq.selects
-                    .iter()
-                    .fold(Vec::new(), |mut acc, &(_, ref sq)| {
-                        acc.extend(sq.tables.to_vec());
-                        acc
-                    })
-            }
+            SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
+            SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
+            SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
+            SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::CompoundSelect(ref csq) => csq
+                .selects
+                .iter()
+                .flat_map(|(_, sq)| &sq.tables)
+                .cloned()
+                .collect(),
             _ => unreachable!(),
         }
     }
 }
 
-impl ReferredTables for ConditionExpression {
-    fn referred_tables(&self) -> Vec<Table> {
-        let mut tables = Vec::new();
-        match *self {
-            ConditionExpression::LogicalOp(ref ct) | ConditionExpression::ComparisonOp(ref ct) => {
-                for t in ct
-                    .left
-                    .referred_tables()
-                    .into_iter()
-                    .chain(ct.right.referred_tables().into_iter())
-                {
-                    if !tables.contains(&t) {
-                        tables.push(t);
-                    }
-                }
-            }
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => {
-                if let Some(ref t) = f.table {
-                    let t = Table::from(t.as_ref());
-                    if !tables.contains(&t) {
-                        tables.push(t);
-                    }
-                }
-            }
-            ConditionExpression::Bracketed(ref ce) => tables.extend(ce.referred_tables()),
-            _ => unimplemented!(),
-        }
-        tables
+impl ReferredTables for Expression {
+    fn referred_tables(&self) -> HashSet<Table> {
+        self.referred_columns()
+            .filter_map(|col| col.table.clone())
+            .map(|name| Table {
+                name,
+                ..Default::default()
+            })
+            .collect()
     }
 }
 
 #[derive(Clone)]
 pub struct ReferredColumnsIter<'a> {
     exprs_to_visit: Vec<&'a Expression>,
-    arithmetic_to_visit: Vec<&'a Arithmetic>,
-    condition_expressions_to_visit: Vec<&'a ConditionExpression>,
     columns_to_visit: Vec<&'a Column>,
 }
 
 impl<'a> ReferredColumnsIter<'a> {
-    fn visit_expr(&mut self, expr: &'a Expression) -> Option<Cow<'a, Column>> {
+    fn visit_expr(&mut self, expr: &'a Expression) -> Option<&'a Column> {
         match expr {
-            Expression::Arithmetic(ari) => self.visit_arithmetic(ari),
             Expression::Call(fexpr) => self.visit_function_expression(fexpr),
             Expression::Literal(_) => None,
-            Expression::Column(col) => Some(Cow::Borrowed(col)),
+            Expression::Column(col) => Some(col),
             Expression::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
             } => {
-                self.condition_expressions_to_visit.push(condition);
+                self.exprs_to_visit.push(condition);
                 self.exprs_to_visit.push(then_expr);
                 if let Some(else_expr) = else_expr {
                     self.visit_expr(else_expr)
@@ -88,13 +62,38 @@ impl<'a> ReferredColumnsIter<'a> {
                     None
                 }
             }
+            Expression::BinaryOp { lhs, rhs, .. } => {
+                self.exprs_to_visit.push(lhs);
+                self.visit_expr(rhs)
+            }
+            Expression::UnaryOp { rhs, .. } => self.visit_expr(rhs),
+            Expression::Exists { .. } => None,
+            Expression::Between {
+                operand, min, max, ..
+            } => {
+                self.exprs_to_visit.push(operand);
+                self.exprs_to_visit.push(min);
+                self.visit_expr(max)
+            }
+            Expression::In { lhs, rhs, .. } => {
+                self.exprs_to_visit.push(lhs);
+                match rhs {
+                    InValue::Subquery(_) => None,
+                    InValue::List(exprs) => {
+                        self.exprs_to_visit.extend(exprs.iter().skip(1));
+                        if let Some(expr) = exprs.first() {
+                            self.visit_expr(expr)
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+            Expression::NestedSelect(_) => None,
         }
     }
 
-    fn visit_function_expression(
-        &mut self,
-        fexpr: &'a FunctionExpression,
-    ) -> Option<Cow<'a, Column>> {
+    fn visit_function_expression(&mut self, fexpr: &'a FunctionExpression) -> Option<&'a Column> {
         use FunctionExpression::*;
 
         match fexpr {
@@ -115,50 +114,13 @@ impl<'a> ReferredColumnsIter<'a> {
         }
     }
 
-    fn visit_condition_expression(
-        &mut self,
-        ce: &'a ConditionExpression,
-    ) -> Option<Cow<'a, Column>> {
-        match ce {
-            ConditionExpression::ComparisonOp(ConditionTree { left, right, .. })
-            | ConditionExpression::LogicalOp(ConditionTree { left, right, .. }) => {
-                self.condition_expressions_to_visit.push(left);
-                self.visit_condition_expression(right)
-            }
-            ConditionExpression::NegationOp(ce) => self.visit_condition_expression(ce),
-            ConditionExpression::ExistsOp(_) => unimplemented!("EXISTS is not implemented yet"),
-            ConditionExpression::Base(ConditionBase::Field(col)) => Some(Cow::Borrowed(col)),
-            ConditionExpression::Base(
-                ConditionBase::Literal(_) | ConditionBase::LiteralList(_),
-            ) => None,
-            ConditionExpression::Base(ConditionBase::NestedSelect(_)) => {
-                unimplemented!("Nested selects are not implemented yet")
-            }
-            ConditionExpression::Arithmetic(ari) => self.visit_arithmetic(&ari),
-            ConditionExpression::Bracketed(ce) => self.visit_condition_expression(ce),
-            ConditionExpression::Between { operand, min, max } => {
-                self.condition_expressions_to_visit.push(operand);
-                self.condition_expressions_to_visit.push(min);
-                self.visit_condition_expression(max)
-            }
-        }
-    }
-
-    fn visit_arithmetic(&mut self, ari: &'a Arithmetic) -> Option<Cow<'a, Column>> {
-        self.exprs_to_visit.push(&ari.left);
-        self.visit_expr(&ari.right)
-    }
-
     fn finished(&self) -> bool {
-        self.exprs_to_visit.is_empty()
-            && self.arithmetic_to_visit.is_empty()
-            && self.condition_expressions_to_visit.is_empty()
-            && self.columns_to_visit.is_empty()
+        self.exprs_to_visit.is_empty() && self.columns_to_visit.is_empty()
     }
 }
 
 impl<'a> Iterator for ReferredColumnsIter<'a> {
-    type Item = Cow<'a, Column>;
+    type Item = &'a Column;
 
     fn next(&mut self) -> Option<Self::Item> {
         while !self.finished() {
@@ -166,17 +128,7 @@ impl<'a> Iterator for ReferredColumnsIter<'a> {
                 .exprs_to_visit
                 .pop()
                 .and_then(|expr| self.visit_expr(expr))
-                .or_else(|| {
-                    self.arithmetic_to_visit
-                        .pop()
-                        .and_then(|ari| self.visit_arithmetic(ari))
-                })
-                .or_else(|| {
-                    self.condition_expressions_to_visit
-                        .pop()
-                        .and_then(|ce| self.visit_condition_expression(ce))
-                })
-                .or_else(|| self.columns_to_visit.pop().map(Cow::Borrowed));
+                .or_else(|| self.columns_to_visit.pop());
             if next.is_some() {
                 return next;
             }
@@ -193,85 +145,59 @@ impl ReferredColumns for Expression {
     fn referred_columns(&self) -> ReferredColumnsIter {
         ReferredColumnsIter {
             exprs_to_visit: vec![self],
-            arithmetic_to_visit: vec![],
-            condition_expressions_to_visit: vec![],
             columns_to_visit: vec![],
         }
     }
 }
 
-impl ReferredColumns for ConditionExpression {
-    fn referred_columns(&self) -> ReferredColumnsIter {
-        ReferredColumnsIter {
-            exprs_to_visit: vec![],
-            arithmetic_to_visit: vec![],
-            condition_expressions_to_visit: vec![&self],
-            columns_to_visit: vec![],
-        }
-    }
-}
-
-/// Recursively traverses `ce`, a [`ConditionExpression`], to find all function calls inside,
+/// Recursively traverses `expr`, an [`Expression`], to find all function calls inside,
 /// putting found function calls into `out`.
-pub fn find_function_calls<'a>(out: &mut Vec<&'a FunctionExpression>, ce: &'a ConditionExpression) {
-    fn on_expr<'a>(out: &mut Vec<&'a FunctionExpression>, expr: &'a Expression) {
-        match expr {
-            Expression::Arithmetic(ari) => {
-                on_expr(out, &ari.left);
-                on_expr(out, &ari.right);
-            }
-            Expression::Call(f)
-            | Expression::Column(Column {
-                function: Some(box f),
-                ..
-            }) => {
-                out.push(f);
-            }
-            Expression::CaseWhen {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                find_function_calls(out, condition);
-                on_expr(out, then_expr);
-                if let Some(else_expr) = else_expr {
-                    on_expr(out, else_expr);
-                }
-            }
-            Expression::Literal(_) | Expression::Column(_) => {}
+pub fn find_function_calls<'a>(out: &mut Vec<&'a FunctionExpression>, expr: &'a Expression) {
+    match expr {
+        Expression::Call(f)
+        | Expression::Column(Column {
+            function: Some(box f),
+            ..
+        }) => {
+            out.push(f);
         }
-    }
-
-    match *ce {
-        ConditionExpression::ComparisonOp(ref ct) | ConditionExpression::LogicalOp(ref ct) => {
-            find_function_calls(out, &ct.left);
-            find_function_calls(out, &ct.right);
-        }
-        ConditionExpression::NegationOp(ref ce) | ConditionExpression::Bracketed(ref ce) => {
-            find_function_calls(out, &*ce)
-        }
-        ConditionExpression::Base(ref cb) => {
-            if let ConditionBase::Field(ref c) = cb {
-                if let Some(function) = &c.function {
-                    out.push(function);
-                }
-            }
-        }
-        ConditionExpression::Arithmetic(ref ari) => {
-            on_expr(out, &ari.left);
-            on_expr(out, &ari.right);
-        }
-        ConditionExpression::Between {
-            ref operand,
-            ref min,
-            ref max,
+        Expression::CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
         } => {
-            find_function_calls(out, &*operand);
-            find_function_calls(out, &*min);
-            find_function_calls(out, &*max);
+            find_function_calls(out, condition);
+            find_function_calls(out, then_expr);
+            if let Some(else_expr) = else_expr {
+                find_function_calls(out, else_expr);
+            }
         }
-        // unsupported, but also there aren't function calls in there anyway
-        ConditionExpression::ExistsOp(_) => {}
+        Expression::Literal(_) | Expression::Column(_) => {}
+        Expression::BinaryOp { lhs, rhs, .. } => {
+            find_function_calls(out, lhs);
+            find_function_calls(out, rhs);
+        }
+        Expression::UnaryOp { rhs, .. } => {
+            find_function_calls(out, rhs);
+        }
+        Expression::Exists { .. } => {}
+        Expression::Between {
+            operand, min, max, ..
+        } => {
+            find_function_calls(out, operand);
+            find_function_calls(out, min);
+            find_function_calls(out, max);
+        }
+        Expression::In { lhs, rhs, .. } => {
+            find_function_calls(out, lhs);
+            match rhs {
+                InValue::Subquery(_) => {}
+                InValue::List(exprs) => {
+                    exprs.iter().for_each(|expr| find_function_calls(out, expr));
+                }
+            }
+        }
+        Expression::NestedSelect(_) => {}
     }
 }
 
@@ -291,26 +217,37 @@ pub fn is_aggregate(function: &FunctionExpression) -> bool {
     }
 }
 
-/// Returns true if *any* of the recursive subexpressions of the given [`Expression`] contain an
+/// Rturns true if *any* of the recursive subexpressions of the given [`Expression`] contain an
 /// aggregate
 pub fn contains_aggregate(expr: &Expression) -> bool {
     match expr {
-        Expression::Arithmetic(_) => false,
         Expression::Call(f) => is_aggregate(f) || f.arguments().any(|arg| contains_aggregate(&arg)),
         Expression::Literal(_) => false,
         Expression::Column { .. } => false,
         Expression::CaseWhen {
-            condition: _,
+            condition,
             then_expr,
             else_expr,
         } => {
-            // FIXME(grfn): ignoring conditions here is incorrect, since they can contain function
-            // call nodes - that's a conscious concession until we can replace ConditionExpr with
-            // Expression and simplify expression traversal significantly
-            contains_aggregate(then_expr)
+            contains_aggregate(condition)
+                || contains_aggregate(then_expr)
                 || else_expr
                     .iter()
                     .any(|expr| contains_aggregate(expr.as_ref()))
+        }
+        Expression::BinaryOp { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
+        Expression::UnaryOp { rhs, .. } => contains_aggregate(rhs),
+        Expression::Exists(_) => false,
+        Expression::Between {
+            operand, min, max, ..
+        } => contains_aggregate(operand) || contains_aggregate(min) || contains_aggregate(max),
+        Expression::NestedSelect(_) => false,
+        Expression::In { lhs, rhs, .. } => {
+            contains_aggregate(lhs)
+                || match rhs {
+                    InValue::Subquery(_) => false,
+                    InValue::List(exprs) => exprs.iter().any(contains_aggregate),
+                }
         }
     }
 }
@@ -327,12 +264,10 @@ mod tests {
 
         #[test]
         fn literal() {
-            assert_eq!(
-                LitExpr(Literal::Integer(1))
-                    .referred_columns()
-                    .collect::<Vec<_>>(),
-                vec![]
-            );
+            assert!(LitExpr(Literal::Integer(1))
+                .referred_columns()
+                .next()
+                .is_none());
         }
 
         #[test]
@@ -341,7 +276,7 @@ mod tests {
                 ColExpr(Column::from("test"))
                     .referred_columns()
                     .collect::<Vec<_>>(),
-                vec![Cow::Owned(Column::from("test"))],
+                vec![&Column::from("test")],
             )
         }
 
@@ -354,7 +289,7 @@ mod tests {
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),
-                vec![Cow::Owned(Column::from("test"))]
+                vec![&Column::from("test")]
             )
         }
 
@@ -370,10 +305,7 @@ mod tests {
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),
-                vec![
-                    Cow::Owned(Column::from("col1")),
-                    Cow::Owned(Column::from("col2"))
-                ]
+                vec![&Column::from("col1"), &Column::from("col2")]
             )
         }
 
@@ -392,28 +324,21 @@ mod tests {
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),
-                vec![
-                    Cow::Owned(Column::from("col1")),
-                    Cow::Owned(Column::from("col2")),
-                ]
+                vec![&Column::from("col1"), &Column::from("col2"),]
             );
         }
 
         #[test]
-        fn condition_expr() {
+        fn binary_op() {
             assert_eq!(
-                ConditionExpression::ComparisonOp(ConditionTree {
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                        Column::from("sign")
-                    ))),
-                    operator: BinaryOperator::Greater,
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                        Literal::Integer(0)
-                    )))
-                })
+                Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("sign"))),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(0)))
+                }
                 .referred_columns()
                 .collect::<Vec<_>>(),
-                vec![Cow::Owned(Column::from("sign"))]
+                vec![&Column::from("sign")]
             );
         }
     }
@@ -421,17 +346,15 @@ mod tests {
     #[test]
     fn find_funcalls_basic() {
         let func = FunctionExpression::CountStar;
-        let cexpr = ConditionExpression::ComparisonOp(ConditionTree {
-            left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+        let cexpr = Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column {
                 name: "test".to_string(),
                 table: None,
                 function: Some(Box::new(FunctionExpression::CountStar)),
-            }))),
-            operator: BinaryOperator::Greater,
-            right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                Literal::Integer(0),
-            ))),
-        });
+            })),
+            op: BinaryOperator::Greater,
+            rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+        };
         let mut out = vec![];
         find_function_calls(&mut out, &cexpr);
         assert_eq!(out, vec![&func]);

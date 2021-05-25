@@ -1,4 +1,3 @@
-use crate::condition::condition_expr;
 use crate::expression::expression;
 use crate::Expression;
 
@@ -14,7 +13,7 @@ pub fn case_when(i: &[u8]) -> IResult<&[u8], Expression> {
         multispace1,
         tag_no_case("when"),
         multispace0,
-        condition_expr,
+        expression,
         multispace0,
         tag_no_case("then"),
         multispace0,
@@ -31,7 +30,7 @@ pub fn case_when(i: &[u8]) -> IResult<&[u8], Expression> {
     Ok((
         remaining_input,
         Expression::CaseWhen {
-            condition,
+            condition: Box::new(condition),
             then_expr: Box::new(then_expr),
             else_expr: else_expr.map(Box::new),
         },
@@ -40,9 +39,7 @@ pub fn case_when(i: &[u8]) -> IResult<&[u8], Expression> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        BinaryOperator, Column, ConditionBase, ConditionExpression, ConditionTree, Literal,
-    };
+    use crate::{BinaryOperator, Column, Literal};
 
     use super::*;
 
@@ -55,31 +52,33 @@ mod tests {
         };
 
         let exp = Expression::CaseWhen {
-            condition: ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field(c1.clone()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Integer(0),
-                ))),
+            condition: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column(c1.clone())),
+                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
             }),
             then_expr: Box::new(Expression::Column(c1.clone())),
             else_expr: Some(Box::new(Expression::Literal(Literal::Integer(1)))),
         };
 
-        assert_eq!(format!("{}", exp), "CASE WHEN foo = 0 THEN foo ELSE 1 END");
+        assert_eq!(
+            format!("{}", exp),
+            "CASE WHEN (foo = 0) THEN foo ELSE 1 END"
+        );
 
         let exp_no_else = Expression::CaseWhen {
-            condition: ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field(c1.clone()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                    Literal::Integer(0),
-                ))),
+            condition: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column(c1.clone())),
+                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
             }),
             then_expr: Box::new(Expression::Column(c1)),
             else_expr: None,
         };
 
-        assert_eq!(format!("{}", exp_no_else), "CASE WHEN foo = 0 THEN foo END");
+        assert_eq!(
+            format!("{}", exp_no_else),
+            "CASE WHEN (foo = 0) THEN foo END"
+        );
     }
 }

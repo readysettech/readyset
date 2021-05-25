@@ -9,9 +9,8 @@ use petgraph::graph::NodeIndex;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, ConditionBase,
-    ConditionExpression, ConditionTree, Expression, FunctionExpression, LimitClause, Literal,
-    OrderClause, SelectStatement, SqlQuery, TableKey,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, Expression, FunctionExpression,
+    LimitClause, Literal, OrderClause, SelectStatement, SqlQuery, TableKey, UnaryOperator,
 };
 
 use itertools::Itertools;
@@ -27,6 +26,8 @@ use crate::errors::internal_err;
 use crate::ReadySetResult;
 use noria::{internal, invariant, invariant_eq, unsupported, DataType, ReadySetError};
 
+use super::query_graph::JoinPredicate;
+
 mod grouped;
 mod join;
 mod rewrite;
@@ -38,37 +39,15 @@ fn sanitize_leaf_column(c: &mut Column, view_name: &str) {
     c.aliases = vec![];
 }
 
-/// Returns all collumns used in a predicate
-fn predicate_columns(ce: &ConditionExpression) -> HashSet<Column> {
-    use nom_sql::ConditionExpression::*;
-
-    let mut cols = HashSet::new();
-    match *ce {
-        LogicalOp(ref ct) | ComparisonOp(ref ct) => {
-            cols.extend(predicate_columns(&ct.left));
-            cols.extend(predicate_columns(&ct.right));
-        }
-        Base(ConditionBase::Field(ref c)) => {
-            cols.insert(Column::from(c));
-        }
-        Bracketed(ref ce) => {
-            cols.extend(predicate_columns(&ce));
-        }
-        NegationOp(_) => unreachable!("negations should have been eliminated"),
-        _ => (),
-    }
-
-    cols
-}
-
 fn value_columns_needed_for_predicates(
     value_columns: &[OutputColumn],
-    predicates: &[ConditionExpression],
+    predicates: &[Expression],
 ) -> Vec<(Column, OutputColumn)> {
-    let pred_columns: HashSet<_> = predicates.iter().fold(HashSet::new(), |mut acc, p| {
-        acc.extend(predicate_columns(p));
-        acc
-    });
+    let pred_columns: HashSet<Column> = predicates
+        .iter()
+        .flat_map(|p| p.referred_columns())
+        .map(|col| col.clone().into())
+        .collect();
 
     value_columns
         .iter()
@@ -856,7 +835,7 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         parent: MirNodeRef,
-        conditions: ConditionExpression,
+        conditions: Expression,
     ) -> MirNodeRef {
         let fields = parent.borrow().columns().to_vec();
         trace!(
@@ -896,7 +875,7 @@ impl SqlToMirConverter {
                       over_else: Option<Literal>,
                       t: GroupedNodeType,
                       distinct: bool,
-                      cond: Option<ConditionExpression>| {
+                      cond: Option<Expression>| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
@@ -953,7 +932,7 @@ impl SqlToMirConverter {
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::Sum),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Sum {
                 expr:
@@ -968,7 +947,7 @@ impl SqlToMirConverter {
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::Sum),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Sum { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
@@ -1010,7 +989,7 @@ impl SqlToMirConverter {
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::Count),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Count {
                 expr:
@@ -1025,7 +1004,7 @@ impl SqlToMirConverter {
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::Count),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Count { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
@@ -1058,7 +1037,7 @@ impl SqlToMirConverter {
                 Some(else_val.clone()),
                 GroupedNodeType::FilterAggregation(Aggregation::Avg),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Avg {
                 expr:
@@ -1073,7 +1052,7 @@ impl SqlToMirConverter {
                 None,
                 GroupedNodeType::FilterAggregation(Aggregation::Avg),
                 false,
-                Some(condition.clone()),
+                Some(*condition.clone()),
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
@@ -1138,7 +1117,7 @@ impl SqlToMirConverter {
         over: (MirNodeRef, &Column, Option<Literal>),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
-        condition: Option<ConditionExpression>,
+        condition: Option<Expression>,
     ) -> MirNodeRef {
         let parent_node = over.0;
 
@@ -1204,7 +1183,7 @@ impl SqlToMirConverter {
     fn make_join_node(
         &self,
         name: &str,
-        join_predicates: &[ConditionTree],
+        join_predicates: &[JoinPredicate],
         left_node: MirNodeRef,
         right_node: MirNodeRef,
         kind: JoinType,
@@ -1225,14 +1204,12 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
 
         for jp in join_predicates {
-            // equi-join only
-            invariant!(jp.operator == BinaryOperator::Equal || jp.operator == BinaryOperator::In);
-            let mut l_col = match *jp.left {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
+            let mut l_col = match jp.left {
+                Expression::Column(ref f) => Column::from(f),
                 _ => unsupported!("no multi-level joins yet"),
             };
-            let r_col = match *jp.right {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => Column::from(f),
+            let r_col = match jp.right {
+                Expression::Column(ref f) => Column::from(f),
                 _ => unsupported!("no multi-level joins yet"),
             };
 
@@ -1486,24 +1463,20 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         parent: MirNodeRef,
-        ce: &ConditionExpression,
+        ce: &Expression,
         nc: usize,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
-        use nom_sql::ConditionExpression::*;
-
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
         let output_cols = parent.borrow().columns().to_vec();
-        match *ce {
-            LogicalOp(ref ct) => {
-                let (left, right);
-                match ct.operator {
+        match ce {
+            Expression::BinaryOp { lhs, op, rhs } => {
+                match op {
                     BinaryOperator::And => {
-                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc)?;
-
-                        right = self.make_predicate_nodes(
+                        let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
+                        let right = self.make_predicate_nodes(
                             name,
                             left.last().unwrap().clone(),
-                            &*ct.right,
+                            rhs,
                             nc + left.len(),
                         )?;
 
@@ -1511,16 +1484,11 @@ impl SqlToMirConverter {
                         pred_nodes.extend(right.clone());
                     }
                     BinaryOperator::Or => {
-                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc)?;
+                        let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
+                        let right =
+                            self.make_predicate_nodes(name, parent.clone(), rhs, nc + left.len())?;
 
-                        right = self.make_predicate_nodes(
-                            name,
-                            parent.clone(),
-                            &*ct.right,
-                            nc + left.len(),
-                        )?;
-
-                        debug!(self.log, "Creating union node for Symbol’s value as variable is void: or predicate");
+                        debug!(self.log, "Creating union node for `or` predicate");
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
@@ -1534,29 +1502,45 @@ impl SqlToMirConverter {
                         pred_nodes.extend(right.clone());
                         pred_nodes.push(union);
                     }
-                    _ => unsupported!("LogicalOp operator is {:?}", ct.operator),
+                    _ => {
+                        // currently, we only support filter-like
+                        // comparison operations, no nested-selections
+                        let f =
+                            self.make_filter_node(&format!("{}_f{}", name, nc), parent, ce.clone());
+                        pred_nodes.push(f);
+                    }
                 }
             }
-            ComparisonOp(..) => {
-                // currently, we only support filter-like
-                // comparison operations, no nested-selections
-                let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ce.clone());
+            Expression::UnaryOp {
+                op: UnaryOperator::Not,
+                ..
+            } => internal!("negation should have been removed earlier"),
+            Expression::Literal(_) | Expression::Column(_) => {
+                let f = self.make_filter_node(
+                    &format!("{}_f{}", name, nc),
+                    parent,
+                    Expression::BinaryOp {
+                        lhs: Box::new(ce.clone()),
+                        op: BinaryOperator::NotEqual,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                    },
+                );
                 pred_nodes.push(f);
             }
-            Bracketed(ref inner) => {
-                pred_nodes.extend(self.make_predicate_nodes(name, parent, &*inner, nc)?);
+            Expression::Between { .. } => internal!("BETWEEN should have been removed earlier"),
+            Expression::Exists(_) => unsupported!("exists unsupported"),
+            Expression::Call(_) => {
+                internal!("Function calls should have been handled by projection earlier")
             }
-            NegationOp(_) => internal!("negation should have been removed earlier"),
-            Base(_) => internal!("dangling base predicate"),
-            Between { .. } => internal!("BETWEEN should have been removed earlier"),
-            Arithmetic(_) => unsupported!("arithmetic unsupported"),
-            ExistsOp(_) => unsupported!("exists unsupported"),
+            Expression::CaseWhen { .. } => unsupported!("CASE WHEN not supported in filters"),
+            Expression::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
+            Expression::In { .. } => internal!("IN should have been removed earlier"),
         }
 
         Ok(pred_nodes)
     }
 
-    /// If the provided [`ConditionExpression`] contains function calls, extract them into a new
+    /// If the provided [`Expression`] contains function calls, extract them into a new
     /// projection node which evaluates them.
     ///
     /// The returned `HashMap` maps the `FunctionExpression`s for the function calls to the names of
@@ -1567,7 +1551,7 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         parent: &mut MirNodeRef,
-        ce: &ConditionExpression,
+        ce: &Expression,
     ) -> HashMap<FunctionExpression, String> {
         let mut ret = HashMap::new();
         let mut funcalls = vec![];
@@ -1601,10 +1585,10 @@ impl SqlToMirConverter {
     fn predicates_above_group_by<'a>(
         &self,
         name: &str,
-        column_to_predicates: &HashMap<Column, Vec<&'a ConditionExpression>>,
+        column_to_predicates: &HashMap<Column, Vec<&'a Expression>>,
         over_col: Column,
         parent: MirNodeRef,
-        created_predicates: &mut Vec<&'a ConditionExpression>,
+        created_predicates: &mut Vec<&'a Expression>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut predicates_above_group_by_nodes = Vec::new();
         let mut prev_node = parent.clone();
@@ -1776,8 +1760,7 @@ impl SqlToMirConverter {
 
             // 3. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
-                HashMap::new();
+            let mut column_to_predicates: HashMap<Column, Vec<&Expression>> = HashMap::new();
 
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
@@ -1788,7 +1771,7 @@ impl SqlToMirConverter {
                 for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
                     for col in pred.referred_columns() {
                         column_to_predicates
-                            .entry(col.as_ref().into())
+                            .entry(col.into())
                             .or_default()
                             .push(pred);
                     }
@@ -2245,9 +2228,7 @@ impl SqlToMirConverter {
                     .collect();
 
                 let operator = match &st.where_clause {
-                    Some(ConditionExpression::ComparisonOp(ConditionTree { operator, .. })) => {
-                        *operator
-                    }
+                    Some(Expression::BinaryOp { op, .. }) => *op,
                     _ => BinaryOperator::Equal,
                 };
 

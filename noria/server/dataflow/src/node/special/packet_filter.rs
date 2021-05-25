@@ -665,7 +665,7 @@ mod test {
             let mut keys = HashSet::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
 
-            let mut original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
 
             let column_indexes = vec![1usize, 3usize];

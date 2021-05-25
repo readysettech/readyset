@@ -1,92 +1,100 @@
-use nom_sql::{
-    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, ItemPlaceholder,
-    JoinConstraint, Literal, SqlQuery,
-};
-
-use std::mem;
+use crate::controller::sql::query_utils::is_logical_op;
+use nom_sql::{BinaryOperator, Expression, JoinConstraint, SqlQuery, UnaryOperator};
+use noria::{internal, unsupported, ReadySetResult};
 
 pub trait NegationRemoval {
-    fn remove_negation(self) -> SqlQuery;
+    fn remove_negation(self) -> ReadySetResult<SqlQuery>;
 }
 
-fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
+fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
     match *ce {
-        ConditionExpression::LogicalOp(ConditionTree {
-            ref mut operator,
-            ref mut left,
-            ref mut right,
-        }) => {
+        Expression::BinaryOp {
+            ref mut op,
+            ref mut lhs,
+            ref mut rhs,
+        } => {
             if negate {
-                *operator = match *operator {
+                *op = match *op {
                     BinaryOperator::And => BinaryOperator::Or,
                     BinaryOperator::Or => BinaryOperator::And,
-                    _ => unreachable!(),
-                };
-            }
-
-            normalize_condition_expr(left, negate);
-            normalize_condition_expr(right, negate);
-        }
-        ConditionExpression::ComparisonOp(ConditionTree {
-            ref mut operator,
-            ref mut left,
-            ref mut right,
-        }) => {
-            if negate {
-                *operator = match *operator {
                     BinaryOperator::Equal => BinaryOperator::NotEqual,
                     BinaryOperator::NotEqual => BinaryOperator::Equal,
                     BinaryOperator::Greater => BinaryOperator::LessOrEqual,
                     BinaryOperator::GreaterOrEqual => BinaryOperator::Less,
                     BinaryOperator::Less => BinaryOperator::GreaterOrEqual,
                     BinaryOperator::LessOrEqual => BinaryOperator::Greater,
-                    _ => unreachable!(),
+                    BinaryOperator::Like => BinaryOperator::NotLike,
+                    BinaryOperator::NotLike => BinaryOperator::Like,
+                    BinaryOperator::ILike => BinaryOperator::NotILike,
+                    BinaryOperator::NotILike => BinaryOperator::ILike,
+                    BinaryOperator::Is => BinaryOperator::IsNot,
+                    BinaryOperator::IsNot => BinaryOperator::Is,
+                    BinaryOperator::Add
+                    | BinaryOperator::Subtract
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide => {
+                        // TODO(grfn): Replace with proper typechecking
+                        unsupported!("Cannot apply NOT operator to expression: {}", ce)
+                    }
                 };
             }
 
-            normalize_condition_expr(left, false);
-            normalize_condition_expr(right, false);
+            normalize_expr(lhs, is_logical_op(op) && negate)?;
+            normalize_expr(rhs, is_logical_op(op) && negate)?;
         }
-        ConditionExpression::NegationOp(_) => {
-            let inner = if let ConditionExpression::NegationOp(ref mut inner) = *ce {
-                mem::replace(
-                    &mut **inner,
-                    ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(
-                        ItemPlaceholder::QuestionMark,
-                    ))),
-                )
-            } else {
-                unreachable!()
-            };
-            *ce = inner;
-            normalize_condition_expr(ce, !negate);
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            ref mut rhs,
+        } => {
+            *ce = std::mem::replace(rhs, Expression::Literal(nom_sql::Literal::Null));
+            normalize_expr(ce, !negate)?;
         }
-        ConditionExpression::Bracketed(ref mut inner) => {
-            normalize_condition_expr(inner, negate);
+        Expression::Between { .. } => {
+            internal!("BETWEEN should have been removed earlier")
         }
-        ConditionExpression::Base(_) => {}
-        ConditionExpression::Arithmetic(_) => unimplemented!(),
-        ConditionExpression::ExistsOp(_) => unimplemented!(),
-        ConditionExpression::Between { .. } => {
-            unreachable!("BETWEEN should have been removed earlier")
+        Expression::CaseWhen {
+            ref mut then_expr,
+            ref mut else_expr,
+            ..
+        } => {
+            normalize_expr(then_expr.as_mut(), negate)?;
+            if let Some(else_expr) = else_expr {
+                normalize_expr(else_expr.as_mut(), negate)?;
+            }
+        }
+        Expression::In {
+            ref mut negated, ..
+        } => {
+            *negated = !*negated;
+        }
+        Expression::Call(_)
+        | Expression::Literal(_)
+        | Expression::Column(_)
+        | Expression::Exists(_)
+        | Expression::NestedSelect(_) => {
+            if negate {
+                unsupported!("Cannot apply NOT operator to expression: {}", ce);
+            }
         }
     }
+
+    Ok(())
 }
 
 impl NegationRemoval for SqlQuery {
-    fn remove_negation(mut self) -> SqlQuery {
+    fn remove_negation(mut self) -> ReadySetResult<SqlQuery> {
         if let SqlQuery::Select(ref mut s) = self {
             if let Some(ref mut w) = s.where_clause {
-                normalize_condition_expr(w, false);
+                normalize_expr(w, false)?;
             }
 
             for j in s.join.iter_mut() {
                 if let JoinConstraint::On(ref mut ce) = j.constraint {
-                    normalize_condition_expr(ce, false);
+                    normalize_expr(ce, false)?;
                 }
             }
         }
-        self
+        Ok(self)
     }
 }
 
@@ -96,37 +104,38 @@ mod tests {
 
     #[test]
     fn it_normalizes() {
-        let mut expr = ConditionExpression::NegationOp(Box::new(ConditionExpression::LogicalOp(
-            ConditionTree {
-                operator: BinaryOperator::And,
-                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: BinaryOperator::Less,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-                })),
-                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: BinaryOperator::Equal,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-                })),
-            },
-        )));
+        let mut expr = Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            rhs: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::And,
+                lhs: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::Less,
+                    lhs: Box::new(Expression::Column("a".into())),
+                    rhs: Box::new(Expression::Column("b".into())),
+                }),
+                rhs: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expression::Column("c".into())),
+                    rhs: Box::new(Expression::Column("b".into())),
+                }),
+            }),
+        };
 
-        let target = ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::Or,
-            left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::GreaterOrEqual,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-            })),
-            right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::NotEqual,
-                left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
-                right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-            })),
-        });
+        let target = Expression::BinaryOp {
+            op: BinaryOperator::Or,
+            lhs: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::GreaterOrEqual,
+                lhs: Box::new(Expression::Column("a".into())),
+                rhs: Box::new(Expression::Column("b".into())),
+            }),
+            rhs: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::NotEqual,
+                lhs: Box::new(Expression::Column("c".into())),
+                rhs: Box::new(Expression::Column("b".into())),
+            }),
+        };
 
-        normalize_condition_expr(&mut expr, false);
-        assert_eq!(expr, target);
+        normalize_expr(&mut expr, false).unwrap();
+        assert_eq!(expr, target, "expected = {}\nactual = {}", target, expr);
     }
 }

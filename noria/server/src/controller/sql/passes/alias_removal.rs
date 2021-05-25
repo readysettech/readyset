@@ -1,9 +1,8 @@
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
-    Arithmetic, Column, CommonTableExpression, ConditionBase, ConditionExpression, ConditionTree,
-    Expression, FieldDefinitionExpression, FunctionExpression, JoinConstraint, JoinRightSide,
-    SelectStatement, SqlQuery, Table,
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
+    InValue, JoinConstraint, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 use std::collections::HashMap;
 
@@ -36,57 +35,6 @@ pub trait AliasRemoval {
         query_name: &str,
         context: &HashMap<String, DataType>,
     ) -> Vec<TableAliasRewrite>;
-}
-
-fn rewrite_conditional(
-    col_table_remap: &HashMap<String, String>,
-    ce: &ConditionExpression,
-) -> ConditionExpression {
-    let translate_column = |f: &Column| {
-        ConditionExpression::Base(ConditionBase::Field(rewrite_column(col_table_remap, f)))
-    };
-
-    let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
-        let new_ce = match *bce {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => translate_column(f),
-            ConditionExpression::Base(b) => ConditionExpression::Base(b),
-            x => rewrite_conditional(col_table_remap, &x),
-        };
-        Box::new(new_ce)
-    };
-
-    match ce {
-        ConditionExpression::ComparisonOp(ct) => {
-            let rewritten_ct = ConditionTree {
-                operator: ct.operator,
-                left: translate_ct_arm(ct.left.clone()),
-                right: translate_ct_arm(ct.right.clone()),
-            };
-            ConditionExpression::ComparisonOp(rewritten_ct)
-        }
-        ConditionExpression::LogicalOp(ConditionTree {
-            operator,
-            left,
-            right,
-        }) => {
-            let rewritten_ct = ConditionTree {
-                operator: *operator,
-                left: Box::new(rewrite_conditional(col_table_remap, left)),
-                right: Box::new(rewrite_conditional(col_table_remap, right)),
-            };
-            ConditionExpression::LogicalOp(rewritten_ct)
-        }
-        ConditionExpression::Bracketed(ce) => rewrite_conditional(col_table_remap, ce),
-        ConditionExpression::Between { operand, min, max } => ConditionExpression::Between {
-            operand: translate_ct_arm(operand.clone()),
-            min: translate_ct_arm(min.clone()),
-            max: translate_ct_arm(max.clone()),
-        },
-        ConditionExpression::Arithmetic(ari) => {
-            ConditionExpression::Arithmetic(Box::new(rewrite_arithmetic(col_table_remap, &ari)))
-        }
-        x => x.clone(),
-    }
 }
 
 fn rewrite_table(table_remap: &HashMap<String, String>, table: &Table) -> Table {
@@ -129,7 +77,7 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
             then_expr,
             else_expr,
         } => Expression::CaseWhen {
-            condition: rewrite_conditional(col_table_remap, &condition),
+            condition: Box::new(rewrite_expression(col_table_remap, &condition)),
             then_expr: Box::new(rewrite_expression(col_table_remap, &then_expr)),
             else_expr: else_expr
                 .as_ref()
@@ -139,9 +87,40 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
         Expression::Call(fun) => {
             Expression::Call(rewrite_function_expression(col_table_remap, fun))
         }
-        Expression::Arithmetic(ari) => {
-            Expression::Arithmetic(rewrite_arithmetic(col_table_remap, &ari))
-        }
+        Expression::BinaryOp { lhs, op, rhs } => Expression::BinaryOp {
+            lhs: Box::new(rewrite_expression(col_table_remap, lhs)),
+            op: *op,
+            rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
+        },
+        Expression::UnaryOp { op, rhs } => Expression::UnaryOp {
+            op: *op,
+            rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
+        },
+        Expression::Exists(_) | Expression::NestedSelect(_) => expr.clone(),
+        Expression::Between {
+            operand,
+            min,
+            max,
+            negated,
+        } => Expression::Between {
+            operand: Box::new(rewrite_expression(col_table_remap, operand)),
+            min: Box::new(rewrite_expression(col_table_remap, min)),
+            max: Box::new(rewrite_expression(col_table_remap, max)),
+            negated: *negated,
+        },
+        Expression::In { lhs, rhs, negated } => Expression::In {
+            lhs: Box::new(rewrite_expression(col_table_remap, lhs)),
+            rhs: match rhs {
+                InValue::Subquery(_) => rhs.clone(),
+                InValue::List(exprs) => InValue::List(
+                    exprs
+                        .iter()
+                        .map(|expr| rewrite_expression(col_table_remap, expr))
+                        .collect(),
+                ),
+            },
+            negated: *negated,
+        },
     }
 }
 
@@ -184,17 +163,6 @@ fn rewrite_function_expression(
                 .map(|arg| rewrite_expression(col_table_remap, arg))
                 .collect(),
         },
-    }
-}
-
-fn rewrite_arithmetic(
-    col_table_remap: &HashMap<String, String>,
-    arithmetic: &Arithmetic,
-) -> Arithmetic {
-    Arithmetic {
-        left: Box::new(rewrite_expression(col_table_remap, &arithmetic.left)),
-        op: arithmetic.op,
-        right: Box::new(rewrite_expression(col_table_remap, &arithmetic.right)),
     }
 }
 
@@ -362,7 +330,7 @@ impl AliasRemoval for SqlQuery {
 
                     jc.constraint = match jc.constraint {
                         JoinConstraint::On(ref cond) => {
-                            JoinConstraint::On(rewrite_conditional(&col_table_remap, cond))
+                            JoinConstraint::On(rewrite_expression(&col_table_remap, cond))
                         }
                         c @ JoinConstraint::Using(..) => c,
                     };
@@ -373,7 +341,7 @@ impl AliasRemoval for SqlQuery {
             // Rewrite column table aliases in conditions.
             sq.where_clause = match sq.where_clause {
                 None => None,
-                Some(ref wc) => Some(rewrite_conditional(&col_table_remap, wc)),
+                Some(ref wc) => Some(rewrite_expression(&col_table_remap, wc)),
             };
 
             // Extract remappings for FROM and JOIN table references from the alias rewrites.
@@ -437,9 +405,9 @@ mod tests {
     use super::{AliasRemoval, TableAliasRewrite};
     use maplit::hashmap;
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, ConditionBase, ConditionExpression,
-        ConditionTree, FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint,
-        JoinOperator, JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
+        parse_query, parser, BinaryOperator, Column, Expression, FieldDefinitionExpression,
+        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+        SelectStatement, SqlQuery, Table,
     };
     use std::collections::HashMap;
 
@@ -461,9 +429,6 @@ mod tests {
 
     #[test]
     fn it_removes_aliases() {
-        use nom_sql::{BinaryOperator, ConditionBase, ConditionExpression, ConditionTree};
-
-        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let q = SelectStatement {
             tables: vec![Table {
                 name: String::from("PaperTag"),
@@ -471,13 +436,13 @@ mod tests {
                 schema: None,
             }],
             fields: vec![FieldDefinitionExpression::from(Column::from("t.id"))],
-            where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: wrap(ConditionBase::Field(Column::from("t.id"))),
-                right: wrap(ConditionBase::Literal(Literal::Placeholder(
+            where_clause: Some(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(Column::from("t.id"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
-            })),
+            }),
             ..Default::default()
         };
         let mut context = HashMap::new();
@@ -493,13 +458,13 @@ mod tests {
                 );
                 assert_eq!(
                     tq.where_clause,
-                    Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: BinaryOperator::Equal,
-                        left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
-                        right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                    Some(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("PaperTag.id"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),
-                    }))
+                    })
                 );
                 assert_eq!(
                     tq.tables,
@@ -525,12 +490,8 @@ mod tests {
 
     #[test]
     fn it_removes_nested_aliases() {
-        use nom_sql::{
-            BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, Expression,
-            FunctionExpression,
-        };
+        use nom_sql::{BinaryOperator, Expression, FunctionExpression};
 
-        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let col_small = Column {
             name: "count(t.id)".into(),
             table: None,
@@ -562,13 +523,13 @@ mod tests {
                 schema: None,
             }],
             fields: vec![FieldDefinitionExpression::from(col_small.clone())],
-            where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: BinaryOperator::Equal,
-                left: wrap(ConditionBase::Field(col_small.clone())),
-                right: wrap(ConditionBase::Literal(Literal::Placeholder(
+            where_clause: Some(Expression::BinaryOp {
+                op: BinaryOperator::Equal,
+                lhs: Box::new(Expression::Column(col_small.clone())),
+                rhs: Box::new(Expression::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
-            })),
+            }),
             ..Default::default()
         };
         let mut context = HashMap::new();
@@ -584,13 +545,13 @@ mod tests {
                 );
                 assert_eq!(
                     tq.where_clause,
-                    Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: BinaryOperator::Equal,
-                        left: wrap(ConditionBase::Field(col_full.clone())),
-                        right: wrap(ConditionBase::Literal(Literal::Placeholder(
+                    Some(Expression::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expression::Column(col_full.clone())),
+                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),
-                    }))
+                    })
                 );
                 assert_eq!(
                     tq.tables,
@@ -616,7 +577,6 @@ mod tests {
 
     #[test]
     fn it_rewrites_duplicate_aliases() {
-        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let mut res = parser::parse_query(
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
         )
@@ -650,17 +610,13 @@ mod tests {
                             alias: None,
                             schema: None,
                         }),
-                        constraint: JoinConstraint::On(ConditionExpression::ComparisonOp(
-                            ConditionTree {
-                                operator: BinaryOperator::Equal,
-                                left: wrap(ConditionBase::Field(Column::from(
-                                    "__query_name__t1.other"
-                                ))),
-                                right: wrap(ConditionBase::Field(Column::from(
-                                    "__query_name__t2.id"
-                                )))
-                            }
-                        ))
+                        constraint: JoinConstraint::On(Expression::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expression::Column(Column::from(
+                                "__query_name__t1.other"
+                            ))),
+                            rhs: Box::new(Expression::Column(Column::from("__query_name__t2.id")))
+                        })
                     }]
                 );
             }

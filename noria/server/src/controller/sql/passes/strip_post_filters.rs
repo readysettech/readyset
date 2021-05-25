@@ -1,8 +1,7 @@
 use nom_sql::{
-    BinaryOperator, ConditionBase, ConditionExpression, ConditionTree, DeleteStatement, Literal,
-    SelectStatement, SqlQuery, UpdateStatement,
+    BinaryOperator, DeleteStatement, Expression, Literal, SelectStatement, SqlQuery,
+    UpdateStatement,
 };
-use ConditionExpression::*;
 
 pub trait StripPostFilters {
     /// Remove all filters from the given query that cannot be done as nodes in the query graph, and
@@ -10,32 +9,27 @@ pub trait StripPostFilters {
     fn strip_post_filters(self) -> Self;
 }
 
-impl StripPostFilters for Option<ConditionExpression> {
+impl StripPostFilters for Option<Expression> {
     fn strip_post_filters(self) -> Self {
         self.and_then(|conds| match conds {
             #[cfg(not(feature = "param_filter"))]
-            ComparisonOp(ConditionTree {
-                operator: BinaryOperator::ILike | BinaryOperator::Like,
-                left: box Base(ConditionBase::Field(_)),
-                right: box Base(ConditionBase::Literal(Literal::Placeholder(_))),
-            }) => None,
-            LogicalOp(ConditionTree {
-                operator,
-                left,
-                right,
-            }) => match (
-                Some(*left).strip_post_filters(),
-                Some(*right).strip_post_filters(),
+            Expression::BinaryOp {
+                op: BinaryOperator::ILike | BinaryOperator::Like,
+                lhs: box Expression::Column(_),
+                rhs: box Expression::Literal(Literal::Placeholder(_)),
+            } => None,
+            Expression::BinaryOp { op, lhs, rhs } => match (
+                Some(*lhs).strip_post_filters(),
+                Some(*rhs).strip_post_filters(),
             ) {
                 (None, None) => None,
                 (Some(cond), None) | (None, Some(cond)) => Some(cond),
-                (Some(left), Some(right)) => Some(LogicalOp(ConditionTree {
-                    operator,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                })),
+                (Some(left), Some(right)) => Some(Expression::BinaryOp {
+                    op,
+                    lhs: Box::new(left),
+                    rhs: Box::new(right),
+                }),
             },
-            Bracketed(box cond) => Some(cond).strip_post_filters(),
             _ => Some(conds),
         })
     }

@@ -75,24 +75,24 @@ impl Relaxed {
         // NULLs in the right side columns
         for (srcdst, ex_qge) in &existing_qg.edges {
             match *ex_qge {
-                QueryGraphEdge::Join(_) => {
+                QueryGraphEdge::Join { .. } => {
                     if !new_qg.edges.contains_key(srcdst) {
                         return Ok(None);
                     }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
-                        QueryGraphEdge::Join(_) => {}
+                        QueryGraphEdge::Join { .. } => {}
                         // If there is no matching Join edge, we cannot reuse
                         _ => return Ok(None),
                     }
                 }
-                QueryGraphEdge::LeftJoin(_) => {
+                QueryGraphEdge::LeftJoin { .. } => {
                     if !new_qg.edges.contains_key(srcdst) {
                         return Ok(None);
                     }
                     let new_qge = &new_qg.edges[srcdst];
                     match *new_qge {
-                        QueryGraphEdge::LeftJoin(_) => {}
+                        QueryGraphEdge::LeftJoin { .. } => {}
                         // If there is no matching LeftJoin edge, we cannot reuse
                         _ => return Ok(None),
                     }
