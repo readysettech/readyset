@@ -202,68 +202,6 @@ impl ToString for Literal {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum BinaryOperator {
-    And,
-    Or,
-    Like,
-    NotLike,
-    ILike,
-    NotILike,
-    Equal,
-    NotEqual,
-    Greater,
-    GreaterOrEqual,
-    Less,
-    LessOrEqual,
-    In,
-    NotIn,
-    Is,
-}
-
-impl BinaryOperator {
-    /// Returns true if this operator represents an ordered comparison
-    pub fn is_comparison(&self) -> bool {
-        use BinaryOperator::*;
-        matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
-    }
-    /// If this operator is an ordered comparison, invert its meaning.
-    /// (i.e. Greater becomes Less)
-    pub fn flip_comparison(self) -> Option<Self> {
-        use BinaryOperator::*;
-        match self {
-            Greater => Some(Less),
-            GreaterOrEqual => Some(LessOrEqual),
-            Less => Some(Greater),
-            LessOrEqual => Some(GreaterOrEqual),
-            _ => None,
-        }
-    }
-}
-
-impl Display for BinaryOperator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let op = match *self {
-            BinaryOperator::And => "AND",
-            BinaryOperator::Or => "OR",
-            BinaryOperator::Like => "LIKE",
-            BinaryOperator::NotLike => "NOT LIKE",
-            BinaryOperator::ILike => "LIKE",
-            BinaryOperator::NotILike => "NOT LIKE",
-            BinaryOperator::Equal => "=",
-            BinaryOperator::NotEqual => "!=",
-            BinaryOperator::Greater => ">",
-            BinaryOperator::GreaterOrEqual => ">=",
-            BinaryOperator::Less => "<",
-            BinaryOperator::LessOrEqual => "<=",
-            BinaryOperator::In => "IN",
-            BinaryOperator::NotIn => "NOT IN",
-            BinaryOperator::Is => "IS",
-        };
-        write!(f, "{}", op)
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
@@ -748,24 +686,6 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
     ))(i)
 }
 
-// Parses a SQL column identifier in the table.column format
-pub fn column_identifier(i: &[u8]) -> IResult<&[u8], Column> {
-    let col_func_no_table = map(column_function, |func| Column {
-        name: func.to_string(),
-        table: None,
-        function: Some(Box::new(func)),
-    });
-    let col_w_table = map(
-        tuple((opt(terminated(sql_identifier, tag("."))), sql_identifier)),
-        |tup| Column {
-            name: str::from_utf8(tup.1).unwrap().to_string(),
-            table: tup.0.map(|t| str::from_utf8(t).unwrap().to_string()),
-            function: None,
-        },
-    );
-    alt((col_func_no_table, col_w_table))(i)
-}
-
 // Parses a SQL identifier (alphanumeric1 and "_").
 pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
@@ -796,30 +716,6 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
         delimited(multispace0, alt((tag(";"), line_ending, eof)), multispace0)(i)?;
 
     Ok((remaining_input, ()))
-}
-
-// Parse binary comparison operators
-pub fn binary_comparison_operator(i: &[u8]) -> IResult<&[u8], BinaryOperator> {
-    alt((
-        map(
-            tuple((tag_no_case("not"), multispace1, tag_no_case("like"))),
-            |_| BinaryOperator::NotLike,
-        ),
-        map(tag_no_case("like"), |_| BinaryOperator::Like),
-        map(
-            tuple((tag_no_case("not"), multispace1, tag_no_case("ilike"))),
-            |_| BinaryOperator::NotILike,
-        ),
-        map(tag_no_case("ilike"), |_| BinaryOperator::ILike),
-        map(tag_no_case("!="), |_| BinaryOperator::NotEqual),
-        map(tag_no_case("<>"), |_| BinaryOperator::NotEqual),
-        map(tag_no_case(">="), |_| BinaryOperator::GreaterOrEqual),
-        map(tag_no_case("<="), |_| BinaryOperator::LessOrEqual),
-        map(tag_no_case("="), |_| BinaryOperator::Equal),
-        map(tag_no_case("<"), |_| BinaryOperator::Less),
-        map(tag_no_case(">"), |_| BinaryOperator::Greater),
-        map(tag_no_case("in"), |_| BinaryOperator::In),
-    ))(i)
 }
 
 // Parse rule for AS-based aliases for SQL entities.
@@ -1121,21 +1017,6 @@ mod tests {
         );
 
         assert!(res_not_ok.into_iter().all(|r| !r));
-    }
-
-    #[test]
-    fn simple_column_function() {
-        let qs = b"max(addr_id)";
-
-        let res = column_identifier(qs);
-        let expected = Column {
-            name: String::from("max(addr_id)"),
-            table: None,
-            function: Some(Box::new(FunctionExpression::Max(Box::new(
-                Expression::Column(Column::from("addr_id")),
-            )))),
-        };
-        assert_eq!(res.unwrap().1, expected);
     }
 
     #[test]

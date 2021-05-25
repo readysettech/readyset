@@ -11,16 +11,16 @@ extern crate serde_derive;
 #[macro_use]
 extern crate pretty_assertions;
 
-pub use self::arithmetic::{Arithmetic, ArithmeticOperator};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
-    BinaryOperator, FieldDefinitionExpression, ItemPlaceholder, Literal, Real, SqlType, TableKey,
+    FieldDefinitionExpression, ItemPlaceholder, Literal, Real, SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
-pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};
 pub use self::delete::DeleteStatement;
-pub use self::expression::{Expression, FunctionExpression};
+pub use self::expression::{
+    BinaryOperator, Expression, FunctionExpression, InValue, UnaryOperator,
+};
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};
@@ -38,12 +38,10 @@ pub mod parser;
 #[macro_use]
 mod keywords;
 mod alter;
-mod arithmetic;
 mod case;
 mod column;
 mod common;
 mod compound_select;
-mod condition;
 mod create;
 mod create_table_options;
 mod delete;

@@ -1,8 +1,8 @@
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
-use super::helpers::predicate_implication::predicates_are_equivalent;
+use super::helpers::predicate_implication::join_predicates_are_equivalent;
 use super::ReuseType;
+use crate::controller::sql::query_graph::JoinPredicate;
 use crate::ReadySetResult;
-use nom_sql::ConditionTree;
 use std::collections::HashSet;
 use std::vec::Vec;
 
@@ -115,9 +115,9 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
     *order = new_order;
 }
 
-fn predicates_for_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a [ConditionTree] {
+fn predicates_for_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a [JoinPredicate] {
     match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join(ref jps) | QueryGraphEdge::LeftJoin(ref jps) => &jps,
+        QueryGraphEdge::Join { ref on } | QueryGraphEdge::LeftJoin { ref on } => &on,
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }
@@ -153,7 +153,7 @@ pub(super) fn reorder_joins(
             for new_jref in qg.join_order.iter() {
                 let njps = predicates_for_join_ref(&new_jref, qg);
                 // if we find an equivalent join, add it to the new query's join chains
-                if predicates_are_equivalent(njps, ejps)? {
+                if join_predicates_are_equivalent(njps, ejps)? {
                     extend_chains(&mut shared_join_chains, new_jref);
                     found = true;
                     break;

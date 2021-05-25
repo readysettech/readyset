@@ -819,8 +819,8 @@ mod tests {
 
     #[test]
     fn simple_create_view() {
-        use crate::common::{BinaryOperator, FieldDefinitionExpression};
-        use crate::condition::{ConditionBase, ConditionExpression, ConditionTree};
+        use crate::common::FieldDefinitionExpression;
+        use crate::{BinaryOperator, Expression};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
@@ -833,15 +833,11 @@ mod tests {
                 definition: Box::new(SelectSpecification::Simple(SelectStatement {
                     tables: vec![Table::from("users")],
                     fields: vec![FieldDefinitionExpression::All],
-                    where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                            "username".into()
-                        ))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                            Literal::String("bob".into())
-                        ))),
-                        operator: BinaryOperator::Equal,
-                    })),
+                    where_clause: Some(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column("username".into())),
+                        rhs: Box::new(Expression::Literal(Literal::String("bob".into()))),
+                        op: BinaryOperator::Equal,
+                    }),
                     ..Default::default()
                 })),
             }

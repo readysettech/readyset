@@ -1,60 +1,15 @@
-use nom_sql::{
-    Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, FunctionExpression, SqlQuery, Table,
-};
+use nom_sql::analysis::ReferredColumns;
+use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
 
 use crate::errors::{internal_err, ReadySetResult};
-use crate::{internal, invariant, unsupported};
-use std::collections::{HashMap, HashSet};
+use crate::{internal, invariant};
+use std::collections::HashMap;
 
 pub trait CountStarRewrite {
     fn rewrite_count_star(
         self,
         write_schemas: &HashMap<String, Vec<String>>,
     ) -> ReadySetResult<SqlQuery>;
-}
-
-fn extract_condition_columns(ce: &ConditionExpression) -> ReadySetResult<HashSet<Column>> {
-    Ok(match *ce {
-        ConditionExpression::LogicalOp(ConditionTree {
-            ref left,
-            ref right,
-            ..
-        }) => extract_condition_columns(left)?
-            .into_iter()
-            .chain(extract_condition_columns(right)?.into_iter())
-            .collect(),
-        ConditionExpression::ComparisonOp(ConditionTree {
-            ref left,
-            ref right,
-            ..
-        }) => {
-            let mut cols = HashSet::new();
-            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **left {
-                cols.insert(f.clone());
-            }
-            if let ConditionExpression::Base(ConditionBase::Field(ref f)) = **right {
-                cols.insert(f.clone());
-            }
-
-            cols
-        }
-        ConditionExpression::NegationOp(ref inner) => extract_condition_columns(inner)?,
-        ConditionExpression::Bracketed(ref inner) => extract_condition_columns(inner)?,
-        ConditionExpression::Base(_) => internal!(),
-        ConditionExpression::Arithmetic(_) => unsupported!(),
-        ConditionExpression::ExistsOp(_) => unsupported!(),
-        ConditionExpression::Between {
-            ref operand,
-            ref min,
-            ref max,
-        } => {
-            let mut res = extract_condition_columns(operand)?;
-            res.extend(extract_condition_columns(min)?);
-            res.extend(extract_condition_columns(max)?);
-            res
-        }
-    })
 }
 
 impl CountStarRewrite for SqlQuery {
@@ -66,7 +21,7 @@ impl CountStarRewrite for SqlQuery {
 
         let rewrite_count_star = |f: &mut FunctionExpression,
                                   tables: &Vec<Table>,
-                                  avoid_columns: &Vec<Column>|
+                                  avoid_columns: &[&Column]|
          -> ReadySetResult<_> {
             invariant!(!tables.is_empty());
             if *f == CountStar {
@@ -97,10 +52,10 @@ impl CountStarRewrite for SqlQuery {
                 let tables = sq.tables.clone();
                 let mut avoid_cols = vec![];
                 if let Some(ref gbc) = sq.group_by {
-                    avoid_cols.extend(gbc.columns.clone());
+                    avoid_cols.extend(&gbc.columns);
                 }
                 if let Some(ref w) = sq.where_clause {
-                    avoid_cols.extend(extract_condition_columns(w)?);
+                    avoid_cols.extend(w.referred_columns());
                 }
                 for field in sq.fields.iter_mut() {
                     match *field {

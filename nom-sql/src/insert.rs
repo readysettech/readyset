@@ -117,10 +117,10 @@ pub fn insertion(i: &[u8]) -> IResult<&[u8], InsertStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arithmetic::{Arithmetic, ArithmeticOperator};
     use crate::column::Column;
     use crate::common::ItemPlaceholder;
     use crate::table::Table;
+    use crate::BinaryOperator;
 
     #[test]
     fn simple_insert() {
@@ -263,11 +263,11 @@ mod tests {
                 ]],
                 on_duplicate: Some(vec![(
                     Column::from("value"),
-                    Expression::Arithmetic(Arithmetic {
-                        op: ArithmeticOperator::Add,
-                        left: Box::new(Expression::Column(Column::from("value"))),
-                        right: Box::new(Expression::Literal(1.into())),
-                    }),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("value"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
                 ),]),
                 ..Default::default()
             }

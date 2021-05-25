@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use nom_sql::{
-    Arithmetic, ArithmeticOperator, BinaryOperator, Column, ColumnConstraint, ConditionBase,
-    ConditionExpression, ConditionTree, CreateTableStatement, Expression, Literal, SelectStatement,
-    SqlQuery, TableKey, UpdateStatement,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, Literal,
+    SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
@@ -90,21 +89,21 @@ pub(crate) fn sanitize_query(query: &str) -> String {
 //    Then we'll check the right side, which will find a "hole" in the first key,
 //    and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
-    cond: &ConditionExpression,
+    cond: &Expression,
     pkey: &Vec<&Column>,
     mut flattened: &mut HashSet<Vec<(String, DataType)>>,
 ) -> ReadySetResult<bool> {
     Ok(match *cond {
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-            right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            operator: BinaryOperator::Equal,
-        })
-        | ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(ref l)),
-            operator: BinaryOperator::Equal,
-        }) => {
+        Expression::BinaryOp {
+            lhs: box Expression::Literal(ref l),
+            rhs: box Expression::Column(ref c),
+            op: BinaryOperator::Equal | BinaryOperator::Is,
+        }
+        | Expression::BinaryOp {
+            lhs: box Expression::Column(ref c),
+            rhs: box Expression::Literal(ref l),
+            op: BinaryOperator::Equal | BinaryOperator::Is,
+        } => {
             if !pkey.iter().any(|pk| pk.name == c.name) {
                 unsupported!("UPDATE/DELETE only supports WHERE-clauses on primary keys");
             }
@@ -137,35 +136,35 @@ fn do_flatten_conditional(
 
             true
         }
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Literal(ref left)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(ref right)),
-            operator: BinaryOperator::Equal,
-        }) if left == right => true,
-        ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::And,
-            ref left,
-            ref right,
-        }) => {
+        Expression::BinaryOp {
+            lhs: box Expression::Literal(ref left),
+            rhs: box Expression::Literal(ref right),
+            op: BinaryOperator::Equal,
+        } if left == right => true,
+        Expression::BinaryOp {
+            op: BinaryOperator::And,
+            ref lhs,
+            ref rhs,
+        } => {
             // When checking ANDs we want to make sure that both sides refer to the same key,
             // e.g. WHERE A.a = 1 AND A.a = 1
             // or for compound primary keys:
             // WHERE A.a = AND a.b = 2
             // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
             let pre_count = flattened.len();
-            do_flatten_conditional(&*left, pkey, &mut flattened)? && {
+            do_flatten_conditional(&*lhs, pkey, &mut flattened)? && {
                 let count = flattened.len();
-                let valid = do_flatten_conditional(&*right, pkey, &mut flattened)?;
+                let valid = do_flatten_conditional(&*rhs, pkey, &mut flattened)?;
                 valid && (pre_count == flattened.len() || count == flattened.len())
             }
         }
-        ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::Or,
-            ref left,
-            ref right,
-        }) => {
-            do_flatten_conditional(&*left, pkey, &mut flattened)?
-                && do_flatten_conditional(&*right, pkey, &mut flattened)?
+        Expression::BinaryOp {
+            op: BinaryOperator::Or,
+            ref lhs,
+            ref rhs,
+        } => {
+            do_flatten_conditional(&*lhs, pkey, &mut flattened)?
+                && do_flatten_conditional(&*rhs, pkey, &mut flattened)?
         }
         _ => false,
     })
@@ -178,7 +177,7 @@ fn do_flatten_conditional(
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([[1]])
 pub(crate) fn flatten_conditional(
-    cond: &ConditionExpression,
+    cond: &Expression,
     pkey: &Vec<&Column>,
 ) -> ReadySetResult<Option<Vec<Vec<DataType>>>> {
     let mut flattened = HashSet::new();
@@ -226,66 +225,62 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         .collect()
 }
 
-fn get_parameter_columns_recurse(cond: &ConditionExpression) -> Vec<(&Column, BinaryOperator)> {
+fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOperator)> {
     match *cond {
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(_))),
-            operator: binop,
-        }) => vec![(c, binop)],
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Literal(Literal::Placeholder(_))),
-            right: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            operator: binop,
-        }) => vec![(c, binop.flip_comparison().unwrap_or(binop))],
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Field(ref c)),
-            right: box ConditionExpression::Base(ConditionBase::LiteralList(ref literals)),
-            operator: BinaryOperator::In,
-        }) if (|| {
-            literals
-                .iter()
-                .all(|l| matches!(*l, Literal::Placeholder(_)))
-        })() =>
+        Expression::BinaryOp {
+            lhs: box Expression::Column(ref c),
+            rhs: box Expression::Literal(Literal::Placeholder(_)),
+            op: binop,
+        } => vec![(c, binop)],
+        Expression::BinaryOp {
+            lhs: box Expression::Literal(Literal::Placeholder(_)),
+            rhs: box Expression::Column(ref c),
+            op: binop,
+        } => vec![(c, binop.flip_comparison().unwrap_or(binop))],
+        Expression::In {
+            lhs: box Expression::Column(ref c),
+            rhs: nom_sql::InValue::List(ref exprs),
+            negated: false,
+        } if exprs
+            .iter()
+            .all(|expr| matches!(expr, Expression::Literal(Literal::Placeholder(_)))) =>
         {
             // the weird extra closure above is due to
             // https://github.com/rust-lang/rfcs/issues/1006
-            vec![(c, BinaryOperator::Equal); literals.len()]
+            vec![(c, BinaryOperator::Equal); exprs.len()]
         }
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Field(_)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(_)),
-            operator: _,
-        })
-        | ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Literal(_)),
-            right: box ConditionExpression::Base(ConditionBase::Field(_)),
-            operator: _,
-        }) => vec![],
+        Expression::BinaryOp {
+            lhs: box Expression::Column(_),
+            rhs: box Expression::Literal(_),
+            op: _,
+        }
+        | Expression::BinaryOp {
+            lhs: box Expression::Literal(_),
+            rhs: box Expression::Column(_),
+            op: _,
+        } => vec![],
         // comma joins and column equality comparisons
-        ConditionExpression::ComparisonOp(ConditionTree {
-            left: box ConditionExpression::Base(ConditionBase::Field(_)),
-            right: box ConditionExpression::Base(ConditionBase::Field(_)),
-            operator: _,
-        }) => vec![],
-        ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::And,
-            ref left,
-            ref right,
-        })
-        | ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::Or,
-            ref left,
-            ref right,
-        }) => {
-            let mut l = get_parameter_columns_recurse(left);
-            let mut r = get_parameter_columns_recurse(right);
+        Expression::BinaryOp {
+            lhs: box Expression::Column(_),
+            rhs: box Expression::Column(_),
+            op: _,
+        } => vec![],
+        Expression::BinaryOp {
+            op: BinaryOperator::And,
+            ref lhs,
+            ref rhs,
+        }
+        | Expression::BinaryOp {
+            op: BinaryOperator::Or,
+            ref lhs,
+            ref rhs,
+        } => {
+            let mut l = get_parameter_columns_recurse(lhs);
+            let mut r = get_parameter_columns_recurse(rhs);
             l.append(&mut r);
             l
         }
-        ConditionExpression::NegationOp(ref expr) | ConditionExpression::Bracketed(ref expr) => {
-            get_parameter_columns_recurse(expr)
-        }
+        Expression::UnaryOp { ref rhs, .. } => get_parameter_columns_recurse(rhs),
         _ => unimplemented!(),
     }
 }
@@ -353,17 +348,17 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
 fn walk_update_where<I>(
     col2v: &mut HashMap<String, DataType>,
     params: &mut Option<I>,
-    expr: ConditionExpression,
+    expr: Expression,
 ) -> ReadySetResult<()>
 where
     I: Iterator<Item = DataType>,
 {
     match expr {
-        ConditionExpression::ComparisonOp(ConditionTree {
-            operator: BinaryOperator::Equal,
-            left: box ConditionExpression::Base(ConditionBase::Field(c)),
-            right: box ConditionExpression::Base(ConditionBase::Literal(l)),
-        }) => {
+        Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            lhs: box Expression::Column(c),
+            rhs: box Expression::Literal(l),
+        } => {
             let v = match l {
                 Literal::Placeholder(_) => params
                     .as_mut()
@@ -377,14 +372,14 @@ where
             let oldv = col2v.insert(c.name, v);
             invariant!(oldv.is_none());
         }
-        ConditionExpression::LogicalOp(ConditionTree {
-            operator: BinaryOperator::And,
-            left,
-            right,
-        }) => {
+        Expression::BinaryOp {
+            op: BinaryOperator::And,
+            lhs,
+            rhs,
+        } => {
             // recurse
-            walk_update_where(col2v, params, *left)?;
-            walk_update_where(col2v, params, *right)?;
+            walk_update_where(col2v, params, *lhs)?;
+            walk_update_where(col2v, params, *rhs)?;
         }
         _ => unsupported!("Fancy high-brow UPDATEs are not supported"),
     }
@@ -428,26 +423,20 @@ where
                         ),
                     ));
                 }
-                Expression::Arithmetic(ref ae) => {
+                Expression::BinaryOp {
+                    lhs: box Expression::Column(ref c),
+                    ref op,
+                    rhs: box Expression::Literal(ref l),
+                } => {
                     // we only support "column = column +/- literal"
-                    // TODO(grfn): Handle nested arithmetic
-                    // (https://app.clubhouse.io/readysettech/story/41)
-                    match ae {
-                        Arithmetic {
-                            op,
-                            left: box Expression::Column(ref c),
-                            right: box Expression::Literal(ref l),
-                        } => {
-                            invariant_eq!(c, &field.column);
-                            match op {
-                                ArithmeticOperator::Add => {
-                                    updates.push((i, Modification::Apply(Operation::Add, l.into())))
-                                }
-                                ArithmeticOperator::Subtract => {
-                                    updates.push((i, Modification::Apply(Operation::Sub, l.into())))
-                                }
-                                _ => unsupported!(),
-                            }
+                    // TODO(ENG-142): Handle nested arithmetic
+                    invariant_eq!(c, &field.column);
+                    match op {
+                        BinaryOperator::Add => {
+                            updates.push((i, Modification::Apply(Operation::Add, l.into())))
+                        }
+                        BinaryOperator::Subtract => {
+                            updates.push((i, Modification::Apply(Operation::Sub, l.into())))
                         }
                         _ => unsupported!(),
                     }

@@ -1,5 +1,5 @@
+use nom_sql::analysis::ReferredColumns;
 use nom_sql::Column;
-use nom_sql::ConditionExpression::*;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -101,52 +101,35 @@ impl Signature for QueryGraph {
         // Collect attributes from predicates and projected columns
         let mut attrs = HashSet::<&Column>::new();
         let mut attrs_vec = Vec::<&Column>::new();
-        for n in self.relations.values() {
-            for p in &n.predicates {
-                match *p {
-                    ComparisonOp(ref ct) | LogicalOp(ref ct) => {
-                        for c in &ct.contained_columns() {
-                            attrs_vec.push(c);
-                            attrs.insert(c);
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
+        let mut record_column = |c| {
+            attrs_vec.push(c);
+            attrs.insert(c);
+        };
+        self.relations
+            .values()
+            .flat_map(|n| &n.predicates)
+            .flat_map(|p| p.referred_columns())
+            .for_each(&mut record_column);
 
         for e in self.edges.values() {
-            match *e {
-                QueryGraphEdge::Join(ref join_predicates)
-                | QueryGraphEdge::LeftJoin(ref join_predicates) => {
-                    for p in join_predicates {
-                        for c in &p.contained_columns() {
-                            attrs_vec.push(c);
-                            attrs.insert(c);
-                        }
-                    }
+            match e {
+                QueryGraphEdge::Join { on } | QueryGraphEdge::LeftJoin { on } => {
+                    on.iter()
+                        .flat_map(|p| vec![&p.left, &p.right])
+                        .flat_map(|p| p.referred_columns())
+                        .for_each(&mut record_column);
                 }
                 QueryGraphEdge::GroupBy(ref cols) => {
-                    for c in cols {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    }
+                    cols.iter().for_each(&mut record_column);
                 }
             }
         }
 
         // Global predicates are part of the attributes too
-        for p in &self.global_predicates {
-            match *p {
-                ComparisonOp(ref ct) | LogicalOp(ref ct) => {
-                    for c in &ct.contained_columns() {
-                        attrs_vec.push(c);
-                        attrs.insert(c);
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
+        self.global_predicates
+            .iter()
+            .flat_map(|p| p.referred_columns())
+            .for_each(record_column);
 
         // Compute attributes part of hash
         attrs_vec.sort();

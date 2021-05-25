@@ -33,8 +33,8 @@
 //! let query_str = format!("{}", query.statement);
 //! assert_eq!(query_str, "SELECT table_1.column_3, table_2.column_2 \
 //! FROM table_1 \
-//! INNER JOIN table_2 ON table_1.column_2 = table_2.column_1 \
-//! WHERE table_1.column_1 = ?");
+//! INNER JOIN table_2 ON (table_1.column_2 = table_2.column_1) \
+//! WHERE (table_1.column_1 = ?)");
 //! ```
 //!
 //! # Architecture
@@ -72,10 +72,9 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-    SelectStatement, SqlType, Table, TableKey,
+    BinaryOperator, Column, ColumnSpecification, CreateTableStatement, Expression,
+    FieldDefinitionExpression, FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint,
+    JoinOperator, JoinRightSide, Literal, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
 
@@ -498,8 +497,8 @@ impl GeneratorState {
                 if let FieldDefinitionExpression::Expression { expr, .. } = field {
                     if !contains_aggregate(expr) {
                         for col in expr.referred_columns() {
-                            if !existing_group_by_cols.contains(&col) {
-                                group_by.columns.push(col.into_owned());
+                            if !existing_group_by_cols.contains(col) {
+                                group_by.columns.push(col.clone());
                             }
                         }
                     }
@@ -850,18 +849,18 @@ lazy_static! {
     };
 }
 
-fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: ConditionExpression) {
+fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expression) {
     query.where_clause = Some(match query.where_clause.take() {
-        Some(existing_cond) => ConditionExpression::LogicalOp(ConditionTree {
-            operator: op.into(),
-            left: Box::new(existing_cond),
-            right: Box::new(cond),
-        }),
+        Some(existing_cond) => Expression::BinaryOp {
+            op: op.into(),
+            lhs: Box::new(existing_cond),
+            rhs: Box::new(cond),
+        },
         None => cond,
     })
 }
 
-fn and_where(query: &mut SelectStatement, cond: ConditionExpression) {
+fn and_where(query: &mut SelectStatement, cond: Expression) {
     extend_where(query, LogicalOp::And, cond)
 }
 
@@ -923,28 +922,28 @@ impl QueryOperation {
             QueryOperation::Filter(filter) => {
                 let tbl = state.some_table_mut();
                 let col = tbl.fresh_column_with_type(SqlType::Int(1));
-                let right = Box::new(match filter.rhs {
+                let rhs = Box::new(match filter.rhs {
                     FilterRHS::Constant => {
                         tbl.expect_value(col.clone(), 1i32.into());
-                        ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(1)))
+                        Expression::Literal(Literal::Integer(1))
                     }
                     FilterRHS::Column => {
                         let col = tbl.fresh_column();
-                        ConditionExpression::Base(ConditionBase::Field(Column {
+                        Expression::Column(Column {
                             table: Some(tbl.name.clone().into()),
                             ..col.into()
-                        }))
+                        })
                     }
                 });
 
-                let cond = ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: filter.operator,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+                let cond = Expression::BinaryOp {
+                    op: filter.operator,
+                    lhs: Box::new(Expression::Column(Column {
                         table: Some(tbl.name.clone().into()),
                         ..col.clone().into()
-                    }))),
-                    right,
-                });
+                    })),
+                    rhs,
+                };
 
                 query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(tbl.name.clone().into()),
@@ -976,23 +975,17 @@ impl QueryOperation {
                 query.join.push(JoinClause {
                     operator: *operator,
                     right: JoinRightSide::Table(right_table.name.clone().into()),
-                    constraint: JoinConstraint::On(ConditionExpression::ComparisonOp(
-                        ConditionTree {
-                            operator: BinaryOperator::Equal,
-                            left: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                                Column {
-                                    table: Some(left_table_name.clone().into()),
-                                    ..left_join_key.into()
-                                },
-                            ))),
-                            right: Box::new(ConditionExpression::Base(ConditionBase::Field(
-                                Column {
-                                    table: Some(right_table_name.clone().into()),
-                                    ..right_join_key.into()
-                                },
-                            ))),
-                        },
-                    )),
+                    constraint: JoinConstraint::On(Expression::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expression::Column(Column {
+                            table: Some(left_table_name.clone().into()),
+                            ..left_join_key.into()
+                        })),
+                        rhs: Box::new(Expression::Column(Column {
+                            table: Some(right_table_name.clone().into()),
+                            ..right_join_key.into()
+                        })),
+                    }),
                 });
 
                 query.fields.push(FieldDefinitionExpression::from(Column {
@@ -1016,16 +1009,16 @@ impl QueryOperation {
                 let col = table.fresh_column();
                 and_where(
                     query,
-                    ConditionExpression::ComparisonOp(ConditionTree {
-                        operator: BinaryOperator::Equal,
-                        left: Box::new(ConditionExpression::Base(ConditionBase::Field(Column {
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expression::Column(Column {
                             table: Some(table.name.clone().into()),
                             ..col.clone().into()
-                        }))),
-                        right: Box::new(ConditionExpression::Base(ConditionBase::Literal(
-                            Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                        })),
+                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                            ItemPlaceholder::QuestionMark,
                         ))),
-                    }),
+                    },
                 );
                 let table_name = table.name.clone();
                 state.add_parameter(table_name, col);
@@ -1234,17 +1227,10 @@ mod tests {
         assert_eq!(query.join.len(), 1);
         let join = query.join.first().unwrap();
         match &join.constraint {
-            JoinConstraint::On(ConditionExpression::ComparisonOp(ConditionTree {
-                operator,
-                left,
-                right,
-            })) => {
-                assert_eq!(operator, &BinaryOperator::Equal);
-                match (left.as_ref(), right.as_ref()) {
-                    (
-                        ConditionExpression::Base(ConditionBase::Field(left_field)),
-                        ConditionExpression::Base(ConditionBase::Field(right_field)),
-                    ) => {
+            JoinConstraint::On(Expression::BinaryOp { op, lhs, rhs }) => {
+                assert_eq!(op, &BinaryOperator::Equal);
+                match (lhs.as_ref(), rhs.as_ref()) {
+                    (Expression::Column(left_field), Expression::Column(right_field)) => {
                         assert_eq!(
                             left_field.table.as_ref(),
                             Some(&query.tables.first().unwrap().name)

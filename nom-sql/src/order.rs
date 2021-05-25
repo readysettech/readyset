@@ -69,9 +69,11 @@ fn order_expr(i: &[u8]) -> IResult<&[u8], (Column, OrderType)> {
 
 // Parse ORDER BY clause
 pub fn order_clause(i: &[u8]) -> IResult<&[u8], OrderClause> {
-    let (remaining_input, (_, _, _, columns)) = tuple((
+    let (remaining_input, (_, _, _, _, _, columns)) = tuple((
         multispace0,
-        tag_no_case("order by"),
+        tag_no_case("order"),
+        multispace1,
+        tag_no_case("by"),
         multispace1,
         many0(order_expr),
     ))(i)?;

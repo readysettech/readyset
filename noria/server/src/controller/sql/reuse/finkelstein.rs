@@ -144,16 +144,16 @@ impl Finkelstein {
                         _ => return Ok(None),
                     }
                 }
-                QueryGraphEdge::Join(_) => {
+                QueryGraphEdge::Join { .. } => {
                     match *new_qge {
-                        QueryGraphEdge::Join(_) => {}
+                        QueryGraphEdge::Join { .. } => {}
                         // If there is no matching Join edge, we cannot reuse
                         _ => return Ok(None),
                     }
                 }
-                QueryGraphEdge::LeftJoin(_) => {
+                QueryGraphEdge::LeftJoin { .. } => {
                     match *new_qge {
-                        QueryGraphEdge::LeftJoin(_) => {}
+                        QueryGraphEdge::LeftJoin { .. } => {}
                         // If there is no matching LeftJoin edge, we cannot reuse
                         _ => return Ok(None),
                     }

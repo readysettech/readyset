@@ -6,8 +6,7 @@ use crate::{internal, invariant, unsupported};
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{self, ConditionExpression, FunctionExpression};
-use nom_sql::{Expression, FunctionExpression::*};
+use nom_sql::{self, Expression, FunctionExpression, FunctionExpression::*};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 
@@ -18,9 +17,9 @@ pub(super) fn make_predicates_above_grouped<'a>(
     qg: &QueryGraph,
     node_for_rel: &HashMap<&str, MirNodeRef>,
     node_count: usize,
-    column_to_predicates: &HashMap<Column, Vec<&'a ConditionExpression>>,
+    column_to_predicates: &HashMap<Column, Vec<&'a Expression>>,
     prev_node: &mut Option<MirNodeRef>,
-) -> ReadySetResult<(Vec<&'a ConditionExpression>, Vec<MirNodeRef>)> {
+) -> ReadySetResult<(Vec<&'a Expression>, Vec<MirNodeRef>)> {
     let mut created_predicates = Vec::new();
     let mut predicates_above_group_by_nodes = Vec::new();
     let mut node_count = node_count;
@@ -33,8 +32,8 @@ pub(super) fn make_predicates_above_grouped<'a>(
             for over_col in
                 Expression::Call(ccol.function.as_deref().unwrap().clone()).referred_columns()
             {
-                let over_table = over_col.as_ref().table.as_ref().unwrap().as_str();
-                let col = Column::from(over_col.clone().into_owned());
+                let over_table = over_col.table.as_ref().unwrap().as_str();
+                let col = Column::from(over_col.clone());
 
                 if column_to_predicates.contains_key(&col) {
                     let parent = match *prev_node {
@@ -82,7 +81,7 @@ pub(super) fn make_expressions_above_grouped(
         .filter_map(|c| c.function.as_ref())
         .filter(|f| is_aggregate(&f))
         .flat_map(|f| f.arguments())
-        .filter(|arg| matches!(arg, Expression::Arithmetic(_) | Expression::Call(_)))
+        .filter(|arg| matches!(arg, Expression::BinaryOp { .. } | Expression::Call(_)))
         .map(|expr| (expr.to_string(), expr.clone()))
         .collect();
 
@@ -121,10 +120,7 @@ pub(super) fn make_grouped(
         let gb_edges: Vec<_> = qg
             .edges
             .values()
-            .filter(|e| match **e {
-                QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => false,
-                QueryGraphEdge::GroupBy(_) => true,
-            })
+            .filter(|e| matches!(e, QueryGraphEdge::GroupBy(_)))
             .collect();
 
         for computed_col in computed_cols_cgn.columns.iter() {
@@ -278,7 +274,7 @@ pub(super) fn make_grouped(
                     let fn_cols: Vec<_> =
                         Expression::Call(computed_col.function.as_deref().unwrap().clone())
                             .referred_columns()
-                            .map(|c| Column::from(c.into_owned()))
+                            .map(|c| Column::from(c.clone()))
                             .collect();
                     // TODO(grfn) this double-collect is really gross- make_projection_helper takes
                     // a Vec<&mir::Column> but we have a Vec<&nom_sql::Column> and there's no way to

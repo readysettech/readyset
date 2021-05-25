@@ -1,6 +1,6 @@
 use nom_sql::{
-    BinaryOperator, Column, ConditionBase, ConditionExpression, ConditionTree, Expression,
-    FieldDefinitionExpression, JoinConstraint, JoinOperator, JoinRightSide, Literal, Table,
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, JoinConstraint, JoinOperator,
+    JoinRightSide, Literal, Table, UnaryOperator,
 };
 use nom_sql::{OrderType, SelectStatement};
 
@@ -13,7 +13,7 @@ use std::vec::Vec;
 use std::{cmp::Ordering, num::NonZeroU64};
 use std::{collections::HashMap, convert::TryInto};
 
-use super::query_utils::{is_aggregate, map_aggregates};
+use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -154,18 +154,25 @@ pub struct JoinRef {
     pub dst: String,
 }
 
+/// An equality predicate on two expressions, used as the key for a join
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct JoinPredicate {
+    pub left: Expression,
+    pub right: Expression,
+}
+
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
-    pub predicates: Vec<ConditionExpression>,
+    pub predicates: Vec<Expression>,
     pub columns: Vec<Column>,
     pub parameters: Vec<(Column, nom_sql::BinaryOperator)>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum QueryGraphEdge {
-    Join(Vec<ConditionTree>),
-    LeftJoin(Vec<ConditionTree>),
+    Join { on: Vec<JoinPredicate> },
+    LeftJoin { on: Vec<JoinPredicate> },
     GroupBy(Vec<Column>),
 }
 
@@ -189,7 +196,7 @@ pub struct QueryGraph {
     /// its (src, dst) pair
     pub join_order: Vec<JoinRef>,
     /// Global predicates (not associated with a particular relation)
-    pub global_predicates: Vec<ConditionExpression>,
+    pub global_predicates: Vec<Expression>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
 }
@@ -256,20 +263,17 @@ impl Hash for QueryGraph {
 }
 
 /// Splits top level conjunctions into multiple predicates
-fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression> {
+fn split_conjunctions(ces: Vec<Expression>) -> Vec<Expression> {
     let mut new_ces = Vec::new();
     for ce in ces {
         match ce {
-            ConditionExpression::LogicalOp(ref ct) => {
-                match ct.operator {
-                    BinaryOperator::And => {
-                        new_ces.extend(split_conjunctions(vec![*ct.left.clone()]));
-                        new_ces.extend(split_conjunctions(vec![*ct.right.clone()]));
-                    }
-                    _ => {
-                        new_ces.push(ce.clone());
-                    }
-                };
+            Expression::BinaryOp {
+                op: BinaryOperator::And,
+                lhs,
+                rhs,
+            } => {
+                new_ces.extend(split_conjunctions(vec![*lhs.clone()]));
+                new_ces.extend(split_conjunctions(vec![*rhs.clone()]));
             }
             _ => {
                 new_ces.push(ce.clone());
@@ -287,11 +291,11 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
 // 3. Extract join predicates
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
-    ce: &ConditionExpression,
+    ce: &Expression,
     tables: &[Table],
-    local: &mut HashMap<String, Vec<ConditionExpression>>,
-    join: &mut Vec<ConditionTree>,
-    global: &mut Vec<ConditionExpression>,
+    local: &mut HashMap<String, Vec<Expression>>,
+    join: &mut Vec<JoinPredicate>,
+    global: &mut Vec<Expression>,
     params: &mut Vec<(Column, nom_sql::BinaryOperator)>,
 ) -> ReadySetResult<()> {
     // Handling OR and AND expressions requires some care as there are some corner cases.
@@ -303,8 +307,12 @@ fn classify_conditionals(
     //       table2.y= 42). this is a global predicate according to finkelstein algorithm
     //       and we don't support these yet.
 
-    match *ce {
-        ConditionExpression::LogicalOp(ref ct) => {
+    match ce {
+        Expression::BinaryOp {
+            op: op @ (BinaryOperator::And | BinaryOperator::Or),
+            lhs,
+            rhs,
+        } => {
             // first, we recurse on both sides, collected the result of nested predicate analysis
             // in separate collections. What do do with these depends on whether we're an AND or an
             // OR clause:
@@ -318,7 +326,7 @@ fn classify_conditionals(
             let mut new_global = Vec::new();
 
             classify_conditionals(
-                ct.left.as_ref(),
+                lhs.as_ref(),
                 tables,
                 &mut new_local,
                 &mut new_join,
@@ -326,7 +334,7 @@ fn classify_conditionals(
                 &mut new_params,
             )?;
             classify_conditionals(
-                ct.right.as_ref(),
+                rhs.as_ref(),
                 tables,
                 &mut new_local,
                 &mut new_join,
@@ -334,7 +342,7 @@ fn classify_conditionals(
                 &mut new_params,
             )?;
 
-            match ct.operator {
+            match op {
                 BinaryOperator::And => {
                     //
                     for (t, ces) in new_local {
@@ -344,11 +352,11 @@ fn classify_conditionals(
                             "can only combine two or fewer ConditionExpression's"
                         );
                         if ces.len() == 2 {
-                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                                operator: BinaryOperator::And,
-                                left: Box::new(ces.first().unwrap().clone()),
-                                right: Box::new(ces.last().unwrap().clone()),
-                            });
+                            let new_ce = Expression::BinaryOp {
+                                op: BinaryOperator::And,
+                                lhs: Box::new(ces.first().unwrap().clone()),
+                                rhs: Box::new(ces.last().unwrap().clone()),
+                            };
 
                             let e = local.entry(t.to_string()).or_default();
                             e.push(new_ce);
@@ -377,11 +385,11 @@ fn classify_conditionals(
                         if ces.len() != 2 {
                             unsupported!("should combine only 2 ConditionExpressions");
                         }
-                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                            operator: BinaryOperator::Or,
-                            left: Box::new(ces.first().unwrap().clone()),
-                            right: Box::new(ces.last().unwrap().clone()),
-                        });
+                        let new_ce = Expression::BinaryOp {
+                            lhs: Box::new(ces.first().unwrap().clone()),
+                            op: BinaryOperator::Or,
+                            rhs: Box::new(ces.last().unwrap().clone()),
+                        };
 
                         let e = local.entry(t.to_string()).or_default();
                         e.push(new_ce);
@@ -390,147 +398,142 @@ fn classify_conditionals(
                         global.push(ce.clone())
                     }
                 }
-                x => unsupported!("binary operator unsupported: {:?}", x),
+                _ => unreachable!("Already matched on And | Or above"),
             }
 
             join.extend(new_join);
             params.extend(new_params);
         }
-        ConditionExpression::ComparisonOp(ref ct) => {
+        Expression::BinaryOp { lhs, op, rhs } if is_predicate(&op) => {
             // atomic selection predicate
-            if let ConditionExpression::Base(ref l) = *ct.left.as_ref() {
-                if let ConditionExpression::Base(ref r) = *ct.right.as_ref() {
-                    match *r {
-                        // right-hand side is field, so this could be a comma join
-                        // or a security policy using UserContext
-                        ConditionBase::Field(ref rf) => {
-                            // column/column comparison
-                            if let ConditionBase::Field(ref lf) = *l {
-                                if lf.table.is_some()
-                                    && tables
-                                        .contains(&Table::from(lf.table.as_ref().unwrap().as_str()))
-                                    && rf.table.is_some()
-                                    && tables
-                                        .contains(&Table::from(rf.table.as_ref().unwrap().as_str()))
-                                    && lf.table != rf.table
-                                {
-                                    // both columns' tables appear in table list and the tables are
-                                    // different --> comma join
-                                    if ct.operator == BinaryOperator::Equal
-                                        || ct.operator == BinaryOperator::In
-                                    {
-                                        // equi-join between two tables
-                                        let mut join_ct = ct.clone();
-                                        if let Ordering::Less =
-                                            rf.table.as_ref().cmp(&lf.table.as_ref())
-                                        {
-                                            mem::swap(&mut join_ct.left, &mut join_ct.right);
-                                        }
-                                        join.push(join_ct);
-                                    } else {
-                                        // non-equi-join?
-                                        unsupported!("non-equi-join?");
-                                    }
-                                } else {
-                                    // not a comma join, just an ordinary comparison with a
-                                    // computed column. This must be a global predicate because it
-                                    // crosses "tables" (the computed column has no associated
-                                    // table)
-                                    global.push(ce.clone());
+            match **rhs {
+                // right-hand side is a column, so this could be a comma join
+                // or a security policy using UserContext
+                Expression::Column(ref rf) => {
+                    match **lhs {
+                        // column/column comparison
+                        Expression::Column(ref lf)
+                            if lf.table.is_some()
+                                && tables.contains(&Table::from(
+                                    lf.table.as_ref().unwrap().as_str(),
+                                ))
+                                && rf.table.is_some()
+                                && tables.contains(&Table::from(
+                                    rf.table.as_ref().unwrap().as_str(),
+                                ))
+                                && lf.table != rf.table =>
+                        {
+                            // both columns' tables appear in table list and the tables are
+                            // different --> comma join
+                            if *op == BinaryOperator::Equal {
+                                // equi-join between two tables
+                                let mut jp = JoinPredicate {
+                                    left: (**lhs).clone(),
+                                    right: (**rhs).clone(),
+                                };
+                                if let Ordering::Less = rf.table.as_ref().cmp(&lf.table.as_ref()) {
+                                    mem::swap(&mut jp.left, &mut jp.right);
                                 }
+                                join.push(jp);
                             } else {
-                                unsupported!("left hand side of comparison must be field");
+                                // non-equi-join?
+                                unsupported!("non-equi-join?");
                             }
                         }
-                        // right-hand side is a placeholder, so this must be a query parameter
-                        ConditionBase::Literal(Literal::Placeholder(_)) => {
-                            if let ConditionBase::Field(ref lf) = *l {
-                                params.push((lf.clone(), ct.operator.clone()));
-                            }
-                        }
-                        // right-hand side is a non-placeholder literal, so this is a predicate
-                        ConditionBase::Literal(_) => {
-                            if let ConditionBase::Field(ref lf) = *l {
-                                // we assume that implied table names have previously been expanded
-                                // and thus all non-computed columns carry table names
-                                if lf.table.is_some() {
-                                    let e = local.entry(lf.table.clone().unwrap()).or_default();
-                                    e.push(ce.clone());
-                                } else {
-                                    // comparisons between computed columns and literals are global
-                                    // predicates
-                                    global.push(ce.clone());
-                                }
-                            }
-                        }
-                        ConditionBase::LiteralList(_) => (),
-                        ConditionBase::NestedSelect(_) => {
-                            unsupported!("nested SELECTs are unsupported")
+                        _ => {
+                            // not a comma join, just an ordinary comparison with a
+                            // computed column. This must be a global predicate because it
+                            // crosses "tables" (the computed column has no associated
+                            // table)
+                            global.push(ce.clone());
                         }
                     }
-                };
-            };
+                }
+                // right-hand side is a placeholder, so this must be a query parameter
+                Expression::Literal(Literal::Placeholder(_)) => {
+                    if let Expression::Column(ref lf) = **lhs {
+                        params.push((lf.clone(), op.clone()));
+                    }
+                }
+                // right-hand side is a non-placeholder literal, so this is a predicate
+                Expression::Literal(_) => {
+                    if let Expression::Column(ref lf) = **lhs {
+                        // we assume that implied table names have previously been expanded
+                        // and thus all non-computed columns carry table names
+                        if lf.table.is_some() {
+                            let e = local.entry(lf.table.clone().unwrap()).or_default();
+                            e.push(ce.clone());
+                        } else {
+                            // comparisons between computed columns and literals are global
+                            // predicates
+                            global.push(ce.clone());
+                        }
+                    }
+                }
+                Expression::NestedSelect(_) => {
+                    unsupported!("nested SELECTs are unsupported")
+                }
+                Expression::Call(_)
+                | Expression::BinaryOp { .. }
+                | Expression::UnaryOp { .. }
+                | Expression::CaseWhen { .. }
+                | Expression::Exists(_)
+                | Expression::Between { .. }
+                | Expression::In { .. } => {
+                    unsupported!(
+                        "Unsupported right-hand side of condition expression: {}",
+                        rhs
+                    )
+                }
+            }
         }
-        ConditionExpression::Bracketed(ref inner) => {
-            let mut new_params = Vec::new();
-            let mut new_join = Vec::new();
-            let mut new_local = HashMap::new();
-            classify_conditionals(
-                inner.as_ref(),
-                tables,
-                &mut new_local,
-                &mut new_join,
-                global,
-                &mut new_params,
-            )?;
-            join.extend(new_join);
-            params.extend(new_params);
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            ..
+        } => {
+            internal!("negation should have been removed earlier");
         }
-        ConditionExpression::Base(_) => {
+        Expression::BinaryOp { .. } => unsupported!("Arithmetic not supported here"),
+        Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
+        Expression::Between { .. } => {
+            internal!("Between should have been removed earlier")
+        }
+        _ => {
             // don't expect to see a base here: we ought to exit when classifying its
             // parent selection predicate
             internal!("encountered unexpected standalone base of condition expression");
-        }
-        ConditionExpression::NegationOp(_) => {
-            internal!("negation should have been removed earlier");
-        }
-        ConditionExpression::Arithmetic(_) => unsupported!("arithmetic not supported here"),
-        ConditionExpression::ExistsOp(_) => unsupported!("EXISTS not supported yet"),
-        ConditionExpression::Between { .. } => {
-            internal!("Between should have been removed earlier")
         }
     }
     Ok(())
 }
 
-/// Convert the given `ConditionExpression`, which should be a set of AND-ed together direct
-/// comparison predicates, into a list of predicate trees
-fn collect_join_predicates(
-    cond: ConditionExpression,
-    out: &mut Vec<ConditionTree>,
-) -> ReadySetResult<()> {
-    use ConditionExpression::*;
-
+/// Convert the given `Expression`, which should be a set of AND-ed together direct
+/// comparison predicates, into a list of predicate expressions
+fn collect_join_predicates(cond: Expression, out: &mut Vec<JoinPredicate>) -> ReadySetResult<()> {
     match cond {
-        ComparisonOp(ct) => {
-            out.push(ct);
+        Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            lhs,
+            rhs,
+        } => {
+            out.push(JoinPredicate {
+                left: *lhs,
+                right: *rhs,
+            });
             Ok(())
         }
-        Bracketed(cond) => collect_join_predicates(*cond, out),
-        LogicalOp(ConditionTree {
-            left,
-            operator,
-            right,
-        }) => {
-            if operator != BinaryOperator::And {
-                unsupported!("Only AND is supported between join conditions");
-            }
-
-            collect_join_predicates(*left, out)?;
-            collect_join_predicates(*right, out)?;
+        Expression::BinaryOp {
+            lhs,
+            op: BinaryOperator::And,
+            rhs,
+        } => {
+            collect_join_predicates(*lhs, out)?;
+            collect_join_predicates(*rhs, out)?;
             Ok(())
         }
-        _ => unsupported!("Only direct comparisons supported for join conditions"),
+        _ => {
+            unsupported!("Only direct comparisons combined with AND supported for join conditions")
+        }
     }
 }
 
@@ -544,7 +547,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // a handy closure for making new relation nodes
     let new_node = |rel: String,
-                    preds: Vec<ConditionExpression>,
+                    preds: Vec<Expression>,
                     st: &SelectStatement|
      -> ReadySetResult<QueryGraphNode> {
         Ok(QueryGraphNode {
@@ -562,10 +565,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         FieldDefinitionExpression::AllInTable(_) => {
                             internal!("<table>.* should have been expanded already")
                         }
-                        // No need to do anything for literals and arithmetic expressions here, as they
+                        // No need to do anything for literals and operator expressions here, as they
                         // aren't associated with a relation (and thus have no QGN)
                         FieldDefinitionExpression::Expression {
-                            expr: Expression::Literal(_) | Expression::Arithmetic(_),
+                            expr: Expression::Literal(_) | Expression::BinaryOp { .. },
                             ..
                         } => None,
                         // XXX(malte): don't drop aggregation columns
@@ -590,13 +593,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                                 }
                             }
                         },
-                        FieldDefinitionExpression::Expression {
-                            expr: Expression::CaseWhen { .. },
-                            ..
-                        } => {
-                            unsupported!(
-                                "Projecting CASE WHEN expressions is not currently supported"
-                            )
+                        FieldDefinitionExpression::Expression { expr, .. } => {
+                            unsupported!("Projected expression not yet supported: {}", expr)
                         }
                     })
                 })
@@ -635,10 +633,14 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
     let mut join_predicates = Vec::new();
-    let wrapcol = |tbl: &str, col: &str| -> Box<ConditionExpression> {
-        let col = Column::from(format!("{}.{}", tbl, col).as_str());
-        Box::new(ConditionExpression::Base(ConditionBase::Field(col)))
+    let col_expr = |tbl: &str, col: &str| -> Expression {
+        Expression::Column(Column {
+            table: Some(tbl.into()),
+            name: (col.into()),
+            function: None,
+        })
     };
+
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
     let prev_table = Some(st.tables.last().as_ref().unwrap().name.clone());
@@ -685,12 +687,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                             // their join order in the query; if so, flip them
                             // TODO(malte): this only deals with simple, flat join
                             // conditions for now.
-                            let l = match *pred.left.as_ref() {
-                                ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                            let l = match &pred.left {
+                                Expression::Column(f) => f,
                                 ref x => unsupported!("join condition not supported: {:?}", x),
                             };
-                            let r = match *pred.right.as_ref() {
-                                ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                            let r = match &pred.right {
+                                Expression::Column(f) => f,
                                 ref x => unsupported!("join condition not supported: {:?}", x),
                             };
                             if *l.table.as_ref().unwrap() == right_table
@@ -709,10 +711,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         left_table = prev_table.as_ref().unwrap().clone();
                         right_table = table.name.clone();
 
-                        vec![ConditionTree {
-                            operator: BinaryOperator::Equal,
-                            left: wrapcol(&left_table, &col.name),
-                            right: wrapcol(&right_table, &col.name),
+                        vec![JoinPredicate {
+                            left: col_expr(&left_table, &col.name),
+                            right: col_expr(&right_table, &col.name),
                         }]
                     }
                 };
@@ -727,10 +728,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         (left_table.clone(), right_table.clone()),
                         match jc.operator {
                             JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                                QueryGraphEdge::LeftJoin(join_preds)
+                                QueryGraphEdge::LeftJoin { on: join_preds }
                             }
                             JoinOperator::Join | JoinOperator::InnerJoin => {
-                                QueryGraphEdge::Join(join_preds)
+                                QueryGraphEdge::Join { on: join_preds }
                             }
                             _ => unsupported!("join operator not supported"),
                         },
@@ -776,9 +777,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         // 2. Add predicates for implied (comma) joins
         for jp in join_predicates {
-            // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
-            if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
-                if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
+            if let Expression::Column(l) = &jp.left {
+                if let Expression::Column(r) = &jp.right {
                     let nn = new_node(l.table.clone().unwrap(), Vec::new(), st)?;
                     // If tables aren't already in the relations, add them.
                     qg.relations
@@ -792,9 +792,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     let e = qg
                         .edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
-                        .or_insert_with(|| QueryGraphEdge::Join(vec![]));
+                        .or_insert_with(|| QueryGraphEdge::Join { on: vec![] });
                     match *e {
-                        QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
+                        QueryGraphEdge::Join { on: ref mut preds } => preds.push(jp.clone()),
                         _ => internal!("Expected join edge for join condition {:#?}", jp),
                     };
                 }
@@ -928,7 +928,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         for ((src, dst), edge) in sorted_edges {
             match edge {
-                QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => {
+                QueryGraphEdge::Join { .. } | QueryGraphEdge::LeftJoin { .. } => {
                     qg.join_order.push(JoinRef {
                         src: src.clone(),
                         dst: dst.clone(),

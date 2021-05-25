@@ -4,6 +4,7 @@
 #![feature(allow_fail)]
 #![feature(drain_filter)]
 #![feature(async_closure)]
+#![feature(or_patterns)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -12,7 +13,6 @@ extern crate tracing;
 
 pub mod backend;
 mod convert;
-mod referred_tables;
 mod rewrite;
 mod schema;
 mod utils;

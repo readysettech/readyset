@@ -29,15 +29,13 @@ impl FilterVec {
                         Value::Column(c) => &r[*c],
                     };
                     match *op {
-                        BinaryOperator::Equal => d == v,
+                        // FIXME(ENG-209): Make NULL = NULL not true, but NULL IS NULL true
+                        BinaryOperator::Equal | BinaryOperator::Is => d == v,
                         BinaryOperator::NotEqual => d != v,
                         BinaryOperator::Greater => d > v,
                         BinaryOperator::GreaterOrEqual => d >= v,
                         BinaryOperator::Less => d < v,
                         BinaryOperator::LessOrEqual => d <= v,
-                        BinaryOperator::In => {
-                            unreachable!("In operator must be handled by FilterCondition::In")
-                        }
                         _ => unimplemented!(),
                     }
                 }
