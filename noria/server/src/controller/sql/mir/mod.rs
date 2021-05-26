@@ -2197,6 +2197,22 @@ impl SqlToMirConverter {
                 }
             };
 
+            if st.distinct {
+                let name = if has_leaf {
+                    format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
+                } else {
+                    String::from(name)
+                };
+                let distinct_node = self.make_distinct_node(
+                    &name,
+                    final_node.clone(),
+                    projected_columns.iter().collect(),
+                );
+                nodes_added.push(distinct_node.clone());
+                final_node = distinct_node;
+                new_node_count += 1;
+            }
+
             let ident = if has_leaf {
                 format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
             } else {

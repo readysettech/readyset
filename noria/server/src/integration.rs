@@ -5466,7 +5466,6 @@ async fn round_with_no_precision() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_works() {
     let mut g = start_simple_unsharded("distinct_select_works").await;
 
@@ -5504,7 +5503,6 @@ async fn distinct_select_works() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_works_sharded() {
     let mut g = start_simple("distinct_select_works_sharded").await;
 
@@ -5542,7 +5540,6 @@ async fn distinct_select_works_sharded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_multi_col() {
     let mut g = start_simple_unsharded("distinct_select_multi_col").await;
 
@@ -5586,7 +5583,6 @@ async fn distinct_select_multi_col() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_multi_col_sharded() {
     let mut g = start_simple("distinct_select_multi_col_sharded").await;
 
@@ -5630,7 +5626,6 @@ async fn distinct_select_multi_col_sharded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_builtin() {
     let mut g = start_simple_unsharded("distinct_select_with_builtin").await;
 
@@ -5675,7 +5670,6 @@ async fn distinct_select_with_builtin() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_builtin_sharded() {
     let mut g = start_simple("distinct_select_with_builtin_sharded").await;
 
@@ -5720,7 +5714,6 @@ async fn distinct_select_with_builtin_sharded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_join() {
     let mut g = start_simple_unsharded("distinct_select_with_join").await;
     let sql = "
@@ -5775,7 +5768,6 @@ async fn distinct_select_with_join() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_join_sharded() {
     let mut g = start_simple("distinct_select_with_join_sharded").await;
     let sql = "
@@ -5830,7 +5822,6 @@ async fn distinct_select_with_join_sharded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_agg").await;
 
@@ -5868,7 +5859,6 @@ async fn distinct_select_with_agg() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_agg_sharded() {
     let mut g = start_simple("distinct_select_with_agg_sharded").await;
 
@@ -5906,7 +5896,6 @@ async fn distinct_select_with_agg_sharded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_multi_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_multi_agg").await;
 
@@ -5949,7 +5938,6 @@ async fn distinct_select_with_multi_agg() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_multi_agg_sharded() {
     let mut g = start_simple("distinct_select_with_multi_agg_sharded").await;
 
@@ -5994,7 +5982,6 @@ async fn distinct_select_with_multi_agg_sharded() {
 // This kind of a query is bad practice (it's strongly advised to not combine SELECT DISTINCT with
 // aggregate distinct. That being said, it's valid SQL, so we should still test it).
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_distinct_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_distinct_agg").await;
 
@@ -6034,7 +6021,6 @@ async fn distinct_select_with_distinct_agg() {
 // This kind of a query is bad practice (it's strongly advised to not combine SELECT DISTINCT with
 // aggregate distinct. That being said, it's valid SQL, so we should still test it).
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn distinct_select_with_distinct_agg_sharded() {
     let mut g = start_simple("distinct_select_with_distinct_agg_sharded").await;
 
