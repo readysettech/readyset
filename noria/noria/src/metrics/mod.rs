@@ -323,6 +323,15 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | result | ViewQueryResultTag |
     pub const SERVER_VIEW_QUERY_RESULT: &str = "server.view_query_result";
+
+    /// Counter: The number of times a dataflow node type is added to the
+    /// dataflow graph. Recorded at the time the new graph is committed.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain. |
+    /// | ntype | The dataflow node type. |
+    pub const DOMAIN_NODE_ADDED: &str = "domain.node_added";
 }
 
 /// A dumped metric's kind.
@@ -435,12 +444,15 @@ impl MetricsDump {
         self.metrics.keys()
     }
 
-    /// Returns the `DumpedMetricValue` for a specific metric and set of labels.
-    /// None is returned if the metric is not found.
+    /// Returns the first `DumpedMetricValue` found for a specific metric
+    /// that includes `labels` as a subset of the metrics labels.
+    ///
+    /// None is returned if the metric is not found or there is no metric
+    /// that includes `labels` as a subset.
     pub fn metric_with_labels<K>(
         &self,
         metric: &K,
-        labels: Vec<(&K, &str)>,
+        labels: &[(&K, &str)],
     ) -> Option<DumpedMetricValue>
     where
         String: Borrow<K>,
@@ -463,6 +475,33 @@ impl MetricsDump {
         }
 
         None
+    }
+
+    /// Returns the set of DumpedMetric's for a specific metric that have
+    /// `labels` as a subset of their labels.
+    ///
+    /// An empty vec is returned if the metric is not found or there is no metric
+    /// that includes `labels` as a subset.
+    pub fn all_metrics_with_labels<K>(&self, metric: &K, labels: &[(&K, &str)]) -> Vec<DumpedMetric>
+    where
+        String: Borrow<K>,
+        K: Hash + Eq + ?Sized,
+    {
+        let mut dumped_metrics = Vec::new();
+        if let Some(dm) = self.metrics.get(metric) {
+            for m in dm {
+                if labels.iter().all(|l| {
+                    m.labels
+                        .get(l.0)
+                        .filter(|metric_label| l.1 == *metric_label)
+                        .is_some()
+                }) {
+                    dumped_metrics.push(m.clone());
+                }
+            }
+        }
+
+        dumped_metrics
     }
 }
 
@@ -492,7 +531,39 @@ macro_rules! get_metric {
             $(
                 labels.push(($label, $value));
             )*
-            $metrics_dump.metric_with_labels($metrics_name, labels)
+            $metrics_dump.metric_with_labels($metrics_name, labels.as_slice())
+        }
+    };
+}
+
+/// Checks a metrics dump for a specified metric with a set of labels.
+/// If the metric exists, returns a vector of all metrics that match
+/// the specified metrics that include the set of labels as a subset of
+/// their own labels.
+///
+/// The first two parameters are MetricsDump, MetricsName. After which,
+/// any number of labels can be specified. Labels are specified with the
+/// syntax: label1 => label_value.
+///
+/// Example usage:
+///    get_all_metrics!(
+///         metrics_dump,
+///         recorded::SERVER_VIEW_QUERY_RESULT,
+///         "result" => recorded::ViewQueryResult::REPLAY);
+#[macro_export]
+macro_rules! get_all_metrics {
+    (
+        $metrics_dump:expr,
+        $metrics_name:expr
+        $(, $label:expr => $value:expr)*
+    ) => {
+        {
+            #[allow(unused_mut)]
+            let mut labels = Vec::new();
+            $(
+                labels.push(($label, $value));
+            )*
+            $metrics_dump.all_metrics_with_labels($metrics_name, labels.as_slice())
         }
     };
 }

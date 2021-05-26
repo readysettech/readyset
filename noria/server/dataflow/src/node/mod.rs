@@ -200,6 +200,11 @@ impl Node {
     pub fn shard_by(&mut self, s: Sharding) {
         self.sharded_by = s;
     }
+
+    /// Returns the node's inner NodeType as a String.
+    pub fn node_type_string(&self) -> String {
+        self.inner.to_string()
+    }
 }
 
 // events

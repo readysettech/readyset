@@ -22,6 +22,7 @@
 
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
+use metrics::counter;
 use metrics::histogram;
 use nom_sql::BinaryOperator;
 use noria::metrics::recorded;
@@ -416,6 +417,12 @@ impl<'a> Migration<'a> {
                        "type" => format!("{:?}", mainline.ingredients[ni]),
                        "node" => ni.index(),
                        "local" => nnodes
+                );
+                counter!(
+                    recorded::DOMAIN_NODE_ADDED,
+                    1,
+                    "domain" => domain.index().to_string(),
+                    "ntype" => (&mainline.ingredients[ni]).node_type_string()
                 );
 
                 let mut ip: IndexPair = ni.into();
