@@ -4,6 +4,8 @@ mod server;
 
 #[cfg(test)]
 mod readyset;
+#[cfg(test)]
+mod readyset_mysql;
 
 use anyhow::{anyhow, Result};
 use docker::{kill_zookeeper, start_zookeeper};
@@ -11,7 +13,7 @@ use futures::executor;
 use noria::consensus::ZookeeperAuthority;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
-use server::{NoriaServerRunner, ServerProcessHandle};
+use server::{NoriaMySQLRunner, NoriaServerRunner, ProcessHandle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -21,19 +23,36 @@ use url::Url;
 #[cfg(test)]
 use std::env;
 
-/// Source of the noria-server binary.
-pub enum NoriaServerSource {
+/// Path to noria binaries on the local machine.
+pub struct NoriaBinaryPath {
+    /// Path to a built noria-server on the local machine.
+    pub noria_server: PathBuf,
+    /// Optional path to noria-mysql on the local machine. noria-mysql
+    /// may not be included in the build.
+    pub noria_mysql: Option<PathBuf>,
+}
+
+impl NoriaBinaryPath {
+    fn exists(&self) -> bool {
+        self.noria_server.exists()
+            && (self.noria_mysql.is_none()
+                || (self.noria_mysql.is_some() && self.noria_mysql.as_ref().unwrap().exists()))
+    }
+}
+
+/// Source of the noria binaries.
+pub enum NoriaBinarySource {
     /// Use a prebuilt binary specified by the path.
-    Existing(PathBuf),
+    Existing(NoriaBinaryPath),
     /// Build the binary based on `BuildParams`.
     Build(BuildParams),
 }
 
-/// Parameters required to build noria-server.
+/// Parameters required to build noria binaries.
 pub struct BuildParams {
-    /// The path to the root project to build noria-server from.
+    /// The path to the root project to build binaries from.
     root_project_path: PathBuf,
-    /// The target directory to store the noria-server binary.
+    /// The target directory to store the noria binaries.
     target_dir: PathBuf,
     /// Whether we build the release version of the binary.
     release: bool,
@@ -64,26 +83,29 @@ pub struct DeploymentParams {
     /// Name of the cluster, cluster resources will be prefixed
     /// with this name.
     name: String,
-    /// Source of the noria-server binary. `start_multi_process`
+    /// Source of the binaries. `start_multi_process`
     /// may be required to do more work based on this value.
-    noria_server_source: NoriaServerSource,
+    noria_server_source: NoriaBinarySource,
     /// Number of shards for dataflow nodes.
     sharding: Option<usize>,
     /// The primary region of the noria cluster.
     primary_region: Option<String>,
     /// Parameters for the set of noria-server instances in the deployment.
     servers: Vec<ServerParams>,
+    /// Deploy the mysql adapter.
+    mysql_adapter: bool,
 }
 
 impl DeploymentParams {
     // TODO(justin): Convert to a builder pattern to make this cleaner.
-    pub fn new(name: &str, noria_server_source: NoriaServerSource) -> Self {
+    pub fn new(name: &str, noria_server_source: NoriaBinarySource) -> Self {
         Self {
             name: name.to_string(),
             noria_server_source,
             sharding: None,
             primary_region: None,
             servers: vec![],
+            mysql_adapter: false,
         }
     }
 
@@ -98,6 +120,10 @@ impl DeploymentParams {
     pub fn add_server(&mut self, server: ServerParams) {
         self.servers.push(server);
     }
+
+    pub fn deploy_mysql_adapter(&mut self) {
+        self.mysql_adapter = true;
+    }
 }
 
 /// A handle to a single server in the deployment.
@@ -107,7 +133,15 @@ pub struct ServerHandle {
     /// The parameters used to create the server.
     pub params: ServerParams,
     /// The local process the server is running in.
-    process: ServerProcessHandle,
+    pub process: ProcessHandle,
+}
+
+/// A handle to a mysql-adapter instance in the deployment.
+pub struct MySQLAdapterHandle {
+    /// The mysql connection string of the adapter.
+    pub conn_str: String,
+    /// The local process the adapter is running in.
+    pub process: ProcessHandle,
 }
 
 /// A handle to a deployment created with `start_multi_process`.
@@ -126,15 +160,17 @@ pub struct DeploymentHandle {
     /// A handle to each noria server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
-    /// The source of the noria-server binary. Stored here to allow
-    /// new servers to be started up.
-    noria_server_path: PathBuf,
+    /// The paths to the binaries for the deployment.
+    noria_binary_paths: NoriaBinaryPath,
     /// Dataflow sharding for new servers.
     sharding: Option<usize>,
     /// The primary region of the deployment.
     primary_region: Option<String>,
     /// Next new server port.
     port: u16,
+    /// Holds a handle to the mysql adapter if this deployment includes
+    /// a mysql adapter.
+    mysql_adapter: Option<MySQLAdapterHandle>,
 }
 
 impl DeploymentHandle {
@@ -144,7 +180,7 @@ impl DeploymentHandle {
         self.port = port;
         let handle = start_server(
             &params,
-            &self.noria_server_path,
+            &self.noria_binary_paths.noria_server,
             &self.name,
             self.sharding,
             self.primary_region.as_ref(),
@@ -194,10 +230,13 @@ impl DeploymentHandle {
             return Ok(());
         }
 
+        // Drop any errors on failure to kill so we complete
+        // cleanup.
         for h in &mut self.noria_server_handles {
-            // Drop any errors on failure to kill so we complete
-            // cleanup.
             let _ = h.1.process.kill();
+        }
+        if let Some(adapter_handle) = &mut self.mysql_adapter {
+            let _ = adapter_handle.process.kill();
         }
         kill_zookeeper(&self.name).await?;
         std::fs::remove_dir_all(&get_log_path(&self.name))?;
@@ -212,6 +251,10 @@ impl DeploymentHandle {
 
     pub fn server_handles(&mut self) -> &mut HashMap<Url, ServerHandle> {
         &mut self.noria_server_handles
+    }
+
+    pub fn mysql_connection_str(&self) -> Option<String> {
+        self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
     }
 }
 
@@ -290,6 +333,20 @@ fn start_server(
     })
 }
 
+fn start_mysql_adapter(
+    noria_mysql_path: &Path,
+    deployment_name: &str,
+    zookeeper_addr: &str,
+    port: u16,
+) -> Result<ProcessHandle> {
+    let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
+    runner.set_deployment(deployment_name);
+    runner.set_port(port);
+    runner.set_zookeeper(zookeeper_addr);
+
+    runner.start()
+}
+
 /// Checks the set of deployment params for invalid configurations
 pub fn check_deployment_params(params: &DeploymentParams) -> anyhow::Result<()> {
     match &params.primary_region {
@@ -353,16 +410,17 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     kill_zookeeper(&params.name).await?;
     start_zookeeper(&params.name, port).await?;
 
-    let noria_server_path = match params.noria_server_source {
+    let noria_binary_paths = match params.noria_server_source {
         // TODO(justin): Make building the noria container start in a seperate
         // thread to parallelize zookeeper startup and binary building.
-        NoriaServerSource::Build(build_params) => cargo_builder::build_noria_server(
+        NoriaBinarySource::Build(build_params) => cargo_builder::build_noria(
             &build_params.root_project_path,
             &build_params.target_dir,
             build_params.release,
             build_params.rebuild,
+            params.mysql_adapter,
         )?,
-        NoriaServerSource::Existing(path) => path,
+        NoriaBinarySource::Existing(binary_paths) => binary_paths,
     };
 
     // Create the noria-server instances.
@@ -371,7 +429,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
         port = get_next_good_port(Some(port));
         let handle = start_server(
             server,
-            &noria_server_path,
+            &noria_binary_paths.noria_server,
             &params.name,
             params.sharding,
             params.primary_region.as_ref(),
@@ -393,6 +451,25 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     let metrics_handle = ControllerHandle::new(metrics_authority).await?;
     let metrics = MetricsClient::new(metrics_handle).unwrap();
 
+    // Start a MySQL adapter instance.
+    let mysql_adapter_handle = if params.mysql_adapter {
+        port = get_next_good_port(Some(port));
+        let process = start_mysql_adapter(
+            noria_binary_paths.noria_mysql.as_ref().unwrap(),
+            &params.name,
+            &zookeeper_addr,
+            port,
+        )?;
+        // Sleep to give the adapter time to startup.
+        sleep(Duration::from_millis(500));
+        Some(MySQLAdapterHandle {
+            conn_str: format!("mysql://127.0.0.1:{}", port),
+            process,
+        })
+    } else {
+        None
+    };
+
     Ok(DeploymentHandle {
         handle,
         metrics,
@@ -400,10 +477,11 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
         zookeeper_addr,
         noria_server_handles: handles,
         shutdown: false,
-        noria_server_path,
+        noria_binary_paths,
         sharding: params.sharding,
         primary_region: params.primary_region,
         port,
+        mysql_adapter: mysql_adapter_handle,
     })
 }
 
@@ -437,7 +515,7 @@ mod tests {
 
         let mut deployment = DeploymentParams::new(
             cluster_name,
-            NoriaServerSource::Build(BuildParams {
+            NoriaBinarySource::Build(BuildParams {
                 root_project_path: project_root,
                 target_dir: build_dir,
                 release: true,
@@ -480,7 +558,7 @@ mod tests {
         let cluster_name = "ct_minimal";
         let mut deployment = DeploymentParams::new(
             cluster_name,
-            NoriaServerSource::Build(BuildParams {
+            NoriaBinarySource::Build(BuildParams {
                 root_project_path: get_project_root(),
                 target_dir: get_project_root().join("test_target"),
                 release: true,
@@ -500,7 +578,7 @@ mod tests {
         let cluster_name = "ct_multiregion";
         let mut deployment = DeploymentParams::new(
             cluster_name,
-            NoriaServerSource::Build(BuildParams {
+            NoriaBinarySource::Build(BuildParams {
                 root_project_path: get_project_root(),
                 target_dir: get_project_root().join("test_target"),
                 release: true,
@@ -521,7 +599,7 @@ mod tests {
         let cluster_name = "ct_server_management";
         let mut deployment = DeploymentParams::new(
             cluster_name,
-            NoriaServerSource::Build(BuildParams {
+            NoriaBinarySource::Build(BuildParams {
                 root_project_path: get_project_root(),
                 target_dir: get_project_root().join("test_target"),
                 release: true,
@@ -553,8 +631,14 @@ mod tests {
 
     #[tokio::test]
     async fn clustertest_no_server_in_primary_region_test() {
-        let mut deployment =
-            DeploymentParams::new("fake_cluster", NoriaServerSource::Existing("/".into()));
+        let mut deployment = DeploymentParams::new(
+            "fake_cluster",
+            NoriaBinarySource::Existing(NoriaBinaryPath {
+                noria_server: "/".into(),
+                noria_mysql: None,
+            }),
+        );
+
         deployment.set_primary_region("r1");
         deployment.add_server(ServerParams::default().with_region("r2"));
         deployment.add_server(ServerParams::default().with_region("r3"));
@@ -563,8 +647,14 @@ mod tests {
 
     #[tokio::test]
     async fn clustertest_server_region_without_primary_region() {
-        let mut deployment =
-            DeploymentParams::new("fake_cluster", NoriaServerSource::Existing("/".into()));
+        let mut deployment = DeploymentParams::new(
+            "fake_cluster",
+            NoriaBinarySource::Existing(NoriaBinaryPath {
+                noria_server: "/".into(),
+                noria_mysql: None,
+            }),
+        );
+
         deployment.add_server(ServerParams::default().with_region("r1"));
         deployment.add_server(ServerParams::default().with_region("r2"));
 

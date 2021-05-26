@@ -20,7 +20,7 @@ async fn query_regional_routing_test() {
     let cluster_name = "ct_server_regional";
     let mut deployment = DeploymentParams::new(
         cluster_name,
-        NoriaServerSource::Build(BuildParams {
+        NoriaBinarySource::Build(BuildParams {
             root_project_path: get_project_root(),
             target_dir: get_project_root().join("test_target"),
             release: true,
@@ -123,7 +123,7 @@ async fn controller_in_primary_test() {
     let cluster_name = "ct_controller_in_primary";
     let mut deployment = DeploymentParams::new(
         cluster_name,
-        NoriaServerSource::Build(BuildParams {
+        NoriaBinarySource::Build(BuildParams {
             root_project_path: get_project_root(),
             target_dir: get_project_root().join("test_target"),
             release: true,
