@@ -140,5 +140,15 @@ async fn controller_in_primary_test() {
     let controller_uri = deployment.handle.controller_uri().await.unwrap();
     let controller_handle = deployment.server_handles().get(&controller_uri).unwrap();
     assert_eq!(controller_handle.params.region, Some("r1".to_string()));
+
+    deployment.kill_server(&controller_uri).await.unwrap();
+    let new_controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let new_controller_handle = deployment
+        .server_handles()
+        .get(&new_controller_uri)
+        .unwrap();
+    assert_ne!(new_controller_uri, controller_uri);
+    assert_eq!(new_controller_handle.params.region, Some("r1".to_string()));
+
     deployment.teardown().await.unwrap();
 }

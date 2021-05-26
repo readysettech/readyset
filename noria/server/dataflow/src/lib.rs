@@ -35,6 +35,7 @@ mod domain;
 mod group_commit;
 mod processing;
 
+use derivative::Derivative;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -82,7 +83,8 @@ pub enum DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Derivative)]
+#[derivative(PartialEq)]
 pub struct PersistenceParameters {
     /// Force a flush if packets have been in the base table queue for this long.
     pub flush_timeout: time::Duration,
@@ -91,6 +93,7 @@ pub struct PersistenceParameters {
     /// Filename prefix for persistent log entries.
     pub log_prefix: String,
     /// Absolute path where the log will be written. Defaults to the current directory.
+    #[derivative(PartialEq = "ignore")]
     pub log_dir: Option<PathBuf>,
     /// Number of background threads PersistentState can use (shared acrosss all worker threads).
     pub persistence_threads: i32,

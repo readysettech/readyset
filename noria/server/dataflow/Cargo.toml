@@ -46,6 +46,7 @@ vec1 = "1.6.0"
 maplit = "1.0.2"
 chrono = { version = "0.4.0", features = ["serde"] }
 chrono-tz = { version = "0.5", features = ["serde"] }
+derivative = "2.2.0"
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
