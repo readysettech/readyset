@@ -30,6 +30,22 @@ impl NodeType {
     }
 }
 
+impl ToString for NodeType {
+    fn to_string(&self) -> String {
+        match *self {
+            NodeType::Ingress => "Ingress",
+            NodeType::Base(_) => "Base",
+            NodeType::Internal(_) => "Internal",
+            NodeType::Egress(_) => "Egress",
+            NodeType::Sharder(_) => "Sharder",
+            NodeType::Reader(_) => "Reader",
+            NodeType::Source => "Source",
+            NodeType::Dropped => "Dropped",
+        }
+        .to_string()
+    }
+}
+
 impl From<ops::NodeOperator> for NodeType {
     fn from(op: ops::NodeOperator) -> Self {
         NodeType::Internal(op)

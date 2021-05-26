@@ -12,12 +12,17 @@ use crate::Builder;
 use crate::DataType;
 use dataflow::node::special::Base;
 use dataflow::ops::union::Union;
-use noria::get_metric;
+use noria::consensus::LocalAuthority;
+use noria::internal::DomainIndex;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
+use noria::{get_all_metrics, get_metric};
+use petgraph::graph::NodeIndex;
 use serial_test::serial;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -197,4 +202,147 @@ async fn test_metrics_client() {
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
     assert!(get_external_requests_count(metrics_dump) < second_count);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn reader_replication() {
+    let authority = Arc::new(LocalAuthority::new());
+    let cluster_name = "reader_replication";
+
+    let mut w1 = build_custom(
+        cluster_name,
+        Some(DEFAULT_SHARDING),
+        true,
+        true,
+        authority.clone(),
+        None,
+    )
+    .await;
+    let mut metrics_client = initialize_metrics(&mut w1).await;
+
+    let instances_standalone = w1.get_instances().await.unwrap();
+    assert_eq!(1usize, instances_standalone.len());
+
+    let w1_addr = instances_standalone[0].0.clone();
+
+    let _w2 = build_custom(
+        "reader_replication",
+        Some(DEFAULT_SHARDING),
+        true,
+        false,
+        authority.clone(),
+        None,
+    )
+    .await;
+
+    while w1.get_instances().await.unwrap().len() < 2 {
+        eprintln!("waiting");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let instances_cluster = w1.get_instances().await.unwrap();
+
+    let w2_addr = instances_cluster
+        .iter()
+        .map(|(addr, _, _)| addr)
+        .find(|&addr| addr != &w1_addr)
+        .unwrap()
+        .clone();
+
+    w1.install_recipe(
+        "
+      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
+      QUERY q:
+        SELECT *
+        FROM t1;",
+    )
+    .await
+    .unwrap();
+
+    let metrics = metrics_client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    let reader_added_metrics = get_all_metrics!(
+        metrics_dump,
+        recorded::DOMAIN_NODE_ADDED,
+        "ntype" => "Reader"
+    );
+    assert_eq!(reader_added_metrics.len(), 1);
+
+    w1.table("t1")
+        .await
+        .unwrap()
+        .insert(vec![1i64.into(), 2i64.into(), 3i64.into()])
+        .await
+        .unwrap();
+
+    let worker_without_reader = if w1
+        .view_from_workers("q", vec![w1_addr.clone()])
+        .await
+        .is_err()
+    {
+        w1_addr
+    } else {
+        w2_addr
+    };
+
+    let info_pre_replication = w1.get_info().await.unwrap();
+    let domains_pre_replication =
+        info_pre_replication
+            .workers
+            .values()
+            .fold(HashMap::new(), |mut acc, entry| {
+                acc.extend(entry.iter().map(|e| (e.0 .0, e.1)));
+                acc
+            });
+
+    let repl_result = w1
+        .replicate_readers(vec!["q".to_owned()], Some(worker_without_reader.clone()))
+        .await
+        .unwrap();
+
+    let metrics = metrics_client.get_metrics().await.unwrap();
+    let metrics_dump = &metrics[0].metrics;
+    let reader_added_metrics = get_all_metrics!(
+        metrics_dump,
+        recorded::DOMAIN_NODE_ADDED,
+        "ntype" => "Reader"
+    );
+    assert_eq!(reader_added_metrics.len(), 2);
+
+    let readers = repl_result.new_readers;
+    assert!(readers.contains_key("q"));
+
+    let info_post_replication = w1.get_info().await.unwrap();
+    let domains_from_worker: HashMap<DomainIndex, Vec<NodeIndex>> = info_post_replication
+        .workers
+        .get(&worker_without_reader)
+        .unwrap()
+        .iter()
+        .fold(HashMap::new(), |mut acc, (dk, nodes)| {
+            acc.entry(dk.0)
+                .or_insert_with(Vec::new)
+                .extend(nodes.iter());
+            acc
+        });
+
+    let result = w1.view_from_workers("q", vec![worker_without_reader]).await;
+    assert!(result.is_ok());
+    let mut records: Vec<Vec<DataType>> = result
+        .unwrap()
+        .lookup(&[0.into()], true)
+        .await
+        .unwrap()
+        .into();
+    records.sort();
+    assert_eq!(records, vec![vec![1.into(), 2.into(), 3.into(), 0.into()]]);
+    for (domain, nodes) in readers.get("q").unwrap().iter() {
+        assert!(domains_pre_replication.get(domain).is_none());
+        let domain_nodes_opt = domains_from_worker.get(domain);
+        assert!(domain_nodes_opt.is_some());
+        let domain_nodes = domain_nodes_opt.unwrap();
+        for node in nodes {
+            assert!(domain_nodes.contains(node))
+        }
+    }
 }
