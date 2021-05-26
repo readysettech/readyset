@@ -493,11 +493,13 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {
                         state.epoch = epoch;
-                        // check that running config is the same that builder requested
+                        // check that running config is compatible with the new
+                        // configuration.
                         assert_eq!(
                             state.config, config,
-                            "Config in Zk does not match requested config!"
+                            "Config in Zk is not compatible with requested config!"
                         );
+                        state.config = config.clone();
                         Ok(state)
                     }
                 },

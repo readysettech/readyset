@@ -3888,6 +3888,7 @@ dependencies = [
  "bincode",
  "chrono",
  "chrono-tz",
+ "derivative",
  "derive_more",
  "futures-util",
  "hashbag",

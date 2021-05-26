@@ -424,6 +424,7 @@ pub(crate) struct Config {
     pub(crate) threads: Option<usize>,
     pub(crate) primary_region: Option<String>,
 }
+
 impl Default for Config {
     fn default() -> Self {
         Self {
