@@ -106,3 +106,39 @@ async fn query_regional_routing_test() {
 
     deployment.teardown().await.unwrap();
 }
+
+// This test verifies that the controller is elected from the
+// primary region.
+//
+// Steps:
+//   1. Create a four server deployment with regions `r1`, `r1`, `r2`, and
+//      `r3`, with primary region `r1`.
+//   2. Retrieve the ServerHandle associated with the controller
+//      server and verify that it is in `r1`.
+//   3. Kill the server associated with the controller.
+//   4. Verify the new controller elected is also in `r1`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn controller_in_primary_test() {
+    let cluster_name = "ct_controller_in_primary";
+    let mut deployment = DeploymentParams::new(
+        cluster_name,
+        NoriaServerSource::Build(BuildParams {
+            root_project_path: get_project_root(),
+            target_dir: get_project_root().join("test_target"),
+            release: true,
+            rebuild: false,
+        }),
+    );
+    deployment.set_primary_region("r1");
+    deployment.add_server(ServerParams::default().with_region("r1"));
+    deployment.add_server(ServerParams::default().with_region("r1"));
+    deployment.add_server(ServerParams::default().with_region("r2"));
+    deployment.add_server(ServerParams::default().with_region("r3"));
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let controller_handle = deployment.server_handles().get(&controller_uri).unwrap();
+    assert_eq!(controller_handle.params.region, Some("r1".to_string()));
+    deployment.teardown().await.unwrap();
+}
