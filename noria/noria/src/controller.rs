@@ -624,6 +624,13 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         self.rpc("healthy_workers", ())
     }
 
+    /// Get the url of the current noria controller.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn controller_uri(&mut self) -> impl Future<Output = ReadySetResult<Url>> + '_ {
+        self.rpc("controller_uri", ())
+    }
+
     /// Get the maximum replication offset that has been written to any of the tables in this Noria
     /// instance
     ///

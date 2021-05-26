@@ -22,6 +22,7 @@ use noria::{
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
+use reqwest::Url;
 use slog::Logger;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
@@ -79,6 +80,7 @@ pub struct ControllerInner {
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
+    controller_uri: Url,
 
     log: slog::Logger,
 }
@@ -204,6 +206,9 @@ impl ControllerInner {
             (Method::POST, "/outputs") => Ok(Ok(bincode::serialize(&self.outputs()).unwrap())),
             (Method::GET | Method::POST, "/instances") => {
                 Ok(Ok(bincode::serialize(&self.get_instances()).unwrap()))
+            }
+            (Method::GET | Method::POST, "/controller_uri") => {
+                Ok(Ok(bincode::serialize(&self.controller_uri).unwrap()))
             }
             (Method::GET, "/workers") | (Method::POST, "/workers") => Ok(Ok(bincode::serialize(
                 &self.workers.keys().collect::<Vec<_>>(),
@@ -585,7 +590,7 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(log: slog::Logger, state: ControllerState) -> Self {
+    pub(super) fn new(log: slog::Logger, state: ControllerState, controller_uri: Url) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -638,6 +643,7 @@ impl ControllerInner {
             pending_recovery,
             last_checked_workers: Instant::now(),
             read_addrs: Default::default(),
+            controller_uri,
 
             replication_offset: state.replication_offset,
         }

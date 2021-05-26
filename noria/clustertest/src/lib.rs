@@ -42,6 +42,7 @@ pub struct BuildParams {
 }
 
 /// Parameters for a single noria-server instance.
+#[derive(Clone)]
 pub struct ServerParams {
     /// A server's region string, passed in via --region.
     region: Option<String>,
@@ -103,8 +104,10 @@ impl DeploymentParams {
 pub struct ServerHandle {
     /// The external address of the server.
     pub addr: Url,
+    /// The parameters used to create the server.
+    pub params: ServerParams,
     /// The local process the server is running in.
-    pub process: ServerProcessHandle,
+    process: ServerProcessHandle,
 }
 
 /// A handle to a deployment created with `start_multi_process`.
@@ -164,12 +167,12 @@ impl DeploymentHandle {
 
     /// Kill an existing noria-server instance in the deployment referenced
     /// by `ServerHandle`.
-    pub async fn kill_server(&mut self, server_addr: Url) -> anyhow::Result<()> {
-        if !self.noria_server_handles.contains_key(&server_addr) {
+    pub async fn kill_server(&mut self, server_addr: &Url) -> anyhow::Result<()> {
+        if !self.noria_server_handles.contains_key(server_addr) {
             return Err(anyhow!("Server handle does not exist in deployment"));
         }
 
-        let mut handle = self.noria_server_handles.remove(&server_addr).unwrap();
+        let mut handle = self.noria_server_handles.remove(server_addr).unwrap();
         handle.process.kill()?;
 
         // Wait until the server is no longer visible in the deployment.
@@ -205,6 +208,10 @@ impl DeploymentHandle {
 
     pub fn server_addrs(&self) -> Vec<Url> {
         self.noria_server_handles.keys().cloned().collect()
+    }
+
+    pub fn server_handles(&mut self) -> &mut HashMap<Url, ServerHandle> {
+        &mut self.noria_server_handles
     }
 }
 
@@ -264,7 +271,8 @@ fn start_server(
     if let Some(shard) = sharding {
         runner.set_shards(shard);
     }
-    if let Some(region) = server_params.region.as_ref() {
+    let region = server_params.region.as_ref();
+    if let Some(region) = region {
         runner.set_region(&region);
     }
     if let Some(region) = primary_region.as_ref() {
@@ -278,6 +286,7 @@ fn start_server(
     Ok(ServerHandle {
         addr,
         process: runner.start()?,
+        params: server_params.clone(),
     })
 }
 
@@ -536,7 +545,7 @@ mod tests {
         assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 3);
 
         // Now kill that server we started up.
-        deployment.kill_server(server_handle).await.unwrap();
+        deployment.kill_server(&server_handle).await.unwrap();
         assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
 
         deployment.teardown().await.unwrap();

@@ -306,7 +306,11 @@ where
             CampaignUpdate::WonLeaderElection(state) => {
                 info!(self.log, "won leader election, creating ControllerInner");
 
-                self.inner = Some(ControllerInner::new(self.log.clone(), state.clone()));
+                self.inner = Some(ControllerInner::new(
+                    self.log.clone(),
+                    state.clone(),
+                    self.our_descriptor.controller_uri.clone(),
+                ));
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
                     heartbeat_every: state.config.heartbeat_every,
