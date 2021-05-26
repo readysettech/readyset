@@ -823,6 +823,7 @@ dependencies = [
  "anyhow",
  "futures 0.3.14",
  "futures-util",
+ "mysql 20.1.0",
  "noria",
  "port_scanner",
  "rand 0.8.3",
