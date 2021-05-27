@@ -368,8 +368,17 @@ enum TokenTree {
     Group(Vec<TokenTree>),
 }
 
-named!(infix(&[u8]) -> TokenTree, complete!(map!(alt!(
-    terminated!(tag_no_case!("and"), multispace1) => { |_| BinaryOperator::And } |
+// no_and variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in the
+// right-hand side of a BETWEEN, eg:
+//     foo between (1 + 2) and 3 + 5
+// should parse the same as:
+//     foo between (1 + 2) and (3 + 5)
+// , but:
+//     foo between (1 + 2) and 8 and bar
+// should parse the same as:
+//     (foo between (1 + 2) and 8) and bar
+
+named!(infix_no_and(&[u8]) -> TokenTree, complete!(map!(alt!(
     terminated!(tag_no_case!("or"), multispace1) => { |_| BinaryOperator::Or } |
     terminated!(tag_no_case!("like"), multispace1) => { |_| BinaryOperator::Like } |
     do_parse!(
@@ -405,6 +414,11 @@ named!(infix(&[u8]) -> TokenTree, complete!(map!(alt!(
     char!('/') => { |_| BinaryOperator::Divide }
 ), TokenTree::Infix)));
 
+named!(infix(&[u8]) -> TokenTree, complete!(alt!(
+    terminated!(tag_no_case!("and"), multispace1) => { |_| TokenTree::Infix(BinaryOperator::And) } |
+    infix_no_and
+)));
+
 named!(prefix(&[u8]) -> TokenTree, map!(alt!(
     tag_no_case!("not") => { |_| UnaryOperator::Not }
 ), TokenTree::Prefix));
@@ -432,6 +446,28 @@ named!(token_tree(&[u8]) -> Vec<TokenTree>, do_parse!(
     prefix: many0!(prefix)
         >> primary: primary
         >> rest: rest
+        >> ({
+            let mut res = prefix;
+            res.push(primary);
+            for (infix, mut prefix, primary) in rest {
+                res.push(infix);
+                res.append(&mut prefix);
+                res.push(primary);
+            }
+            res
+        })
+));
+
+named!(rest_no_and(&[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
+    preceded!(multispace0, infix_no_and),
+    delimited!(multispace0, many0!(prefix), multispace0),
+    primary
+)));
+
+named!(token_tree_no_and(&[u8]) -> Vec<TokenTree>, do_parse!(
+    prefix: many0!(prefix)
+        >> primary: primary
+        >> rest: rest_no_and
         >> ({
             let mut res = prefix;
             res.push(primary);
@@ -577,6 +613,13 @@ named!(pub(crate) between_operand(&[u8]) -> Expression, alt!(
     column_identifier_no_alias => { |c| Expression::Column(c) }
 ));
 
+named!(pub(crate) between_max(&[u8]) -> Expression, alt!(
+    map!(token_tree_no_and, |tt| {
+        ExprParser.parse(&mut tt.into_iter()).unwrap()
+    }) |
+    simple_expr
+));
+
 named!(between_expr(&[u8]) -> Expression, do_parse!(
     operand: map!(between_operand, Box::new)
         >> multispace1
@@ -587,7 +630,7 @@ named!(between_expr(&[u8]) -> Expression, do_parse!(
         >> multispace1
         >> tag_no_case!("and")
         >> multispace1
-        >> max: map!(simple_expr, Box::new)
+        >> max: map!(between_max, Box::new)
         >> (Expression::Between {
             operand,
             min,
@@ -1333,7 +1376,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore] // FIXME
         fn between_with_arithmetic() {
             let qs = b"foo between (1 + 2) and 3 + 5";
             let expected = Expression::Between {
@@ -1353,6 +1395,7 @@ mod tests {
             let res = expression(qs);
             let (remaining, result) = res.unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            eprintln!("{}", result);
             assert_eq!(result, expected);
         }
 
