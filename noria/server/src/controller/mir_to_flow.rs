@@ -1160,9 +1160,11 @@ fn extract_conditions(
         ComparisonOp(ref ct) => to_conditions(ct, fields, &parent, remapped_exprs_to_parent_names),
         Bracketed(ce) => extract_conditions(&ce, fields, parent, remapped_exprs_to_parent_names),
         NegationOp(_) => unreachable!("negation should have been removed earlier"),
-        Base(_) => Err(MirUnsupportedCondition()),
-        ConditionExpression::Arithmetic(_) => Err(MirUnsupportedCondition()),
-        ExistsOp(_) => Err(MirUnsupportedCondition()),
+        ExistsOp(_) | ConditionExpression::Arithmetic(_) | Base(_) => {
+            Err(MirUnsupportedCondition {
+                expression: conditions.to_string,
+            })
+        }
         Between { .. } => unreachable!("BETWEEN should have been removed earlier"),
     }
 }
@@ -1218,7 +1220,9 @@ fn to_conditions(
     // TODO(malte): we only support one level of condition nesting at this point :(
     let l = match *ct.left.as_ref() {
         ConditionExpression::Base(ConditionBase::Field(ref f)) => Ok(column_from_parent(f)),
-        _ => Err(MirUnsupportedCondition()),
+        ref left => Err(MirUnsupportedCondition {
+            expression: left.to_string(),
+        }),
     }?;
     let f = match *ct.right.as_ref() {
         ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => Some(
@@ -1241,7 +1245,9 @@ fn to_conditions(
         ),
         _ => None,
     }
-    .ok_or_else(|| MirUnsupportedCondition())?;
+    .ok_or_else(|| MirUnsupportedCondition {
+        expression: ct.right.to_string(),
+    })?;
 
     let mut filters = Vec::new();
     filters.push((l, f));
@@ -1260,18 +1266,24 @@ fn logical_op_to_conditions(
                     logical_op_to_conditions(ct2, columns, n)
                 }
                 ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
-                _ => Err(MirUnsupportedCondition()),
+                ref left => Err(MirUnsupportedCondition {
+                    expression: left.to_string(),
+                }),
             }?;
             let mut right_filter = match ct.right.as_ref() {
                 ConditionExpression::LogicalOp(ref ct2) => {
                     logical_op_to_conditions(ct2, columns, n)
                 }
                 ConditionExpression::ComparisonOp(ref ct2) => to_conditions(ct2, columns, n, None),
-                _ => Err(MirUnsupportedCondition()),
+                ref right => Err(MirUnsupportedCondition {
+                    expression: right.to_string(),
+                }),
             }?;
             left_filter.append(&mut right_filter);
             Ok(left_filter)
         }
-        _ => Err(MirUnsupportedCondition()),
+        _ => Err(MirUnsupportedCondition {
+            expression: ct.to_string(),
+        }),
     }
 }

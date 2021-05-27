@@ -262,9 +262,12 @@ pub enum ReadySetError {
     #[error("Primary key must be on a primitive field")]
     InvalidPrimaryKeyField,
 
-    /// An unsupported conditional combo in MIR.
-    #[error("Unsupported conditional in MIR")]
-    MirUnsupportedCondition(),
+    /// An unsupported condition expression in MIR.
+    #[error("Unsupported conditional in MIR: {expression}")]
+    MirUnsupportedCondition {
+        /// The expression that is unsupported, represented as a SQL string
+        expression: String,
+    },
 
     /// A worker operation couldn't be completed because the worker doesn't know where the
     /// controller is yet, or has lost track of it.
