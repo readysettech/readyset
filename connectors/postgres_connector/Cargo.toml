@@ -1,0 +1,20 @@
+[package]
+name = "postgres_connector"
+version = "0.1.0"
+authors = ["Vlad Krasnov <vlad@readyset.io>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.33"
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+native-tls = "0.2.7"
+tokio = { version = "1.5", features = ["full"] }
+futures = { version = "0.3" }
+bytes = "1.0"
+slog = "2.7"
+slog-term = "2.8"
+chrono = "0.4"
+
+noria = { path = "../../noria/noria", package = "noria" }

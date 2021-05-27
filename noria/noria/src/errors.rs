@@ -618,6 +618,14 @@ impl From<mysql_async::Error> for ReadySetError {
     }
 }
 
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
+impl From<tokio_postgres::Error> for ReadySetError {
+    fn from(e: tokio_postgres::Error) -> ReadySetError {
+        ReadySetError::ReplicationFailed(e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{internal, ReadySetResult};

@@ -41,9 +41,7 @@ pub struct MySqlBinlogConnector {
     schemas: Vec<String>,
 }
 
-///
 /// This is the action that the connector wants Noria to execute
-///
 #[derive(Debug)]
 pub enum BinlogAction {
     /// Database schema has changed (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`)
