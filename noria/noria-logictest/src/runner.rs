@@ -6,6 +6,7 @@ use mysql::Row;
 use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
 use std::net::TcpListener;
@@ -211,22 +212,32 @@ impl TestScript {
         let mut rows = results
             .into_iter()
             .map(|mut row: Row| -> anyhow::Result<Vec<Value>> {
-                query
-                    .column_types
-                    .iter()
-                    .enumerate()
-                    .map(|(col_idx, col_type)| -> anyhow::Result<Value> {
-                        let val = row.take(col_idx).ok_or_else(|| {
-                            anyhow!(
-                                "Row had the wrong number of columns: expected {}, but got {}",
-                                query.column_types.len(),
-                                row.len()
-                            )
-                        })?;
-                        Ok(Value::from_mysql_value_with_type(val, col_type)
-                            .with_context(|| format!("Converting value to {:?}", col_type))?)
-                    })
-                    .collect::<anyhow::Result<Vec<_>>>()
+                match &query.column_types {
+                    Some(column_types) => column_types
+                        .iter()
+                        .enumerate()
+                        .map(|(col_idx, col_type)| -> anyhow::Result<Value> {
+                            let val = row.take(col_idx).ok_or_else(|| {
+                                anyhow!(
+                                    "Row had the wrong number of columns: expected {}, but got {}",
+                                    column_types.len(),
+                                    row.len()
+                                )
+                            })?;
+                            Ok(Value::from_mysql_value_with_type(val, col_type)
+                                .with_context(|| format!("Converting value to {:?}", col_type))?)
+                        })
+                        .collect(),
+                    None => {
+                        row.unwrap()
+                            .into_iter()
+                            .map(|val| {
+                                Ok(Value::try_from(val)
+                                    .with_context(|| format!("Converting value"))?)
+                            })
+                            .collect()
+                    }
+                }
             });
 
         let vals: Vec<Value> = match query.sort_mode.unwrap_or_default() {
