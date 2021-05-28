@@ -679,6 +679,11 @@ impl ControllerInner {
         nodes: Vec<(NodeIndex, bool)>,
         worker_id_opt: Option<WorkerIdentifier>,
     ) -> ReadySetResult<DomainHandle> {
+        // Reader nodes are always assigned to their own domains, so it's good enough to see
+        // if any of its nodes is a reader.
+        // We check for *any* node (and not *all*) since a reader domain has a reader node and an
+        // ingress node.
+        let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
         let mut nodes = Some(
             nodes
                 .into_iter()
@@ -716,13 +721,18 @@ impl ControllerInner {
             _ => None,
         };
         let selected_worker = selected_worker.as_ref();
-        let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &mut Worker)| {
+        let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
             (selected_worker.is_none())
                 || (selected_worker
                     .filter(|s_worker_id| **worker_id == **s_worker_id)
                     .is_some())
         };
-        let mut wi = self.workers.iter_mut().filter(&worker_selector);
+        let mut wi = self
+            .workers
+            .iter()
+            .filter(worker_selector)
+            .filter(|(_, worker)| !worker.reader_only || is_reader_domain)
+            .cycle();
 
         let mut domain_addresses = vec![];
         let mut assignments = vec![];
@@ -743,14 +753,9 @@ impl ControllerInner {
                 persistence_parameters: self.persistence.clone(),
             };
 
-            let w = loop {
-                if let Some((_, w)) = wi.next() {
-                    if w.healthy {
-                        break w;
-                    }
-                } else {
-                    wi = self.workers.iter_mut().filter(&worker_selector);
-                }
+            let w = match wi.next() {
+                Some((_, w)) if w.healthy => w,
+                _ => internal!("There should always be a valid worker to place the domain!"),
             };
 
             let idx = domain.index.clone();
