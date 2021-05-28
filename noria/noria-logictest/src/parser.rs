@@ -119,7 +119,7 @@ named!(
     )
 );
 
-named!(column_types<Vec<Type>>, many0!(column_type));
+named!(column_types<Vec<Type>>, many1!(column_type));
 
 named!(
     sort_mode<SortMode>,
@@ -289,8 +289,7 @@ named!(
     do_parse!(
         conditionals: conditionals
             >> tag!("query")
-            >> take_while1!(is_space)
-            >> column_types: column_types
+            >> column_types: opt!(preceded!(take_while1!(is_space), column_types))
             >> sort_mode: opt!(preceded!(take_while1!(is_space), sort_mode))
             >> label:
                 opt!(preceded!(
@@ -468,7 +467,41 @@ ORDER BY 1
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: vec![Type::Integer],
+                column_types: Some(vec![Type::Integer]),
+                sort_mode: Some(SortMode::NoSort),
+                label: None,
+                conditionals: vec![],
+                query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
+FROM t1
+ORDER BY 1"
+                    .to_string(),
+                results: QueryResults::Hash {
+                    count: 30,
+                    digest: md5::Digest(
+                        hex::decode("3c13dee48d9356ae19af2515e05e6b54")
+                            .unwrap()
+                            .try_into()
+                            .unwrap()
+                    )
+                },
+                params: Default::default(),
+            }
+        )
+    }
+
+    #[test]
+    fn parse_query_no_column_types() {
+        let input = b"query nosort
+SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
+FROM t1
+ORDER BY 1
+----
+30 values hashing to 3c13dee48d9356ae19af2515e05e6b54";
+        let result = complete(query)(input);
+        assert_eq!(
+            result.unwrap().1,
+            Query {
+                column_types: None,
                 sort_mode: Some(SortMode::NoSort),
                 label: None,
                 conditionals: vec![],
@@ -513,7 +546,7 @@ SELECT a,
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: vec![Type::Integer, Type::Integer, Type::Integer],
+                column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
                 label: None,
                 conditionals: vec![],
@@ -566,7 +599,7 @@ a
                     conditionals: vec![],
                 },),
                 Record::Query(Query {
-                    column_types: vec![Type::Text],
+                    column_types: Some(vec![Type::Text]),
                     sort_mode: Some(SortMode::ValueSort),
                     label: None,
                     conditionals: vec![],
@@ -581,7 +614,7 @@ a
                 }),
                 Record::Query(Query {
                     label: None,
-                    column_types: vec![Type::Text],
+                    column_types: Some(vec![Type::Text]),
                     sort_mode: Some(SortMode::ValueSort),
                     conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
@@ -603,7 +636,7 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: vec![Type::Integer],
+                column_types: Some(vec![Type::Integer]),
                 sort_mode: Some(SortMode::RowSort),
                 label: Some("x0".to_string()),
                 conditionals: vec![],
@@ -637,7 +670,7 @@ SELECT * FROM t1 WHERE id = ?
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: vec![Type::Integer, Type::Integer, Type::Integer],
+                column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
                 label: None,
                 conditionals: vec![],
@@ -661,7 +694,7 @@ $1 = 1
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: vec![Type::Integer, Type::Integer, Type::Integer],
+                column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
                 label: None,
                 conditionals: vec![],
@@ -693,7 +726,7 @@ SELECT * FROM t1
             result.unwrap().1,
             vec![
                 Record::Query(Query {
-                    column_types: vec![Type::Integer],
+                    column_types: Some(vec![Type::Integer]),
                     sort_mode: Some(SortMode::RowSort),
                     label: Some("x0".to_string()),
                     conditionals: vec![],
@@ -704,7 +737,7 @@ SELECT * FROM t1
                     params: Default::default(),
                 }),
                 Record::Query(Query {
-                    column_types: vec![Type::Integer, Type::Integer],
+                    column_types: Some(vec![Type::Integer, Type::Integer]),
                     sort_mode: Some(SortMode::RowSort),
                     label: None,
                     conditionals: vec![],
@@ -729,7 +762,7 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
         assert_eq!(
             result.unwrap().1,
             vec![Record::Query(Query {
-                column_types: vec![Type::Integer],
+                column_types: Some(vec![Type::Integer]),
                 sort_mode: Some(SortMode::RowSort),
                 label: Some("x0".to_string()),
                 conditionals: vec![],

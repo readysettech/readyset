@@ -415,7 +415,7 @@ impl Into<mysql::Params> for QueryParams {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Query {
     pub label: Option<String>,
-    pub column_types: Vec<Type>,
+    pub column_types: Option<Vec<Type>>,
     pub sort_mode: Option<SortMode>,
     pub conditionals: Vec<Conditional>,
     pub query: String,
@@ -429,7 +429,9 @@ impl Display for Query {
             f,
             "{}\nquery {} {}\n{}{}\n----\n{}",
             self.conditionals.iter().join("\n"),
-            self.column_types.iter().join(""),
+            self.column_types
+                .as_ref()
+                .map_or("".to_owned(), |cts| cts.iter().join("")),
             self.sort_mode.map_or("".to_owned(), |sm| sm.to_string()),
             self.query,
             self.params,
