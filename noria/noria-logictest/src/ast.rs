@@ -14,7 +14,7 @@ use derive_more::{From, TryInto};
 use itertools::Itertools;
 use msql_srv::MysqlTime;
 use mysql::chrono::NaiveDateTime;
-use noria::TIMESTAMP_FORMAT;
+use noria::{DataType, TIMESTAMP_FORMAT};
 
 /// The expected result of a statement
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -230,6 +230,26 @@ impl From<Value> for mysql::Value {
     }
 }
 
+impl TryFrom<DataType> for Value {
+    type Error = anyhow::Error;
+
+    fn try_from(value: DataType) -> Result<Self, Self::Error> {
+        match value {
+            DataType::None => Ok(Value::Null),
+            DataType::Int(i) => Ok(Value::Integer(i.into())),
+            DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
+            DataType::BigInt(bi) => Ok(Value::Integer(bi.into())),
+            DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
+            DataType::Real(mantissa, exponent, sign, _) => {
+                Ok(maths::float::encode_f64(mantissa, exponent, sign).into())
+            }
+            DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
+            DataType::Timestamp(ts) => Ok(Value::Date(ts)),
+            DataType::Time(t) => Ok(Value::Time(*t)),
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -253,6 +273,15 @@ impl Display for Value {
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{}", t),
         }
+    }
+}
+
+impl From<f64> for Value {
+    fn from(f: f64) -> Self {
+        Self::Real(
+            f.trunc() as i64,
+            (f.fract() * 1_000_000_000.0).round() as u32,
+        )
     }
 }
 
@@ -349,6 +378,12 @@ impl Display for QueryResults {
     }
 }
 
+impl Default for QueryResults {
+    fn default() -> Self {
+        QueryResults::Results(vec![])
+    }
+}
+
 /// The parameters passed to a prepared query, either positional or named
 #[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
 pub enum QueryParams {
@@ -382,16 +417,22 @@ impl Display for QueryParams {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             QueryParams::PositionalParams(ps) => {
-                write!(f, "{}", ps.iter().map(|p| format!("? = {}", p)).join("\n"))
+                write!(f, "{}", ps.iter().map(|p| format!("? = {}", p)).join("\n"))?;
             }
             QueryParams::NumberedParams(ps) => {
                 write!(
                     f,
                     "{}",
                     ps.iter().map(|(n, p)| format!("${} = {}", n, p)).join("\n")
-                )
+                )?;
             }
         }
+
+        if !self.is_empty() {
+            writeln!(f)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -427,7 +468,7 @@ impl Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}\nquery {} {}\n{}{}\n----\n{}",
+            "{}\nquery {} {}\n{}\n{}----\n{}",
             self.conditionals.iter().join("\n"),
             self.column_types
                 .as_ref()

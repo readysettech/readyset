@@ -34,6 +34,15 @@ pub struct TestScript {
     records: Vec<Record>,
 }
 
+impl From<Vec<Record>> for TestScript {
+    fn from(records: Vec<Record>) -> Self {
+        TestScript {
+            path: "".into(),
+            records,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub deployment_name: String,

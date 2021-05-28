@@ -8,12 +8,19 @@ use std::str::FromStr;
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use colored::Colorize;
+use itertools::Itertools;
 use mysql::prelude::Queryable;
-use nom_sql::{parse_query, SqlQuery};
-use query_generator::GeneratorState;
+use mysql::Params;
+use nom_sql::{parse_query, CreateTableStatement, SqlQuery};
+use query_generator::{GeneratorState, Operations};
 
-use crate::ast::{Query, QueryResults, Record, SortMode, Statement, Value};
+use crate::ast::{
+    Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult, Value,
+};
 use crate::runner::TestScript;
+
+/// Default value for [`Seed::hash_threshold`]
+const DEFAULT_HASH_THRESHOLD: usize = 20;
 
 /// URL for a database to compare against. In the future we likely will want to add more of these
 pub enum DatabaseURL {
@@ -44,20 +51,21 @@ impl DatabaseConnection {
         }
     }
 
-    fn query<Q>(&mut self, query: Q) -> anyhow::Result<Vec<Vec<Value>>>
+    fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
     where
         Q: AsRef<str>,
+        P: Into<Params>,
     {
         match self {
             DatabaseConnection::MySQL(conn) => conn
-                .query_iter(query)?
+                .exec_iter(stmt, params)?
                 .map(|r| {
                     let mut r = r?;
                     Ok((0..r.columns().len())
                         .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
                         .collect::<Result<Vec<_>, _>>()?)
                 })
-                .collect::<Result<Vec<_>, _>>(),
+                .collect(),
         }
     }
 
@@ -80,13 +88,166 @@ impl FromStr for DatabaseURL {
     }
 }
 
-/// Use a test script containing DDL and queries, but no data, as a seed to generate a test script
-/// containing data with results compared against a reference database
+#[derive(Debug)]
+enum Relation {
+    Table(String),
+    View(String),
+}
+
+impl Relation {
+    fn kind(&self) -> &'static str {
+        match self {
+            Relation::Table(_) => "TABLE",
+            Relation::View(_) => "VIEW",
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Relation::Table(name) => name,
+            Relation::View(name) => name,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Seed {
+    /// Relations to drop (if they exist) before seeding the reference db, to account for having
+    /// previously run the test script
+    relations_to_drop: Vec<Relation>,
+    tables: Vec<CreateTableStatement>,
+    queries: Vec<Query>,
+    hash_threshold: usize,
+    file: Option<File>,
+    script: TestScript,
+}
+
+impl TryFrom<PathBuf> for Seed {
+    type Error = anyhow::Error;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let mut file = File::open(&path)?;
+        let script = TestScript::read(path.clone(), &mut file)?;
+
+        let mut relations_to_drop = vec![];
+        let mut tables = vec![];
+        let mut queries = vec![];
+        let mut hash_threshold = DEFAULT_HASH_THRESHOLD;
+
+        for record in script.records() {
+            match record {
+                Record::Statement(Statement { command, .. }) => {
+                    match parse_query(command).map_err(|s| anyhow!("{}", s))? {
+                        SqlQuery::CreateTable(tbl) => {
+                            relations_to_drop.push(Relation::Table(tbl.table.name.clone()));
+                            tables.push(tbl)
+                        }
+                        SqlQuery::CreateView(view) => {
+                            relations_to_drop.push(Relation::View(view.name.clone()));
+                        }
+                        _ => {}
+                    }
+                }
+                Record::Query(query) => {
+                    if !query.params.is_empty() {
+                        bail!("Queries with params aren't supported yet");
+                    }
+                    queries.push(query.clone());
+                }
+                Record::HashThreshold(ht) => {
+                    hash_threshold = *ht;
+                }
+                Record::Halt => break,
+            }
+        }
+
+        file.seek(SeekFrom::Start(0))?;
+        Ok(Seed {
+            relations_to_drop,
+            tables,
+            queries,
+            hash_threshold,
+            file: Some(file),
+            script,
+        })
+    }
+}
+
+impl TryFrom<Operations> for Seed {
+    type Error = anyhow::Error;
+
+    fn try_from(Operations(operations): Operations) -> Result<Self, Self::Error> {
+        let mut gen = query_generator::GeneratorState::default();
+        let queries = operations
+            .into_iter()
+            .map(|ops| -> anyhow::Result<Query> {
+                let query = gen.generate_query(&ops);
+
+                Ok(Query {
+                    label: None,
+                    column_types: None,
+                    sort_mode: if query.statement.order.is_some() {
+                        Some(SortMode::NoSort)
+                    } else {
+                        Some(SortMode::RowSort)
+                    },
+                    conditionals: vec![],
+                    query: query.statement.to_string(),
+                    results: Default::default(),
+                    params: QueryParams::PositionalParams(
+                        query
+                            .state
+                            .key()
+                            .into_iter()
+                            .map(|dt| dt.try_into())
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut relations_to_drop = vec![];
+        let mut tables = vec![];
+        let mut records = vec![];
+
+        for (name, table) in gen.tables() {
+            let create_stmt = CreateTableStatement::from(table.clone());
+            records.push(Record::Statement(Statement {
+                result: StatementResult::Ok,
+                command: create_stmt.to_string(),
+                conditionals: vec![],
+            }));
+            tables.push(create_stmt);
+            relations_to_drop.push(Relation::Table(name.clone().into()));
+        }
+
+        Ok(Seed {
+            relations_to_drop,
+            tables,
+            queries,
+            hash_threshold: DEFAULT_HASH_THRESHOLD,
+            file: None,
+            script: records.into(),
+        })
+    }
+}
+
+/// Generate test scripts by comparing results against a reference database
+///
+/// The `generate` command takes either a seed script to generate from or a series of
+/// [operations][0], and generates a logictest test script by running queries against a reference
+/// database and saving the results
+///
+/// [0]: QueryGenerator::Operations
 #[derive(Clap)]
 pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
     #[clap(parse(from_str))]
-    from: PathBuf,
+    from: Option<PathBuf>,
+
+    /// Comma-separated list of query operations to use to generate data
+    #[clap(long)]
+    operations: Option<Operations>,
 
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
@@ -110,14 +271,23 @@ pub struct Generate {
     random: bool,
 }
 
-fn write_output<W, I>(original_file: &mut File, new_entries: I, output: &mut W) -> io::Result<()>
+fn write_output<W, I>(seed: Seed, new_entries: I, output: &mut W) -> io::Result<()>
 where
     W: io::Write,
     I: IntoIterator<Item = Record>,
 {
-    original_file.seek(SeekFrom::Start(0))?;
-    io::copy(original_file, output)?;
-    writeln!(output)?;
+    writeln!(output, "# Generated by:")?;
+    writeln!(output, "#     {}", std::env::args().join(" "))?;
+
+    if let Some(mut original_file) = seed.file {
+        io::copy(&mut original_file, output)?;
+        writeln!(output)?;
+    } else {
+        for rec in seed.script.records() {
+            writeln!(output, "{}", rec)?;
+        }
+    }
+
     for rec in new_entries {
         writeln!(output, "{}", rec)?;
     }
@@ -125,65 +295,38 @@ where
 }
 
 impl Generate {
-    pub fn run(self) -> anyhow::Result<()> {
-        let mut file = File::open(&self.from)?;
-        let script = TestScript::read(self.from.clone(), &mut file)?;
-
-        let mut hash_threshold = 20;
-
-        let mut new_entries = vec![];
-
-        let mut relations_to_drop = vec![];
-        let mut tables = vec![];
-        let mut queries = vec![];
-
-        for record in script.records() {
-            match record {
-                Record::Statement(Statement { command, .. }) => {
-                    match parse_query(command).map_err(|s| anyhow!("{}", s))? {
-                        SqlQuery::CreateTable(tbl) => {
-                            relations_to_drop.push(("TABLE", tbl.table.name.clone()));
-                            tables.push(tbl)
-                        }
-                        SqlQuery::CreateView(view) => {
-                            relations_to_drop.push(("VIEW", view.name.clone()));
-                        }
-                        _ => {}
-                    }
-                }
-                Record::Query(query) => {
-                    if !query.params.is_empty() {
-                        bail!("Queries with params aren't supported yet");
-                    }
-                    queries.push(query);
-                }
-                Record::HashThreshold(ht) => {
-                    hash_threshold = *ht;
-                }
-                Record::Halt => break,
-            }
-        }
+    pub fn run(mut self) -> anyhow::Result<()> {
+        let mut seed = match (self.from.take(), self.operations.take()) {
+            (Some(path), None) => Seed::try_from(path)?,
+            (None, Some(operations)) => Seed::try_from(operations)?,
+            _ => bail!("Must specify one of <from> or --operations"),
+        };
 
         let mut conn = self.compare_to.connect()?;
 
         eprintln!(
             "{}",
-            format!("==> Dropping {} relations", relations_to_drop.len()).bold()
+            format!("==> Dropping {} relations", seed.relations_to_drop.len()).bold()
         );
-        relations_to_drop.reverse();
-        for (kind, relation) in &relations_to_drop {
+        seed.relations_to_drop.reverse();
+        for relation in &seed.relations_to_drop {
             if self.verbose {
-                eprintln!("    > Dropping {} {}", kind, relation);
+                eprintln!("    > Dropping {} {}", relation.kind(), relation.name());
             }
-            conn.query_drop(format!("DROP {} IF EXISTS {}", kind, relation))
-                .with_context(|| format!("Dropping {} {}", kind, relation))?;
+            conn.query_drop(format!(
+                "DROP {} IF EXISTS {}",
+                relation.kind(),
+                relation.name()
+            ))
+            .with_context(|| format!("Dropping {} {}", relation.kind(), relation.name()))?;
         }
 
-        let tables_in_order = tables
+        let tables_in_order = seed
+            .tables
             .iter()
             .map(|t| t.table.name.clone())
             .collect::<Vec<_>>();
-        let generator = GeneratorState::from(tables);
+        let generator = GeneratorState::from(seed.tables.clone());
         let insert_statements = tables_in_order
             .into_iter()
             .map(|table_name| {
@@ -209,7 +352,7 @@ impl Generate {
             .collect::<Vec<_>>();
 
         eprintln!("{}", "==> Running original test script".bold());
-        conn.run_script(&script)?;
+        conn.run_script(&seed.script)?;
 
         eprintln!(
             "{}",
@@ -226,16 +369,19 @@ impl Generate {
                 .with_context(|| format!("Inserting seed data for {}", insert_statement.table))?;
         }
 
-        new_entries.extend(
-            insert_statements
-                .iter()
-                .map(|stmt| Record::Statement(Statement::ok(stmt.to_string()))),
-        );
+        let new_entries = insert_statements
+            .iter()
+            .map(|stmt| Record::Statement(Statement::ok(stmt.to_string())));
 
-        let queries_with_results = queries
-            .into_iter()
+        eprintln!("{}", format!("==> Running {} queries", seed.queries.len()));
+        let hash_threshold = seed.hash_threshold;
+        let queries_with_results = seed
+            .queries
+            .iter()
             .map(|q| -> anyhow::Result<Record> {
-                let results = conn.query(&q.query)?;
+                let results = conn
+                    .execute(&q.query, q.params.clone())
+                    .with_context(|| format!("Running query {}", q.query))?;
                 let values = results.into_iter().flatten().collect::<Vec<_>>();
                 let query_results = if values.len() > hash_threshold {
                     QueryResults::hash(&values)
@@ -251,16 +397,16 @@ impl Generate {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        new_entries.extend(queries_with_results);
+        let new_entries = new_entries.chain(queries_with_results);
 
         if let Some(out_path) = self.output {
             write_output(
-                &mut file,
+                seed,
                 new_entries,
                 &mut File::create(out_path).context("Opening output file")?,
             )?;
         } else {
-            write_output(&mut file, new_entries, &mut io::stdout())?;
+            write_output(seed, new_entries, &mut io::stdout())?;
         }
 
         Ok(())
