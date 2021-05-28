@@ -19,6 +19,7 @@ pub struct Builder {
     log: slog::Logger,
     region: Option<String>,
     mysql_url: Option<String>,
+    reader_only: bool,
 }
 impl Default for Builder {
     fn default() -> Self {
@@ -31,6 +32,7 @@ impl Default for Builder {
             memory_check_frequency: None,
             region: None,
             mysql_url: None,
+            reader_only: false,
         }
     }
 }
@@ -134,6 +136,11 @@ impl Builder {
         self.mysql_url = Some(url);
     }
 
+    /// Configures this Noria server to accept only reader domains.
+    pub fn as_reader_only(&mut self) {
+        self.reader_only = true;
+    }
+
     /// Start a server instance and return a handle to it.
     #[must_use]
     pub fn start<A: Authority + 'static>(
@@ -149,6 +156,7 @@ impl Builder {
             ref log,
             region,
             mysql_url,
+            reader_only,
         } = self;
 
         let config = config.clone();
@@ -164,6 +172,7 @@ impl Builder {
             log,
             region,
             mysql_url,
+            reader_only,
         )
     }
 

@@ -97,6 +97,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     log: slog::Logger,
     region: Option<String>,
     mysql_url: Option<String>,
+    reader_only: bool,
 ) -> Result<Handle<A>, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -169,7 +170,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         valve: valve.clone(),
         domains: Default::default(),
         region: region.clone(),
-        reader_only: false,
+        reader_only,
     };
 
     tokio::spawn(worker.run().map_err(|e| {
