@@ -186,6 +186,12 @@ If specified, overrides the value of --external-address"))
                 .env("MYSQL_URL")
                 .help("Host for mysql connection. Should include username and password if necessary."),
         )
+        .arg(
+            Arg::with_name("reader-only")
+                .long("reader-only")
+                .takes_value(false)
+                .help("Whether this server should only run reader domains or not.")
+        )
         .get_matches();
 
     let log = noria_server::logger_pls();
@@ -243,6 +249,10 @@ If specified, overrides the value of --external-address"))
 
     if let Some(pr) = matches.value_of("primary-region") {
         builder.set_primary_region(pr.into());
+    }
+
+    if matches.is_present("reader-only") {
+        builder.as_reader_only()
     }
 
     let mut persistence_params = noria_server::PersistenceParameters::new(
