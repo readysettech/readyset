@@ -52,6 +52,7 @@ pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<L
         true,
         Arc::new(LocalAuthority::new()),
         None,
+        false,
     )
     .await
 }
@@ -64,6 +65,7 @@ pub async fn build_custom(
     controller: bool,
     authority: Arc<LocalAuthority>,
     region: Option<String>,
+    reader_only: bool,
 ) -> Handle<LocalAuthority> {
     use crate::logger_pls;
     let mut builder = Builder::default();
@@ -72,6 +74,10 @@ pub async fn build_custom(
     }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
+
+    if reader_only {
+        builder.as_reader_only();
+    }
 
     if region.is_some() {
         builder.set_region(region.unwrap());

@@ -7,7 +7,7 @@
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;
-use crate::Builder;
+use crate::{Builder, ReadySetError};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -24,6 +24,7 @@ use noria::{
     ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
+use crate::errors::ReadySetError::MigrationFailed;
 use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -4482,6 +4483,7 @@ async fn test_view_includes_replicas() {
         true,
         authority.clone(),
         Some("r1".into()),
+        false,
     )
     .await;
 
@@ -4497,6 +4499,7 @@ async fn test_view_includes_replicas() {
         false,
         authority.clone(),
         Some("r2".into()),
+        false,
     )
     .await;
 
@@ -6059,4 +6062,51 @@ async fn distinct_select_with_distinct_agg_sharded() {
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![1, 2]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn assign_nonreader_domains_to_nonreader_workers() {
+    let authority = Arc::new(LocalAuthority::new());
+    let cluster_name = "assign_nonreader_domains_to_nonreader_workers";
+
+    let mut w1 = build_custom(
+        cluster_name,
+        Some(DEFAULT_SHARDING),
+        true,
+        true,
+        authority.clone(),
+        None,
+        true,
+    )
+    .await;
+
+    let query = "CREATE TABLE test (id integer, name text);\
+        QUERY testquery: SELECT * FROM test;";
+    let result = w1.install_recipe(query).await;
+
+    assert!(matches!(
+        result,
+        Err(ReadySetError::RpcFailed {
+            during: _,
+            // This 'box' keyword appears to be experimental.
+            // So if this test ever fails because of that, feel free to change this.
+            source: box MigrationFailed { .. },
+        })
+    ));
+
+    let _w2 = build_custom(
+        cluster_name,
+        Some(DEFAULT_SHARDING),
+        true,
+        false,
+        authority.clone(),
+        None,
+        false,
+    )
+    .await;
+
+    sleep().await;
+
+    let result = w1.install_recipe(query).await;
+    assert!(matches!(result, Ok(_)));
 }
