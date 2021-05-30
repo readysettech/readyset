@@ -3,9 +3,7 @@ use crate::{Column, MirNodeRef};
 use common::DataType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
-use nom_sql::{
-    BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, OrderType,
-};
+use nom_sql::{BinaryOperator, ColumnSpecification, Expression, FunctionExpression, OrderType};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 
@@ -28,22 +26,8 @@ pub enum MirNodeInner {
         group_by: Vec<Column>,
         kind: Extremum,
     },
-    /// filter conditions (one for each parent column)
+    /// filter conditions
     Filter {
-        conditions: Expression,
-        // Maps the Columns that contained function calls into the
-        // names of the projected columns that contain the evaluated results.
-        // This is the 2nd return value of `project_expressions`.
-        remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
-    },
-    /// filter condition and grouping
-    // FilterAggregation Mir Node type still exists, due to optimization and rewrite logic
-    FilterAggregation {
-        on: Column,
-        else_on: Option<Literal>,
-        group_by: Vec<Column>,
-        // kind is same as a normal aggregation (sum, count, avg)
-        kind: Aggregation,
         conditions: Expression,
         // Maps the Columns that contained function calls into the
         // names of the projected columns that contain the evaluated results.
@@ -62,13 +46,13 @@ pub enum MirNodeInner {
     /// different from other operators in that it doesn't map 1:1 to a SQL operator and there are
     /// several invariants we follow. It is used to support multiple aggregates in queries by
     /// joining pairs of aggregates together using custom join logic. We only join nodes with inner
-    /// types of Aggregation, FilterAggregation, or Extremum. For any group of aggregates, we will
-    /// make N-1 JoinAggregates to join them all back together. The first JoinAggregates will join
-    /// the first two aggregates together. The next JoinAggregates will join that JoinAggregates
-    /// node to the next aggregate in the list, so on and so forth. Each aggregate will share
-    /// identical group_by columns which are deduplicated at every join, so by the end we have
-    /// every unique column (the actual aggregate columns) from each aggregate node, and a single
-    /// version of each group_by column in the final join.
+    /// types of Aggregation or Extremum. For any group of aggregates, we will make N-1
+    /// JoinAggregates to join them all back together. The first JoinAggregates will join the first
+    /// two aggregates together. The next JoinAggregates will join that JoinAggregates node to the
+    /// next aggregate in the list, so on and so forth. Each aggregate will share identical group_by
+    /// columns which are deduplicated at every join, so by the end we have every unique column (the
+    /// actual aggregate columns) from each aggregate node, and a single version of each group_by
+    /// column in the final join.
     JoinAggregates,
     /// on left column, on right column, emit columns
     LeftJoin {
@@ -141,11 +125,6 @@ impl MirNodeInner {
             }
             MirNodeInner::Base { .. } => panic!("can't add columns to base nodes!"),
             MirNodeInner::Extremum {
-                ref mut group_by, ..
-            } => {
-                group_by.push(c);
-            }
-            MirNodeInner::FilterAggregation {
                 ref mut group_by, ..
             } => {
                 group_by.push(c);
@@ -273,31 +252,6 @@ impl MirNodeInner {
                     ref remapped_exprs_to_parent_names,
                 } => {
                     our_conditions == conditions
-                        && our_remapped_exprs_to_parent_names == remapped_exprs_to_parent_names
-                }
-                _ => false,
-            },
-            MirNodeInner::FilterAggregation {
-                on: ref our_on,
-                else_on: ref our_else_on,
-                group_by: ref our_group_by,
-                kind: ref our_kind,
-                conditions: ref our_conditions,
-                remapped_exprs_to_parent_names: ref our_remapped_exprs_to_parent_names,
-            } => match *other {
-                MirNodeInner::FilterAggregation {
-                    ref on,
-                    ref else_on,
-                    ref group_by,
-                    ref kind,
-                    ref conditions,
-                    ref remapped_exprs_to_parent_names,
-                } => {
-                    our_on == on
-                        && our_else_on == else_on
-                        && our_group_by == group_by
-                        && our_kind == kind
-                        && our_conditions == conditions
                         && our_remapped_exprs_to_parent_names == remapped_exprs_to_parent_names
                 }
                 _ => false,
@@ -488,29 +442,6 @@ impl Debug for MirNodeInner {
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 write!(f, "σ[{}]", conditions)
-            }
-            MirNodeInner::FilterAggregation {
-                ref on,
-                else_on: _,
-                ref group_by,
-                ref kind,
-                conditions: _,
-                remapped_exprs_to_parent_names: _,
-            } => {
-                let op_string = match *kind {
-                    Aggregation::Count => format!("|*|(filter {})", on.name.as_str()),
-                    Aggregation::Sum => format!("𝛴(filter {})", on.name.as_str()),
-                    Aggregation::Avg => format!("Avg(filter {})", on.name.as_str()),
-                    Aggregation::GroupConcat { separator: ref s } => {
-                        format!("||([{}], \"{}\")", on.name, s)
-                    }
-                };
-                let group_cols = group_by
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join {

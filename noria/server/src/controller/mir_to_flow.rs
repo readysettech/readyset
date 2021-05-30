@@ -9,7 +9,7 @@ use crate::errors::internal_err;
 use crate::manual::ops::grouped::aggregate::Aggregation;
 use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use common::DataType;
-use dataflow::ops::filter::{FilterCondition, FilterVec};
+use dataflow::ops::filter::FilterCondition;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
@@ -112,13 +112,10 @@ fn mir_node_to_flow_parts(
                         parent,
                         mir_node.columns.as_slice(),
                         on,
-                        None,
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
                         mig,
                         table_mapping,
-                        None,
-                        None,
                     )?
                 }
                 MirNodeInner::Base {
@@ -147,37 +144,10 @@ fn mir_node_to_flow_parts(
                         parent,
                         mir_node.columns.as_slice(),
                         on,
-                        None,
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
                         mig,
                         table_mapping,
-                        None,
-                        None,
-                    )?
-                }
-                MirNodeInner::FilterAggregation {
-                    ref on,
-                    ref else_on,
-                    ref group_by,
-                    ref kind,
-                    ref conditions,
-                    ref remapped_exprs_to_parent_names,
-                } => {
-                    invariant_eq!(mir_node.ancestors.len(), 1);
-                    let parent = mir_node.ancestors[0].clone();
-                    make_grouped_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        on,
-                        else_on.clone(),
-                        group_by,
-                        GroupedNodeType::FilterAggregation(kind.clone()),
-                        mig,
-                        table_mapping,
-                        Some(conditions.clone()),
-                        remapped_exprs_to_parent_names.as_ref(),
                     )?
                 }
                 MirNodeInner::Filter {
@@ -580,22 +550,14 @@ fn make_grouped_node(
     parent: MirNodeRef,
     columns: &[Column],
     on: &Column,
-    else_on: Option<Literal>,
     group_by: &[Column],
     kind: GroupedNodeType,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    conditions: Option<Expression>,
-    remapped_exprs_to_parent_names: Option<&HashMap<FunctionExpression, String>>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
-    invariant!(match kind {
-        GroupedNodeType::FilterAggregation(_) => true,
-        _ => else_on.is_none() && conditions.is_none(),
-    });
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let parent_node = parent.borrow();
-    let mut fields = parent_node.columns().to_vec();
     let column_names = column_names(columns);
     let over_col_indx = parent_node.column_id_for_column(on, table_mapping);
     let group_col_indx = group_by
@@ -624,25 +586,6 @@ fn make_grouped_node(
             column_names.as_slice(),
             extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
         ),
-        GroupedNodeType::FilterAggregation(agg) => {
-            let cond = conditions
-                .ok_or_else(|| internal_err("FilterAggregation must have conditions!"))?;
-
-            let filter =
-                extract_conditions(&cond, &mut fields, &parent, remapped_exprs_to_parent_names)?;
-
-            mig.add_ingredient(
-                String::from(name),
-                column_names.as_slice(),
-                agg.over_filtered(
-                    parent_na,
-                    over_col_indx,
-                    group_col_indx.as_slice(),
-                    FilterVec::from(filter),
-                    else_on,
-                )?,
-            )
-        }
     };
     Ok(FlowNode::New(na))
 }

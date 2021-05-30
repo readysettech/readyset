@@ -83,7 +83,7 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Option<Self::Diff>> {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
         let v = match r[self.over] {
             DataType::Int(n) => i128::from(n),
             DataType::UnsignedInt(n) => i128::from(n),
@@ -105,9 +105,9 @@ impl GroupedOperation for ExtremumOperator {
         };
 
         if pos {
-            Ok(Some(DiffType::Insert(v)))
+            Ok(DiffType::Insert(v))
         } else {
-            Ok(Some(DiffType::Remove(v)))
+            Ok(DiffType::Remove(v))
         }
     }
 

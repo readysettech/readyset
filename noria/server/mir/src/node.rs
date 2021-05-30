@@ -19,10 +19,6 @@ pub mod node_inner;
 pub enum GroupedNodeType {
     Aggregation(ops::grouped::aggregate::Aggregation),
     Extremum(ops::grouped::extremum::Extremum),
-    // Filter Aggregation MIR node type still exists separate from Aggregation for purpose of
-    // optimization and rewrite logic.
-    // However, the internal operator is the same as a normal aggregation.
-    FilterAggregation(ops::grouped::aggregate::Aggregation),
 }
 
 pub struct MirNode {
@@ -192,7 +188,7 @@ impl MirNode {
     pub fn add_column(&mut self, c: Column) -> usize {
         fn column_pos(node: &MirNode) -> Option<usize> {
             match &node.inner {
-                MirNodeInner::Aggregation { .. } | MirNodeInner::FilterAggregation { .. } => {
+                MirNodeInner::Aggregation { .. } => {
                     // the aggregation column must always be the last column
                     Some(node.columns.len() - 1)
                 }
@@ -381,19 +377,6 @@ impl MirNode {
                     if !columns.contains(&c) {
                         columns.push(c.clone());
                     }
-                }
-            }
-            MirNodeInner::FilterAggregation { ref on, .. } => {
-                let parent = self.ancestors.iter().next().unwrap();
-                // need all parent columns
-                for c in parent.borrow().columns() {
-                    if !columns.contains(&c) {
-                        columns.push(c.clone());
-                    }
-                }
-                // need the "over" columns
-                if !columns.contains(on) {
-                    columns.push(on.clone());
                 }
             }
             MirNodeInner::Project {
