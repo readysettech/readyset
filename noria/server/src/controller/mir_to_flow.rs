@@ -968,8 +968,19 @@ fn generate_project_expression(
             left: Box::new(generate_project_expression(parent, *lhs)?),
             right: Box::new(generate_project_expression(parent, *rhs)?),
         }),
-        Expression::CaseWhen { .. }
-        | Expression::UnaryOp { .. }
+        Expression::CaseWhen {
+            condition,
+            then_expr,
+            else_expr,
+        } => Ok(DataflowExpression::CaseWhen {
+            condition: Box::new(generate_project_expression(parent, *condition)?),
+            then_expr: Box::new(generate_project_expression(parent, *then_expr)?),
+            else_expr: match else_expr {
+                Some(else_expr) => Box::new(generate_project_expression(parent, *else_expr)?),
+                None => Box::new(DataflowExpression::Literal(DataType::None)),
+            },
+        }),
+        Expression::UnaryOp { .. }
         | Expression::Between { .. }
         | Expression::Exists(_)
         | Expression::In { .. } => {
