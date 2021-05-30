@@ -1,5 +1,3 @@
-mod expression;
-
 use nom_sql::SqlType;
 use noria::internal;
 use std::borrow::Cow;
@@ -7,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
-pub use expression::{BuiltinFunction, ProjectExpression};
+use dataflow_expression::Expression;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
@@ -24,7 +22,7 @@ pub struct Project {
     us: Option<IndexPair>,
     emit: Option<Vec<usize>>,
     additional: Option<Vec<DataType>>,
-    expressions: Option<Vec<ProjectExpression>>,
+    expressions: Option<Vec<Expression>>,
     src: IndexPair,
     cols: usize,
 }
@@ -35,7 +33,7 @@ impl Project {
         src: NodeIndex,
         emit: &[usize],
         additional: Option<Vec<DataType>>,
-        expressions: Option<Vec<ProjectExpression>>,
+        expressions: Option<Vec<Expression>>,
     ) -> Project {
         Project {
             emit: Some(emit.into()),
@@ -294,7 +292,7 @@ impl Ingredient for Project {
 mod tests {
     use super::*;
     use nom_sql::BinaryOperator;
-    use ProjectExpression::{Column, Literal, Op};
+    use Expression::{Column, Literal, Op};
 
     use crate::ops;
 
@@ -317,7 +315,7 @@ mod tests {
         g
     }
 
-    fn setup_arithmetic(expression: ProjectExpression) -> ops::test::MockGraph {
+    fn setup_arithmetic(expression: Expression) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
 
@@ -337,8 +335,8 @@ mod tests {
     }
 
     fn setup_column_arithmetic(op: BinaryOperator) -> ops::test::MockGraph {
-        let expression = ProjectExpression::Op {
-            left: Box::new(ProjectExpression::Column(0)),
+        let expression = Expression::Op {
+            left: Box::new(Expression::Column(0)),
             right: Box::new(Column(1)),
             op,
         };
@@ -459,7 +457,7 @@ mod tests {
     #[test]
     fn it_forwards_arithmetic_w_literals() {
         let number: DataType = 40.into();
-        let expression = ProjectExpression::Op {
+        let expression = Expression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Literal(number)),
             op: BinaryOperator::Multiply,
@@ -477,7 +475,7 @@ mod tests {
     fn it_forwards_arithmetic_w_only_literals() {
         let a: DataType = 80.into();
         let b: DataType = 40.into();
-        let expression = ProjectExpression::Op {
+        let expression = Expression::Op {
             left: Box::new(Literal(a)),
             right: Box::new(Literal(b)),
             op: BinaryOperator::Divide,
@@ -495,7 +493,7 @@ mod tests {
         mut state: Box<dyn State>,
         permutation: &[usize],
         additional: Option<Vec<DataType>>,
-        expressions: Option<Vec<ProjectExpression>>,
+        expressions: Option<Vec<Expression>>,
     ) -> (Project, StateMap) {
         let global = NodeIndex::new(0);
         let mut index: IndexPair = global.into();
@@ -603,7 +601,7 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![ProjectExpression::Op {
+        let expressions = Some(vec![Expression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Column(1)),
             op: BinaryOperator::Add,
@@ -618,7 +616,7 @@ mod tests {
     #[test]
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let expressions = Some(vec![ProjectExpression::Op {
+        let expressions = Some(vec![Expression::Op {
             left: Box::new(Column(0)),
             right: Box::new(Column(1)),
             op: BinaryOperator::Add,
