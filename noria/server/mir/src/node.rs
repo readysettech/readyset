@@ -653,7 +653,6 @@ mod tests {
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Filter {
                     conditions: condition_expression,
-                    remapped_exprs_to_parent_names: None,
                 },
                 vec![parent],
                 vec![],

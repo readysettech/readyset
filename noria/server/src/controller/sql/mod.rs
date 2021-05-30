@@ -1327,7 +1327,7 @@ mod tests {
                 &[&Column::from("users.id"), &Column::from("users.name")],
             );
             let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
-            assert_eq!(filter.description(true), "σ[f2 \\> 20]");
+            assert_eq!(filter.description(true), "σ[(2 > (lit: 20))]");
 
             // Check projection node
             let projection = get_node(&inc, mig, &qfp.name);
@@ -1529,7 +1529,7 @@ mod tests {
             // filter node
             let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
             assert_eq!(filter.fields(), &["id", "name"]);
-            assert_eq!(filter.description(true), "σ[f0 = 42]");
+            assert_eq!(filter.description(true), "σ[(0 = (lit: 42))]");
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge.fields(), &["name", "bogokey"]);

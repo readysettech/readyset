@@ -1,127 +1,29 @@
-use derive_more::{Deref, From, Into};
-
-use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::{self, Display};
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
+use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
-/// FilterVec represents set of constraints on columns against which a record can be checked
-/// Used in Filter operators and aggregations with case statements
-#[derive(Debug, Clone, Serialize, Deserialize, From, Into, Deref)]
-pub struct FilterVec(Vec<(usize, FilterCondition)>);
-
-impl FilterVec {
-    /// Checks if record `r` passes the filter
-    pub fn matches(&self, r: &[DataType]) -> bool {
-        self.iter().all(|(i, cond)| {
-            let d = &r[*i];
-            match cond {
-                FilterCondition::Comparison(ref op, ref f) => {
-                    let v = match f {
-                        Value::Constant(dt) => dt,
-                        Value::Column(c) => &r[*c],
-                    };
-
-                    if *op == BinaryOperator::Is {
-                        return d == v;
-                    } else if d.is_none() || v.is_none() {
-                        return false;
-                    }
-
-                    match *op {
-                        // FIXME(ENG-209): Make NULL = NULL not true, but NULL IS NULL true
-                        BinaryOperator::Equal | BinaryOperator::Is => d == v,
-                        BinaryOperator::NotEqual => d != v,
-                        BinaryOperator::Greater => d > v,
-                        BinaryOperator::GreaterOrEqual => d >= v,
-                        BinaryOperator::Less => d < v,
-                        BinaryOperator::LessOrEqual => d <= v,
-                        _ => unimplemented!(),
-                    }
-                }
-                FilterCondition::In(ref fs) => fs.contains(d),
-            }
-        })
-    }
-
-    pub fn describe(&self) -> String {
-        lazy_static! {
-            static ref ESC_RE: Regex = Regex::new("([<>])").unwrap();
-        }
-        self.iter()
-            .map(|(i, ref cond)| match *cond {
-                FilterCondition::Comparison(ref op, ref x) => format!(
-                    "f{} {} {}",
-                    i,
-                    ESC_RE.replace_all(&format!("{}", op), "\\$1").to_string(),
-                    x
-                ),
-                FilterCondition::In(ref xs) => format!(
-                    "f{} IN ({})",
-                    i,
-                    xs.iter()
-                        .map(|d| format!("{}", d))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            })
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join(", ")
-    }
-}
-
-/// The actual Filter Operator
-/// Filters incoming records according to some FilterVec
+/// The filter operator
+///
+/// The filter operator evaluates an [`Expression`] on incoming records, and only emits records for
+/// which that expression is truthy (is not 0, 0.0, '', or NULL).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    filter: FilterVec,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Value {
-    Constant(DataType),
-    Column(usize),
-}
-
-impl From<DataType> for Value {
-    fn from(dt: DataType) -> Self {
-        Value::Constant(dt)
-    }
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Value::Constant(ref c) => write!(f, "{}", c),
-            Value::Column(ref ci) => write!(f, "col: {}", ci),
-        }
-    }
-}
-
-// TODO: expect that this does not properly capture all possible filter conditions?
-// e.g. nested conditions?
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum FilterCondition {
-    Comparison(BinaryOperator, Value),
-    In(Vec<DataType>),
+    expression: Expression,
 }
 
 impl Filter {
-    /// Construct a new filter operator. The `filter` vector must have as many elements as the
-    /// `src` node has columns. Each column that is set to `None` matches any value, while columns
-    /// in the filter that have values set will check for equality on that column.
-    pub fn new(src: NodeIndex, filter: &[(usize, FilterCondition)]) -> Filter {
+    /// Construct a new filter operator with an expression
+    pub fn new(src: NodeIndex, expression: Expression) -> Filter {
         Filter {
             src: src.into(),
-            filter: FilterVec(Vec::from(filter)),
+            expression,
         }
     }
 }
@@ -135,13 +37,6 @@ impl Ingredient for Filter {
         vec![self.src.as_global()]
     }
 
-    fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[self.src.as_global()];
-        // N.B.: <= because the adjacent node might be a base with a suffix of removed columns.
-        // It's okay to just ignore those.
-        assert!(self.filter.len() <= srcn.fields().len());
-    }
-
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
     }
@@ -150,15 +45,20 @@ impl Ingredient for Filter {
         &mut self,
         _: &mut dyn Executor,
         _: LocalNodeIndex,
-        mut rs: Records,
+        rs: Records,
         _: Option<&[usize]>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        rs.retain(|r| self.filter.matches(r));
+        let mut results = Vec::new();
+        for r in rs {
+            if self.expression.eval(r.rec())?.is_truthy() {
+                results.push(r);
+            }
+        }
 
         Ok(ProcessingResult {
-            results: rs,
+            results: results.into(),
             ..Default::default()
         })
     }
@@ -178,7 +78,7 @@ impl Ingredient for Filter {
         if !detailed {
             String::from("σ")
         } else {
-            format!("σ[{}]", self.filter.describe())
+            format!("σ[{}]", self.expression.to_string())
         }
     }
 
@@ -196,8 +96,12 @@ impl Ingredient for Filter {
     ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
         self.lookup(*self.src, columns, key, nodes, states)
             .map(|result| {
-                let f = self.filter.clone();
-                let filter = move |r: &[DataType]| f.matches(r);
+                let f = self.expression.clone();
+                let filter = move |r: &[DataType]| {
+                    f.eval(r)
+                        .expect("query_through can't currently return an error")
+                        .is_truthy()
+                };
 
                 result.map(|rs| Box::new(rs.filter(move |r| filter(r))) as Box<_>)
             })
@@ -214,10 +118,7 @@ mod tests {
 
     use crate::ops;
 
-    fn setup(
-        materialized: bool,
-        filters: Option<&[(usize, FilterCondition)]>,
-    ) -> ops::test::MockGraph {
+    fn setup(materialized: bool, filters: Option<Expression>) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
         g.set_op(
@@ -225,10 +126,11 @@ mod tests {
             &["x", "y"],
             Filter::new(
                 s.as_global(),
-                filters.unwrap_or(&[(
-                    1,
-                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant("a".into())),
-                )]),
+                filters.unwrap_or_else(|| Expression::Op {
+                    left: Box::new(Expression::Column(1)),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(Expression::Literal("a".into())),
+                }),
             ),
             materialized,
         );
@@ -236,8 +138,8 @@ mod tests {
     }
 
     #[test]
-    fn it_forwards_nofilter() {
-        let mut g = setup(false, Some(&[]));
+    fn it_forwards_constant_expr() {
+        let mut g = setup(false, Some(Expression::Literal(1.into())));
 
         let mut left: Vec<DataType>;
 
@@ -271,16 +173,19 @@ mod tests {
     fn it_forwards_mfilter() {
         let mut g = setup(
             false,
-            Some(&[
-                (
-                    0,
-                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(1.into())),
-                ),
-                (
-                    1,
-                    FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant("a".into())),
-                ),
-            ]),
+            Some(Expression::Op {
+                left: Box::new(Expression::Op {
+                    left: Box::new(Expression::Column(0)),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(Expression::Literal(1.into())),
+                }),
+                op: BinaryOperator::And,
+                right: Box::new(Expression::Op {
+                    left: Box::new(Expression::Column(1)),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(Expression::Literal("a".into())),
+                }),
+            }),
         );
 
         let mut left: Vec<DataType>;
@@ -336,22 +241,19 @@ mod tests {
     fn it_works_with_inequalities() {
         let mut g = setup(
             false,
-            Some(&[
-                (
-                    0,
-                    FilterCondition::Comparison(
-                        BinaryOperator::LessOrEqual,
-                        Value::Constant(2.into()),
-                    ),
-                ),
-                (
-                    1,
-                    FilterCondition::Comparison(
-                        BinaryOperator::NotEqual,
-                        Value::Constant("a".into()),
-                    ),
-                ),
-            ]),
+            Some(Expression::Op {
+                left: Box::new(Expression::Op {
+                    left: Box::new(Expression::Column(0)),
+                    op: BinaryOperator::LessOrEqual,
+                    right: Box::new(Expression::Literal(2.into())),
+                }),
+                op: BinaryOperator::And,
+                right: Box::new(Expression::Op {
+                    left: Box::new(Expression::Column(1)),
+                    op: BinaryOperator::NotEqual,
+                    right: Box::new(Expression::Literal("a".into())),
+                }),
+            }),
         );
 
         let mut left: Vec<DataType>;
@@ -377,10 +279,11 @@ mod tests {
     fn it_works_with_columns() {
         let mut g = setup(
             false,
-            Some(&[(
-                0,
-                FilterCondition::Comparison(BinaryOperator::Equal, Value::Column(1)),
-            )]),
+            Some(Expression::Op {
+                left: Box::new(Expression::Column(0)),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Column(1)),
+            }),
         );
 
         let mut left: Vec<DataType>;
@@ -388,52 +291,5 @@ mod tests {
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
         left = vec![2.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left, false), Records::default());
-    }
-
-    #[test]
-    fn it_works_with_in_list() {
-        let mut g = setup(
-            false,
-            Some(&[
-                (0, FilterCondition::In(vec![2.into(), 42.into()])),
-                (1, FilterCondition::In(vec!["b".into()])),
-            ]),
-        );
-
-        let mut left: Vec<DataType>;
-
-        // both conditions match (2 IN (2, 42), "b" IN ("b"))
-        left = vec![2.into(), "b".into()];
-        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
-
-        // second condition fails ("a" NOT IN ("b"))
-        left = vec![2.into(), "a".into()];
-        assert!(g.narrow_one_row(left.clone(), false).is_empty());
-
-        // first condition fails (3 NOT IN (2, 42))
-        left = vec![3.into(), "b".into()];
-        assert!(g.narrow_one_row(left.clone(), false).is_empty());
-
-        // both conditions match (42 IN (2, 42), "b" IN ("b"))
-        left = vec![42.into(), "b".into()];
-        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
-    }
-
-    #[test]
-    fn null_equal_null() {
-        let fv = FilterVec(vec![(
-            0,
-            FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(DataType::None)),
-        )]);
-        assert!(!fv.matches(&[DataType::None]));
-    }
-
-    #[test]
-    fn value_not_equal_null() {
-        let fv = FilterVec(vec![(
-            0,
-            FilterCondition::Comparison(BinaryOperator::NotEqual, Value::Constant(DataType::None)),
-        )]);
-        assert!(!fv.matches(&[DataType::Int(1)]));
     }
 }

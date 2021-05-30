@@ -3,8 +3,7 @@ use crate::{Column, MirNodeRef};
 use common::DataType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
-use nom_sql::{BinaryOperator, ColumnSpecification, Expression, FunctionExpression, OrderType};
-use std::collections::HashMap;
+use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
 use std::fmt::{self, Debug, Formatter};
 
 pub enum MirNodeInner {
@@ -29,10 +28,6 @@ pub enum MirNodeInner {
     /// filter conditions
     Filter {
         conditions: Expression,
-        // Maps the Columns that contained function calls into the
-        // names of the projected columns that contain the evaluated results.
-        // This is the 2nd return value of `project_expressions`.
-        remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
     },
     /// no extra info required
     Identity,
@@ -245,15 +240,8 @@ impl MirNodeInner {
             },
             MirNodeInner::Filter {
                 conditions: ref our_conditions,
-                remapped_exprs_to_parent_names: ref our_remapped_exprs_to_parent_names,
             } => match *other {
-                MirNodeInner::Filter {
-                    ref conditions,
-                    ref remapped_exprs_to_parent_names,
-                } => {
-                    our_conditions == conditions
-                        && our_remapped_exprs_to_parent_names == remapped_exprs_to_parent_names
-                }
+                MirNodeInner::Filter { ref conditions } => our_conditions == conditions,
                 _ => false,
             },
             MirNodeInner::Join {
