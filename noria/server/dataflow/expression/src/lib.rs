@@ -129,6 +129,8 @@ impl fmt::Display for BuiltinFunction {
 /// - Literals replaced with their corresponding [`DataType`]
 /// - [Column references](nom_sql::Column) resolved into column indices in the parent node.
 /// - Function calls resolved, and arities checked
+/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...`
+///   and x NOT IN (y, z, ...) to `x != y AND x = z AND ...`
 ///
 /// During forward processing of dataflow, instances of these expressions are
 /// [evaluated](Expression::eval) by both projection nodes and filter nodes.
