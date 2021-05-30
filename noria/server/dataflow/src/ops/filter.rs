@@ -28,6 +28,13 @@ impl FilterVec {
                         Value::Constant(dt) => dt,
                         Value::Column(c) => &r[*c],
                     };
+
+                    if *op == BinaryOperator::Is {
+                        return d == v;
+                    } else if d.is_none() || v.is_none() {
+                        return false;
+                    }
+
                     match *op {
                         // FIXME(ENG-209): Make NULL = NULL not true, but NULL IS NULL true
                         BinaryOperator::Equal | BinaryOperator::Is => d == v,
@@ -411,5 +418,23 @@ mod tests {
         // both conditions match (42 IN (2, 42), "b" IN ("b"))
         left = vec![42.into(), "b".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+    }
+
+    #[test]
+    fn null_equal_null() {
+        let fv = FilterVec(vec![(
+            0,
+            FilterCondition::Comparison(BinaryOperator::Equal, Value::Constant(DataType::None)),
+        )]);
+        assert!(!fv.matches(&[DataType::None]));
+    }
+
+    #[test]
+    fn value_not_equal_null() {
+        let fv = FilterVec(vec![(
+            0,
+            FilterCondition::Comparison(BinaryOperator::NotEqual, Value::Constant(DataType::None)),
+        )]);
+        assert!(!fv.matches(&[DataType::Int(1)]));
     }
 }
