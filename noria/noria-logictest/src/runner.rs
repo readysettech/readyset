@@ -157,7 +157,7 @@ impl TestScript {
                 .await
                 .with_context(|| "connecting to mysql")?;
 
-            self.run_on_mysql(&mut conn, false).await?;
+            self.run_on_mysql(&mut conn, None, false).await?;
         } else {
             if let Some(binlog_url) = &opts.binlog_url {
                 self.recreate_test_database(binlog_url.try_into().unwrap(), &opts.mysql_db)
@@ -213,7 +213,7 @@ impl TestScript {
             .await
             .with_context(|| "connecting to noria-mysql")?;
 
-        self.run_on_mysql(&mut conn, opts.binlog_url.is_some())
+        self.run_on_mysql(&mut conn, noria_handle.c.clone(), opts.binlog_url.is_some())
             .await?;
 
         // After all tests are done, stop the adapter
@@ -230,6 +230,7 @@ impl TestScript {
     pub async fn run_on_mysql(
         &self,
         conn: &mut mysql::Conn,
+        mut noria: Option<ControllerHandle<LocalAuthority>>,
         needs_sleep: bool,
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
@@ -257,6 +258,11 @@ impl TestScript {
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
+                Record::Graphviz => {
+                    if let Some(noria) = &mut noria {
+                        println!("{}", noria.graphviz().await?);
+                    }
+                }
             }
         }
         Ok(())

@@ -80,7 +80,7 @@ impl DatabaseConnection {
 
     async fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
         match self {
-            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, false).await,
+            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, None, false).await,
         }
     }
 }
@@ -167,6 +167,7 @@ impl TryFrom<PathBuf> for Seed {
                     hash_threshold = *ht;
                 }
                 Record::Halt { .. } => break,
+                Record::Graphviz => {}
             }
         }
 

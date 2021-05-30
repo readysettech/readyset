@@ -347,6 +347,7 @@ named!(pub record<Record>, alt!(
     statement => { |stmt| Record::Statement(stmt) } |
     query => { |query| Record::Query(query) } |
     halt |
+    terminated!(tag!("graphviz"), line_ending) => { |_| Record::Graphviz } |
     hash_threshold
 ));
 

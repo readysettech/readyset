@@ -509,6 +509,9 @@ pub enum Record {
     Halt {
         conditionals: Vec<Conditional>,
     },
+
+    /// Print a graphviz representation of the current query graph.
+    Graphviz,
 }
 
 impl Display for Record {
@@ -520,6 +523,7 @@ impl Display for Record {
             Record::Halt { conditionals } => {
                 writeln!(f, "{}\nhalt\n", conditionals.iter().join("\n"))
             }
+            Record::Graphviz => f.write_str("graphviz\n"),
         }
     }
 }
