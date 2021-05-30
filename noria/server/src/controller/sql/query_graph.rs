@@ -565,21 +565,6 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         FieldDefinitionExpression::AllInTable(_) => {
                             internal!("<table>.* should have been expanded already")
                         }
-                        // No need to do anything for literals and operator expressions here, as they
-                        // aren't associated with a relation (and thus have no QGN)
-                        FieldDefinitionExpression::Expression {
-                            expr: Expression::Literal(_) | Expression::BinaryOp { .. },
-                            ..
-                        } => None,
-                        // XXX(malte): don't drop aggregation columns
-                        FieldDefinitionExpression::Expression {
-                            expr:
-                                Expression::Call(_)
-                                | Expression::Column(Column {
-                                    function: Some(_), ..
-                                }),
-                            ..
-                        } => None,
                         FieldDefinitionExpression::Expression {
                             expr: Expression::Column(c),
                             ..
@@ -593,8 +578,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                                 }
                             }
                         },
-                        FieldDefinitionExpression::Expression { expr, .. } => {
-                            unsupported!("Projected expression not yet supported: {}", expr)
+                        FieldDefinitionExpression::Expression { .. } => {
+                            // No need to do anything for expressions here, since they aren't associated
+                            // with a relation (and thus have no QGN)
+                            // XXX(malte): don't drop aggregation columns
+                            None
                         }
                     })
                 })

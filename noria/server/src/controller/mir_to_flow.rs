@@ -1,6 +1,6 @@
 use nom_sql::{
-    BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression,
-    OrderType,
+    BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
+    OrderType, UnaryOperator,
 };
 use std::collections::HashMap;
 
@@ -868,6 +868,8 @@ fn make_latest_node(
 /// - Literals being replaced with their corresponding [`DataType`]
 /// - [Column references](nom_sql::Column) being resolved into column indices in the parent node.
 /// - Function calls being resolved to built-in functions, and arities checked
+/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...`
+///   and x NOT IN (y, z, ...) to `x != y AND x != z AND ...`
 fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<DataflowExpression> {
     match expr {
         Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(DataflowExpression::Cast(
@@ -913,14 +915,54 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
                 None => Box::new(DataflowExpression::Literal(DataType::None)),
             },
         }),
-        Expression::UnaryOp { .. }
-        | Expression::Between { .. }
-        | Expression::Exists(_)
-        | Expression::In { .. } => {
-            unsupported!("Unsupported projected expression: {}", expr)
+        Expression::In {
+            lhs,
+            rhs: InValue::List(exprs),
+            negated,
+        } => {
+            let mut exprs = exprs.into_iter();
+            if let Some(fst) = exprs.next() {
+                let (comparison_op, logical_op) = if negated {
+                    (BinaryOperator::NotEqual, BinaryOperator::And)
+                } else {
+                    (BinaryOperator::Equal, BinaryOperator::Or)
+                };
+
+                let lhs = lower_expression(parent, *lhs)?;
+                let make_comparison = |rhs| -> ReadySetResult<_> {
+                    Ok(DataflowExpression::Op {
+                        left: Box::new(lhs.clone()),
+                        op: comparison_op,
+                        right: Box::new(lower_expression(parent, rhs)?),
+                    })
+                };
+
+                exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
+                    Ok(DataflowExpression::Op {
+                        left: Box::new(acc),
+                        op: logical_op,
+                        right: Box::new(make_comparison(rhs)?),
+                    })
+                })
+            } else {
+                if negated {
+                    // x IN () is always false
+                    Ok(DataflowExpression::Literal(DataType::None))
+                } else {
+                    // x NOT IN () is always false
+                    Ok(DataflowExpression::Literal(DataType::from(1)))
+                }
+            }
         }
-        Expression::NestedSelect(_) => {
-            internal!("Nested selection should have been rewritten earlier")
+        Expression::Exists(_) => unsupported!("EXISTS not currently supported"),
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            ..
+        }
+        | Expression::Between { .. }
+        | Expression::NestedSelect(_)
+        | Expression::In { .. } => {
+            internal!("Expression should have been desugared earlier: {}", expr)
         }
     }
 }
