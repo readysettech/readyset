@@ -11,7 +11,7 @@ use chrono_tz::Tz;
 use maths::{float::encode_f64, int::integer_rnd};
 use msql_srv::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
-use noria::{DataType, ReadySetError, ReadySetResult};
+use noria::{unsupported, DataType, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,18 +207,32 @@ impl Expression {
                 .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*c)),
             Literal(dt) => Ok(Cow::Owned(dt.clone())),
             Op { op, left, right } => {
+                use BinaryOperator::*;
+
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
                 match op {
-                    BinaryOperator::Add => Ok(Cow::Owned((non_null!(left) + non_null!(right))?)),
-                    BinaryOperator::Subtract => {
-                        Ok(Cow::Owned((non_null!(left) - non_null!(right))?))
+                    Add => Ok(Cow::Owned((non_null!(left) + non_null!(right))?)),
+                    Subtract => Ok(Cow::Owned((non_null!(left) - non_null!(right))?)),
+                    Multiply => Ok(Cow::Owned((non_null!(left) * non_null!(right))?)),
+                    Divide => Ok(Cow::Owned((non_null!(left) / non_null!(right))?)),
+                    And => Ok(Cow::Owned(
+                        (non_null!(left).is_truthy() && non_null!(right).is_truthy()).into(),
+                    )),
+                    Or => Ok(Cow::Owned(
+                        (non_null!(left).is_truthy() || non_null!(right).is_truthy()).into(),
+                    )),
+                    Equal => Ok(Cow::Owned((non_null!(left) == non_null!(right)).into())),
+                    NotEqual => Ok(Cow::Owned((non_null!(left) != non_null!(right)).into())),
+                    Greater => Ok(Cow::Owned((non_null!(left) > non_null!(right)).into())),
+                    GreaterOrEqual => Ok(Cow::Owned((non_null!(left) >= non_null!(right)).into())),
+                    Less => Ok(Cow::Owned((non_null!(left) < non_null!(right)).into())),
+                    LessOrEqual => Ok(Cow::Owned((non_null!(left) <= non_null!(right)).into())),
+                    Is => Ok(Cow::Owned((left == right).into())),
+                    IsNot => Ok(Cow::Owned((left != right).into())),
+                    Like | NotLike | ILike | NotILike => {
+                        unsupported!("Unsupported operator in expression: {}", op)
                     }
-                    BinaryOperator::Multiply => {
-                        Ok(Cow::Owned((non_null!(left) * non_null!(right))?))
-                    }
-                    BinaryOperator::Divide => Ok(Cow::Owned((non_null!(left) / non_null!(right))?)),
-                    _ => todo!(),
                 }
             }
             Cast(expr, ty) => match expr.eval(record)? {
@@ -991,6 +1005,31 @@ mod tests {
         assert_eq!(
             expr.eval(&[DataType::None]).unwrap(),
             Cow::Owned(DataType::None)
+        );
+    }
+
+    #[test]
+    fn value_truthiness() {
+        assert_eq!(
+            Expression::Op {
+                left: Box::new(Expression::Literal(1.into())),
+                op: BinaryOperator::And,
+                right: Box::new(Expression::Literal(3.into())),
+            }
+            .eval(&[])
+            .unwrap(),
+            Cow::Owned(1.into())
+        );
+
+        assert_eq!(
+            Expression::Op {
+                left: Box::new(Expression::Literal(1.into())),
+                op: BinaryOperator::And,
+                right: Box::new(Expression::Literal(0.into())),
+            }
+            .eval(&[])
+            .unwrap(),
+            Cow::Owned(0.into())
         );
     }
 
