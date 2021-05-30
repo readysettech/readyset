@@ -1228,3 +1228,14 @@ fn json_column_insert_read() {
         vec![(1, "{\"name\": \"Mr. Mistoffelees\"}".to_string())]
     );
 }
+
+#[test]
+fn explain_graphviz() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    let res = conn.query_iter("EXPLAIN GRAPHVIZ;").unwrap();
+    assert_eq!(res.columns().as_ref().len(), 1);
+    assert_eq!(
+        res.columns().as_ref().first().unwrap().name_str(),
+        "GRAPHVIZ"
+    );
+}

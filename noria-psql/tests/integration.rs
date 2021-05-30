@@ -1005,3 +1005,16 @@ fn delete_case_insensitive() {
         .unwrap();
     assert!(row.is_none());
 }
+
+#[test]
+fn explain_graphviz() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    let res = conn.simple_query("EXPLAIN GRAPHVIZ").unwrap();
+    let row = match res.first().unwrap() {
+        SimpleQueryMessage::Row(row) => row,
+        _ => panic!("Expected row"),
+    };
+    assert_eq!(row.columns().len(), 1);
+    assert_eq!(row.columns().first().unwrap().name(), "GRAPHVIZ");
+}

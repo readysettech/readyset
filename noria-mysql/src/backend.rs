@@ -11,8 +11,8 @@ use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
 use crate::{Error, MySqlQueryHandler};
 use msql_srv::{
-    ColumnFlags, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter, RowWriter,
-    StatementMetaWriter,
+    Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
+    RowWriter, StatementMetaWriter,
 };
 use mysql_async::consts::StatusFlags;
 use noria::errors::internal_err;
@@ -354,6 +354,18 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 write_query_results(Ok((num_rows_deleted, 0)), results, None).await
             }
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta { label, value })) => {
+                let cols = vec![Column {
+                    table: "".to_owned(),
+                    column: label,
+                    coltype: ColumnType::MYSQL_TYPE_STRING,
+                    colflags: ColumnFlags::empty(),
+                }];
+                let mut writer = results.start(&cols).await?;
+                writer.write_col(value)?;
+                writer.end_row()?;
+                Ok(writer.finish().await?)
+            }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
@@ -521,6 +533,18 @@ where
             }
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 results.completed(num_rows_deleted, 0, None).await
+            }
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta { label, value })) => {
+                let cols = vec![Column {
+                    table: "".to_owned(),
+                    column: label,
+                    coltype: ColumnType::MYSQL_TYPE_STRING,
+                    colflags: ColumnFlags::empty(),
+                }];
+                let mut writer = results.start(&cols).await?;
+                writer.write_col(value)?;
+                writer.end_row()?;
+                Ok(writer.finish().await?)
             }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,

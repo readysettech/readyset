@@ -6,6 +6,7 @@ use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{drop_table, DropTableStatement};
+use crate::explain::{explain_statement, ExplainStatement};
 use crate::insert::{insertion, InsertStatement};
 use crate::rename::{rename_table, RenameTableStatement};
 use crate::select::{selection, SelectStatement};
@@ -42,6 +43,7 @@ pub enum SqlQuery {
     RenameTable(RenameTableStatement),
     Use(UseStatement),
     Show(ShowStatement),
+    Explain(ExplainStatement),
 }
 
 impl fmt::Display for SqlQuery {
@@ -63,6 +65,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::RenameTable(ref rename) => write!(f, "{}", rename),
             SqlQuery::Use(ref use_db) => write!(f, "{}", use_db),
             SqlQuery::Show(ref show) => write!(f, "{}", show),
+            SqlQuery::Explain(ref explain) => write!(f, "{}", explain),
         }
     }
 }
@@ -87,6 +90,7 @@ impl SqlQuery {
             Self::RenameTable(_) => "RENAME",
             Self::Use(_) => "USE",
             Self::Show(_) => "SHOW",
+            Self::Explain(_) => "EXPLAIN",
         }
     }
 }
@@ -110,6 +114,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(rename_table(dialect), SqlQuery::RenameTable),
             map(use_statement(dialect), SqlQuery::Use),
             map(show(dialect), SqlQuery::Show),
+            map(explain_statement, SqlQuery::Explain),
         ))(i)
     }
 }
