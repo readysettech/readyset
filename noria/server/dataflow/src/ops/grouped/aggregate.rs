@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
-use std::sync;
 
 use crate::ops::{
     filter::FilterVec,
@@ -83,7 +82,7 @@ impl Aggregation {
                 over,
                 group: group_by.into(),
                 count_sum_map: RefCell::new(Default::default()),
-                filter: Some(sync::Arc::new(filter)),
+                filter: Some(filter),
                 over_else,
             },
         ))
@@ -110,7 +109,7 @@ pub struct Aggregator {
     group: Vec<usize>,
     // only needed for AVG. Stores both sum and count to avoid rounding errors.
     count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
-    filter: Option<sync::Arc<FilterVec>>,
+    filter: Option<FilterVec>,
     over_else: Option<Literal>,
 }
 

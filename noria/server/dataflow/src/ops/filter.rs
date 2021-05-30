@@ -4,7 +4,6 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
-use std::sync;
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
@@ -83,7 +82,7 @@ impl FilterVec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    filter: sync::Arc<FilterVec>,
+    filter: FilterVec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -122,7 +121,7 @@ impl Filter {
     pub fn new(src: NodeIndex, filter: &[(usize, FilterCondition)]) -> Filter {
         Filter {
             src: src.into(),
-            filter: sync::Arc::new(FilterVec(Vec::from(filter))),
+            filter: FilterVec(Vec::from(filter)),
         }
     }
 }
