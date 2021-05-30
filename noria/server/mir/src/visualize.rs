@@ -155,27 +155,6 @@ impl GraphViz for MirNodeInner {
                     .join(", ");
                 write!(out, "{} | γ: {}", op_string, group_cols)?;
             }
-            MirNodeInner::FilterAggregation {
-                ref on,
-                ref group_by,
-                ref kind,
-                ..
-            } => {
-                let op_string = match &*kind {
-                    AggregationKind::Count => format!("\\|*\\|(filter {})", print_col(on)),
-                    AggregationKind::Sum => format!("𝛴(filter {})", print_col(on)),
-                    AggregationKind::Avg => format!("Avg(filter {})", print_col(on)),
-                    AggregationKind::GroupConcat { separator: s } => {
-                        format!("||({}, \"{}\")", print_col(on), s)
-                    }
-                };
-                let group_cols = group_by
-                    .iter()
-                    .map(|c| print_col(c))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(out, "{} | γ: {}", op_string, group_cols)?;
-            }
             MirNodeInner::Filter { ref conditions, .. } => {
                 write!(out, "σ: {}", conditions)?;
             }

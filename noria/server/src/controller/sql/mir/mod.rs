@@ -871,11 +871,7 @@ impl SqlToMirConverter {
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column,
-                      over_else: Option<Literal>,
-                      t: GroupedNodeType,
-                      distinct: bool,
-                      cond: Option<Expression>| {
+        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
                 let mut dist_col = Vec::new();
@@ -886,20 +882,18 @@ impl SqlToMirConverter {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (node, &over, over_else),
+                    (node, &over),
                     group_cols,
                     t,
-                    cond,
                 ));
                 out_nodes
             } else {
                 out_nodes.push(self.make_grouped_node(
                     name,
                     &func_col,
-                    (parent, &over, over_else),
+                    (parent, &over),
                     group_cols,
                     t,
-                    cond,
                 ));
                 out_nodes
             }
@@ -914,48 +908,14 @@ impl SqlToMirConverter {
                 distinct,
             } => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
-                None,
-            ),
-            Sum {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: Some(box Expression::Literal(ref else_val)),
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::Sum),
-                false,
-                Some(*condition.clone()),
-            ),
-            Sum {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: None,
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                None,
-                GroupedNodeType::FilterAggregation(Aggregation::Sum),
-                false,
-                Some(*condition.clone()),
             ),
             Sum { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
-                None,
             ),
             CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
@@ -971,140 +931,62 @@ impl SqlToMirConverter {
                 distinct,
             } => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
-                None,
-            ),
-            Count {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: Some(box Expression::Literal(ref else_val)),
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::Count),
-                false,
-                Some(*condition.clone()),
-            ),
-            Count {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: None,
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                None,
-                GroupedNodeType::FilterAggregation(Aggregation::Count),
-                false,
-                Some(*condition.clone()),
             ),
             Count { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
-                None,
             ),
             Avg {
                 expr: box Expression::Column(ref col),
                 distinct,
             } => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
-                None,
-            ),
-            Avg {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: Some(box Expression::Literal(ref else_val)),
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                Some(else_val.clone()),
-                GroupedNodeType::FilterAggregation(Aggregation::Avg),
-                false,
-                Some(*condition.clone()),
-            ),
-            Avg {
-                expr:
-                    box Expression::CaseWhen {
-                        ref condition,
-                        then_expr: box Expression::Column(ref col),
-                        else_expr: None,
-                    },
-                distinct: false,
-            } => mknode(
-                &Column::from(col),
-                None,
-                GroupedNodeType::FilterAggregation(Aggregation::Avg),
-                false,
-                Some(*condition.clone()),
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
-                None,
             ),
             // TODO(atsakiris): Support Filters for Extremum/GroupConcat
             // CH: https://app.clubhouse.io/readysettech/story/198
             Max(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
-                None,
             ),
             Max(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                None,
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
-                None,
             ),
             Min(box Expression::Column(ref col)) => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
-                None,
             ),
             Min(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                None,
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
-                None,
             ),
             GroupConcat {
                 expr: box Expression::Column(ref col),
                 ref separator,
             } => mknode(
                 &Column::from(col),
-                None,
                 GroupedNodeType::Aggregation(Aggregation::GroupConcat {
                     separator: separator.clone(),
                 }),
                 false,
-                None,
             ),
             _ => unimplemented!(),
         }
@@ -1114,16 +996,11 @@ impl SqlToMirConverter {
         &self,
         name: &str,
         computed_col: &Column,
-        over: (MirNodeRef, &Column, Option<Literal>),
+        over: (MirNodeRef, &Column),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
-        condition: Option<Expression>,
     ) -> MirNodeRef {
-        let parent_node = over.0;
-
-        // Resolve column IDs in parent
-        let over_col = over.1;
-        let else_val = over.2;
+        let (parent_node, over_col) = over;
 
         // The aggregate node's set of output columns is the group columns plus the function
         // column
@@ -1159,24 +1036,6 @@ impl SqlToMirConverter {
                 vec![parent_node.clone()],
                 vec![],
             ),
-            GroupedNodeType::FilterAggregation(filter_agg) => {
-                let cond = condition.expect("Filter aggregation must have condition!");
-                MirNode::new(
-                    name,
-                    self.schema_version,
-                    combined_columns,
-                    MirNodeInner::FilterAggregation {
-                        on: over_col.clone(),
-                        else_on: else_val.clone(),
-                        group_by: group_by.into_iter().cloned().collect(),
-                        kind: filter_agg,
-                        conditions: cond,
-                        remapped_exprs_to_parent_names: self.remapped_exprs_to_parent_names.clone(),
-                    },
-                    vec![parent_node.clone()],
-                    vec![],
-                )
-            }
         }
     }
 

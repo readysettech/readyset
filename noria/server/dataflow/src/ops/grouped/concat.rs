@@ -148,12 +148,12 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Option<Self::Diff>> {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
         let v = self.build(r)?;
         if pos {
-            Ok(Some(Modify::Add(v)))
+            Ok(Modify::Add(v))
         } else {
-            Ok(Some(Modify::Remove(v)))
+            Ok(Modify::Remove(v))
         }
     }
 

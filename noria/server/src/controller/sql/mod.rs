@@ -2488,8 +2488,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count{
                 expr: Box::new(Expression::CaseWhen {
@@ -2514,9 +2515,9 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             assert_eq!(agg_view.fields(), &["userid", "count"]);
-            assert_eq!(agg_view.description(true), "|σ(1)| γ[0]");
+            assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2549,8 +2550,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
                     condition: Box::new(
@@ -2564,7 +2566,7 @@ mod tests {
                     else_expr: None,
                 }),
                 distinct: false
- });
+            });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
                 &[&Column::from("votes.userid")],
@@ -2574,9 +2576,9 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2610,8 +2612,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum{
                 expr: Box::new(Expression::CaseWhen {
@@ -2636,9 +2639,9 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             assert_eq!(agg_view.fields(), &["userid", "sum"]);
-            assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0]");
+            assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2772,7 +2775,8 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
+            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum {
@@ -2831,8 +2835,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok(), "!{:?}.is_ok()", res);
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let filter_cond = Expression::BinaryOp {
                 lhs: Box::new(Expression::BinaryOp {
@@ -2863,9 +2868,9 @@ mod tests {
                     function: Some(f),
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             assert_eq!(agg_view.fields(), &["comment_id", "votes"]);
-            assert_eq!(agg_view.description(true), "|σ(2)| γ[1]");
+            assert_eq!(agg_view.description(true), "|*| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.

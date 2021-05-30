@@ -81,7 +81,8 @@ pub(super) fn make_expressions_above_grouped(
         .filter_map(|c| c.function.as_ref())
         .filter(|f| is_aggregate(&f))
         .flat_map(|f| f.arguments())
-        .filter(|arg| matches!(arg, Expression::BinaryOp { .. } | Expression::Call(_)))
+        // We don't need to do any work for bare column expressions
+        .filter(|arg| !matches!(arg, Expression::Column(_)))
         .map(|expr| (expr.to_string(), expr.clone()))
         .collect();
 
@@ -96,7 +97,7 @@ pub(super) fn make_expressions_above_grouped(
             vec![],
             false,
         );
-        *prev_node = Some(node.clone());
+        *prev_node = Some(node);
         exprs.into_iter().map(|(e, n)| (n, e)).collect()
     } else {
         HashMap::new()
@@ -338,7 +339,6 @@ fn joinable_aggregate_nodes(agg_nodes: &Vec<MirNodeRef>) -> Vec<MirNodeRef> {
         .into_iter()
         .filter_map(|node| match node.borrow().inner {
             MirNodeInner::Aggregation { .. } => Some(node.clone()),
-            MirNodeInner::FilterAggregation { .. } => Some(node.clone()),
             MirNodeInner::Extremum { .. } => Some(node.clone()),
             _ => None,
         })
