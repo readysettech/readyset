@@ -1,7 +1,12 @@
+use nom_sql::{ColumnSpecification, SqlType};
+use noria::results::Results;
+use noria::ColumnSchema;
 use noria_client::backend::{self as cl, UpstreamPrepare};
 use noria_client::backend::{noria_connector, SinglePrepareResult};
 use psql_srv as ps;
+use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
+use std::sync::Arc;
 use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
@@ -98,6 +103,31 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
+            Noria(NoriaResult::Meta { label, value }) => {
+                let select_schema = SelectSchema(noria_client::backend::SelectSchema {
+                    use_bogo: false,
+                    schema: Cow::Owned(vec![ColumnSchema {
+                        spec: ColumnSpecification::new(
+                            nom_sql::Column {
+                                name: label.to_owned(),
+                                table: None,
+                                function: None,
+                            },
+                            SqlType::Text,
+                        ),
+                        base: None,
+                    }]),
+                    columns: Cow::Owned(vec![label.to_owned()]),
+                });
+                let resultset = Resultset::try_new(
+                    vec![Results::new(vec![vec![value.into()]], Arc::new([label]))],
+                    &select_schema,
+                )?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
             Upstream(upstream::QueryResult::Read { data: rows }) => {
                 let schema = match rows.first() {
                     None => vec![],

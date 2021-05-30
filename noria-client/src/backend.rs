@@ -839,7 +839,8 @@ where
             }
             nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
-            | nom_sql::SqlQuery::RenameTable(..) => {
+            | nom_sql::SqlQuery::RenameTable(..)
+            | nom_sql::SqlQuery::Explain(_) => {
                 error!("unsupported query");
                 unsupported!("query type unsupported");
             }
@@ -1268,6 +1269,13 @@ where
                     Ok(QueryResult::Upstream(query_result?))
                 }
 
+                SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => self
+                    .noria
+                    .graphviz(*simplified)
+                    .await
+                    .map(QueryResult::Noria)
+                    .map_err(|e| e.into()),
+
                 // Table Create / Drop (RYW not supported)
                 // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                 nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
@@ -1330,6 +1338,10 @@ where
                 SqlQuery::Delete(q) => {
                     execution_timer = Some((Instant::now(), SqlQueryType::Write));
                     self.noria.handle_delete(q).await
+                }
+                SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
+                    execution_timer = Some((Instant::now(), SqlQueryType::Read));
+                    self.noria.graphviz(*simplified).await
                 }
                 _ => {
                     error!("unsupported query");

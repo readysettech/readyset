@@ -207,6 +207,13 @@ pub enum QueryResult<'a> {
     Delete {
         num_rows_deleted: u64,
     },
+    /// A metadata string returned as a response to eg an EXPLAIN query
+    Meta {
+        /// The label for the metadata, used as a column header when writing results
+        label: String,
+        /// The actual value
+        value: String,
+    },
 }
 
 impl<'a> QueryResult<'a> {
@@ -238,6 +245,7 @@ impl<'a> QueryResult<'a> {
                 last_inserted_id,
             },
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
+            QueryResult::Meta { label, value } => QueryResult::Meta { label, value },
         }
     }
 }
@@ -340,6 +348,24 @@ impl NoriaConnector {
             prepared_statement_cache: HashMap::new(),
             region,
         }
+    }
+
+    pub(crate) async fn graphviz(
+        &mut self,
+        simplified: bool,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        let noria = &mut self.inner.get_mut().await?.noria;
+
+        let (label, graphviz) = if simplified {
+            ("SIMPLIFIED GRAPHVIZ", noria.simple_graphviz().await?)
+        } else {
+            ("GRAPHVIZ", noria.graphviz().await?)
+        };
+
+        Ok(QueryResult::Meta {
+            label: label.to_owned(),
+            value: graphviz,
+        })
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria

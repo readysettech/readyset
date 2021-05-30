@@ -209,6 +209,9 @@ where
             utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
             // TODO: convert select_schema?
         }
+        QueryResult::Noria(NoriaResult::Meta { label, value }) => {
+            utils::set_str_field(cx, &js_query_result, &label, &value)?;
+        }
         QueryResult::Noria(NoriaResult::Update {
             num_rows_updated,
             last_inserted_id,

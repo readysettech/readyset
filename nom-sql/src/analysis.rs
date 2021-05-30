@@ -41,7 +41,8 @@ impl ReferredTables for SqlQuery {
             | SqlQuery::Commit(_)
             | SqlQuery::Rollback(_)
             | SqlQuery::Use(_)
-            | SqlQuery::Show(_) => HashSet::new(),
+            | SqlQuery::Show(_)
+            | SqlQuery::Explain(_) => HashSet::new(),
         }
     }
 }
