@@ -151,6 +151,12 @@ pub enum Expression {
     Cast(Box<Expression>, SqlType),
 
     Call(BuiltinFunction),
+
+    CaseWhen {
+        condition: Box<Expression>,
+        then_expr: Box<Expression>,
+        else_expr: Box<Expression>,
+    },
 }
 
 impl fmt::Display for Expression {
@@ -163,6 +169,15 @@ impl fmt::Display for Expression {
             Op { op, left, right } => write!(f, "({} {} {})", left, op, right),
             Cast(expr, ty) => write!(f, "cast({} as {})", expr, ty),
             Call(func) => write!(f, "{}", func),
+            CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => write!(
+                f,
+                "case when {} then {} else {}",
+                condition, then_expr, else_expr
+            ),
         }
     }
 }
@@ -388,6 +403,17 @@ impl Expression {
                     }
                 }
             },
+            CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                if condition.eval(record)?.is_truthy() {
+                    then_expr.eval(record)
+                } else {
+                    else_expr.eval(record)
+                }
+            }
         }
     }
 
@@ -464,6 +490,7 @@ impl Expression {
                     _ => e1.sql_type(parent_column_type),
                 },
             },
+            Expression::CaseWhen { then_expr, .. } => then_expr.sql_type(parent_column_type),
         }
     }
 }
@@ -1030,6 +1057,29 @@ mod tests {
             .eval(&[])
             .unwrap(),
             Cow::Owned(0.into())
+        );
+    }
+
+    #[test]
+    fn eval_case_when() {
+        let expr = Expression::CaseWhen {
+            condition: Box::new(Op {
+                left: Box::new(Expression::Column(0)),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Literal(1.into())),
+            }),
+            then_expr: Box::new(Expression::Literal("yes".into())),
+            else_expr: Box::new(Expression::Literal("no".into())),
+        };
+
+        assert_eq!(
+            expr.eval(&[1.into()]).unwrap().as_ref(),
+            &DataType::from("yes")
+        );
+
+        assert_eq!(
+            expr.eval(&[8.into()]).unwrap().as_ref(),
+            &DataType::from("no")
         );
     }
 
