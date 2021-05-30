@@ -195,6 +195,33 @@ impl DataType {
         matches!(*self, DataType::Time(_))
     }
 
+    /// Returns true if this datatype is truthy (is not 0, 0.0, '', or NULL)
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use noria::DataType;
+    ///
+    /// assert!(!DataType::None.is_truthy());
+    /// assert!(!DataType::Int(0).is_truthy());
+    /// assert!(DataType::Int(1).is_truthy());
+    /// ```
+    pub fn is_truthy(&self) -> bool {
+        match *self {
+            DataType::None => false,
+            DataType::Int(x) => x != 0,
+            DataType::UnsignedInt(x) => x != 0,
+            DataType::BigInt(x) => x != 0,
+            DataType::UnsignedBigInt(x) => x != 0,
+            DataType::Real(m, e, s, _) => encode_f64(m, e, s) != 0.0,
+            DataType::Text(_) | DataType::TinyText(_) => {
+                !<&str>::try_from(self).unwrap().is_empty()
+            }
+            DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
+            DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
+        }
+    }
+
     /// Checks if the given DataType::Real is equal to another DataType::Real under an acceptable
     /// error margin. If None is supplied, we use f64::EPSILON.
     pub fn equal_under_error_margin(&self, other: &DataType, error_margin: Option<f64>) -> bool {
@@ -861,6 +888,7 @@ impl TryFrom<f64> for DataType {
     }
 }
 
+/// Booleans are represented as `u32`s which are equal to either 0 or 1
 impl From<bool> for DataType {
     fn from(b: bool) -> Self {
         DataType::from(b as u32)
