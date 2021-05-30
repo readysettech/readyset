@@ -3,14 +3,14 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
-use nom_sql::analysis::{find_function_calls, ReferredColumns};
+use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, Expression, FunctionExpression,
-    LimitClause, Literal, OrderClause, SelectStatement, SqlQuery, TableKey, UnaryOperator,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, Expression, LimitClause, Literal,
+    OrderClause, SelectStatement, SqlQuery, TableKey, UnaryOperator,
 };
 
 use itertools::Itertools;
@@ -83,10 +83,6 @@ pub(super) struct SqlToMirConverter {
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
-    // this is the 2nd return value of `project_expressions`.
-    // FIXME(eta): ideally this should be dependency injected, but it's also
-    // a big annoying type that's painful to thread through, so whatever
-    remapped_exprs_to_parent_names: Option<HashMap<FunctionExpression, String>>,
 
     /// Universe in which the conversion is happening
     universe: Universe,
@@ -99,7 +95,6 @@ impl Default for SqlToMirConverter {
             current: HashMap::default(),
             log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
-            remapped_exprs_to_parent_names: None,
             schema_version: 0,
             universe: Universe::default(),
         }
@@ -848,10 +843,7 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             fields,
-            MirNodeInner::Filter {
-                conditions,
-                remapped_exprs_to_parent_names: self.remapped_exprs_to_parent_names.clone(),
-            },
+            MirNodeInner::Filter { conditions },
             vec![parent],
             vec![],
         )
@@ -1399,48 +1391,6 @@ impl SqlToMirConverter {
         Ok(pred_nodes)
     }
 
-    /// If the provided [`Expression`] contains function calls, extract them into a new
-    /// projection node which evaluates them.
-    ///
-    /// The returned `HashMap` maps the `FunctionExpression`s for the function calls to the names of
-    /// the projected columns that contain the evaluated results.  The returned `MirNodeRef` is
-    /// either just `parent` passed through (if no projections were done), or a node reference to
-    /// the new project node.
-    fn project_expressions<'a>(
-        &self,
-        name: &str,
-        parent: &mut MirNodeRef,
-        ce: &Expression,
-    ) -> HashMap<FunctionExpression, String> {
-        let mut ret = HashMap::new();
-        let mut funcalls = vec![];
-        find_function_calls(&mut funcalls, ce);
-        let expressions = funcalls
-            .into_iter()
-            .enumerate()
-            .map(|(i, fc)| {
-                let new_name = format!("{}_funcall_{}", name, i);
-                ret.insert(fc.clone(), new_name.clone());
-                (new_name, Expression::Call(fc.clone()))
-            })
-            .collect::<Vec<_>>();
-        if !expressions.is_empty() {
-            // wahey, time to do some projecting
-            // project through all the parent's columns verbatim
-            let passthru_cols: Vec<_> = parent.borrow().columns().to_vec();
-            *parent = self.make_project_node(
-                &format!("{}_exprj", name),
-                parent.clone(),
-                passthru_cols.iter().collect(),
-                expressions,
-                vec![],
-                false,
-            );
-        }
-
-        ret
-    }
-
     fn predicates_above_group_by<'a>(
         &self,
         name: &str,
@@ -1730,18 +1680,10 @@ impl SqlToMirConverter {
                                 continue;
                             }
 
-                            let mut parent = match prev_node {
+                            let parent = match prev_node {
                                 None => node_for_rel[rel].clone(),
                                 Some(pn) => pn,
                             };
-
-                            // Project the needful expressions
-                            let exprj_map = self.project_expressions(
-                                &format!("q_{:x}{}_local{}", qg.signature().hash, uformat, i),
-                                &mut parent,
-                                p,
-                            );
-                            self.remapped_exprs_to_parent_names = Some(exprj_map);
 
                             let fns = self.make_predicate_nodes(
                                 &format!(
@@ -1755,7 +1697,6 @@ impl SqlToMirConverter {
                                 p,
                                 0,
                             )?;
-                            self.remapped_exprs_to_parent_names = None;
 
                             invariant!(!fns.is_empty());
                             new_node_count += fns.len();
@@ -1783,18 +1724,10 @@ impl SqlToMirConverter {
                         continue;
                     }
 
-                    let mut parent = match prev_node {
+                    let parent = match prev_node {
                         None => internal!(),
                         Some(pn) => pn,
                     };
-
-                    // Project the needful expressions
-                    let exprj_map = self.project_expressions(
-                        &format!("q_{:x}{}_local{}", qg.signature().hash, uformat, i),
-                        &mut parent,
-                        p,
-                    );
-                    self.remapped_exprs_to_parent_names = Some(exprj_map);
 
                     let fns = self.make_predicate_nodes(
                         &format!(
@@ -1808,7 +1741,6 @@ impl SqlToMirConverter {
                         p,
                         0,
                     )?;
-                    self.remapped_exprs_to_parent_names = None;
 
                     invariant!(!fns.is_empty());
                     new_node_count += fns.len();

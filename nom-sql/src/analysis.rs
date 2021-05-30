@@ -150,57 +150,6 @@ impl ReferredColumns for Expression {
     }
 }
 
-/// Recursively traverses `expr`, an [`Expression`], to find all function calls inside,
-/// putting found function calls into `out`.
-pub fn find_function_calls<'a>(out: &mut Vec<&'a FunctionExpression>, expr: &'a Expression) {
-    match expr {
-        Expression::Call(f)
-        | Expression::Column(Column {
-            function: Some(box f),
-            ..
-        }) => {
-            out.push(f);
-        }
-        Expression::CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            find_function_calls(out, condition);
-            find_function_calls(out, then_expr);
-            if let Some(else_expr) = else_expr {
-                find_function_calls(out, else_expr);
-            }
-        }
-        Expression::Literal(_) | Expression::Column(_) => {}
-        Expression::BinaryOp { lhs, rhs, .. } => {
-            find_function_calls(out, lhs);
-            find_function_calls(out, rhs);
-        }
-        Expression::UnaryOp { rhs, .. } => {
-            find_function_calls(out, rhs);
-        }
-        Expression::Exists { .. } => {}
-        Expression::Between {
-            operand, min, max, ..
-        } => {
-            find_function_calls(out, operand);
-            find_function_calls(out, min);
-            find_function_calls(out, max);
-        }
-        Expression::In { lhs, rhs, .. } => {
-            find_function_calls(out, lhs);
-            match rhs {
-                InValue::Subquery(_) => {}
-                InValue::List(exprs) => {
-                    exprs.iter().for_each(|expr| find_function_calls(out, expr));
-                }
-            }
-        }
-        Expression::NestedSelect(_) => {}
-    }
-}
-
 /// Returns true if the given [`FunctionExpression`] represents an aggregate function
 pub fn is_aggregate(function: &FunctionExpression) -> bool {
     match function {
@@ -341,22 +290,5 @@ mod tests {
                 vec![&Column::from("sign")]
             );
         }
-    }
-
-    #[test]
-    fn find_funcalls_basic() {
-        let func = FunctionExpression::CountStar;
-        let cexpr = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column {
-                name: "test".to_string(),
-                table: None,
-                function: Some(Box::new(FunctionExpression::CountStar)),
-            })),
-            op: BinaryOperator::Greater,
-            rhs: Box::new(Expression::Literal(Literal::Integer(0))),
-        };
-        let mut out = vec![];
-        find_function_calls(&mut out, &cexpr);
-        assert_eq!(out, vec![&func]);
     }
 }

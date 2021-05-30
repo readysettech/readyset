@@ -21,8 +21,6 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 extern crate serde_derive;
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate lazy_static;
 
 pub(crate) mod backlog;
 pub mod node;

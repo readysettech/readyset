@@ -262,7 +262,6 @@ mod tests {
                 vec!["a".into(), "agg".into()],
                 MirNodeInner::Filter {
                     conditions: condition_expression_1.clone(),
-                    remapped_exprs_to_parent_names: None,
                 },
                 vec![grp.clone()],
                 vec![],
