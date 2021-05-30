@@ -1302,6 +1302,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataflow_expression"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "launchpad",
+ "maths",
+ "msql-srv",
+ "nom-sql",
+ "noria",
+ "pretty_assertions 0.6.1",
+ "proptest",
+ "serde",
+ "test-strategy",
+]
+
+[[package]]
 name = "debezium_connector"
 version = "0.1.0"
 dependencies = [
@@ -3888,8 +3905,7 @@ dependencies = [
  "ahash 0.3.8",
  "anyhow",
  "bincode",
- "chrono",
- "chrono-tz",
+ "dataflow_expression",
  "derivative",
  "derive_more",
  "futures-util",
@@ -3900,7 +3916,6 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
- "maths",
  "metrics",
  "msql-srv",
  "nom-sql",

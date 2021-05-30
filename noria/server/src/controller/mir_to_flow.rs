@@ -13,8 +13,8 @@ use dataflow::ops::filter::{FilterCondition, FilterVec};
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
-use dataflow::ops::project::{BuiltinFunction, Project, ProjectExpression};
-use dataflow::{node, ops};
+use dataflow::ops::project::Project;
+use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression};
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
@@ -935,16 +935,16 @@ fn make_latest_node(
 fn generate_project_expression(
     parent: &MirNodeRef,
     expr: Expression,
-) -> ReadySetResult<ProjectExpression> {
+) -> ReadySetResult<DataflowExpression> {
     match expr {
-        Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(ProjectExpression::Cast(
+        Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(DataflowExpression::Cast(
             Box::new(generate_project_expression(parent, (*arg).into())?),
             ty,
         )),
         Expression::Call(FunctionExpression::Call {
             name: fname,
             arguments,
-        }) => Ok(ProjectExpression::Call(
+        }) => Ok(DataflowExpression::Call(
             BuiltinFunction::from_name_and_args(
                 &fname,
                 arguments
@@ -957,13 +957,13 @@ fn generate_project_expression(
             "Unexpected (aggregate?) call node in project expression: {:?}",
             call
         ),
-        Expression::Literal(lit) => Ok(ProjectExpression::Literal(lit.into())),
-        Expression::Column(nom_sql::Column { name, table, .. }) => Ok(ProjectExpression::Column(
+        Expression::Literal(lit) => Ok(DataflowExpression::Literal(lit.into())),
+        Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
             parent
                 .borrow()
                 .column_id_for_column(&Column::new(table.as_deref(), &name), None),
         )),
-        Expression::BinaryOp { lhs, op, rhs } => Ok(ProjectExpression::Op {
+        Expression::BinaryOp { lhs, op, rhs } => Ok(DataflowExpression::Op {
             op,
             left: Box::new(generate_project_expression(parent, *lhs)?),
             right: Box::new(generate_project_expression(parent, *rhs)?),
@@ -1008,7 +1008,7 @@ fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
-    let projected_expressions: Vec<ProjectExpression> = expressions
+    let projected_expressions: Vec<DataflowExpression> = expressions
         .iter()
         .map(|(_, e)| generate_project_expression(&parent, e.clone()))
         .collect::<Result<Vec<_>, _>>()?;

@@ -1,5 +1,10 @@
+use std::borrow::Cow;
+use std::cmp::min;
+use std::convert::TryFrom;
 use std::fmt;
-use std::{borrow::Cow, cmp::min};
+use std::fmt::Formatter;
+use std::ops::{Add, Sub};
+use std::sync::Arc;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
@@ -7,37 +12,30 @@ use maths::{float::encode_f64, int::integer_rnd};
 use msql_srv::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use noria::{DataType, ReadySetError, ReadySetResult};
-use std::convert::TryFrom;
-use std::fmt::Formatter;
-use std::ops::{Add, Sub};
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BuiltinFunction {
     /// convert_tz(expr, expr, expr)
-    ConvertTZ(
-        Box<ProjectExpression>,
-        Box<ProjectExpression>,
-        Box<ProjectExpression>,
-    ),
+    ConvertTZ(Box<Expression>, Box<Expression>, Box<Expression>),
     /// dayofweek(expr)
-    DayOfWeek(Box<ProjectExpression>),
+    DayOfWeek(Box<Expression>),
     /// ifnull(expr, expr)
-    IfNull(Box<ProjectExpression>, Box<ProjectExpression>),
+    IfNull(Box<Expression>, Box<Expression>),
     /// month(expr)
-    Month(Box<ProjectExpression>),
+    Month(Box<Expression>),
     /// timediff(expr, expr)
-    Timediff(Box<ProjectExpression>, Box<ProjectExpression>),
+    Timediff(Box<Expression>, Box<Expression>),
     /// addtime(expr, expr)
-    Addtime(Box<ProjectExpression>, Box<ProjectExpression>),
+    Addtime(Box<Expression>, Box<Expression>),
     /// round(expr, prec)
-    Round(Box<ProjectExpression>, Box<ProjectExpression>),
+    Round(Box<Expression>, Box<Expression>),
 }
 
 impl BuiltinFunction {
     pub fn from_name_and_args<A>(name: &str, args: A) -> Result<Self, ReadySetError>
     where
-        A: IntoIterator<Item = ProjectExpression>,
+        A: IntoIterator<Item = Expression>,
     {
         let mut args = args.into_iter();
         match name {
@@ -84,10 +82,7 @@ impl BuiltinFunction {
                 let arity_error = || ReadySetError::ArityError("round".to_owned());
                 Ok(Self::Round(
                     Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(
-                        args.next()
-                            .unwrap_or(ProjectExpression::Literal(DataType::Int(0))),
-                    ),
+                    Box::new(args.next().unwrap_or(Expression::Literal(DataType::Int(0)))),
                 ))
             }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
@@ -125,9 +120,20 @@ impl fmt::Display for BuiltinFunction {
     }
 }
 
-/// Expression AST for projection
+/// Expressions that can be evaluated during execution of a query
+///
+/// This type, which is the final lowered version of the original Expression AST, essentially
+/// represents a desugared version of [`nom_sql::Expression`], with the following transformations
+/// applied during lowering:
+///
+/// - Literals replaced with their corresponding [`DataType`]
+/// - [Column references](nom_sql::Column) resolved into column indices in the parent node.
+/// - Function calls resolved, and arities checked
+///
+/// During forward processing of dataflow, instances of these expressions are
+/// [evaluated](Expression::eval) by both projection nodes and filter nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProjectExpression {
+pub enum Expression {
     /// A reference to a column, by index, in the parent node
     Column(usize),
 
@@ -137,19 +143,19 @@ pub enum ProjectExpression {
     /// A binary operation
     Op {
         op: BinaryOperator,
-        left: Box<ProjectExpression>,
-        right: Box<ProjectExpression>,
+        left: Box<Expression>,
+        right: Box<Expression>,
     },
 
     /// CAST(expr AS type)
-    Cast(Box<ProjectExpression>, SqlType),
+    Cast(Box<Expression>, SqlType),
 
     Call(BuiltinFunction),
 }
 
-impl fmt::Display for ProjectExpression {
+impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ProjectExpression::*;
+        use Expression::*;
 
         match self {
             Column(u) => write!(f, "{}", u),
@@ -189,10 +195,10 @@ macro_rules! non_null {
     };
 }
 
-impl ProjectExpression {
-    /// Evaluate a [`ProjectExpression`] given a source record to pull columns from
+impl Expression {
+    /// Evaluate this expression, given a source record to pull columns from
     pub fn eval<'a>(&self, record: &'a [DataType]) -> ReadySetResult<Cow<'a, DataType>> {
-        use ProjectExpression::*;
+        use Expression::*;
 
         match self {
             Column(c) => record
@@ -379,11 +385,11 @@ impl ProjectExpression {
         // typechecks, which isn't great - but when we actually have a typechecker it'll be
         // attaching types to expressions ahead of time so this is just a stop-gap for now
         match self {
-            ProjectExpression::Column(c) => parent_column_type(*c),
-            ProjectExpression::Literal(l) => Ok(l.sql_type()),
-            ProjectExpression::Op { left, .. } => left.sql_type(parent_column_type),
-            ProjectExpression::Cast(_, typ) => Ok(Some(typ.clone())),
-            ProjectExpression::Call(f) => match f {
+            Expression::Column(c) => parent_column_type(*c),
+            Expression::Literal(l) => Ok(l.sql_type()),
+            Expression::Op { left, .. } => left.sql_type(parent_column_type),
+            Expression::Cast(_, typ) => Ok(Some(typ.clone())),
+            Expression::Call(f) => match f {
                 BuiltinFunction::ConvertTZ(input, _, _) => input.sql_type(parent_column_type),
                 BuiltinFunction::DayOfWeek(_) => Ok(Some(SqlType::Int(32))),
                 BuiltinFunction::IfNull(_, y) => y.sql_type(parent_column_type),
@@ -391,10 +397,10 @@ impl ProjectExpression {
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
-                    ProjectExpression::Literal(DataType::Real(_, _, _, _)) => {
+                    Expression::Literal(DataType::Real(_, _, _, _)) => {
                         match **prec {
                             // Precision should always be coercable to a DataType::Int.
-                            ProjectExpression::Literal(DataType::Int(p)) => {
+                            Expression::Literal(DataType::Int(p)) => {
                                 if p < 0 {
                                     // Precision is negative, which means that we will be returning a rounded Int.
                                     Ok(Some(SqlType::Int(32)))
@@ -403,7 +409,7 @@ impl ProjectExpression {
                                     Ok(Some(SqlType::Real))
                                 }
                             }
-                            ProjectExpression::Literal(DataType::BigInt(p)) => {
+                            Expression::Literal(DataType::BigInt(p)) => {
                                 if p < 0 {
                                     // Precision is negative, which means that we will be returning a rounded Int.
                                     Ok(Some(SqlType::Int(32)))
@@ -412,15 +418,15 @@ impl ProjectExpression {
                                     Ok(Some(SqlType::Real))
                                 }
                             }
-                            ProjectExpression::Literal(DataType::UnsignedInt(_)) => {
+                            Expression::Literal(DataType::UnsignedInt(_)) => {
                                 // Precision is positive so we will continue to return a Real.
                                 Ok(Some(SqlType::Real))
                             }
-                            ProjectExpression::Literal(DataType::UnsignedBigInt(_)) => {
+                            Expression::Literal(DataType::UnsignedBigInt(_)) => {
                                 // Precision is positive so we will continue to return a Real.
                                 Ok(Some(SqlType::Real))
                             }
-                            ProjectExpression::Literal(DataType::Real(_, _, s, _)) => {
+                            Expression::Literal(DataType::Real(_, _, s, _)) => {
                                 if s < 0 {
                                     // Precision is negative, which means that we will be returning a rounded Int.
                                     Ok(Some(SqlType::Int(32)))
@@ -433,16 +439,14 @@ impl ProjectExpression {
                         }
                     }
                     // For all other numeric types we always return the same type as they are.
-                    ProjectExpression::Literal(DataType::UnsignedInt(_)) => {
+                    Expression::Literal(DataType::UnsignedInt(_)) => {
                         Ok(Some(SqlType::UnsignedInt(32)))
                     }
-                    ProjectExpression::Literal(DataType::UnsignedBigInt(_)) => {
+                    Expression::Literal(DataType::UnsignedBigInt(_)) => {
                         Ok(Some(SqlType::UnsignedBigint(32)))
                     }
-                    ProjectExpression::Literal(DataType::BigInt(_)) => {
-                        Ok(Some(SqlType::Bigint(32)))
-                    }
-                    ProjectExpression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(32))),
+                    Expression::Literal(DataType::BigInt(_)) => Ok(Some(SqlType::Bigint(32))),
+                    Expression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(32))),
                     _ => e1.sql_type(parent_column_type),
                 },
             },
@@ -518,7 +522,7 @@ mod tests {
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
     use std::sync::Arc;
     use test_strategy::proptest;
-    use ProjectExpression::*;
+    use Expression::*;
 
     #[test]
     fn eval_column() {
@@ -636,7 +640,7 @@ mod tests {
 
         let datetime = NaiveDateTime::new(
             date, // Monday
-            NaiveTime::from_hms(18, 08, 00),
+            NaiveTime::from_hms(18, 8, 00),
         );
         assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected);
         assert_eq!(expr.eval(&[datetime.to_string().into()]).unwrap(), expected);
@@ -838,7 +842,7 @@ mod tests {
             expr.eval(&[param1.into(), param2.into()]).unwrap(),
             Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
                 NaiveDate::from_ymd(2003, 10, 12),
-                NaiveTime::from_hms(9, 27, 06),
+                NaiveTime::from_hms(9, 27, 6),
             )))
         );
         assert_eq!(
@@ -928,7 +932,7 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = Cow::Owned(DataType::try_from(4.123_f64).unwrap());
-        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
     }
 
     #[test]
@@ -942,7 +946,7 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = Cow::Owned(DataType::try_from(50).unwrap());
-        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
     }
 
     #[test]
@@ -956,7 +960,7 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = Cow::Owned(DataType::try_from(50).unwrap());
-        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
     }
 
     // This is actually straight from MySQL:
@@ -978,7 +982,7 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = Cow::Owned(DataType::try_from(52).unwrap());
-        assert_eq!(expr.eval(&[param1.into(), param2.into()]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
     }
 
     #[test]

@@ -28,7 +28,6 @@ lazy_static = "1.0.0"
 itertools = "0.9"
 metrics = "0.14"
 nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
-maths = { version = "0.0.1", path = "../../../maths" }
 indexmap = "1.1.0"
 rand = "0.7"
 regex = "1"
@@ -44,9 +43,8 @@ derive_more = "0.99.11"
 tuple = "0.5.1"
 vec1 = "1.6.0"
 maplit = "1.0.2"
-chrono = { version = "0.4.0", features = ["serde"] }
-chrono-tz = { version = "0.5", features = ["serde"] }
 derivative = "2.2.0"
+dataflow_expression = { path = "expression" }
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
