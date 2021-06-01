@@ -6162,3 +6162,82 @@ async fn join_straddled_columns() {
 
     assert_eq!(res, vec![(1, 2, 1)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replicate_to_non_existent_worker() {
+    use crate::logger_pls;
+
+    let authority = Arc::new(LocalAuthority::new());
+    let cluster_name = "replicate_to_non_existent_worker";
+
+    let mut builder = Builder::default();
+    builder.log_with(logger_pls());
+    builder.set_sharding(Some(DEFAULT_SHARDING));
+    builder.set_persistence(get_persistence_params(cluster_name));
+    // Extremely aggressive heartbeat/healthcheck intervals, so we
+    // make the second Worker be marked as failed faster.
+    builder.set_heartbeat_interval(Duration::from_millis(2));
+    builder.set_healthcheck_interval(Duration::from_millis(10));
+
+    let mut w1 = builder
+        .clone()
+        .start_local_custom(authority.clone())
+        .await
+        .unwrap();
+
+    w1.install_recipe(
+        "CREATE TABLE test (id INT, name TEXT);
+         VIEW q1: SELECT * FROM test;",
+    )
+    .await
+    .unwrap();
+
+    let w2 = builder.start(authority).await.unwrap();
+
+    sleep().await;
+
+    let instances_cluster = w1.get_instances().await.unwrap();
+    assert_eq!(
+        2,
+        instances_cluster.len(),
+        "There should be 2 noria servers running"
+    );
+
+    let w2_addr = w2.get_address().clone();
+
+    // Kill the worker
+    std::mem::drop(w2);
+
+    // Wait a couple of heartbeats, so the controller has
+    // time to realize the worker is dead and mark it as not healthy.
+    let mut retries = 10;
+    while retries > 0
+        && w1
+            .get_instances()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|(_, healthy, _)| *healthy)
+            .count()
+            < 2
+    {
+        sleep().await;
+        retries -= 1;
+    }
+
+    let result = w1
+        .replicate_readers(vec!["q1".to_owned()], Some(w2_addr))
+        .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(ReadySetError::RpcFailed {
+                during: _,
+                source: box ReadySetError::MigrationFailed { .. }
+            })
+        ),
+        "The migration should've failed. Actual result: {:?}",
+        result
+    );
+}

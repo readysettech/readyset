@@ -340,6 +340,15 @@ pub enum ReadySetError {
     /// An error that was encountered in the mysql_async crate during snapshot/binlog replication proccess
     #[error("MySQL Error during replication: {0}")]
     ReplicationFailed(String),
+
+    /// There are no available Workers to assign domains to.
+    #[error("Could not find healthy worker to place domain {domain_index}.{shard}")]
+    NoAvailableWorkers {
+        /// The index of the domain.
+        domain_index: usize,
+        /// The shard.
+        shard: usize,
+    },
 }
 
 impl ReadySetError {

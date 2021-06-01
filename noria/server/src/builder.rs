@@ -8,8 +8,10 @@ use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time;
+use std::time::Duration;
 
 /// Used to construct a worker.
+#[derive(Clone)]
 pub struct Builder {
     config: Config,
     memory_limit: Option<usize>,
@@ -139,6 +141,16 @@ impl Builder {
     /// Configures this Noria server to accept only reader domains.
     pub fn as_reader_only(&mut self) {
         self.reader_only = true;
+    }
+
+    /// Configures the interval at which the Workers send a heartbeat.
+    pub fn set_heartbeat_interval(&mut self, duration: Duration) {
+        self.config.heartbeat_every = duration;
+    }
+
+    /// Configures the interval at which a health check on the Workers must be run.
+    pub fn set_healthcheck_interval(&mut self, duration: Duration) {
+        self.config.healthcheck_every = duration;
     }
 
     /// Start a server instance and return a handle to it.
