@@ -1,10 +1,12 @@
 use crate::controller::migrate::Migration;
 use crate::controller::HandleRequest;
 use crate::errors::bad_request_err;
+use crate::ControllerDescriptor;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
 use noria::internal;
 use noria::prelude::*;
+use reqwest::Url;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -19,6 +21,7 @@ pub struct Handle<A: Authority + 'static> {
     #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
     kill: Option<Trigger>,
+    descriptor: ControllerDescriptor,
 }
 
 impl<A: Authority> Deref for Handle<A> {
@@ -39,13 +42,20 @@ impl<A: Authority + 'static> Handle<A> {
         authority: Arc<A>,
         event_tx: Sender<HandleRequest>,
         kill: Trigger,
+        descriptor: ControllerDescriptor,
     ) -> Result<Self, anyhow::Error> {
         let c = ControllerHandle::make(authority).await?;
         Ok(Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
+            descriptor,
         })
+    }
+
+    /// Returns the address of this Noria server.
+    pub fn get_address(&self) -> &Url {
+        &self.descriptor.controller_uri
     }
 
     #[cfg(test)]
