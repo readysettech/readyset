@@ -754,6 +754,18 @@ pub struct Filter {
     pub extend_where_with: LogicalOp,
 }
 
+impl Filter {
+    fn all_with_operator(operator: BinaryOperator) -> impl Iterator<Item = Self> {
+        FilterRHS::iter().cartesian_product(LogicalOp::iter()).map(
+            move |(rhs, extend_where_with)| Self {
+                operator,
+                rhs,
+                extend_where_with,
+            },
+        )
+    }
+}
+
 /// Operations that can be performed as part of a SQL query
 ///
 /// Members of this enum represent some sense of an individual operation that can be performed on an
@@ -1036,9 +1048,23 @@ impl FromStr for Operations {
     /// | Specification                           | Meaning                           |
     /// |-----------------------------------------|-----------------------------------|
     /// | aggregates                              | All [`AggregateType`]s            |
+    /// | count                                   | COUNT aggregates                  |
+    /// | sum                                     | SUM aggregates                    |
+    /// | avg                                     | AVG aggregates                    |
+    /// | group_concat                            | GROUP_CONCAT aggregates           |
+    /// | max                                     | MAX aggregates                    |
+    /// | min                                     | MIN aggregates                    |
     /// | filters                                 | All constant-valued [`Filter`]s   |
+    /// | equal_filters                           | Constant-valued `=` filters       |
+    /// | not_equal_filters                       | Constant-valued `!=` filters      |
+    /// | greater_filters                         | Constant-valued `>` filters       |
+    /// | greater_or_equal_filters                | Constant-valued `>=` filters      |
+    /// | less_filters                            | Constant-valued `<` filters       |
+    /// | less_or_equal_filters                   | Constant-valued `<=` filters      |
     /// | distinct                                | `SELECT DISTINCT`                 |
     /// | joins                                   | Joins, with all [`JoinOperator`]s |
+    /// | inner_join                              | `INNER JOIN`s                     |
+    /// | left_join                               | `LEFT JOIN`s                      |
     /// | single_parameter / single_param / param | A single query parameter          |
     /// | project_literal                         | A projected literal value         |
     /// | multiple_parameters / params            | Multiple query parameters         |
@@ -1050,7 +1076,44 @@ impl FromStr for Operations {
                 .map(|s| -> anyhow::Result<Vec<_>> {
                     match s {
                         "aggregates" => Ok(AggregateType::iter().map(ColumnAggregate).collect()),
+                        "count" => Ok(vec![ColumnAggregate(AggregateType::Count)]),
+                        "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum)]),
+                        "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg)]),
+                        "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)]),
+                        "max" => Ok(vec![ColumnAggregate(AggregateType::Max)]),
+                        "min" => Ok(vec![ColumnAggregate(AggregateType::Min)]),
                         "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
+                        "equal_filters" => {
+                            Ok(crate::Filter::all_with_operator(BinaryOperator::Equal)
+                                .map(Filter)
+                                .collect())
+                        }
+                        "not_equal_filters" => {
+                            Ok(crate::Filter::all_with_operator(BinaryOperator::NotEqual)
+                                .map(Filter)
+                                .collect())
+                        }
+                        "greater_filters" => {
+                            Ok(crate::Filter::all_with_operator(BinaryOperator::Greater)
+                                .map(Filter)
+                                .collect())
+                        }
+                        "greater_or_equal_filters" => Ok(crate::Filter::all_with_operator(
+                            BinaryOperator::GreaterOrEqual,
+                        )
+                        .map(Filter)
+                        .collect()),
+                        "less_filters" => {
+                            Ok(crate::Filter::all_with_operator(BinaryOperator::Less)
+                                .map(Filter)
+                                .collect())
+                        }
+                        "less_or_equal_filters" => Ok(crate::Filter::all_with_operator(
+                            BinaryOperator::LessOrEqual,
+                        )
+                        .map(Filter)
+                        .collect()),
+
                         "distinct" => Ok(vec![Distinct]),
                         "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
                         "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
