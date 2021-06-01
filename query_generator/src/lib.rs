@@ -59,6 +59,7 @@ use chrono::{NaiveDate, NaiveTime};
 use derive_more::{Display, From, Into};
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
@@ -489,6 +490,28 @@ impl GeneratorState {
             query.fields.push(FieldDefinitionExpression::All);
         }
 
+        if query_has_aggregate(&query) {
+            let mut group_by = query.group_by.take().unwrap_or_default();
+            // Fill the GROUP BY with all columns not mentioned in an aggregate
+            let existing_group_by_cols: HashSet<_> = group_by.columns.iter().cloned().collect();
+            for field in &query.fields {
+                if let FieldDefinitionExpression::Expression { expr, .. } = field {
+                    if !contains_aggregate(expr) {
+                        for col in expr.referred_columns() {
+                            if !existing_group_by_cols.contains(&col) {
+                                group_by.columns.push(col.into_owned());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TODO: once we support HAVING we'll need to check that here too
+            if !group_by.columns.is_empty() {
+                query.group_by = Some(group_by);
+            }
+        }
+
         Query::new(state, query)
     }
 
@@ -575,9 +598,13 @@ impl<'a> QueryState<'a> {
     /// Return a mutable reference to *some* table in the schema - the implication being that the
     /// caller doesn't care which table
     pub fn some_table_mut(&mut self) -> &mut TableSpec {
-        let table = self.gen.some_table_mut();
-        self.tables.insert(table.name.clone());
-        table
+        if let Some(table) = self.tables.iter().next() {
+            self.gen.table_mut(table).unwrap()
+        } else {
+            let table = self.gen.some_table_mut();
+            self.tables.insert(table.name.clone());
+            table
+        }
     }
 
     /// Create a new, unique, empty table, and return a mutable reference to that table
@@ -812,6 +839,15 @@ fn and_where(query: &mut SelectStatement, cond: ConditionExpression) {
     extend_where(query, LogicalOp::And, cond)
 }
 
+fn query_has_aggregate(query: &SelectStatement) -> bool {
+    query.fields.iter().any(|fde| {
+        matches!(
+            fde,
+            FieldDefinitionExpression::Expression { expr, .. } if contains_aggregate(expr),
+        )
+    })
+}
+
 impl QueryOperation {
     /// Add this query operation to `query`, recording information about new tables and columns in
     /// `state`.
@@ -854,12 +890,8 @@ impl QueryOperation {
 
                 query.fields.push(FieldDefinitionExpression::Expression {
                     alias: Some(alias.clone()),
-                    expr: Expression::Column(Column {
-                        name: alias.clone(),
-                        table: None,
-                        function: Some(Box::new(func)),
-                    }),
-                })
+                    expr: Expression::Call(func),
+                });
             }
 
             QueryOperation::Filter(filter) => {

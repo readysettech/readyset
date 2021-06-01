@@ -22,7 +22,7 @@ use nom::combinator::{map, opt};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
     pub having: Option<ConditionExpression>,
