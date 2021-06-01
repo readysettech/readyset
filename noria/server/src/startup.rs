@@ -199,7 +199,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     crate::controller::instance_campaign(
         campaign_tx,
         authority.clone(),
-        our_descriptor,
+        our_descriptor.clone(),
         config,
         tokio::runtime::Handle::current(),
         region,
@@ -209,7 +209,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         panic!("ControllerOuter failed: {}", e.to_string());
     }));
 
-    let handle = Handle::new(authority, handle_tx, trigger).await?;
+    let handle = Handle::new(authority, handle_tx, trigger, our_descriptor).await?;
 
     Ok(handle)
 }
