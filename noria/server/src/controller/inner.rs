@@ -695,41 +695,17 @@ impl ControllerInner {
                 .collect(),
         );
 
-        // Use the specific worker that's been assigned. If that worker
-        // is not valid, log a warning and fallback to using
-        // all the available workers in a simple round-robin fashion.
-        let selected_worker = match worker_id_opt {
-            Some(ref worker_id)
-                if self
-                    .workers
-                    .get(worker_id)
-                    .filter(|worker| worker.healthy)
-                    .is_some() =>
-            {
-                worker_id_opt.clone()
-            }
-            Some(worker_id) => {
-                warn!(
-                    log,
-                    "Attempted to make a migration with a worker node that it's \
-                    either not present or not healthy. Will fallback to use all workers instead.\
-                    Worker ID: {:?}",
-                    worker_id
-                );
-                None
-            }
-            _ => None,
-        };
-        let selected_worker = selected_worker.as_ref();
         let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
-            (selected_worker.is_none())
-                || (selected_worker
+            (worker_id_opt.is_none())
+                || (worker_id_opt
+                    .as_ref()
                     .filter(|s_worker_id| **worker_id == **s_worker_id)
                     .is_some())
         };
         let mut wi = self
             .workers
             .iter()
+            .filter(|(_, w)| w.healthy)
             .filter(worker_selector)
             .filter(|(_, worker)| !worker.reader_only || is_reader_domain)
             .cycle();
@@ -753,10 +729,10 @@ impl ControllerInner {
                 persistence_parameters: self.persistence.clone(),
             };
 
-            let w = match wi.next() {
-                Some((_, w)) if w.healthy => w,
-                _ => internal!("There should always be a valid worker to place the domain!"),
-            };
+            let (_, w) = wi.next().ok_or(ReadySetError::NoAvailableWorkers {
+                domain_index: idx.index(),
+                shard: i,
+            })?;
 
             let idx = domain.index.clone();
             let shard = domain.shard.unwrap_or(0);
