@@ -144,8 +144,6 @@ impl AverageDataPair {
             self.count = (&self.count - &DataType::Int(1))?;
         }
 
-        // TODO: aggregators currently do not properly remove groups with 0 entries
-        // CH Ticket: https://app.clubhouse.io/readysettech/story/174
         if self.count > DataType::Int(0) {
             &self.sum / &self.count
         } else {
@@ -232,6 +230,10 @@ impl GroupedOperation for Aggregator {
 
         let apply_diff =
             |curr: ReadySetResult<DataType>, diff: Self::Diff| -> ReadySetResult<DataType> {
+                if diff.value.is_none() {
+                    return curr;
+                }
+
                 match self.op {
                     Aggregation::Count => apply_count(curr?, diff),
                     Aggregation::Sum => apply_sum(curr?, diff),

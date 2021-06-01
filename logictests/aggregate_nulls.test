@@ -1,0 +1,26 @@
+statement ok
+create table t1(id int, value int);
+
+statement ok
+insert into t1 (id, value) values (1, 1), (2, 2), (3, null);
+
+query I nosort
+select count(value) from t1
+----
+2
+
+query I nosort
+select count(*) from t1
+----
+3
+
+statement ok
+create table t2(value int);
+
+statement ok
+insert into t2 values (1), (2), (null);
+
+query I nosort
+select count(value) from t2
+----
+2
