@@ -4,7 +4,6 @@ use std::str;
 
 use crate::column::Column;
 use crate::common::{column_identifier_no_alias, ws_sep_comma};
-use crate::keywords::escape_if_keyword;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -12,7 +11,7 @@ use nom::multi::many0;
 use nom::sequence::{preceded, tuple};
 use nom::IResult;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
@@ -40,7 +39,7 @@ impl fmt::Display for OrderClause {
             "{}",
             self.columns
                 .iter()
-                .map(|&(ref c, ref o)| format!("{} {}", escape_if_keyword(&c.name), o))
+                .map(|&(ref c, ref o)| format!("{} {}", c, o))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -111,5 +110,13 @@ mod tests {
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
+    }
+
+    #[test]
+    fn order_prints_column_table() {
+        let clause = OrderClause {
+            columns: vec![("t.n".into(), OrderType::OrderDescending)],
+        };
+        assert_eq!(clause.to_string(), "ORDER BY t.n DESC");
     }
 }

@@ -74,8 +74,8 @@ use strum_macros::EnumIter;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CreateTableStatement,
     Expression, FieldDefinitionExpression, FunctionExpression, ItemPlaceholder, JoinClause,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, SelectStatement, SqlType, Table,
-    TableKey,
+    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderClause, OrderType,
+    SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
 
@@ -865,7 +865,6 @@ pub enum BuiltinFunction {
 /// for the future are:
 ///
 /// - arithmetic projections
-/// - topk
 /// - union
 /// - order by
 /// - ilike
@@ -881,6 +880,7 @@ pub enum QueryOperation {
     SingleParameter,
     MultipleParameters,
     ProjectBuiltinFunction(BuiltinFunction),
+    TopK(OrderType),
 }
 
 const COMPARISON_OPS: &[BinaryOperator] = &[
@@ -896,6 +896,11 @@ const JOIN_OPERATORS: &[JoinOperator] = &[
     JoinOperator::LeftJoin,
     JoinOperator::LeftOuterJoin,
     JoinOperator::InnerJoin,
+];
+
+const ALL_TOPK: &[QueryOperation] = &[
+    QueryOperation::TopK(OrderType::OrderAscending),
+    QueryOperation::TopK(OrderType::OrderDescending),
 ];
 
 lazy_static! {
@@ -944,6 +949,7 @@ lazy_static! {
             .chain(iter::once(QueryOperation::ProjectLiteral))
             .chain(iter::once(QueryOperation::SingleParameter))
             .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
+            .chain(ALL_TOPK.iter().cloned())
             .collect()
     };
 }
@@ -1207,6 +1213,24 @@ impl QueryOperation {
                     BuiltinFunction::Round => add_builtin!(round(SqlType::Real)),
                 }
             }
+            QueryOperation::TopK(order_type) => {
+                let table = state.some_table_mut();
+                let column = table.some_column_name();
+                query.order = Some(OrderClause {
+                    columns: vec![(
+                        Column {
+                            table: Some(table.name.clone().into()),
+                            ..column.into()
+                        },
+                        *order_type,
+                    )],
+                });
+
+                query.limit = Some(LimitClause {
+                    limit: 10,
+                    offset: 0,
+                })
+            }
         }
     }
 
@@ -1257,6 +1281,7 @@ impl FromStr for Operations {
     /// | project_literal                         | A projected literal value         |
     /// | multiple_parameters / params            | Multiple query parameters         |
     /// | project_builtin                         | Project a built-in function       |
+    /// | topk                                    | ORDER BY combined with LIMIT      |
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use QueryOperation::*;
 
@@ -1332,6 +1357,7 @@ impl FromStr for Operations {
                         "project_builtin" => Ok(BuiltinFunction::iter()
                             .map(QueryOperation::ProjectBuiltinFunction)
                             .collect()),
+                        "topk" => Ok(ALL_TOPK.to_vec()),
                         s => Err(anyhow!("unknown query operation: {}", s)),
                     }
                 })
