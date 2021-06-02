@@ -746,19 +746,31 @@ impl From<LogicalOp> for BinaryOperator {
     }
 }
 
+/// An individual filter operation
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FilterOp {
+    /// Compare a column with either another column, or a value
+    Comparison { op: BinaryOperator, rhs: FilterRHS },
+
+    /// A BETWEEN comparison on a column and two constant values
+    Between { negated: bool },
+}
+
+/// A full representation of a filter to be added to a query
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Filter {
-    pub operator: BinaryOperator,
-    pub rhs: FilterRHS,
+    /// How to add the filter to the WHERE clause of the query
     pub extend_where_with: LogicalOp,
+
+    /// The actual filter operation to add
+    pub operation: FilterOp,
 }
 
 impl Filter {
     fn all_with_operator(operator: BinaryOperator) -> impl Iterator<Item = Self> {
         FilterRHS::iter().cartesian_product(LogicalOp::iter()).map(
             move |(rhs, extend_where_with)| Self {
-                operator,
-                rhs,
+                operation: FilterOp::Comparison { op: operator, rhs },
                 extend_where_with,
             },
         )
@@ -822,14 +834,34 @@ const JOIN_OPERATORS: &[JoinOperator] = &[
 ];
 
 lazy_static! {
-    static ref ALL_FILTERS: Vec<Filter> = {
+    static ref ALL_COMPARISON_FILTER_OPS: Vec<FilterOp> = {
         COMPARISON_OPS
             .iter()
             .cartesian_product(FilterRHS::iter())
+            .map(|(operator, rhs)| FilterOp::Comparison {
+                    op: *operator,
+                    rhs,
+                },
+            )
+            .collect()
+    };
+
+    static ref ALL_FILTER_OPS: Vec<FilterOp> = {
+        ALL_COMPARISON_FILTER_OPS
+            .iter()
+            .cloned()
+            .chain(iter::once(FilterOp::Between { negated: true }))
+            .chain(iter::once(FilterOp::Between { negated: false }))
+            .collect()
+    };
+
+    static ref ALL_FILTERS: Vec<Filter> = {
+        ALL_FILTER_OPS
+            .iter()
+            .cloned()
             .cartesian_product(LogicalOp::iter())
-            .map(|((operator, rhs), extend_where_with)| Filter {
-                operator: *operator,
-                rhs,
+            .map(|(operation, extend_where_with)| Filter {
+                operation,
                 extend_where_with,
             })
             .collect()
@@ -922,33 +954,46 @@ impl QueryOperation {
             QueryOperation::Filter(filter) => {
                 let tbl = state.some_table_mut();
                 let col = tbl.fresh_column_with_type(SqlType::Int(1));
-                let rhs = Box::new(match filter.rhs {
-                    FilterRHS::Constant => {
-                        tbl.expect_value(col.clone(), 1i32.into());
-                        Expression::Literal(Literal::Integer(1))
-                    }
-                    FilterRHS::Column => {
-                        let col = tbl.fresh_column();
-                        Expression::Column(Column {
-                            table: Some(tbl.name.clone().into()),
-                            ..col.into()
-                        })
-                    }
-                });
-
-                let cond = Expression::BinaryOp {
-                    op: filter.operator,
-                    lhs: Box::new(Expression::Column(Column {
-                        table: Some(tbl.name.clone().into()),
-                        ..col.clone().into()
-                    })),
-                    rhs,
-                };
 
                 query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(tbl.name.clone().into()),
-                    ..col.into()
+                    ..col.clone().into()
                 }));
+
+                let col_expr = Box::new(Expression::Column(Column {
+                    table: Some(tbl.name.clone().into()),
+                    ..col.clone().into()
+                }));
+
+                let cond = match filter.operation {
+                    FilterOp::Comparison { op, rhs } => {
+                        let rhs = Box::new(match rhs {
+                            FilterRHS::Constant => {
+                                tbl.expect_value(col.clone(), 1i32.into());
+                                Expression::Literal(Literal::Integer(1))
+                            }
+                            FilterRHS::Column => {
+                                let col = tbl.fresh_column();
+                                Expression::Column(Column {
+                                    table: Some(tbl.name.clone().into()),
+                                    ..col.into()
+                                })
+                            }
+                        });
+
+                        Expression::BinaryOp {
+                            op,
+                            lhs: col_expr,
+                            rhs,
+                        }
+                    }
+                    FilterOp::Between { negated } => Expression::Between {
+                        operand: col_expr,
+                        min: Box::new(Expression::Literal(Literal::Integer(1))),
+                        max: Box::new(Expression::Literal(Literal::Integer(5))),
+                        negated,
+                    },
+                };
 
                 extend_where(query, filter.extend_where_with, cond);
             }
@@ -1123,6 +1168,7 @@ impl FromStr for Operations {
     /// | greater_or_equal_filters                | Constant-valued `>=` filters      |
     /// | less_filters                            | Constant-valued `<` filters       |
     /// | less_or_equal_filters                   | Constant-valued `<=` filters      |
+    /// | between_filters                         | Constant-valued `BETWEEN` filters |
     /// | distinct                                | `SELECT DISTINCT`                 |
     /// | joins                                   | Joins, with all [`JoinOperator`]s |
     /// | inner_join                              | `INNER JOIN`s                     |
@@ -1176,7 +1222,17 @@ impl FromStr for Operations {
                         )
                         .map(Filter)
                         .collect()),
-
+                        "between_filters" => Ok(LogicalOp::iter()
+                            .cartesian_product(
+                                iter::once(FilterOp::Between { negated: true })
+                                    .chain(iter::once(FilterOp::Between { negated: false })),
+                            )
+                            .map(|(extend_where_with, operation)| crate::Filter {
+                                extend_where_with,
+                                operation,
+                            })
+                            .map(Filter)
+                            .collect()),
                         "distinct" => Ok(vec![Distinct]),
                         "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
                         "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
