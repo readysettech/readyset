@@ -265,7 +265,7 @@ steps:
 
   - label: ':terraform: Terraform fmt'
     commands:
-    - cd ops/noria_module
+    - cd ops/tf/readyset
     - terraform fmt -check -recursive -diff
     plugins:
     - docker#v3.7.0:
@@ -275,7 +275,7 @@ steps:
 
   - label: ':terraform: Terraform validate'
     commands:
-    - cd ops/noria_module
+    - cd ops/tf/readyset
     - terraform init -backend=false
     - terraform validate
     plugins:
@@ -292,7 +292,7 @@ steps:
     - docker#v3.7.0:
         image: wata727/tflint:latest
         mount-checkout: false
-        volumes: ["./ops/noria_module:/data"]
+        volumes: ["./ops/tf/readyset:/data"]
         command: [
           "--only", "terraform_deprecated_interpolation",
           "--only", "terraform_deprecated_index",
