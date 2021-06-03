@@ -754,6 +754,9 @@ pub enum FilterOp {
 
     /// A BETWEEN comparison on a column and two constant values
     Between { negated: bool },
+
+    /// An IS NULL comparison on a column
+    IsNull { negated: bool },
 }
 
 /// A full representation of a filter to be added to a query
@@ -852,6 +855,8 @@ lazy_static! {
             .cloned()
             .chain(iter::once(FilterOp::Between { negated: true }))
             .chain(iter::once(FilterOp::Between { negated: false }))
+            .chain(iter::once(FilterOp::IsNull { negated: true }))
+            .chain(iter::once(FilterOp::IsNull { negated: false }))
             .collect()
     };
 
@@ -993,6 +998,18 @@ impl QueryOperation {
                         max: Box::new(Expression::Literal(Literal::Integer(5))),
                         negated,
                     },
+                    FilterOp::IsNull { negated } => {
+                        tbl.expect_value(col.clone(), DataType::None);
+                        Expression::BinaryOp {
+                            lhs: col_expr,
+                            op: if negated {
+                                BinaryOperator::Is
+                            } else {
+                                BinaryOperator::IsNot
+                            },
+                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                        }
+                    }
                 };
 
                 extend_where(query, filter.extend_where_with, cond);
@@ -1169,6 +1186,7 @@ impl FromStr for Operations {
     /// | less_filters                            | Constant-valued `<` filters       |
     /// | less_or_equal_filters                   | Constant-valued `<=` filters      |
     /// | between_filters                         | Constant-valued `BETWEEN` filters |
+    /// | is_null_filters                         | IS NULL and IS NOT NULL filters   |
     /// | distinct                                | `SELECT DISTINCT`                 |
     /// | joins                                   | Joins, with all [`JoinOperator`]s |
     /// | inner_join                              | `INNER JOIN`s                     |
@@ -1226,6 +1244,17 @@ impl FromStr for Operations {
                             .cartesian_product(
                                 iter::once(FilterOp::Between { negated: true })
                                     .chain(iter::once(FilterOp::Between { negated: false })),
+                            )
+                            .map(|(extend_where_with, operation)| crate::Filter {
+                                extend_where_with,
+                                operation,
+                            })
+                            .map(Filter)
+                            .collect()),
+                        "is_null_filters" => Ok(LogicalOp::iter()
+                            .cartesian_product(
+                                iter::once(FilterOp::IsNull { negated: true })
+                                    .chain(iter::once(FilterOp::IsNull { negated: false })),
                             )
                             .map(|(extend_where_with, operation)| crate::Filter {
                                 extend_where_with,
