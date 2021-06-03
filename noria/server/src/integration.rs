@@ -6249,3 +6249,227 @@ async fn replicate_to_unavailable_worker() {
         result
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_agg_col_count() {
+    let mut g = start_simple("group_by_agg_col_count").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, number int);
+         VIEW groupbyaggcolcount: SELECT count(value) as c FROM test GROUP BY value;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("groupbyaggcolcount").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(6i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["c"]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![2, 3, 4]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_agg_col_avg() {
+    let mut g = start_simple("group_by_agg_col_avg").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, number int);
+         VIEW groupbyaggcolavg: SELECT avg(value) as a FROM test GROUP BY value;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("groupbyaggcolavg").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(6i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| f64::try_from(&r["a"]).unwrap())
+        .sorted_by(|a, b| a.partial_cmp(b).unwrap())
+        .collect::<Vec<f64>>();
+
+    assert_eq!(res, vec![1., 2., 3.]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_agg_col_sum() {
+    let mut g = start_simple("group_by_agg_col_sum").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, number int);
+         VIEW groupbyaggcolsum: SELECT sum(value) as s FROM test GROUP BY value;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("groupbyaggcolsum").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(6i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r["s"]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+
+    assert_eq!(res, vec![2, 6, 12]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_agg_col_multi() {
+    let mut g = start_simple("group_by_agg_col_multi").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, number int);
+         VIEW groupbyaggcolmulti: SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("groupbyaggcolmulti").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(6i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DataType::from(3i32), DataType::from(8i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["c"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| a.0.cmp(&b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(2, 4.), (3, 4.), (4, 6.)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_agg_col_with_join() {
+    let mut g = start_simple("group_by_agg_col_with_join").await;
+    let sql = "
+        # base tables
+        CREATE TABLE test (id int, number int, PRIMARY KEY(id));
+        CREATE TABLE test2 (test_id int, value int);
+
+        # read queries
+        QUERY groupbyaggcolwithjoin: SELECT count(number) as c, avg(test2.value) AS a \
+                    FROM test \
+                    INNER JOIN test2 \
+                    ON (test.id = test2.test_id)
+                    GROUP BY number;
+    ";
+
+    g.install_recipe(sql).await.unwrap();
+    let mut test = g.table("test").await.unwrap();
+    let mut test2 = g.table("test2").await.unwrap();
+    let mut q = g.view("groupbyaggcolwithjoin").await.unwrap();
+
+    test.insert_many(vec![
+        vec![0i64.into(), 10i64.into()],
+        vec![1i64.into(), 10i64.into()],
+        vec![2i64.into(), 10i64.into()],
+    ])
+    .await
+    .unwrap();
+    test2
+        .insert_many(vec![
+            vec![0i64.into(), 20i64.into()],
+            vec![1i64.into(), 20i64.into()],
+            vec![2i64.into(), 20i64.into()],
+        ])
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["c"]).unwrap(),
+                f64::try_from(&r["a"]).unwrap(),
+            )
+        })
+        .sorted_by(|a, b| a.0.cmp(&b.0))
+        .collect::<Vec<(i32, f64)>>();
+
+    assert_eq!(res, vec![(3, 20.)]);
+}
