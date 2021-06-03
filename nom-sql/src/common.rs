@@ -175,11 +175,18 @@ impl ToString for Literal {
             Literal::UnsignedInteger(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => {
                 let precision = if f.precision < 30 { f.precision } else { 30 };
-                format!(
+                let fstr = format!(
                     "{f:.prec$}",
                     f = encode_f64(f.mantissa, f.exponent, f.sign),
                     prec = precision as usize
-                )
+                );
+                // Trim all trailing zeros, but leave one after the dot if this is a whole number
+                let res = fstr.trim_end_matches('0');
+                if &res[(res.len() - 1)..] == "." {
+                    format!("{}0", res)
+                } else {
+                    res.to_owned()
+                }
             }
             Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
             Literal::Blob(ref bv) => bv
@@ -902,26 +909,29 @@ pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     })(i)
 }
 
-fn unpack(v: &[u8]) -> i32 {
-    i32::from_str(str::from_utf8(v).unwrap()).unwrap()
-}
-
 // Floating point literal value
+#[allow(clippy::type_complexity)]
 pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(tuple((opt(tag("-")), digit1, tag("."), digit1)), |tup| {
-        let sign = if (tup.0).is_some() { -1.0 } else { 1.0 };
-        let int = unpack(tup.1);
-        let dec = unpack(tup.3);
-        let prec = tup.3.len();
-        let float = ((int as f64) + (dec as f64) / 10.0_f64.powf(prec as f64)) * sign;
-        let (mantissa, exponent, sign) = decode_f64(float);
-        Literal::FixedPoint(Real {
-            mantissa,
-            exponent,
-            sign,
-            precision: tup.3.len() as u8,
-        })
-    })(i)
+    map(
+        tuple((opt(tag("-")), digit1, tag("."), digit1)),
+        |(sign, whole, _, frac): (Option<&[u8]>, &[u8], &[u8], &[u8])| {
+            let prec = frac.len();
+            let float = f64::from_str(&format!(
+                "{}{}.{}",
+                sign.map_or("", |s| str::from_utf8(s).unwrap()),
+                str::from_utf8(whole).unwrap(),
+                str::from_utf8(frac).unwrap()
+            ))
+            .unwrap();
+            let (mantissa, exponent, sign) = decode_f64(float);
+            Literal::FixedPoint(Real {
+                mantissa,
+                exponent,
+                sign,
+                precision: prec as _,
+            })
+        },
+    )(i)
 }
 
 /// String literal value
@@ -1049,6 +1059,7 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_approx_eq::assert_approx_eq;
 
     #[test]
     fn sql_identifiers() {
@@ -1261,5 +1272,48 @@ mod tests {
     fn terminated_by_semicolon() {
         let res = statement_terminator(b"   ;  ");
         assert_eq!(res, Ok((&b""[..], ())));
+    }
+
+    #[test]
+    fn float_formatting_strips_trailing_zeros() {
+        let (mantissa, exponent, sign) = decode_f64(1.5);
+        let f = Literal::FixedPoint(Real {
+            mantissa,
+            exponent,
+            sign,
+            precision: u8::MAX,
+        });
+        assert_eq!(f.to_string(), "1.5");
+    }
+
+    #[test]
+    fn float_formatting_leaves_zero_after_dot() {
+        let (mantissa, exponent, sign) = decode_f64(0.0);
+        let f = Literal::FixedPoint(Real {
+            mantissa,
+            exponent,
+            sign,
+            precision: u8::MAX,
+        });
+        assert_eq!(f.to_string(), "0.0");
+    }
+
+    #[test]
+    fn float_lots_of_zeros() {
+        let res = float_literal(b"1.500000000000000000000000000000")
+            .unwrap()
+            .1;
+        match res {
+            Literal::FixedPoint(Real {
+                mantissa,
+                exponent,
+                sign,
+                ..
+            }) => {
+                let res_f = encode_f64(mantissa, exponent, sign);
+                assert_approx_eq!(res_f, 1.5);
+            }
+            _ => unreachable!(),
+        }
     }
 }
