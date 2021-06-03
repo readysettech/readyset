@@ -3701,6 +3701,7 @@ dependencies = [
 name = "nom-sql"
 version = "0.0.11"
 dependencies = [
+ "assert_approx_eq",
  "derive_more",
  "itertools 0.10.0",
  "maths",
