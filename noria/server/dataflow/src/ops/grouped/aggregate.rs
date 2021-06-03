@@ -25,17 +25,13 @@ impl Aggregation {
     ///
     /// The aggregation will aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
-    /// identifier. The `over` column should not be in the `group_by` array.
+    /// identifier.
     pub fn over(
         self,
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
-        invariant!(
-            !group_by.iter().any(|&i| i == over),
-            "cannot group by aggregation column"
-        );
         Ok(GroupedOperator::new(
             src,
             Aggregator {
