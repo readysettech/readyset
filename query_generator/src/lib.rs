@@ -766,6 +766,18 @@ impl Filter {
     }
 }
 
+// The names of the built-in functions we can generate for use in a project expression
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+pub enum BuiltinFunction {
+    ConvertTZ,
+    DayOfWeek,
+    IfNull,
+    Month,
+    Timediff,
+    Addtime,
+    Round,
+}
+
 /// Operations that can be performed as part of a SQL query
 ///
 /// Members of this enum represent some sense of an individual operation that can be performed on an
@@ -792,6 +804,7 @@ pub enum QueryOperation {
     ProjectLiteral,
     SingleParameter,
     MultipleParameters,
+    ProjectBuiltinFunction(BuiltinFunction),
 }
 
 const COMPARISON_OPS: &[BinaryOperator] = &[
@@ -832,6 +845,7 @@ lazy_static! {
             .chain(JOIN_OPERATORS.iter().cloned().map(QueryOperation::Join))
             .chain(iter::once(QueryOperation::ProjectLiteral))
             .chain(iter::once(QueryOperation::SingleParameter))
+            .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
             .collect()
     };
 }
@@ -1021,6 +1035,61 @@ impl QueryOperation {
                 QueryOperation::SingleParameter.add_to_query(state, query);
                 QueryOperation::SingleParameter.add_to_query(state, query);
             }
+            QueryOperation::ProjectBuiltinFunction(bif) => {
+                macro_rules! add_builtin {
+                    ($fname:ident($($arg:tt)*)) => {{
+                        let table = state.some_table_mut();
+                        let mut arguments = Vec::new();
+                        add_builtin!(@args_to_expr, table, arguments, $($arg)*);
+                        let expr = Expression::Call(FunctionExpression::Call {
+                            name: stringify!($fname).to_owned(),
+                            arguments,
+                        });
+                        let alias = state.fresh_alias();
+                        query.fields.push(FieldDefinitionExpression::Expression {
+                            alias: Some(alias.clone()),
+                            expr,
+                        });
+                    }};
+
+                    (@args_to_expr, $table: ident, $out: ident, $(,)?) => {};
+
+                    (@args_to_expr, $table: ident, $out:ident, $arg:literal, $($args: tt)*) => {{
+                        $out.push(Expression::Literal($arg.into()));
+                        add_builtin!(@args_to_expr, $table, $out, $($args)*);
+                    }};
+                    (@args_to_expr, $table: ident, $out:ident, $arg:literal) => {
+                        add_builtin!(@args_to_expr, $table, $out, $arg,);
+                    };
+
+                    (@args_to_expr, $table: ident, $out:ident, $arg:expr, $($args: tt)*) => {{
+                        $out.push(Expression::Column(
+                            Column {
+                                table: Some($table.name.clone().into()),
+                                ..$table.fresh_column_with_type($arg).into()
+                            }
+                        ));
+                        add_builtin!(@args_to_expr, $table, $out, $($args)*);
+                    }};
+                    (@args_to_expr, $table: ident, $out:ident, $arg:expr) => {{
+                        add_builtin!(@args_to_expr, $table, $out, $arg,);
+                    }};
+                }
+
+                match bif {
+                    BuiltinFunction::ConvertTZ => {
+                        add_builtin!(convert_tz(SqlType::Timestamp, "America/New_York", "UTC"))
+                    }
+                    BuiltinFunction::DayOfWeek => add_builtin!(dayofweek(SqlType::Date)),
+                    BuiltinFunction::IfNull => add_builtin!(ifnull(SqlType::Text, SqlType::Text)),
+                    BuiltinFunction::Month => add_builtin!(month(SqlType::Date)),
+                    BuiltinFunction::Timediff => {
+                        add_builtin!(timediff(SqlType::Time, SqlType::Time))
+                    }
+                    BuiltinFunction::Addtime => add_builtin!(addtime(SqlType::Time, SqlType::Time)),
+                    BuiltinFunction::Round => add_builtin!(round(SqlType::Real)),
+                }
+            }
         }
     }
 
@@ -1068,6 +1137,7 @@ impl FromStr for Operations {
     /// | single_parameter / single_param / param | A single query parameter          |
     /// | project_literal                         | A projected literal value         |
     /// | multiple_parameters / params            | Multiple query parameters         |
+    /// | project_builtin                         | Project a built-in function       |
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use QueryOperation::*;
 
@@ -1119,6 +1189,9 @@ impl FromStr for Operations {
                         "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
                         "project_literal" => Ok(vec![ProjectLiteral]),
                         "multiple_parameters" | "params" => Ok(vec![MultipleParameters]),
+                        "project_builtin" => Ok(BuiltinFunction::iter()
+                            .map(QueryOperation::ProjectBuiltinFunction)
+                            .collect()),
                         s => Err(anyhow!("unknown query operation: {}", s)),
                     }
                 })

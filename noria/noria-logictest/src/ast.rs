@@ -2,6 +2,7 @@
 //!
 //! [1]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
+use std::cmp;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
@@ -268,7 +269,11 @@ impl Display for Value {
                 }
             }
             Self::Integer(i) => write!(f, "{}", i),
-            Self::Real(whole, frac) => write!(f, "{}.{}", whole, &format!("{}", frac)[..3]),
+            Self::Real(whole, frac) => {
+                write!(f, "{}.", whole)?;
+                let frac = frac.to_string();
+                write!(f, "{}", &frac[..(cmp::min(frac.len(), 3))])
+            }
             Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{}", t),
@@ -286,13 +291,13 @@ impl From<f64> for Value {
 }
 
 impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for Value {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         format!("{}", self).cmp(&format!("{}", other))
     }
 }
