@@ -489,32 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn select_literals() {
-        use crate::common::Literal;
-
-        let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
-        // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
-        //        let qstring = "SELECT NULL, 1, \"foo\";";
-
-        let res = selection(qstring.as_bytes());
-        assert_eq!(
-            res.unwrap().1,
-            SelectStatement {
-                tables: vec![Table::from("users")],
-                fields: vec![
-                    FieldDefinitionExpression::from(Expression::Literal(Literal::Null,)),
-                    FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1),)),
-                    FieldDefinitionExpression::from(Expression::Literal(Literal::String(
-                        "foo".to_owned()
-                    ),)),
-                    FieldDefinitionExpression::from(Expression::Literal(Literal::CurrentTime,)),
-                ],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
     fn select_all() {
         let qstring = "SELECT * FROM users;";
 
@@ -1422,47 +1396,6 @@ mod tests {
     }
 
     #[test]
-    fn where_in_clause() {
-        let qstr = "SELECT `auth_permission`.`content_type_id`, `auth_permission`.`codename`
-                    FROM `auth_permission`
-                    JOIN `django_content_type`
-                      ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
-                    WHERE `auth_permission`.`content_type_id` IN (0);";
-        let res = selection(qstr.as_bytes());
-
-        let expected_where_clause = Some(Expression::In {
-            lhs: Box::new(Expression::Column(Column::from(
-                "auth_permission.content_type_id",
-            ))),
-            rhs: InValue::List(vec![Expression::Literal(0.into())]),
-            negated: false,
-        });
-
-        let expected = SelectStatement {
-            tables: vec![Table::from("auth_permission")],
-            fields: vec![
-                FieldDefinitionExpression::from(Column::from("auth_permission.content_type_id")),
-                FieldDefinitionExpression::from(Column::from("auth_permission.codename")),
-            ],
-            join: vec![JoinClause {
-                operator: JoinOperator::Join,
-                right: JoinRightSide::Table(Table::from("django_content_type")),
-                constraint: JoinConstraint::On(Expression::BinaryOp {
-                    op: BinaryOperator::Equal,
-                    lhs: Box::new(Expression::Column(Column::from(
-                        "auth_permission.content_type_id",
-                    ))),
-                    rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
-                }),
-            }],
-            where_clause: expected_where_clause,
-            ..Default::default()
-        };
-
-        assert_eq!(res.unwrap().1, expected);
-    }
-
-    #[test]
     fn where_call_in_list() {
         let qstr = b"SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)";
         let res = selection(qstr);
@@ -1518,6 +1451,45 @@ mod tests {
     }
 
     #[test]
+    fn simple_cte() {
+        let qstr = b"WITH max_val AS (SELECT max(value) as value FROM t1)
+            SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.ctes.len(), 1);
+        assert_eq!(query.ctes.first().unwrap().name, "max_val".to_owned());
+    }
+
+    #[test]
+    fn multiple_ctes() {
+        let qstr = b"WITH
+              max_val AS (SELECT max(value) as value FROM t1),
+              min_val AS (SELECT min(value) as value FROM t1)
+            SELECT name FROM t2
+            JOIN max_val ON max_val.value = t2.max_value
+            JOIN min_val ON min_val.value = t2.min_value";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.ctes.len(), 2);
+        assert_eq!(query.ctes[0].name, "max_val".to_owned());
+        assert_eq!(query.ctes[1].name, "min_val".to_owned());
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+#[cfg(test)]
+mod tests_mysql {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::{FieldDefinitionExpression, Literal};
+    use crate::table::Table;
+    use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
+
+    #[test]
     fn alias_generic_function() {
         let qstr = "SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;";
         let res = selection(qstr.as_bytes());
@@ -1569,31 +1541,69 @@ mod tests {
     }
 
     #[test]
-    fn simple_cte() {
-        let qstr = b"WITH max_val AS (SELECT max(value) as value FROM t1)
-            SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value";
-        let res = selection(qstr);
-        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
-        let (rem, query) = res.unwrap();
-        assert!(rem.is_empty());
-        assert_eq!(query.ctes.len(), 1);
-        assert_eq!(query.ctes.first().unwrap().name, "max_val".to_owned());
+    fn select_literals() {
+        use crate::common::Literal;
+
+        let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
+        // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
+        //        let qstring = "SELECT NULL, 1, \"foo\";";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec![Table::from("users")],
+                fields: vec![
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::Null,)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1),)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::String(
+                        "foo".to_owned()
+                    ),)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::CurrentTime,)),
+                ],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
-    fn multiple_ctes() {
-        let qstr = b"WITH
-              max_val AS (SELECT max(value) as value FROM t1),
-              min_val AS (SELECT min(value) as value FROM t1)
-            SELECT name FROM t2
-            JOIN max_val ON max_val.value = t2.max_value
-            JOIN min_val ON min_val.value = t2.min_value";
-        let res = selection(qstr);
-        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
-        let (rem, query) = res.unwrap();
-        assert!(rem.is_empty());
-        assert_eq!(query.ctes.len(), 2);
-        assert_eq!(query.ctes[0].name, "max_val".to_owned());
-        assert_eq!(query.ctes[1].name, "min_val".to_owned());
+    fn where_in_clause() {
+        let qstr = "SELECT `auth_permission`.`content_type_id`, `auth_permission`.`codename`
+                    FROM `auth_permission`
+                    JOIN `django_content_type`
+                      ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
+                    WHERE `auth_permission`.`content_type_id` IN (0);";
+        let res = selection(qstr.as_bytes());
+
+        let expected_where_clause = Some(Expression::In {
+            lhs: Box::new(Expression::Column(Column::from(
+                "auth_permission.content_type_id",
+            ))),
+            rhs: InValue::List(vec![Expression::Literal(0.into())]),
+            negated: false,
+        });
+
+        let expected = SelectStatement {
+            tables: vec![Table::from("auth_permission")],
+            fields: vec![
+                FieldDefinitionExpression::from(Column::from("auth_permission.content_type_id")),
+                FieldDefinitionExpression::from(Column::from("auth_permission.codename")),
+            ],
+            join: vec![JoinClause {
+                operator: JoinOperator::Join,
+                right: JoinRightSide::Table(Table::from("django_content_type")),
+                constraint: JoinConstraint::On(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expression::Column(Column::from(
+                        "auth_permission.content_type_id",
+                    ))),
+                    rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
+                }),
+            }],
+            where_clause: expected_where_clause,
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, expected);
     }
 }

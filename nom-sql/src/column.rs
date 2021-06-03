@@ -365,6 +365,12 @@ mod tests {
         assert_eq!(format!("{}", c2), "count(*)");
         assert_eq!(format!("{}", c3), "sum(mytab.foo)");
     }
+}
+
+#[cfg(not(feature = "postgres"))]
+#[cfg(test)]
+mod tests_mysql {
+    use super::*;
 
     #[test]
     fn multiple_constraints() {

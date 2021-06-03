@@ -100,6 +100,7 @@ fn parse_file(path: &str) -> (i32, i32) {
     parse_queryset(queries)
 }
 
+#[cfg(not(features = "postgres"))]
 #[test]
 #[ignore]
 fn hotcrp_queries() {
@@ -143,6 +144,7 @@ fn finkelstein82_test_queries() {
     assert_eq!(res.unwrap(), 9);
 }
 
+#[cfg(not(feature = "postgres"))]
 #[test]
 fn hotcrp_schema() {
     let mut f = File::open(Path::new("tests/hotcrp-schema.txt")).unwrap();
@@ -193,6 +195,7 @@ fn mediawiki_schema() {
     assert_eq!(fail, 0);
 }
 
+#[cfg(not(feature = "postgres"))]
 #[test]
 fn parse_comments() {
     let (ok, fail) = parse_file("tests/comments.txt");
@@ -202,6 +205,7 @@ fn parse_comments() {
     assert_eq!(fail, 0);
 }
 
+#[cfg(not(feature = "postgres"))]
 #[test]
 fn parse_autoincrement() {
     let (ok, fail) = parse_file("tests/autoincrement.txt");

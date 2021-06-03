@@ -67,7 +67,7 @@ pub fn updating(i: &[u8]) -> IResult<&[u8], UpdateStatement> {
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{ItemPlaceholder, Literal, Real};
+    use crate::common::{ItemPlaceholder, Literal};
     use crate::table::Table;
     use crate::BinaryOperator;
 
@@ -125,6 +125,45 @@ mod tests {
     }
 
     #[test]
+    fn update_with_arithmetic_and_where() {
+        let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
+
+        let res = updating(qstring.as_bytes());
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(Expression::Column(Column::from("users.id"))),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            ))),
+            op: BinaryOperator::Equal,
+        });
+        assert_eq!(
+            res.unwrap().1,
+            UpdateStatement {
+                table: Table::from("users"),
+                fields: vec![(
+                    Column::from("karma"),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("karma"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
+                ),],
+                where_clause: expected_where_cond,
+            }
+        );
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+#[cfg(test)]
+mod tests_mysql {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::{ItemPlaceholder, Literal};
+    use crate::table::Table;
+    use crate::{BinaryOperator, Real};
+
+    #[test]
     fn updated_with_neg_float() {
         let qstring = "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
 
@@ -152,35 +191,6 @@ mod tests {
                 ),],
                 where_clause: expected_where_cond,
                 ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn update_with_arithmetic_and_where() {
-        let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
-
-        let res = updating(qstring.as_bytes());
-        let expected_where_cond = Some(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("users.id"))),
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
-                ItemPlaceholder::QuestionMark,
-            ))),
-            op: BinaryOperator::Equal,
-        });
-        assert_eq!(
-            res.unwrap().1,
-            UpdateStatement {
-                table: Table::from("users"),
-                fields: vec![(
-                    Column::from("karma"),
-                    Expression::BinaryOp {
-                        op: BinaryOperator::Add,
-                        lhs: Box::new(Expression::Column(Column::from("karma"))),
-                        rhs: Box::new(Expression::Literal(1.into()))
-                    },
-                ),],
-                where_clause: expected_where_cond,
             }
         );
     }
