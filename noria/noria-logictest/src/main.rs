@@ -1,4 +1,5 @@
 #![warn(clippy::dbg_macro)]
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -37,40 +38,101 @@ impl Command {
     }
 }
 
-fn input_files(paths: &[PathBuf]) -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
-    if paths == vec![Path::new("-")] {
-        Ok(vec![("stdin".to_string().into(), Box::new(io::stdin()))])
-    } else {
-        Ok(paths
-            .iter()
-            .map(
-                |path| -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
-                    if path.is_file() {
-                        Ok(vec![(path.to_path_buf(), Box::new(File::open(path)?))])
-                    } else if path.is_dir() {
-                        Ok(path
-                            .read_dir()?
-                            .filter_map(|entry| -> Option<(PathBuf, Box<dyn io::Read>)> {
-                                let path = entry.ok()?.path();
-                                if path.is_file() {
-                                    Some((path.clone(), Box::new(File::open(&path).unwrap())))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect())
-                    } else {
-                        Err(anyhow!(
-                            "Invalid path {}, must be a filename, directory, or `-`",
-                            path.to_str().unwrap()
-                        ))
-                    }
-                },
-            )
-            .collect::<anyhow::Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect())
+/// The set of input files we are going to run over
+#[derive(Default)]
+struct InputFiles {
+    /// The files we expect to pass
+    expected_passes: Vec<(PathBuf, Box<dyn io::Read>)>,
+
+    /// The files we expect to fail
+    expected_failures: Vec<(PathBuf, Box<dyn io::Read>)>,
+}
+
+impl TryFrom<&[PathBuf]> for InputFiles {
+    type Error = anyhow::Error;
+
+    fn try_from(paths: &[PathBuf]) -> Result<Self, Self::Error> {
+        if paths == vec![Path::new("-")] {
+            Ok(InputFiles {
+                expected_passes: vec![("stdin".to_string().into(), Box::new(io::stdin()))],
+                ..Default::default()
+            })
+        } else {
+            let (expected_failures, expected_passes) = paths
+                .iter()
+                .map(
+                    |path| -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
+                        if path.is_file() {
+                            Ok(vec![(path.to_path_buf(), Box::new(File::open(path)?))])
+                        } else if path.is_dir() {
+                            Ok(path
+                                .read_dir()?
+                                .filter_map(|entry| -> Option<(PathBuf, Box<dyn io::Read>)> {
+                                    let path = entry.ok()?.path();
+                                    if path.is_file() {
+                                        Some((path.clone(), Box::new(File::open(&path).unwrap())))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect())
+                        } else {
+                            Err(anyhow!(
+                                "Invalid path {}, must be a filename, directory, or `-`",
+                                path.to_str().unwrap()
+                            ))
+                        }
+                    },
+                )
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .partition(|(name, _)| name.to_string_lossy().as_ref().ends_with(".fail.test"));
+
+            Ok(InputFiles {
+                expected_passes,
+                expected_failures,
+            })
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum ExpectedResult {
+    Pass,
+    Fail,
+}
+
+struct InputFile {
+    name: PathBuf,
+    data: Box<dyn io::Read>,
+    expected_result: ExpectedResult,
+}
+
+impl IntoIterator for InputFiles {
+    type Item = InputFile;
+
+    type IntoIter = Box<dyn Iterator<Item = InputFile>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(
+            self.expected_passes
+                .into_iter()
+                .map(|(name, data)| InputFile {
+                    name,
+                    data,
+                    expected_result: ExpectedResult::Pass,
+                })
+                .chain(
+                    self.expected_failures
+                        .into_iter()
+                        .map(|(name, data)| InputFile {
+                            name,
+                            data,
+                            expected_result: ExpectedResult::Fail,
+                        }),
+                ),
+        )
     }
 }
 
@@ -88,10 +150,10 @@ struct Parse {
 
 impl Parse {
     pub fn run(&self) -> anyhow::Result<()> {
-        for (filename, file) in input_files(&self.paths)? {
-            let filename = filename.canonicalize()?;
+        for InputFile { name, data, .. } in InputFiles::try_from(self.paths.as_slice())? {
+            let filename = name.canonicalize()?;
             println!("Parsing records from {}", filename.to_string_lossy());
-            match parser::read_records(file) {
+            match parser::read_records(data) {
                 Ok(records) => {
                     println!(
                         "Successfully parsed {} record{}",
@@ -114,6 +176,10 @@ impl Parse {
 #[derive(Clap)]
 struct Verify {
     /// Files or directories containing test scripts to run. If `-`, will read from standard input
+    ///
+    /// Any files whose name ends in `.fail.test` will be run, but will be expected to *fail* for
+    /// some reason - if any of them pass, the overall run will fail (and noria-logictest will exit
+    /// with status code 0)
     #[clap(parse(from_str))]
     paths: Vec<PathBuf>,
 
@@ -159,15 +225,31 @@ struct Verify {
 impl Verify {
     fn run(&self) -> anyhow::Result<()> {
         let mut failed = false;
-        for (filename, file) in input_files(&self.paths)? {
-            let script = TestScript::read(filename, file)?;
+        for InputFile {
+            name,
+            data,
+            expected_result,
+        } in InputFiles::try_from(self.paths.as_slice())?
+        {
+            let script = TestScript::read(name, data)?;
             let run_opts: RunOptions = self.into();
-            if let Err(e) = script
+            let result = script
                 .run(run_opts)
-                .with_context(|| format!("Running test script {}", script.name()))
-            {
-                failed = true;
-                eprintln!("{:#}", e);
+                .with_context(|| format!("Running test script {}", script.name()));
+            match result {
+                Ok(_) if expected_result == ExpectedResult::Fail => {
+                    failed = true;
+                    eprintln!(
+                        "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
+                        script.name(),
+                        script.name().replace(".fail.test", ".test")
+                    )
+                }
+                Err(e) if expected_result == ExpectedResult::Pass => {
+                    failed = true;
+                    eprintln!("{:#}", e);
+                }
+                _ => {}
             }
         }
 
