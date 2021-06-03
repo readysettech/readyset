@@ -149,9 +149,9 @@ struct Verify {
     #[clap(long, short)]
     verbose: bool,
 
-    /// Enable a MySQL backend for the client, with binlog replication to Noria.
-    /// All writes will pass through to MySQL and be replicated to Noria using binlog.
-    /// The parameter to this argument is a MySQL URL with no database specified.
+    /// Enable a mysql backend for the client, with binlog replication to Noria
+    /// all writes will go to mysql first and then replicated to Noria using binlog
+    /// the parameter to this argument is a mysql url with no database specified.
     #[clap(long)]
     binlog_mysql: Option<String>,
 }
