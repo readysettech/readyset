@@ -120,6 +120,34 @@ mod tests {
     use crate::column::Column;
     use crate::common::ItemPlaceholder;
     use crate::table::Table;
+
+    #[test]
+    fn insert_with_parameters() {
+        let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![vec![
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark)
+                ]],
+                ..Default::default()
+            }
+        );
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+#[cfg(test)]
+mod tests_mysql {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::ItemPlaceholder;
+    use crate::table::Table;
     use crate::BinaryOperator;
 
     #[test]
@@ -131,22 +159,6 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Table::from("users"),
-                fields: None,
-                data: vec![vec![42.into(), "test".into()]],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn simple_insert_schema() {
-        let qstring = "INSERT INTO db1.users VALUES (42, \"test\");";
-
-        let res = insertion(qstring.as_bytes());
-        assert_eq!(
-            res.unwrap().1,
-            InsertStatement {
-                table: Table::from(("db1", "users")),
                 fields: None,
                 data: vec![vec![42.into(), "test".into()]],
                 ..Default::default()
@@ -209,6 +221,22 @@ mod tests {
     }
 
     #[test]
+    fn simple_insert_schema() {
+        let qstring = "INSERT INTO db1.users VALUES (42, \"test\");";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from(("db1", "users")),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn multi_insert() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");";
 
@@ -222,25 +250,6 @@ mod tests {
                     vec![42.into(), "test".into()],
                     vec![21.into(), "test2".into()],
                 ],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn insert_with_parameters() {
-        let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
-
-        let res = insertion(qstring.as_bytes());
-        assert_eq!(
-            res.unwrap().1,
-            InsertStatement {
-                table: Table::from("users"),
-                fields: Some(vec![Column::from("id"), Column::from("name")]),
-                data: vec![vec![
-                    Literal::Placeholder(ItemPlaceholder::QuestionMark),
-                    Literal::Placeholder(ItemPlaceholder::QuestionMark)
-                ]],
                 ..Default::default()
             }
         );

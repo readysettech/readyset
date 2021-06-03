@@ -23,3 +23,6 @@ maplit = "1.0.2"
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
 pretty_assertions = "0.5.1"
+
+[features]
+postgres = []

@@ -80,50 +80,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    use crate::table::Table;
-
-    #[test]
-    fn hash_query() {
-        let qstring = "INSERT INTO users VALUES (42, \"test\");";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
-
-        let expected = SqlQuery::Insert(InsertStatement {
-            table: Table::from("users"),
-            fields: None,
-            data: vec![vec![42.into(), "test".into()]],
-            ..Default::default()
-        });
-        let mut h0 = DefaultHasher::new();
-        let mut h1 = DefaultHasher::new();
-        res.unwrap().hash(&mut h0);
-        expected.hash(&mut h1);
-        assert_eq!(h0.finish(), h1.finish());
-    }
-
-    #[test]
-    fn trim_query() {
-        let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn parse_byte_slice() {
-        let qstring: &[u8] = b"INSERT INTO users VALUES (42, \"test\");";
-        let res = parse_query_bytes(qstring);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn parse_byte_vector() {
-        let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
-        let res = parse_query_bytes(&qstring);
-        assert!(res.is_ok());
-    }
 
     #[test]
     fn display_select_query() {
@@ -257,6 +213,56 @@ mod tests {
         assert!(res1.is_ok());
         assert_eq!(expected0, format!("{}", res0.unwrap()));
         assert_eq!(expected1, format!("{}", res1.unwrap()));
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+#[cfg(test)]
+mod tests_mysql {
+    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    use crate::table::Table;
+
+    #[test]
+    fn trim_query() {
+        let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
+        let res = parse_query(qstring);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_byte_slice() {
+        let qstring: &[u8] = b"INSERT INTO users VALUES (42, \"test\");";
+        let res = parse_query_bytes(qstring);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_byte_vector() {
+        let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
+        let res = parse_query_bytes(&qstring);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn hash_query() {
+        let qstring = "INSERT INTO users VALUES (42, \"test\");";
+        let res = parse_query(qstring);
+        assert!(res.is_ok());
+
+        let expected = SqlQuery::Insert(InsertStatement {
+            table: Table::from("users"),
+            fields: None,
+            data: vec![vec![42.into(), "test".into()]],
+            ..Default::default()
+        });
+        let mut h0 = DefaultHasher::new();
+        let mut h1 = DefaultHasher::new();
+        res.unwrap().hash(&mut h0);
+        expected.hash(&mut h1);
+        assert_eq!(h0.finish(), h1.finish());
     }
 
     #[test]
