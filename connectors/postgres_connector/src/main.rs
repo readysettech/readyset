@@ -1,10 +1,15 @@
 mod connector;
 mod noria_adapter;
+mod snapshot;
 mod wal;
 mod wal_reader;
 
 use clap::{App, Arg};
 use slog::*;
+
+pub use connector::{PostgresPosition, PostgresWalConnector, WalAction};
+pub use noria_adapter::Builder;
+pub use snapshot::PostgresReplicator;
 
 #[tokio::main]
 async fn main() -> noria::ReadySetResult<()> {

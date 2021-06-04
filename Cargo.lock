@@ -1017,7 +1017,7 @@ dependencies = [
  "clap 2.33.3",
  "criterion-plot",
  "csv",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -2544,9 +2544,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d572918e350e82412fe766d24b15e6682fb2ed2bbe018280caa810397cb319"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
 dependencies = [
  "either",
 ]
@@ -3717,7 +3717,7 @@ version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
  "derive_more",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "maplit",
  "maths",
  "nom 5.1.2",
@@ -3754,7 +3754,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "hyper 0.14.7",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "launchpad",
  "lazy_static",
  "maths",
@@ -3954,7 +3954,7 @@ dependencies = [
  "colored",
  "derive_more",
  "hex 0.4.3",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "maplit",
  "maths",
  "md5 0.7.0",
@@ -3977,7 +3977,7 @@ dependencies = [
 name = "noria-mir"
 version = "0.7.0"
 dependencies = [
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "nom-sql",
  "noria-common",
  "noria-dataflow",
@@ -4037,7 +4037,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper 0.14.7",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "launchpad",
  "maplit",
  "maths",
@@ -4712,6 +4712,7 @@ version = "0.2.1"
 source = "git+https://github.com/readysettech/rust-postgres.git#e899d18e0044f3f3674f52ef7505ca39780204db"
 dependencies = [
  "bytes 1.0.1",
+ "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol 0.6.1 (git+https://github.com/readysettech/rust-postgres.git)",
 ]
@@ -4736,6 +4737,7 @@ dependencies = [
  "chrono",
  "clap 2.33.3",
  "futures 0.3.14",
+ "itertools 0.10.1",
  "native-tls",
  "noria",
  "postgres-native-tls",
@@ -4949,7 +4951,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "indicatif",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "launchpad",
  "lazy_static",
  "nom-sql",
@@ -5297,7 +5299,7 @@ name = "reader_map"
 version = "0.1.0"
 dependencies = [
  "hashbag",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "left-right",
  "noria",
  "quickcheck",
@@ -7255,7 +7257,7 @@ checksum = "879f6906492a7cd215bfa4cf595b600146ccfac0c79bcbd1f3000162af5e8b06"
 name = "unbounded-interval-tree"
 version = "0.2.3"
 dependencies = [
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "launchpad",
  "pretty_assertions 0.6.1",
  "proptest",
