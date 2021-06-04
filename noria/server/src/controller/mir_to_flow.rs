@@ -297,7 +297,7 @@ fn mir_node_to_flow_parts(
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
-                    make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)
+                    make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
                 MirNodeInner::TopK {
                     ref order,
@@ -976,7 +976,7 @@ fn make_distinct_node(
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = column_names(columns);
 
@@ -997,9 +997,17 @@ fn make_distinct_node(
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        ops::distinct::Distinct::new(parent_na, group_by_indx),
+        // We're using Count to implement distinct here, because count already keeps track of how
+        // many times we have seen a set of values. This means that if we get a row
+        // deletion, we won't be removing it from our records of distinct rows unless there are no
+        // remaining occurances of the set.
+        //
+        // We use 0 as a placeholder. The over column is ignored with Count entirely. This should
+        // be refactored so Count doesn't take an over column at all.
+        // Issue: https://readysettech.atlassian.net/browse/ENG-310
+        Aggregation::Count.over(parent_na, 0, &group_by_indx)?,
     );
-    FlowNode::New(na)
+    Ok(FlowNode::New(na))
 }
 
 fn make_topk_node(

@@ -5506,7 +5506,6 @@ async fn distinct_select_works() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn partial_distinct() {
     let mut g = start_simple("partial_distinct").await;
 
@@ -5554,7 +5553,6 @@ async fn partial_distinct() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn partial_distinct_multi() {
     let mut g = start_simple("partial_distinct_multi").await;
 

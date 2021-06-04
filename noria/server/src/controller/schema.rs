@@ -43,7 +43,10 @@ fn type_for_internal_column(
                     )
                 }
             } else {
-                unreachable!("non aggregation result column traced back to aggregation");
+                Ok(
+                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                        .map(|cs| cs.sql_type),
+                )
             }
         }
         ops::NodeOperator::Extremum(ref o) => {
