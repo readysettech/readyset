@@ -1252,17 +1252,26 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
         group_by: Vec<&Column>,
     ) -> MirNodeRef {
-        let combined_columns = parent.borrow().columns().to_vec();
+        let group_by: Vec<_> = group_by.into_iter().cloned().collect();
+        let mut columns = group_by.clone();
+        // When Distinct gets converted to a Count flow node in mir_to_flow it will count the
+        // occurances up for us, and put that in a hidden column. Rather than store the count in a
+        // hidden column, we should be explicit and create that column now. It will be omitted in
+        // the final output due to absence in the projected columns list.
+        columns.push(Column {
+            name: "__distinct_count".to_owned(),
+            table: None,
+            function: None,
+            aliases: vec![],
+        });
 
         // make the new operator and record its metadata
         MirNode::new(
             name,
             self.schema_version,
-            combined_columns,
-            MirNodeInner::Distinct {
-                group_by: group_by.into_iter().cloned().collect(),
-            },
-            vec![parent.clone()],
+            columns,
+            MirNodeInner::Distinct { group_by },
+            vec![parent],
             vec![],
         )
     }

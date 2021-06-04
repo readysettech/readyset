@@ -7,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 use crate::prelude::*;
 use noria::errors::ReadySetResult;
 
-pub mod distinct;
 pub mod filter;
 pub mod grouped;
 pub mod identity;
@@ -41,7 +40,6 @@ pub enum NodeOperator {
     TopK(topk::TopK),
     Trigger(trigger::Trigger),
     Rewrite(rewrite::Rewrite),
-    Distinct(distinct::Distinct),
 }
 
 macro_rules! impl_ingredient_fn_mut {
@@ -60,7 +58,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Rewrite(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Distinct(ref mut i) => i.$fn($($arg),*),
         }
     }
 }
@@ -81,7 +78,6 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
             NodeOperator::Trigger(ref i) => i.$fn($($arg),*),
             NodeOperator::Rewrite(ref i) => i.$fn($($arg),*),
-            NodeOperator::Distinct(ref i) => i.$fn($($arg),*),
         }
     }
 }
