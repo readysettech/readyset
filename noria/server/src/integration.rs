@@ -5506,6 +5506,118 @@ async fn distinct_select_works() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn partial_distinct() {
+    let mut g = start_simple("partial_distinct").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, k int);
+         VIEW distinctselect: SELECT DISTINCT value FROM test WHERE k = ?;",
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("distinctselect").await.unwrap();
+
+    macro_rules! do_lookup {
+        ($q: expr, $k: expr) => {{
+            let rows = $q.lookup(&[($k as i32).into()], true).await.unwrap();
+            rows.into_iter()
+                .map(|r| i32::try_from(&r["value"]).unwrap())
+                .sorted()
+                .collect::<Vec<i32>>()
+        }};
+    }
+
+    t.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(0)],
+        vec![DataType::from(1i32), DataType::from(0)],
+        vec![DataType::from(2i32), DataType::from(0)],
+        vec![DataType::from(2i32), DataType::from(1)],
+        vec![DataType::from(3i32), DataType::from(1)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    assert_eq!(do_lookup!(q, 0), vec![1, 2]);
+
+    t.delete_row(vec![DataType::from(1), DataType::from(0)])
+        .await
+        .unwrap();
+    sleep().await;
+    assert_eq!(do_lookup!(q, 0), vec![1, 2]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn partial_distinct_multi() {
+    let mut g = start_simple("partial_distinct_multi").await;
+
+    g.install_recipe(
+        "CREATE TABLE test (value int, number int, k int);
+         VIEW distinctselectmulti: SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;",
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut t = g.table("test").await.unwrap();
+    let mut q = g.view("distinctselectmulti").await.unwrap();
+
+    t.insert_many(vec![
+        vec![
+            DataType::from(1i32),
+            DataType::from(2i32),
+            DataType::from(0),
+        ],
+        vec![
+            DataType::from(1i32),
+            DataType::from(4i32),
+            DataType::from(0),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(2i32),
+            DataType::from(0),
+        ],
+        vec![
+            DataType::from(2i32),
+            DataType::from(6i32),
+            DataType::from(1),
+        ],
+        vec![
+            DataType::from(3i32),
+            DataType::from(2i32),
+            DataType::from(1),
+        ],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = q.lookup(&[(0_i32).into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                i32::try_from(&r["value"]).unwrap(),
+                i32::try_from(&r["s"]).unwrap(),
+            )
+        })
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 6), (2, 2)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn distinct_select_works_sharded() {
     let mut g = start_simple("distinct_select_works_sharded").await;
 
