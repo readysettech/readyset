@@ -217,3 +217,68 @@ mod tests_mysql {
         );
     }
 }
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::{ItemPlaceholder, Literal};
+    use crate::table::Table;
+    use crate::{BinaryOperator, Real};
+
+    #[test]
+    fn updated_with_neg_float() {
+        let qstring =
+            "UPDATE \"stories\" SET \"hotness\" = -19216.5479744 WHERE \"stories\".\"id\" = ?";
+
+        let res = updating(qstring.as_bytes());
+        let expected_left = Expression::Column(Column::from("stories.id"));
+        let expected_where_cond = Some(Expression::BinaryOp {
+            lhs: Box::new(expected_left),
+            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                ItemPlaceholder::QuestionMark,
+            ))),
+            op: BinaryOperator::Equal,
+        });
+        assert_eq!(
+            res.unwrap().1,
+            UpdateStatement {
+                table: Table::from("stories"),
+                fields: vec![(
+                    Column::from("hotness"),
+                    Expression::Literal(Literal::FixedPoint(Real {
+                        mantissa: 5282204485892035,
+                        exponent: -38,
+                        sign: -1,
+                        precision: 7,
+                    }),),
+                ),],
+                where_clause: expected_where_cond,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn update_with_arithmetic() {
+        let qstring = "UPDATE users SET karma = karma + 1;";
+
+        let res = updating(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            UpdateStatement {
+                table: Table::from("users"),
+                fields: vec![(
+                    Column::from("karma"),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("karma"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
+                ),],
+                ..Default::default()
+            }
+        );
+    }
+}

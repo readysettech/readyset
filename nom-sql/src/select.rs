@@ -1607,3 +1607,131 @@ mod tests_mysql {
         assert_eq!(res.unwrap().1, expected);
     }
 }
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::{FieldDefinitionExpression, Literal};
+    use crate::table::Table;
+    use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
+
+    #[test]
+    fn alias_generic_function() {
+        let qstr = "SELECT id, coalesce(a, 'b',c) AS created_day FROM users;";
+        let res = selection(qstr.as_bytes());
+        assert!(res.is_ok(), "!{:?}.is_ok()", res);
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec!["users".into()],
+                fields: vec![
+                    FieldDefinitionExpression::from(Column::from("id")),
+                    FieldDefinitionExpression::Expression {
+                        alias: Some("created_day".to_owned()),
+                        expr: Expression::Call(FunctionExpression::Call {
+                            name: "coalesce".to_owned(),
+                            arguments: vec![
+                                Expression::Column(Column::from("a")),
+                                Expression::Literal(Literal::String("b".to_owned())),
+                                Expression::Column(Column::from("c"))
+                            ]
+                        }),
+                    },
+                ],
+                where_clause: None,
+                ..Default::default()
+            }
+        )
+    }
+
+    #[test]
+    fn parenthesized_joins() {
+        let qstr = b"select \"lp\".\"vehicle_id\" AS \"vehicle_id\",\"util\".\"utility_id\" AS \"utility_id\",
+            cast(convert_tz(\"lp\".\"start_dttm\",'UTC',\"util\".\"time_zone\") as date) AS \"local_date\",
+            cast(convert_tz(\"lp\".\"start_dttm\",'UTC',\"util\".\"time_zone\") as time) AS \"local_start_time\",
+            timediff(\"lp\".\"end_dttm\",\"lp\".\"start_dttm\") AS \"duration\",
+            sum(ifnull(\"lp\".\"energy_delivered\",\"lp\".\"energy_added\")) AS \"usage_kwh\"
+            from ((((\"wg_static\".\"vehicle_load_profiles\" \"lp\"
+            join \"wg_static\".\"vehicles\" \"v\" on(\"v\".\"vehicle_id\" = \"lp\".\"vehicle_id\"))
+            join \"wg_static\".\"registrations\" \"r\" on(\"r\".\"registration_id\" = \"v\".\"registration_id\"))
+            join \"wg_static\".\"users\" \"u\" on(\"u\".\"user_id\" = \"r\".\"user_id\"))
+            join \"wg_static\".\"utilities\" \"util\" on(\"util\".\"utility_id\" = \"u\".\"utility_id\"))
+            where \"lp\".\"is_home\" = 1
+            group by lp.vehicle_id, lp.start_dttm, util.time_zone, lp.end_dttm
+        ";
+        let res = selection(qstr);
+        assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
+        let (rem, query) = res.unwrap();
+        assert!(rem.is_empty());
+        assert_eq!(query.join.len(), 4);
+    }
+
+    #[test]
+    fn select_literals() {
+        use crate::common::Literal;
+
+        let qstring = "SELECT NULL, 1, 'foo', CURRENT_TIME FROM users;";
+        // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
+        //        let qstring = "SELECT NULL, 1, \"foo\";";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec![Table::from("users")],
+                fields: vec![
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::Null,)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1),)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::String(
+                        "foo".to_owned()
+                    ),)),
+                    FieldDefinitionExpression::from(Expression::Literal(Literal::CurrentTime,)),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn where_in_clause() {
+        let qstr = "SELECT \"auth_permission\".\"content_type_id\", \"auth_permission\".\"codename\"
+                    FROM \"auth_permission\"
+                    JOIN \"django_content_type\"
+                      ON ( \"auth_permission\".\"content_type_id\" = \"django_content_type\".\"id\" )
+                    WHERE \"auth_permission\".\"content_type_id\" IN (0);";
+        let res = selection(qstr.as_bytes());
+
+        let expected_where_clause = Some(Expression::In {
+            lhs: Box::new(Expression::Column(Column::from(
+                "auth_permission.content_type_id",
+            ))),
+            rhs: InValue::List(vec![Expression::Literal(0.into())]),
+            negated: false,
+        });
+
+        let expected = SelectStatement {
+            tables: vec![Table::from("auth_permission")],
+            fields: vec![
+                FieldDefinitionExpression::from(Column::from("auth_permission.content_type_id")),
+                FieldDefinitionExpression::from(Column::from("auth_permission.codename")),
+            ],
+            join: vec![JoinClause {
+                operator: JoinOperator::Join,
+                right: JoinRightSide::Table(Table::from("django_content_type")),
+                constraint: JoinConstraint::On(Expression::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expression::Column(Column::from(
+                        "auth_permission.content_type_id",
+                    ))),
+                    rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
+                }),
+            }],
+            where_clause: expected_where_clause,
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, expected);
+    }
+}

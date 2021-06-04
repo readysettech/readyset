@@ -1446,3 +1446,159 @@ mod tests_mysql {
         }
     }
 }
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+
+    mod precedence {
+        use super::tests::precedence::parses_same;
+
+        #[test]
+        fn is_and_between() {
+            parses_same(
+                "\"h\".\"local_date\" is null
+                 and month(\"lp\".\"local_date\") between \"peak\".\"start_month\" and \"peak\".\"end_month\"
+                 and dayofweek(\"lp\".\"local_date\") between 2 and 6",
+                "((\"h\".\"local_date\" is null)
+                 and (month(\"lp\".\"local_date\") between \"peak\".\"start_month\" and \"peak\".\"end_month\")
+                 and (dayofweek(\"lp\".\"local_date\") between 2 and 6))",
+            )
+        }
+    }
+
+    mod conditions {
+        use super::*;
+        use crate::ItemPlaceholder;
+
+        #[test]
+        fn complex_bracketing() {
+            use crate::common::Literal;
+
+            let cond = "\"read_ribbons\".\"is_following\" = 1 \
+                    AND \"comments\".\"user_id\" <> \"read_ribbons\".\"user_id\" \
+                    AND \"saldo\" >= 0 \
+                    AND ( \"parent_comments\".\"user_id\" = \"read_ribbons\".\"user_id\" \
+                    OR ( \"parent_comments\".\"user_id\" IS NULL \
+                    AND \"stories\".\"user_id\" = \"read_ribbons\".\"user_id\" ) ) \
+                    AND ( \"parent_comments\".\"id\" IS NULL \
+                    OR \"saldo\" >= 0 ) \
+                    AND \"read_ribbons\".\"user_id\" = ?";
+
+            let res = expression(cond.as_bytes());
+            let expected = Expression::BinaryOp {
+                op: BinaryOperator::And,
+                lhs: Box::new(Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Literal(1.into())),
+                }),
+                rhs: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::And,
+                    lhs: Box::new(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column("comments.user_id".into())),
+                        op: BinaryOperator::NotEqual,
+                        rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
+                    }),
+                    rhs: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::And,
+                        lhs: Box::new(Expression::BinaryOp {
+                            lhs: Box::new(Expression::Column("saldo".into())),
+                            op: BinaryOperator::GreaterOrEqual,
+                            rhs: Box::new(Expression::Literal(0.into())),
+                        }),
+                        rhs: Box::new(Expression::BinaryOp {
+                            op: BinaryOperator::And,
+                            lhs: Box::new(Expression::BinaryOp {
+                                op: BinaryOperator::Or,
+                                lhs: Box::new(Expression::BinaryOp {
+                                    lhs: Box::new(Expression::Column(
+                                        "parent_comments.user_id".into(),
+                                    )),
+                                    op: BinaryOperator::Equal,
+                                    rhs: Box::new(Expression::Column(
+                                        "read_ribbons.user_id".into(),
+                                    )),
+                                }),
+                                rhs: Box::new(Expression::BinaryOp {
+                                    op: BinaryOperator::And,
+                                    lhs: Box::new(Expression::BinaryOp {
+                                        lhs: Box::new(Expression::Column(
+                                            "parent_comments.user_id".into(),
+                                        )),
+                                        op: BinaryOperator::Is,
+                                        rhs: Box::new(Expression::Literal(Literal::Null)),
+                                    }),
+                                    rhs: Box::new(Expression::BinaryOp {
+                                        lhs: Box::new(Expression::Column("stories.user_id".into())),
+                                        op: BinaryOperator::Equal,
+                                        rhs: Box::new(Expression::Column(
+                                            "read_ribbons.user_id".into(),
+                                        )),
+                                    }),
+                                }),
+                            }),
+                            rhs: Box::new(Expression::BinaryOp {
+                                op: BinaryOperator::And,
+                                lhs: Box::new(Expression::BinaryOp {
+                                    op: BinaryOperator::Or,
+                                    lhs: Box::new(Expression::BinaryOp {
+                                        lhs: Box::new(Expression::Column(
+                                            "parent_comments.id".into(),
+                                        )),
+                                        op: BinaryOperator::Is,
+                                        rhs: Box::new(Expression::Literal(Literal::Null)),
+                                    }),
+                                    rhs: Box::new(Expression::BinaryOp {
+                                        lhs: Box::new(Expression::Column("saldo".into())),
+                                        op: BinaryOperator::GreaterOrEqual,
+                                        rhs: Box::new(Expression::Literal(0.into())),
+                                    }),
+                                }),
+                                rhs: Box::new(Expression::BinaryOp {
+                                    op: BinaryOperator::Equal,
+                                    lhs: Box::new(Expression::Column(
+                                        "read_ribbons.user_id".into(),
+                                    )),
+                                    rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                                        ItemPlaceholder::QuestionMark,
+                                    ))),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            };
+            let (rem, res) = res.unwrap();
+            assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+            assert_eq!(res, expected);
+        }
+
+        #[test]
+        fn equality_literals() {
+            let cond1 = "foo = 42";
+            let cond2 = "foo = 'hello'";
+
+            let res1 = expression(cond1.as_bytes());
+            assert_eq!(
+                res1.unwrap().1,
+                Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
+                }
+            );
+
+            let res2 = expression(cond2.as_bytes());
+            assert_eq!(
+                res2.unwrap().1,
+                Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
+                }
+            );
+        }
+    }
+}

@@ -1212,3 +1212,336 @@ mod tests_mysql {
         assert!(res.is_ok());
     }
 }
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use crate::{ColumnConstraint, Literal, SqlType};
+
+    use super::*;
+    use crate::column::Column;
+    use crate::table::Table;
+
+    #[test]
+    fn django_create() {
+        let qstring = "CREATE TABLE \"django_admin_log\" (
+                       \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       \"action_time\" datetime NOT NULL,
+                       \"user_id\" integer NOT NULL,
+                       \"content_type_id\" integer,
+                       \"object_id\" longtext,
+                       \"object_repr\" varchar(200) NOT NULL,
+                       \"action_flag\" smallint UNSIGNED NOT NULL,
+                       \"change_message\" longtext NOT NULL);";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("django_admin_log"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.action_time"),
+                        SqlType::DateTime(0),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.user_id"),
+                        SqlType::Int(32),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("django_admin_log.content_type_id"),
+                        SqlType::Int(32),
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("django_admin_log.object_id"),
+                        SqlType::Longtext,
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.object_repr"),
+                        SqlType::Varchar(200),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.action_flag"),
+                        SqlType::UnsignedSmallint(16),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("django_admin_log.change_message"),
+                        SqlType::Longtext,
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                ],
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column {
+                    name: "id".into(),
+                    table: Some("django_admin_log".into()),
+                    function: None,
+                }])])
+            }
+        );
+
+        let qstring = "CREATE TABLE \"auth_group\" (
+                       \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       \"name\" varchar(80) NOT NULL UNIQUE)";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("auth_group"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("auth_group.id"),
+                        SqlType::Int(32),
+                        vec![
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("auth_group.name"),
+                        SqlType::Varchar(80),
+                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
+                    ),
+                ],
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column {
+                    name: "id".into(),
+                    table: Some("auth_group".into()),
+                    function: None,
+                }])])
+            }
+        );
+    }
+
+    #[test]
+    fn format_create() {
+        let qstring = "CREATE TABLE \"auth_group\" (
+                       \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                       \"name\" varchar(80) NOT NULL UNIQUE)";
+        // TODO(malte): INTEGER isn't quite reflected right here, perhaps
+        let expected = "CREATE TABLE auth_group (\
+                        id INT(32) AUTO_INCREMENT NOT NULL, \
+                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
+    }
+
+    #[test]
+    fn simple_create_view() {
+        use crate::common::FieldDefinitionExpression;
+        use crate::{BinaryOperator, Expression};
+
+        let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = 'bob';";
+
+        let res = view_creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateViewStatement {
+                name: String::from("v"),
+                fields: vec![],
+                definition: Box::new(SelectSpecification::Simple(SelectStatement {
+                    tables: vec![Table::from("users")],
+                    fields: vec![FieldDefinitionExpression::All],
+                    where_clause: Some(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column("username".into())),
+                        rhs: Box::new(Expression::Literal(Literal::String("bob".into()))),
+                        op: BinaryOperator::Equal,
+                    }),
+                    ..Default::default()
+                })),
+            }
+        );
+    }
+
+    #[test]
+    fn format_create_view() {
+        let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
+        let expected = "CREATE VIEW v AS SELECT * FROM t";
+        let res = view_creation(qstring.as_bytes());
+        assert_eq!(format!("{}", res.unwrap().1), expected);
+    }
+
+    #[test]
+    fn lobsters_indexes() {
+        let qstring = "CREATE TABLE \"comments\" (
+            \"id\" int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            \"hat_id\" int,
+            fulltext INDEX \"index_comments_on_comment\"  (\"comment\"),
+            INDEX \"confidence_idx\"  (\"confidence\"),
+            UNIQUE INDEX \"short_id\"  (\"short_id\"),
+            INDEX \"story_id_short_id\"  (\"story_id\", \"short_id\"),
+            INDEX \"thread_id\"  (\"thread_id\"),
+            INDEX \"index_comments_on_user_id\"  (\"user_id\"))
+            ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("comments"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("comments.id"),
+                        SqlType::UnsignedInt(32),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::AutoIncrement,
+                            ColumnConstraint::PrimaryKey,
+                        ],
+                    ),
+                    ColumnSpecification::new(Column::from("comments.hat_id"), SqlType::Int(32),),
+                ],
+                keys: Some(vec![
+                    TableKey::FulltextKey(
+                        Some("index_comments_on_comment".into()),
+                        vec![Column::from("comments.comment")]
+                    ),
+                    TableKey::Key(
+                        "confidence_idx".into(),
+                        vec![Column::from("comments.confidence")]
+                    ),
+                    TableKey::UniqueKey(
+                        Some("short_id".into()),
+                        vec![Column::from("comments.short_id")]
+                    ),
+                    TableKey::Key(
+                        "story_id_short_id".into(),
+                        vec![
+                            Column::from("comments.story_id"),
+                            Column::from("comments.short_id")
+                        ]
+                    ),
+                    TableKey::Key("thread_id".into(), vec![Column::from("comments.thread_id")]),
+                    TableKey::Key(
+                        "index_comments_on_user_id".into(),
+                        vec![Column::from("comments.user_id")]
+                    ),
+                    TableKey::PrimaryKey(vec![Column {
+                        name: "id".into(),
+                        table: Some("comments".into()),
+                        function: None,
+                    }]),
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn mediawiki_create() {
+        let qstring = "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
+                       varchar(40) NOT NULL default '') TYPE=MyISAM;";
+        let res = creation(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("user_newtalk"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("user_newtalk.user_id"),
+                        SqlType::Int(5),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("user_newtalk.user_ip"),
+                        SqlType::Varchar(40),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
+                        ],
+                    ),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn mediawiki_create2() {
+        let qstring = "CREATE TABLE \"user\" (
+                        user_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                        user_name varchar(255) binary NOT NULL default '',
+                        user_real_name varchar(255) binary NOT NULL default '',
+                        user_password tinyblob NOT NULL,
+                        user_newpassword tinyblob NOT NULL,
+                        user_newpass_time binary(14),
+                        user_email tinytext NOT NULL,
+                        user_touched binary(14) NOT NULL default '',
+                        user_token binary(32) NOT NULL default '',
+                        user_email_authenticated binary(14),
+                        user_email_token binary(32),
+                        user_email_token_expires binary(14),
+                        user_registration binary(14),
+                        user_editcount int,
+                        user_password_expires varbinary(14) DEFAULT NULL
+                       ) ENGINE=, DEFAULT CHARSET=utf8";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn mediawiki_create3() {
+        let qstring = "CREATE TABLE \"interwiki\" (
+ iw_prefix varchar(32) NOT NULL,
+ iw_url blob NOT NULL,
+ iw_api blob NOT NULL,
+ iw_wikiid varchar(64) NOT NULL,
+ iw_local bool NOT NULL,
+ iw_trans tinyint NOT NULL default 0
+ ) ENGINE=, DEFAULT CHARSET=utf8";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn mediawiki_externallinks() {
+        let qstring = "CREATE TABLE \"externallinks\" (
+          \"el_id\" int(10) unsigned NOT NULL AUTO_INCREMENT,
+          \"el_from\" int(8) unsigned NOT NULL DEFAULT '0',
+          \"el_from_namespace\" int(11) NOT NULL DEFAULT '0',
+          \"el_to\" blob NOT NULL,
+          \"el_index\" blob NOT NULL,
+          \"el_index_60\" varbinary(60) NOT NULL,
+          PRIMARY KEY (\"el_id\"),
+          KEY \"el_from\" (\"el_from\",\"el_to\"(40)),
+          KEY \"el_to\" (\"el_to\"(60),\"el_from\"),
+          KEY \"el_index\" (\"el_index\"(60)), KEY \"el_backlinks_to\" (\"el_from_namespace\",\"el_to\"(60),\"el_from\"),
+          KEY \"el_index_60\" (\"el_index_60\",\"el_id\"),
+          KEY \"el_from_index_60\" (\"el_from\",\"el_index_60\",\"el_id\")
+        )";
+        creation(qstring.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn vehicle_load_profiles() {
+        let qstring = b"CREATE TABLE \"vehicle_load_profiles\" (
+  \"vehicle_load_profile_id\" int(11) NOT NULL AUTO_INCREMENT,
+  \"vehicle_id\" int(11) NOT NULL,
+  \"charge_event_id\" int(11) DEFAULT NULL,
+  \"start_dttm\" timestamp NULL DEFAULT NULL,
+  \"end_dttm\" timestamp NULL DEFAULT NULL,
+  \"is_home\" tinyint(1) DEFAULT NULL,
+  \"energy_delivered\" float DEFAULT NULL,
+  \"energy_added\" float DEFAULT NULL,
+  \"soc_added\" float DEFAULT NULL,
+  \"created_at\" timestamp NOT NULL DEFAULT current_timestamp(),
+  \"last_updated_at\" timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (\"vehicle_load_profile_id\"),
+  KEY \"load_profile_vehicle\" (\"vehicle_id\"),
+  KEY \"vlp_charge_event\" (\"charge_event_id\"),
+  CONSTRAINT \"load_profile_vehicle\" FOREIGN KEY (\"vehicle_id\") REFERENCES \"vehicles\" (\"vehicle_id\"),
+  CONSTRAINT \"vlp_charge_event\" FOREIGN KEY (\"charge_event_id\") REFERENCES \"charge_events\" (\"charge_event_id\")
+) ENGINE=InnoDB AUTO_INCREMENT=546971 DEFAULT CHARSET=latin1";
+        let res = creation(qstring);
+        assert!(res.is_ok());
+    }
+}
