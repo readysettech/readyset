@@ -168,7 +168,7 @@ mod tests_mysql {
 
     #[test]
     fn complex_insert() {
-        let qstring = "INSERT INTO users VALUES (42, 'test', \"test\", CURRENT_TIMESTAMP);";
+        let qstring = "INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);";
 
         let res = insertion(qstring.as_bytes());
         assert_eq!(
@@ -189,7 +189,7 @@ mod tests_mysql {
 
     #[test]
     fn insert_with_field_names() {
-        let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\");";
+        let qstring = "INSERT INTO users (id, name) VALUES (42, 'test');";
 
         let res = insertion(qstring.as_bytes());
         assert_eq!(
@@ -206,7 +206,7 @@ mod tests_mysql {
     // Issue #3
     #[test]
     fn insert_without_spaces() {
-        let qstring = "INSERT INTO users(id, name) VALUES(42, \"test\");";
+        let qstring = "INSERT INTO users(id, name) VALUES(42, 'test');";
 
         let res = insertion(qstring.as_bytes());
         assert_eq!(
@@ -286,6 +286,165 @@ mod tests_mysql {
     #[test]
     fn insert_with_leading_value_whitespace() {
         let qstring = "INSERT INTO users (id, name) VALUES ( 42, \"test\");";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+}
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+    use crate::column::Column;
+    use crate::common::ItemPlaceholder;
+    use crate::table::Table;
+    use crate::BinaryOperator;
+
+    #[test]
+    fn simple_insert() {
+        let qstring = "INSERT INTO users VALUES (42, 'test');";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn complex_insert() {
+        let qstring = "INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: None,
+                data: vec![vec![
+                    42.into(),
+                    "test".into(),
+                    "test".into(),
+                    Literal::CurrentTimestamp,
+                ],],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn insert_with_field_names() {
+        let qstring = "INSERT INTO users (id, name) VALUES (42, 'test');";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    // Issue #3
+    #[test]
+    fn insert_without_spaces() {
+        let qstring = "INSERT INTO users(id, name) VALUES(42, 'test');";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn simple_insert_schema() {
+        let qstring = "INSERT INTO db1.users VALUES (42, 'test');";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from(("db1", "users")),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn multi_insert() {
+        let qstring = "INSERT INTO users (id, name) VALUES (42, 'test'),(21, 'test2');";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                data: vec![
+                    vec![42.into(), "test".into()],
+                    vec![21.into(), "test2".into()],
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn insert_with_on_dup_update() {
+        let qstring = "INSERT INTO keystores (\"key\", \"value\") VALUES ($1, :2) \
+                       ON DUPLICATE KEY UPDATE \"value\" = \"value\" + 1";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("keystores"),
+                fields: Some(vec![Column::from("key"), Column::from("value")]),
+                data: vec![vec![
+                    Literal::Placeholder(ItemPlaceholder::DollarNumber(1)),
+                    Literal::Placeholder(ItemPlaceholder::ColonNumber(2))
+                ]],
+                on_duplicate: Some(vec![(
+                    Column::from("value"),
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Add,
+                        lhs: Box::new(Expression::Column(Column::from("value"))),
+                        rhs: Box::new(Expression::Literal(1.into()))
+                    },
+                ),]),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn insert_with_leading_value_whitespace() {
+        let qstring = "INSERT INTO users (id, name) VALUES ( 42, 'test');";
 
         let res = insertion(qstring.as_bytes());
         assert_eq!(

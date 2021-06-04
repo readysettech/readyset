@@ -191,6 +191,7 @@ pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
+// Escapes a keyword using MySQL syntax.
 pub fn escape_if_keyword(s: &str) -> String {
     if sql_keyword(s.as_bytes()).is_ok() {
         format!("`{}`", s)

@@ -326,47 +326,6 @@ pub fn column_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Expression;
-
-    #[test]
-    fn column_from_str() {
-        let s = "table.col";
-        let c = Column::from(s);
-
-        assert_eq!(
-            c,
-            Column {
-                name: String::from("col"),
-                table: Some(String::from("table")),
-                function: None,
-            }
-        );
-    }
-
-    #[test]
-    fn print_function_column() {
-        let c2 = Column {
-            name: "".into(), // must be present, but will be ignored
-            table: None,
-            function: Some(Box::new(FunctionExpression::CountStar)),
-        };
-        let c3 = Column {
-            name: "".into(), // must be present, but will be ignored
-            table: None,
-            function: Some(Box::new(FunctionExpression::Sum {
-                expr: Box::new(Expression::Column(Column::from("mytab.foo"))),
-                distinct: false,
-            })),
-        };
-
-        assert_eq!(format!("{}", c2), "count(*)");
-        assert_eq!(format!("{}", c3), "sum(mytab.foo)");
-    }
-}
-
 #[cfg(not(feature = "postgres"))]
 #[cfg(test)]
 mod tests_mysql {
@@ -376,6 +335,35 @@ mod tests_mysql {
     fn multiple_constraints() {
         let (_, res) =
             column_specification(b"`created_at` timestamp NOT NULL DEFAULT current_timestamp()")
+                .unwrap();
+        assert_eq!(
+            res,
+            ColumnSpecification {
+                column: Column {
+                    name: "created_at".to_owned(),
+                    table: None,
+                    function: None
+                },
+                sql_type: SqlType::Timestamp,
+                comment: None,
+                constraints: vec![
+                    ColumnConstraint::NotNull,
+                    ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
+                ]
+            }
+        );
+    }
+}
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+
+    #[test]
+    fn multiple_constraints() {
+        let (_, res) =
+            column_specification(b"\"created_at\" timestamp NOT NULL DEFAULT current_timestamp()")
                 .unwrap();
         assert_eq!(
             res,

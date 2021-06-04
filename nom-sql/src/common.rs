@@ -1224,3 +1224,73 @@ mod tests_mysql {
         assert_eq!(res, Ok((&b""[..], expected)));
     }
 }
+
+#[cfg(feature = "postgres")]
+#[cfg(test)]
+mod tests_postgres {
+    use super::*;
+
+    #[test]
+    fn cast() {
+        let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
+        let expected = FunctionExpression::Cast(
+            Box::new(Expression::Column(Column {
+                table: Some("lp".to_owned()),
+                name: "start_ddtm".to_owned(),
+                function: None,
+            })),
+            SqlType::Date,
+        );
+        let res = column_function(qs);
+        assert_eq!(res.unwrap().1, expected);
+    }
+
+    #[test]
+    fn simple_generic_function_with_literal() {
+        let qlist = [
+            "coalesce('a',b,c)".as_bytes(),
+            "coalesce ('a',b,c)".as_bytes(),
+            "coalesce('a' ,b,c)".as_bytes(),
+            "coalesce('a', b,c)".as_bytes(),
+        ];
+        for q in qlist.iter() {
+            let res = column_function(q);
+            let expected = FunctionExpression::Call {
+                name: "coalesce".to_string(),
+                arguments: vec![
+                    Expression::Literal(Literal::String("a".to_owned())),
+                    Expression::Column(Column::from("b")),
+                    Expression::Column(Column::from("c")),
+                ],
+            };
+            assert_eq!(res, Ok((&b""[..], expected)));
+        }
+    }
+
+    #[test]
+    fn literal_string_single_backslash_escape() {
+        let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
+        let quote = &b"'"[..];
+        let quoted = &[quote, &all_escaped[..], quote].concat();
+        let res = string_literal(quoted);
+        let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
+        assert_eq!(res, Ok((&b""[..], expected)));
+    }
+
+    #[test]
+    fn sql_identifiers() {
+        let id1 = b"foo";
+        let id2 = b"f_o_o";
+        let id3 = b"foo12";
+        let id4 = b":fo oo";
+        let id5 = b"primary ";
+        let id6 = b"\"primary\"";
+
+        assert!(sql_identifier(id1).is_ok());
+        assert!(sql_identifier(id2).is_ok());
+        assert!(sql_identifier(id3).is_ok());
+        assert!(sql_identifier(id4).is_err());
+        assert!(sql_identifier(id5).is_err());
+        assert!(sql_identifier(id6).is_ok());
+    }
+}
