@@ -1,12 +1,10 @@
 use futures::FutureExt;
 use noria::{ReadySetError, ReadySetResult, TableOperation};
-use std::convert::{TryFrom, TryInto};
+use slog::{debug, error};
 use tokio_postgres as pgsql;
 
+use crate::noria_adapter::{PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::wal_reader::{WalEvent, WalReader};
-
-const REPLICATION_SLOT: &str = "noria";
-const PUBLICATION_NAME: &str = "noria";
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
 pub struct PostgresPosition {
@@ -14,6 +12,18 @@ pub struct PostgresPosition {
     pub lsn: i64,
 }
 
+/// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria" replication slot
+/// with the "noria" publication.
+///
+/// The server must be configured with `wal_level` set to `logical`.
+///
+/// The connector user must have the following permissions:
+/// `REPLICATION` - to be able to create a replication slot.
+/// `SELECT` - In order to be able to copy the initial table data, the role used for the replication connection must have the
+///            `SELECT` privilege on the published tables (or be a superuser).
+/// `CREATE` - To create a publication, the user must have the CREATE privilege in the database.
+///            To add tables to a publication, the user must have ownership rights on the table. To create a publication that
+///            publishes all tables automatically, the user must be a superuser.
 pub struct PostgresWalConnector {
     /// This is the underlying (regular) PostgreSQL client
     client: pgsql::Client,
@@ -25,6 +35,8 @@ pub struct PostgresWalConnector {
     peek: Option<(WalEvent, i64)>,
     /// If we just want to continue reading the binlog from a previous point
     next_position: Option<PostgresPosition>,
+    /// The name of the snapshot that was created with the replication slot
+    pub(crate) snapshot_name: Option<String>,
     log: slog::Logger,
 }
 
@@ -54,28 +66,32 @@ pub struct ServerIdentity {
 /// The decoded response to `CREATE_REPLICATION_SLOT`
 #[derive(Debug)]
 pub struct CreatedSlot {
-    slot_name: String,
-    consistent_point: String,
-    snapshot_name: Option<String>,
-    output_plugin: Option<String>,
+    /// The name of the newly-created replication slot
+    pub(crate) slot_name: String,
+    /// The WAL location at which the slot became consistent. This is the earliest location
+    /// from which streaming can start on this replication slot.
+    pub(crate) consistent_point: String,
+    /// The identifier of the snapshot exported by the command. The snapshot is valid until a
+    /// new command is executed on this connection or the replication connection is closed.
+    /// Null if the created slot is physical.
+    pub(crate) snapshot_name: Option<String>,
+    /// The name of the output plugin used by the newly-created replication slot.
+    /// Null if the created slot is physical.
+    pub(crate) output_plugin: Option<String>,
 }
 
-impl TryFrom<&PostgresPosition> for noria::ReplicationOffset {
-    type Error = ReadySetError;
-
-    fn try_from(value: &PostgresPosition) -> Result<Self, Self::Error> {
-        Ok(noria::ReplicationOffset {
+impl From<&PostgresPosition> for noria::ReplicationOffset {
+    fn from(value: &PostgresPosition) -> Self {
+        noria::ReplicationOffset {
             replication_log_name: String::new(),
             offset: value.lsn as _,
-        })
+        }
     }
 }
 
-impl TryFrom<PostgresPosition> for noria::ReplicationOffset {
-    type Error = ReadySetError;
-
-    fn try_from(value: PostgresPosition) -> Result<Self, Self::Error> {
-        (&value).try_into()
+impl From<PostgresPosition> for noria::ReplicationOffset {
+    fn from(value: PostgresPosition) -> Self {
+        (&value).into()
     }
 }
 
@@ -100,6 +116,8 @@ impl std::fmt::Display for PostgresPosition {
 }
 
 impl PostgresWalConnector {
+    /// Connects to postgres and if needed creates a new replication slot for itself with an exported
+    /// snapshot.
     pub async fn connect<S: AsRef<str>>(
         mut config: pgsql::Config,
         dbname: S,
@@ -112,7 +130,6 @@ impl PostgresWalConnector {
         config.dbname(dbname.as_ref()).set_replication_database();
 
         let (client, connection) = config.connect(connector).await?;
-
         let connection_handle = tokio::spawn(connection);
 
         let mut connector = PostgresWalConnector {
@@ -121,35 +138,55 @@ impl PostgresWalConnector {
             reader: None,
             peek: None,
             next_position,
+            snapshot_name: None,
             log: logger,
         };
 
-        // TODO: what do we do with this information?
-        let _system = connector.identify_system().await?;
+        if next_position.is_none() {
+            connector.create_publication_and_slot().await?;
+        }
 
-        match connector.create_publication(PUBLICATION_NAME).await {
+        Ok(connector)
+    }
+
+    async fn create_publication_and_slot(&mut self) -> ReadySetResult<()> {
+        let system = self.identify_system().await?;
+        debug!(self.log, "{:?}", system);
+
+        match self.create_publication(PUBLICATION_NAME).await {
             Ok(()) => {
-                // When a new publication is created we have to remove the existing slot if any
-                let _ = connector.drop_replication_slot(REPLICATION_SLOT).await;
-            } // Created a new publication, everything is good
+                // Created a new publication, everything is good
+            }
             Err(err)
                 if err.to_string().contains("publication")
-                    && err.to_string().contains("already exists") => {} // This is an existing slot, also good
+                    && err.to_string().contains("already exists") =>
+            {
+                // This is an existing publication we are going to use
+            }
+            Err(err) if err.to_string().contains("permission denied") => {
+                error!(
+                    self.log,
+                    "Insufficient permissions to create publication FOR ALL TABLES"
+                );
+            }
             Err(err) => return Err(err),
         }
 
-        match connector.create_replication_slot(REPLICATION_SLOT).await {
-            Ok(_slot) => {} // Created a new slot, everything is good
+        // Drop the existing slot if any
+        let _ = self.drop_replication_slot(REPLICATION_SLOT).await;
+
+        match self.create_replication_slot(REPLICATION_SLOT).await {
+            Ok(slot) => self.snapshot_name = slot.snapshot_name, // Created a new slot, everything is good
             Err(err)
                 if err.to_string().contains("replication slot")
-                    && err.to_string().contains("already exists") => {} // This is an existing slot, also good
+                    && err.to_string().contains("already exists") =>
+            {
+                // This is an existing slot we will be using
+            }
             Err(err) => return Err(err),
         };
 
-        connector
-            .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
-            .await?;
-        Ok(connector)
+        Ok(())
     }
 
     /// Waits and returns the next WAL event, while monotoring the connection
@@ -285,6 +322,7 @@ impl PostgresWalConnector {
     }
 
     /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to recieve WAL on that slot.
+    /// The user must have superuser priviliges for that to work.
     async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
         let query = format!("CREATE PUBLICATION {} FOR ALL TABLES", name);
         self.simple_query(&query).await?;
@@ -292,31 +330,23 @@ impl PostgresWalConnector {
     }
 
     /// Creates a new replication slot on the primary.
+    /// The command format for PostgreSQL is as follows:
+    ///
+    /// `CREATE_REPLICATION_SLOT slot_name [ TEMPORARY ] { PHYSICAL [ RESERVE_WAL ] | LOGICAL output_plugin [ EXPORT_SNAPSHOT | NOEXPORT_SNAPSHOT | USE_SNAPSHOT ] }`
+    ///
+    /// We use the following options:
+    /// No `TEMPORARY` - we want the slot to persist when connection to primary is down
+    /// `LOGICAL` - we are using logical streaming replication
+    /// `pgoutput` - the plugin to use for logical decoding, always available from PG > 10
+    /// `EXPORT_SNAPSHOT` -  we want the operation to export a snapshot that can be then used for replication
     async fn create_replication_slot(&mut self, name: &str) -> ReadySetResult<CreatedSlot> {
-        // Command format:
-        // CREATE_REPLICATION_SLOT slot_name [ TEMPORARY ] { PHYSICAL [ RESERVE_WAL ] | LOGICAL output_plugin [ EXPORT_SNAPSHOT | NOEXPORT_SNAPSHOT | USE_SNAPSHOT ] }
-        //
-        // TEMPORARY - Specify that this replication slot is a temporary one. Temporary slots are not saved to disk and are
-        // automatically dropped on error or when the session has finished.
-        // NOEXPORT_SNAPSHOT - Decides what to do with the snapshot created during logical slot initialization. NOEXPORT_SNAPSHOT
-        // will just use the snapshot for logical decoding as normal but won't do anything else with it.
-        // pgoutput - the plugin to use for logical decoding, always available from PG > 10
         let query = format!(
-            "CREATE_REPLICATION_SLOT {} LOGICAL pgoutput NOEXPORT_SNAPSHOT",
+            "CREATE_REPLICATION_SLOT {} LOGICAL pgoutput EXPORT_SNAPSHOT",
             name
         );
 
         let row = self.one_row_query(&query, 4).await?;
 
-        // In response to this command, the server will send a one-row result set containing the following fields:
-        // slot_name (text) - The name of the newly-created replication slot.
-        // consistent_point (text) - The WAL location at which the slot became consistent. This is the earliest location
-        //                           from which streaming can start on this replication slot.
-        // snapshot_name (text) - The identifier of the snapshot exported by the command. The snapshot is valid until a
-        //                        new command is executed on this connection or the replication connection is closed.
-        //                        Null if the created slot is physical.
-        // output_plugin (text) - The name of the output plugin used by the newly-created replication slot.
-        //                        Null if the created slot is physical.
         let slot_name = row.get(0).unwrap().to_string(); // Can unwrap because checked by `one_row_query`
         let consistent_point = row.get(1).unwrap().to_string();
         let snapshot_name = row.get(2).map(Into::into);

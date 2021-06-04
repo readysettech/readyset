@@ -1,0 +1,389 @@
+use crate::PostgresPosition;
+use futures::{pin_mut, StreamExt};
+use noria::{consensus::Authority, ReadySetError, ReadySetResult};
+use postgres_types::Type;
+use slog::{debug, info, trace, Logger};
+use std::{
+    convert::{TryFrom, TryInto},
+    ffi::CString,
+};
+use tokio_postgres as pgsql;
+
+const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
+
+pub struct PostgresReplicator<'a, A: 'static + Authority> {
+    /// This is the underlying (regular) PostgreSQL transaction
+    pub(crate) transaction: pgsql::Transaction<'a>,
+    pub(crate) noria: &'a mut noria::ControllerHandle<A>,
+    /// If Some then only snapshot those tables, otherwise will snapshot all tables
+    pub(crate) tables: Option<Vec<String>>,
+    pub(crate) log: Logger,
+}
+
+#[derive(Debug)]
+enum TableKind {
+    RegularTable,
+    View,
+}
+
+#[derive(Debug)]
+enum ConstraintKind {
+    PrimaryKey,
+    UniqueKey,
+    ForeignKey,
+    Other(u8),
+}
+
+#[derive(Debug)]
+struct TableEntry {
+    schema: String,
+    name: String,
+    oid: u32,
+}
+
+#[derive(Debug)]
+struct TableDescription {
+    schema: String,
+    name: String,
+    columns: Vec<ColumnEntry>,
+    constraints: Vec<ConstraintEntry>,
+}
+
+#[derive(Debug)]
+struct ColumnEntry {
+    name: String,
+    definition: String,
+    not_null: bool,
+    type_oid: Type,
+}
+
+#[derive(Debug)]
+struct ConstraintEntry {
+    name: String,
+    definition: String,
+    kind: ConstraintKind,
+}
+
+impl TryFrom<pgsql::Row> for ColumnEntry {
+    type Error = pgsql::Error;
+
+    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        // Postgres is sending full type names for column types, but noria doesn't handle them properly yet
+        let definition = match row.try_get(1)? {
+            "timestamp without time zone" => "timestamp".to_string(),
+            val if val.starts_with("character varying") => {
+                val.replace("character varying", "varchar")
+            }
+            val => val.to_string(),
+        };
+
+        Ok(ColumnEntry {
+            name: row.try_get(0)?,
+            definition,
+            not_null: row.try_get(2)?,
+            type_oid: Type::from_oid(row.try_get(3)?).unwrap(),
+        })
+    }
+}
+
+impl std::fmt::Display for ColumnEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}{}",
+            self.name,
+            self.definition,
+            if self.not_null { " NOT NULL" } else { "" },
+        )
+    }
+}
+
+impl TryFrom<pgsql::Row> for ConstraintEntry {
+    type Error = pgsql::Error;
+
+    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        Ok(ConstraintEntry {
+            name: row.try_get(0)?,
+            definition: row.try_get(1)?,
+            kind: match row.try_get::<_, i8>(2)? as u8 {
+                b'f' => ConstraintKind::ForeignKey,
+                b'p' => ConstraintKind::PrimaryKey,
+                b'u' => ConstraintKind::UniqueKey,
+                b => ConstraintKind::Other(b),
+            },
+        })
+    }
+}
+
+impl std::fmt::Display for ConstraintEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.definition)
+    }
+}
+
+impl TryFrom<pgsql::Row> for TableEntry {
+    type Error = pgsql::Error;
+
+    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        Ok(TableEntry {
+            schema: row.try_get(0)?,
+            oid: row.try_get(1)?,
+            name: row.try_get(2)?,
+        })
+    }
+}
+
+impl TableEntry {
+    async fn get_columns<'a>(
+        oid: u32,
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> Result<Vec<ColumnEntry>, pgsql::Error> {
+        let query = r"
+            SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull, a.atttypid
+            FROM pg_catalog.pg_attribute a WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+            ";
+
+        let columns = transaction.query(query, &[&oid]).await?;
+        columns.into_iter().map(TryInto::try_into).collect()
+    }
+
+    async fn get_constraints<'a>(
+        oid: u32,
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> Result<Vec<ConstraintEntry>, pgsql::Error> {
+        let query = r"
+            SELECT c2.relname, pg_catalog.pg_get_constraintdef(con.oid, true), contype
+            FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i 
+            LEFT JOIN pg_catalog.pg_constraint con ON (conrelid = i.indrelid AND conindid = i.indexrelid AND contype IN ('f','p','u'))
+            WHERE c.oid = $1 AND c.oid = i.indrelid AND i.indexrelid = c2.oid
+            ORDER BY i.indisprimary DESC, c2.relname;
+            ";
+
+        let constraints = transaction.query(query, &[&oid]).await?;
+        constraints.into_iter().map(TryInto::try_into).collect()
+    }
+
+    async fn get_table<'a>(
+        self,
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> Result<TableDescription, pgsql::Error> {
+        let columns = Self::get_columns(self.oid, transaction).await?;
+        let constraints = Self::get_constraints(self.oid, transaction).await?;
+
+        Ok(TableDescription {
+            schema: self.schema,
+            name: self.name,
+            columns,
+            constraints,
+        })
+    }
+
+    async fn get_create_view<'a>(
+        self,
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> Result<String, pgsql::Error> {
+        let query = "SELECT definition FROM pg_catalog.pg_views WHERE viewname=$1";
+
+        let mut create_view = format!("CREATE VIEW {} AS", self.name);
+
+        for col in transaction.query(query, &[&self.name]).await? {
+            create_view.push_str(col.try_get(0)?);
+        }
+
+        Ok(create_view)
+    }
+}
+
+impl std::fmt::Display for TableDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "CREATE TABLE {} (", self.name)?;
+        write!(
+            f,
+            "{}",
+            itertools::join(
+                self.columns
+                    .iter()
+                    .map(ToString::to_string)
+                    .chain(self.constraints.iter().map(ToString::to_string)),
+                ",\n"
+            )
+        )?;
+        write!(f, ");")
+    }
+}
+
+impl TableDescription {
+    /// Copy a table's contents from PostgreSQL to Noria
+    async fn dump<'a>(
+        &self,
+        transaction: &'a pgsql::Transaction<'a>,
+        mut noria_table: noria::Table,
+    ) -> ReadySetResult<()> {
+        // The most efficient way to copy an entire table is COPY BINARY
+        let query = format!("COPY {} TO stdout BINARY", self.name);
+        let rows = transaction.copy_out(query.as_str()).await?;
+
+        let type_map: Vec<_> = self.columns.iter().map(|c| c.type_oid.clone()).collect();
+        let binary_rows = pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map);
+
+        pin_mut!(binary_rows);
+
+        let mut noria_rows = Vec::with_capacity(BATCH_SIZE);
+
+        while let Some(Ok(row)) = binary_rows.next().await {
+            let noria_row = type_map
+                .iter()
+                .enumerate()
+                .map(|(i, t)| match t {
+                    &Type::BPCHAR | &Type::TEXT | &Type::VARCHAR => {
+                        let str = CString::new(row.try_get::<&str>(i)?).unwrap();
+                        Ok(noria::DataType::Text(str.into()))
+                    }
+                    &Type::INT4 => Ok(noria::DataType::Int(row.try_get(i)?)),
+                    &Type::INT8 => Ok(noria::DataType::BigInt(row.try_get(i)?)),
+                    &Type::TIMESTAMP => Ok(noria::DataType::Timestamp(row.try_get(i)?)),
+                    &Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
+                    &Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
+                    &Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),
+                    &Type::DATE => Ok(row.try_get::<chrono::NaiveDate>(i)?.into()),
+                    _ => Err(ReadySetError::ReplicationFailed(format!(
+                        "Unimplmented type conversion for {}",
+                        t
+                    ))),
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
+
+            noria_rows.push(noria_row);
+
+            // Accumulate as many inserts as possible before calling into noria, as
+            // those calls can be quite expensive
+            if noria_rows.len() >= BATCH_SIZE {
+                noria_table
+                    .insert_many(std::mem::replace(
+                        &mut noria_rows,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))
+                    .await?;
+            }
+        }
+
+        if !noria_rows.is_empty() {
+            noria_table.insert_many(noria_rows).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
+    pub async fn new(
+        client: &'a mut pgsql::Client,
+        noria: &'a mut noria::ControllerHandle<A>,
+        tables: Option<Vec<String>>,
+        log: slog::Logger,
+    ) -> ReadySetResult<PostgresReplicator<'a, A>> {
+        let transaction = client
+            .build_transaction()
+            .deferrable(true)
+            .isolation_level(pgsql::IsolationLevel::RepeatableRead)
+            .read_only(true)
+            .start()
+            .await?;
+
+        Ok(PostgresReplicator {
+            transaction,
+            noria,
+            tables,
+            log,
+        })
+    }
+
+    /// Begin the replication process, starting with the recipe for the database, followed
+    /// by each table's contents
+    pub async fn snapshot_to_noria<S: AsRef<str>>(
+        &mut self,
+        snapshot_name: S,
+    ) -> ReadySetResult<()> {
+        self.set_snapshot(snapshot_name.as_ref()).await?;
+
+        let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
+        let view_list = self.get_table_list(TableKind::View).await?;
+        if let Some(tables) = self.tables.as_ref() {
+            // If a list of specific tables is provided, keep only those specfied
+            table_list.retain(|e| !tables.contains(&e.name));
+        }
+
+        trace!(self.log, "Loaded table list:\n{:?}", table_list);
+        trace!(self.log, "Loaded view list:\n{:?}", view_list);
+
+        // For each table, retreive its structure
+        let mut tables = Vec::with_capacity(table_list.len());
+        for table in table_list {
+            tables.push(table.get_table(&self.transaction).await?);
+        }
+
+        let mut views = Vec::with_capacity(view_list.len());
+        for view in view_list {
+            views.push(view.get_create_view(&self.transaction).await?);
+        }
+
+        let recipe = itertools::join(
+            tables
+                .iter()
+                .map(ToString::to_string)
+                .chain(views.iter().map(ToString::to_string)),
+            "\n\n",
+        );
+
+        debug!(self.log, "Installing recipe:\n\n{}", recipe);
+
+        self.noria.install_recipe(&recipe).await?;
+
+        // Finally copy each table into noria
+        for table in &tables {
+            // TODO: parallelize with a connection pool if performance here matters
+            let log = self.log.new(slog::o!("table" => table.name.clone()));
+            info!(log, "Replicating table");
+            let noria_table = self.noria.table(&table.name).await?;
+            table.dump(&self.transaction, noria_table).await?;
+        }
+
+        // Only after the repliation is done, mark that we have a replication offset
+        // the exact value is not important, and the default value will just start the next
+        // replication from the earlies possible point, which is the point the snapshot was created
+        self.noria
+            .extend_recipe_with_offset("", Some(PostgresPosition::default().into()))
+            .await?;
+
+        Ok(())
+    }
+
+    /// Retreieve a list of tables of the specified kind
+    async fn get_table_list(&mut self, kind: TableKind) -> Result<Vec<TableEntry>, pgsql::Error> {
+        let kind_code = match kind {
+            TableKind::RegularTable => 'r',
+            TableKind::View => 'v',
+        } as i8;
+
+        let query = r"
+        SELECT n.nspname, c.oid, c.relname, c.relkind
+        FROM pg_catalog.pg_class c
+        LEFT JOIN pg_catalog.pg_namespace n
+        ON n.oid = c.relnamespace
+        WHERE c.relkind IN ($1) AND n.nspname <> 'pg_catalog'
+                                AND n.nspname <> 'information_schema'
+                                AND n.nspname !~ '^pg_toast'
+                                AND pg_catalog.pg_table_is_visible(c.oid)
+        ";
+
+        let tables = self.transaction.query(query, &[&kind_code]).await?;
+        tables.into_iter().map(TryInto::try_into).collect()
+    }
+
+    /// Assign the specific snapshot to the underlying transaction
+    async fn set_snapshot(&mut self, name: &str) -> Result<(), pgsql::Error> {
+        let query = format!("SET TRANSACTION SNAPSHOT '{}'", name);
+        self.transaction.query(query.as_str(), &[]).await?;
+        Ok(())
+    }
+}

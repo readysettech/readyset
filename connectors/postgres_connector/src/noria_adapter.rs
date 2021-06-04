@@ -1,9 +1,12 @@
-use crate::connector::{PostgresPosition, PostgresWalConnector, WalAction};
+use crate::{PostgresPosition, PostgresReplicator, PostgresWalConnector, WalAction};
+use futures::FutureExt;
 use noria::consensus::Authority;
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
-use slog::{error, info, o, Discard, Logger};
+use slog::{debug, error, info, o, Discard, Logger};
 use std::collections::{hash_map, HashMap};
-use std::convert::TryInto;
+
+pub(crate) const REPLICATION_SLOT: &str = "noria";
+pub(crate) const PUBLICATION_NAME: &str = "noria";
 
 /// An adapter that converts WAL actions into Noria API calls
 pub struct PostgreSqlNoriaAdapter<A: Authority + 'static> {
@@ -75,33 +78,59 @@ impl Builder {
     }
 
     async fn start_inner<A: Authority>(
-        postgres_options: tokio_postgres::Config,
+        pgsql_opts: tokio_postgres::Config,
         mut noria: ControllerHandle<A>,
         log: slog::Logger,
     ) -> ReadySetResult<()> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
-        let pos = match noria.replication_offset().await?.map(Into::into) {
-            None => PostgresPosition { lsn: 0 },
-            Some(pos) => pos,
-        };
+        let pos = noria.replication_offset().await?.map(Into::into);
 
-        info!(log, "WAL position {}", pos);
+        if let Some(pos) = pos {
+            info!(log, "Current WAL position {}", pos);
+        }
 
-        let dbname = postgres_options
+        let dbname = pgsql_opts
             .get_dbname()
             .map(|s| vec![s.to_string()])
             .unwrap_or_default();
 
-        let connector = PostgresWalConnector::connect(
-            postgres_options,
+        let mut connector = PostgresWalConnector::connect(
+            pgsql_opts.clone(),
             dbname.first().unwrap(),
-            Some(pos),
+            pos,
             log.clone(),
         )
         .await?;
 
-        info!(log, "PostgreSQL connected");
+        info!(log, "Connected to PostgreSQL");
+
+        if let Some(snapshot) = connector.snapshot_name.as_deref() {
+            // If snapshot name exists, it means we need to make a snapshot to noria
+            let (mut client, connection) = pgsql_opts
+                .connect(postgres_native_tls::MakeTlsConnector::new(
+                    native_tls::TlsConnector::builder().build().unwrap(),
+                ))
+                .await?;
+
+            let connection_handle = tokio::spawn(connection);
+
+            let mut replicator =
+                PostgresReplicator::new(&mut client, &mut noria, None, log.clone()).await?;
+
+            futures::select! {
+                s = replicator.snapshot_to_noria(snapshot).fuse() => s?,
+                c = connection_handle.fuse() => c.unwrap()?,
+            }
+
+            info!(log, "Snapshot finished");
+        }
+
+        connector
+            .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
+            .await?;
+
+        info!(log, "Streaming replication started");
 
         let mut adapter = PostgreSqlNoriaAdapter {
             noria,
@@ -173,7 +202,7 @@ impl<A: Authority> PostgreSqlNoriaAdapter<A> {
 
         loop {
             let action = self.connector.next_action(last_ack).await?;
-            info!(self.log, "{:?}", action);
+            debug!(self.log, "{:?}", action);
 
             let WalAction::TableAction {
                 table,
@@ -181,7 +210,7 @@ impl<A: Authority> PostgreSqlNoriaAdapter<A> {
                 lsn,
             } = action;
 
-            actions.push(noria::TableOperation::SetReplicationOffset(lsn.try_into()?));
+            actions.push(noria::TableOperation::SetReplicationOffset(lsn.into()));
 
             let table_mutator = self.mutator_for_table(table).await?;
 
