@@ -72,9 +72,10 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnSpecification, CreateTableStatement, Expression,
-    FieldDefinitionExpression, FunctionExpression, ItemPlaceholder, JoinClause, JoinConstraint,
-    JoinOperator, JoinRightSide, Literal, SelectStatement, SqlType, Table, TableKey,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CreateTableStatement,
+    Expression, FieldDefinitionExpression, FunctionExpression, ItemPlaceholder, JoinClause,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, SelectStatement, SqlType, Table,
+    TableKey,
 };
 use noria::DataType;
 
@@ -267,6 +268,40 @@ impl From<ColumnName> for Column {
     }
 }
 
+impl From<nom_sql::Column> for ColumnName {
+    fn from(col: nom_sql::Column) -> Self {
+        col.name.into()
+    }
+}
+
+/// Try to find the [`ColumnSpecification`] for the primary key of the given create table statement
+///
+/// TODO(grfn): Ideally, this would reuse the `key_def_coalescing` rewrite pass, but that's buried
+/// deep inside noria-server - if we ever get a chance to extract rewrite passes to their own crate,
+/// this should be updated to use that
+pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecification> {
+    stmt.fields
+        .iter()
+        // Look for a column with a PRIMARY KEY constraint on the spec first
+        .find(|f| {
+            f.constraints
+                .iter()
+                .any(|c| *c == ColumnConstraint::PrimaryKey)
+        })
+        // otherwise, find a column corresponding to a standalone PRIMARY KEY table constraint
+        .or_else(|| {
+            stmt.keys
+                .iter()
+                .flatten()
+                .find_map(|k| match k {
+                    // TODO(grfn): This doesn't support compound primary keys
+                    TableKey::PrimaryKey(cols) => cols.first(),
+                    _ => None,
+                })
+                .and_then(|col| stmt.fields.iter().find(|f| f.column == *col))
+        })
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TableSpec {
     pub name: TableName,
@@ -274,6 +309,9 @@ pub struct TableSpec {
     /// Columns that should *always* be unique
     pub unique_columns: HashSet<ColumnName>,
     column_name_counter: u32,
+
+    /// Name of the primary key columnfor the table, if any
+    pub primary_key: Option<ColumnName>,
 
     /// Values per column that should be present in that column at least some of the time.
     ///
@@ -283,6 +321,9 @@ pub struct TableSpec {
 
 impl From<CreateTableStatement> for TableSpec {
     fn from(stmt: CreateTableStatement) -> Self {
+        let primary_key: Option<ColumnName> =
+            find_primary_keys(&stmt).map(|cspec| cspec.column.clone().into());
+
         TableSpec {
             name: stmt.table.name.into(),
             columns: stmt
@@ -309,6 +350,7 @@ impl From<CreateTableStatement> for TableSpec {
                 .collect(),
             column_name_counter: 0,
             expected_values: Default::default(),
+            primary_key,
         }
     }
 }
@@ -327,7 +369,9 @@ impl From<TableSpec> for CreateTableStatement {
                     comment: None,
                 })
                 .collect(),
-            keys: None,
+            keys: spec
+                .primary_key
+                .map(|cn| vec![TableKey::PrimaryKey(vec![cn.into()])]),
         }
     }
 }
@@ -340,6 +384,7 @@ impl TableSpec {
             column_name_counter: 0,
             expected_values: Default::default(),
             unique_columns: Default::default(),
+            primary_key: None,
         }
     }
 
@@ -412,6 +457,18 @@ impl TableSpec {
                     .collect()
             })
             .collect()
+    }
+
+    /// Ensure this table has a primary key column, and return its name
+    pub fn primary_key(&mut self) -> &ColumnName {
+        if self.primary_key.is_none() {
+            let col = self.fresh_column_with_type(SqlType::Int(32));
+            self.unique_columns.insert(col.clone());
+            self.primary_key = Some(col)
+        }
+
+        // unwrap: we just set it to Some
+        self.primary_key.as_ref().unwrap()
     }
 }
 
@@ -552,6 +609,11 @@ impl GeneratorState {
     /// Get a reference to the generator state's tables.
     pub fn tables(&self) -> &HashMap<TableName, TableSpec> {
         &self.tables
+    }
+
+    /// Get a mutable reference to the generator state's tables.
+    pub fn tables_mut(&mut self) -> &mut HashMap<TableName, TableSpec> {
+        &mut self.tables
     }
 }
 

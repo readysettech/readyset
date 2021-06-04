@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
+use std::mem;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -11,7 +12,9 @@ use colored::Colorize;
 use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::Params;
-use nom_sql::{parse_query, CreateTableStatement, SqlQuery};
+use nom_sql::{
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expression, SqlQuery, Table,
+};
 use query_generator::{GeneratorState, Operations};
 
 use crate::ast::{
@@ -210,8 +213,10 @@ impl TryFrom<Operations> for Seed {
         let mut tables = vec![];
         let mut records = vec![];
 
-        for (name, table) in gen.tables() {
+        for (name, table) in gen.tables_mut() {
+            table.primary_key(); // ensure the table has a primary key
             let create_stmt = CreateTableStatement::from(table.clone());
+
             records.push(Record::Statement(Statement {
                 result: StatementResult::Ok,
                 command: create_stmt.to_string(),
@@ -269,6 +274,18 @@ pub struct Generate {
     /// Enable randomly generating column data.
     #[clap(long)]
     random: bool,
+
+    /// Whether to include row deletes followed by additional queries in the generated test script.
+    ///
+    /// If used with a seed script, all tables must have a primary key (due to current limitations
+    /// in Noria).
+    #[clap(long)]
+    include_deletes: bool,
+
+    /// How many rows to delete in between queries. Ignored if `--include-deletes` is not specified.
+    /// Defaults to half of --rows-per-table, rounded down
+    #[clap(long)]
+    rows_to_delete: Option<usize>,
 }
 
 fn write_output<W, I>(seed: Seed, new_entries: I, output: &mut W) -> io::Result<()>
@@ -327,16 +344,25 @@ impl Generate {
             .map(|t| t.table.name.clone())
             .collect::<Vec<_>>();
         let generator = GeneratorState::from(seed.tables.clone());
-        let insert_statements = tables_in_order
+
+        let data = tables_in_order
+            .clone()
             .into_iter()
             .map(|table_name| {
                 let spec = generator.table(&table_name.clone().into()).unwrap();
+                (spec, spec.generate_data(self.rows_per_table, self.random))
+            })
+            .collect::<Vec<_>>();
+
+        let insert_statements = data
+            .iter()
+            .map(|(spec, data)| {
                 let columns = spec.columns.keys().collect::<Vec<_>>();
-                let data = spec.generate_data(self.rows_per_table, self.random);
                 nom_sql::InsertStatement {
-                    table: table_name.as_str().into(),
+                    table: spec.name.clone().into(),
                     fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
                     data: data
+                        .clone()
                         .into_iter()
                         .map(|mut row| {
                             columns
@@ -373,31 +399,101 @@ impl Generate {
             .iter()
             .map(|stmt| Record::Statement(Statement::ok(stmt.to_string())));
 
-        eprintln!("{}", format!("==> Running {} queries", seed.queries.len()));
         let hash_threshold = seed.hash_threshold;
-        let queries_with_results = seed
-            .queries
-            .iter()
-            .map(|q| -> anyhow::Result<Record> {
-                let results = conn
-                    .execute(&q.query, q.params.clone())
-                    .with_context(|| format!("Running query {}", q.query))?;
-                let values = results.into_iter().flatten().collect::<Vec<_>>();
-                let query_results = if values.len() > hash_threshold {
-                    QueryResults::hash(&values)
-                } else {
-                    QueryResults::Results(values)
-                };
+        let queries = mem::take(&mut seed.queries);
+        let run_queries = |conn: &mut DatabaseConnection| {
+            eprintln!(
+                "{}",
+                format!("==> Running {} queries", queries.len()).bold()
+            );
+            queries
+                .iter()
+                .map(|q| -> anyhow::Result<Record> {
+                    let results = conn
+                        .execute(&q.query, q.params.clone())
+                        .with_context(|| format!("Running query {}", q.query))?;
+                    let values = results.into_iter().flatten().collect::<Vec<_>>();
+                    let query_results = if values.len() > hash_threshold {
+                        QueryResults::hash(&values)
+                    } else {
+                        QueryResults::Results(values)
+                    };
 
-                Ok(Record::Query(Query {
-                    results: query_results,
-                    sort_mode: Some(SortMode::NoSort),
-                    ..q.clone()
-                }))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Record::Query(Query {
+                        results: query_results,
+                        sort_mode: Some(SortMode::NoSort),
+                        ..q.clone()
+                    }))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
 
-        let new_entries = new_entries.chain(queries_with_results);
+        let new_entries = new_entries.chain(run_queries(&mut conn)?);
+
+        let new_entries: Vec<_> = if self.include_deletes {
+            let rows_to_delete = self
+                .rows_to_delete
+                .unwrap_or_else(|| self.rows_per_table / 2);
+
+            let delete_statements: Vec<DeleteStatement> = data
+                .iter()
+                .map(|(spec, data)| {
+                    let table: Table = spec.name.clone().into();
+                    let pk = spec.primary_key.clone().ok_or_else(|| {
+                        anyhow!(
+                            "--include-deletes specified, but table {} missing a primary key",
+                            table
+                        )
+                    })?;
+
+                    Ok(data
+                        .iter()
+                        .take(rows_to_delete)
+                        .map(|row| DeleteStatement {
+                            table: table.clone(),
+                            where_clause: Some(Expression::BinaryOp {
+                                lhs: Box::new(Expression::Column(pk.clone().into())),
+                                op: BinaryOperator::Equal,
+                                rhs: Box::new(Expression::Literal(
+                                    row[&pk].clone().try_into().unwrap(),
+                                )),
+                            }),
+                        })
+                        .collect::<Vec<_>>())
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+
+            let new_entries = new_entries.chain(
+                delete_statements
+                    .iter()
+                    .map(|stmt| Record::Statement(Statement::ok(stmt.to_string()))),
+            );
+
+            eprintln!(
+                "{}",
+                format!("==> Running {} delete statements", delete_statements.len()).bold()
+            );
+
+            for delete_statement in &delete_statements {
+                if self.verbose {
+                    eprintln!(
+                        "     > Deleting {} rows of seed data from {}",
+                        rows_to_delete, delete_statement.table
+                    );
+                }
+                conn.query_drop(delete_statement.to_string())
+                    .with_context(|| {
+                        format!("Deleting seed data for {}", delete_statement.table)
+                    })?;
+            }
+
+            new_entries.chain(run_queries(&mut conn)?).collect()
+        } else {
+            new_entries.collect()
+        };
 
         if let Some(out_path) = self.output {
             write_output(
