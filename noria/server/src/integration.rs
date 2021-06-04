@@ -5727,7 +5727,7 @@ async fn distinct_select_with_join() {
         # read queries
         QUERY distinctselectwithjoin: SELECT DISTINCT number as n, test2.value AS v \
                     FROM test \
-                    LEFT JOIN test2 \
+                    INNER JOIN test2 \
                     ON (test.id = test2.test_id);
     ";
 
