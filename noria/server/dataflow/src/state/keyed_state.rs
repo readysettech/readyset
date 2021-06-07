@@ -10,7 +10,7 @@ use super::partial_map::PartialMap;
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
-use launchpad::intervals::{into_bound_endpoint, BoundAsRef, BoundFunctor};
+use launchpad::intervals::{into_bound_endpoint, BoundFunctor};
 
 /// A map containing a single index into the state of a node.
 ///
@@ -100,10 +100,8 @@ impl KeyedState {
             // This is unwieldy, but allowing callers to insert the wrong length of Vec into us would
             // be very bad!
             KeyedState::MultiBTree(ref mut map, len)
-                if (into_bound_endpoint(BoundAsRef::as_ref(&range.0))
-                    .map_or(true, |x| x.len() == *len)
-                    && into_bound_endpoint(BoundAsRef::as_ref(&range.1))
-                        .map_or(true, |x| x.len() == *len)) =>
+                if (into_bound_endpoint(range.0.as_ref()).map_or(true, |x| x.len() == *len)
+                    && into_bound_endpoint(range.1.as_ref()).map_or(true, |x| x.len() == *len)) =>
             {
                 map.insert_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)))
             }

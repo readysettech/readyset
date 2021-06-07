@@ -30,7 +30,7 @@
 //! - Every node's upper bound is less than or equal to its parent's max bound
 //! - The max bound of each node is equal to the upper bound of either that node, or one of that
 //!   node's descendants
-#![feature(bound_cloned, or_patterns)]
+#![feature(bound_cloned, or_patterns, bound_as_ref)]
 
 use std::cmp::{max, Ordering};
 use std::fmt;
@@ -40,7 +40,7 @@ use Bound::*;
 use Ordering::*;
 
 use launchpad::intervals::{
-    cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps, BoundAsRef,
+    cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, overlaps,
 };
 use proptest::arbitrary::Arbitrary;
 
@@ -260,7 +260,7 @@ where
         let mut nodes: Vec<*mut Option<Box<Node<Q>>>> = vec![&mut self.root];
         let mut curr = self.root.as_mut().unwrap();
         loop {
-            curr.maybe_update_value(BoundAsRef::as_ref(&node.value));
+            curr.maybe_update_value(node.value.as_ref());
 
             match cmp(&curr.key, &node.key) {
                 Equal => return, // Don't insert a redundant key.
@@ -468,7 +468,7 @@ where
             Q: Ord + Clone,
             R: RangeBounds<Q>,
         {
-            if cmp_end_start(BoundAsRef::as_ref(&node.value), range.start_bound()) == Less {
+            if cmp_end_start(node.value.as_ref(), range.start_bound()) == Less {
                 // the upper bound of all of this node's descendants is less than the start bound of
                 // the range we care about, so we can skip it entirely
                 return false;
@@ -1186,11 +1186,7 @@ where
             new_self.left = new_left;
             new_self.update_height();
             new_self.update_value();
-            if cmp_endbound(
-                BoundAsRef::as_ref(&new_top.value),
-                BoundAsRef::as_ref(&new_self.value),
-            ) == Less
-            {
+            if cmp_endbound(new_top.value.as_ref(), new_self.value.as_ref()) == Less {
                 new_top.value = new_self.value.clone();
             }
             new_top.update_height();
@@ -1211,11 +1207,7 @@ where
             new_self.right = new_right;
             new_self.update_height();
             new_self.update_value();
-            if cmp_endbound(
-                BoundAsRef::as_ref(&new_top.value),
-                BoundAsRef::as_ref(&new_self.value),
-            ) == Less
-            {
+            if cmp_endbound(new_top.value.as_ref(), new_self.value.as_ref()) == Less {
                 new_top.value = new_self.value.clone();
             }
             new_top.update_height();
@@ -1232,8 +1224,8 @@ where
 
     fn update_value(&mut self) {
         self.value = std::iter::once(self.key.end_bound())
-            .chain(self.left.iter().map(|n| BoundAsRef::as_ref(&n.value)))
-            .chain(self.right.iter().map(|n| BoundAsRef::as_ref(&n.value)))
+            .chain(self.left.iter().map(|n| n.value.as_ref()))
+            .chain(self.right.iter().map(|n| n.value.as_ref()))
             .max_by(|l, r| cmp_endbound(*l, *r))
             .unwrap()
             .cloned();
@@ -1331,7 +1323,7 @@ mod tests {
                 bounds
             })
             .prop_filter("Empty range", |(start, end)| {
-                cmp_start_end(BoundAsRef::as_ref(start), BoundAsRef::as_ref(end)) == Less
+                cmp_start_end(start.as_ref(), end.as_ref()) == Less
                     && !matches!((start, end), (Included(x), Excluded(y)) if x == y)
             })
     }
@@ -1393,7 +1385,7 @@ mod tests {
             if let Some(max) = max {
                 assert!(
                     matches!(
-                        cmp_endbound(node.key.end_bound(), BoundAsRef::as_ref(max)),
+                        cmp_endbound(node.key.end_bound(), max.as_ref()),
                         Ordering::Less | Ordering::Equal
                     ),
                     "end bound of node {:?} outside parent's max of {:?}",
