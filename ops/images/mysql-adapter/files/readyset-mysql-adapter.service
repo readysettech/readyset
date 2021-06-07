@@ -1,0 +1,11 @@
+[Unit]
+After=network.target
+Description=ReadySet MySQL Adapter
+
+[Service]
+ExecStart=/usr/sbin/readyset-mysql-adapter --no-require-authentication --address 0.0.0.0:3306
+EnvironmentFile=/etc/default/readyset-mysql-adapter
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
