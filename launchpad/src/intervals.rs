@@ -56,54 +56,6 @@ impl<'a, A> BoundFunctor for &'a Bound<A> {
     }
 }
 
-/// Provide `as_ref` for [`Bound`]
-///
-/// NOTE: This has been submitted upstream to the standard library at
-/// https://github.com/rust-lang/rust/pull/80444, so should be removed once that lands
-pub trait BoundAsRef<A> {
-    /// Convert a [`&Bound<A>`] into a `Bound<&A>`
-    ///
-    /// ```rust
-    /// use launchpad::intervals::BoundAsRef;
-    /// use std::ops::Bound;
-    /// use Bound::*;
-    ///
-    /// let bound: Bound<i32> = Included(3);
-    /// let _: Bound<&i32> = bound.as_ref();
-    /// ```
-    fn as_ref(&self) -> Bound<&A>;
-
-    /// Convert a [`&mut Bound<A>`] into a `Bound<&mut A>`
-    ///
-    /// ```rust
-    /// use launchpad::intervals::BoundAsRef;
-    /// use std::ops::Bound;
-    /// use Bound::*;
-    ///
-    /// let mut bound: Bound<i32> = Included(3);
-    /// let _: Bound<&mut i32> = bound.as_mut();
-    /// ```
-    fn as_mut(&mut self) -> Bound<&mut A>;
-}
-
-impl<A> BoundAsRef<A> for Bound<A> {
-    fn as_ref(&self) -> Bound<&A> {
-        match self {
-            Unbounded => Unbounded,
-            Included(ref x) => Included(x),
-            Excluded(ref x) => Excluded(x),
-        }
-    }
-
-    fn as_mut(&mut self) -> Bound<&mut A> {
-        match self {
-            Unbounded => Unbounded,
-            Included(ref mut x) => Included(x),
-            Excluded(ref mut x) => Excluded(x),
-        }
-    }
-}
-
 /// Converts a `Bound<A>` into an `Option<A>`, which is `None` if the `Bound` is `Unbounded`
 /// and `Some` otherwise.
 pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {

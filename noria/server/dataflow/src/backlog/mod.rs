@@ -2,7 +2,7 @@ pub use self::multir::{LookupError, LookupResult};
 use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
-use launchpad::intervals::{BoundAsRef, BoundFunctor};
+use launchpad::intervals::BoundFunctor;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use rand::prelude::*;
@@ -342,8 +342,8 @@ impl WriteHandle {
         match key {
             KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled(),
             KeyComparison::Range((start, end)) => self.handle.insert_range((
-                BoundAsRef::as_ref(&start).map(Vec1::as_vec),
-                BoundAsRef::as_ref(&end).map(Vec1::as_vec),
+                start.as_ref().map(Vec1::as_vec),
+                end.as_ref().map(Vec1::as_vec),
             )),
         }
     }
