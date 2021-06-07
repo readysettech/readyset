@@ -242,9 +242,6 @@ steps:
 
   - block: ":packer: Build Packer images?"
     key: build-packer-images
-    depends_on:
-      - build-noria-release
-      - build-noria-mysql-release
 
   - label: ':pipeline: Build Packer pipeline'
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
