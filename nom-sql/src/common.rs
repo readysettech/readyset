@@ -10,6 +10,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
+use nom::combinator::map_parser;
 use nom::combinator::opt;
 use nom::combinator::{map, not, peek};
 use nom::error::{ErrorKind, ParseError};
@@ -445,13 +446,19 @@ pub fn is_sql_identifier(chr: u8) -> bool {
 }
 
 #[inline]
-fn len_as_u16(len: &[u8]) -> u16 {
+fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
-            Ok(v) => v,
-            Err(e) => panic!("{:?}", e),
+            Ok(v) => Ok((len, v)),
+            Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
+                len,
+                ErrorKind::LengthValue,
+            ))),
         },
-        Err(e) => panic!("{:?}", e),
+        Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
+            len,
+            ErrorKind::LengthValue,
+        ))),
     }
 }
 
@@ -499,6 +506,10 @@ fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
     delimited(tag("("), digit1, tag(")"))(i)
 }
 
+fn delim_u16(i: &[u8]) -> IResult<&[u8], u16> {
+    map_parser(delim_digit, digit_as_u16)(i)
+}
+
 fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
@@ -511,9 +522,9 @@ where
     G: Fn(u16) -> SqlType + 'static,
 {
     let (remaining_input, (_, len, _, signed)) =
-        tuple((tag_no_case(tag), opt(delim_digit), multispace0, opt_signed))(i)?;
+        tuple((tag_no_case(tag), opt(delim_u16), multispace0, opt_signed))(i)?;
 
-    let len = len.map(|l| len_as_u16(l)).unwrap_or(default_len);
+    let len = len.unwrap_or(default_len);
 
     match signed {
         Some(sign)
@@ -563,15 +574,15 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(
             tuple((
                 tag_no_case("char"),
-                delim_digit,
+                delim_u16,
                 multispace0,
                 opt(tag_no_case("binary")),
             )),
-            |t| SqlType::Char(len_as_u16(t.1)),
+            |t| SqlType::Char(t.1),
         ),
-        map(preceded(tag_no_case("datetime"), opt(delim_digit)), |fsp| {
+        map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
             SqlType::DateTime(match fsp {
-                Some(fsp) => len_as_u16(fsp),
+                Some(fsp) => fsp,
                 None => 0_u16,
             })
         }),
@@ -620,11 +631,11 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
                         tag_no_case("varying"),
                     )),
                 )),
-                delim_digit,
+                delim_u16,
                 multispace0,
                 opt(tag_no_case("binary")),
             )),
-            |t| SqlType::Varchar(len_as_u16(t.1)),
+            |t| SqlType::Varchar(t.1),
         ),
         map(tag_no_case("time"), |_| SqlType::Time),
     ))(i)
@@ -634,8 +645,8 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
         decimal_or_numeric,
         map(
-            tuple((tag_no_case("binary"), delim_digit, multispace0)),
-            |t| SqlType::Binary(len_as_u16(t.1)),
+            tuple((tag_no_case("binary"), delim_u16, multispace0)),
+            |t| SqlType::Binary(t.1),
         ),
         map(tag_no_case("blob"), |_| SqlType::Blob),
         map(tag_no_case("longblob"), |_| SqlType::Longblob),
@@ -645,8 +656,8 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tag_no_case("tinyblob"), |_| SqlType::Tinyblob),
         map(tag_no_case("tinytext"), |_| SqlType::Tinytext),
         map(
-            tuple((tag_no_case("varbinary"), delim_digit, multispace0)),
-            |t| SqlType::Varbinary(len_as_u16(t.1)),
+            tuple((tag_no_case("varbinary"), delim_u16, multispace0)),
+            |t| SqlType::Varbinary(t.1),
         ),
     ))(i)
 }
