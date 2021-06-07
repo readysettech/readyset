@@ -799,6 +799,12 @@ impl Ingredient for Join {
     }
 
     fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+        // NOTE: This function relies pretty heavily on the fact that upqueries for NULLs are not
+        // possible. If they were possible, you could return incorrect results, because
+        //   SELECT * FROM a LEFT JOIN b where b.col IS NULL;
+        // means "get me all rows in a not in b" (i.e. a \ b), not "get me rows in b where col
+        // is NULL" (which is what this function would do).
+
         // column indices in the left parent
         let mut left_cols = vec![];
         // column indices in the right parent
@@ -819,8 +825,8 @@ impl Ingredient for Join {
                     .try_into()
                     .unwrap(),
             ))
-        } else if self.kind != JoinType::Left && right_cols.iter().all(|x| x.is_some()) {
-            // as long as we aren't a left join, we can do the same thing as above
+        } else if right_cols.iter().all(|x| x.is_some()) {
+            // same for right parent
             Ok(ColumnSource::exact_copy(
                 self.right.as_global(),
                 right_cols
@@ -830,7 +836,7 @@ impl Ingredient for Join {
                     .try_into()
                     .unwrap(),
             ))
-        } else if self.kind != JoinType::Left {
+        } else {
             let right_cols = right_cols
                 .into_iter()
                 .enumerate()
@@ -847,12 +853,6 @@ impl Ingredient for Join {
                     node: self.right.as_global(),
                     columns: right_cols.try_into().unwrap()
                 },
-            ]))
-        } else {
-            // haven't thought about how to handle left joins yet
-            Ok(ColumnSource::RequiresFullReplay(vec1![
-                self.left.as_global(),
-                self.right.as_global()
             ]))
         }
     }
