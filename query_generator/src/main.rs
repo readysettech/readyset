@@ -5,8 +5,7 @@
 
 use anyhow::bail;
 use clap::Clap;
-use itertools::Either;
-use query_generator::Operations;
+use query_generator::GenerateOpts;
 
 mod benchmark;
 
@@ -33,11 +32,8 @@ impl Command {
 
 #[derive(Clap)]
 struct Generate {
-    /// Comma-separated list of query operations to generate queries with
-    operations: Option<Operations>,
-
-    #[clap(long, default_value = "3")]
-    max_depth: usize,
+    #[clap(flatten)]
+    options: GenerateOpts,
 
     #[clap(long)]
     ddl_only: bool,
@@ -47,21 +43,15 @@ struct Generate {
 }
 
 impl Generate {
-    pub fn run(mut self) -> anyhow::Result<()> {
+    pub fn run(self) -> anyhow::Result<()> {
         if self.ddl_only && self.queries_only {
             bail!("Cannot specify both --ddl-only and --queries-only")
         }
-
         let mut gen = query_generator::GeneratorState::default();
-        let queries = if let Some(Operations(operations)) = self.operations.take() {
-            Either::Left(
-                operations
-                    .into_iter()
-                    .map(|ops| gen.generate_query(&ops).statement),
-            )
-        } else {
-            Either::Right(gen.generate_queries(self.max_depth))
-        };
+        let queries = self
+            .options
+            .into_query_seeds()
+            .map(|seed| gen.generate_query(seed).statement);
 
         if self.queries_only {
             for query in queries {

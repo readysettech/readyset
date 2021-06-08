@@ -2,6 +2,8 @@
 //! [`RangeBounds`][std::ops::RangeBounds]).
 
 use std::cmp::Ordering;
+use std::iter::Step;
+use std::mem;
 use std::ops::{Bound, RangeBounds};
 use Bound::*;
 use Ordering::*;
@@ -345,6 +347,72 @@ where
 /// [0]: std::ops::Bound
 pub type BoundPair<T> = (Bound<T>, Bound<T>);
 
+/// An iterator over all the values of `T` between a pair of [`Bound`]s. Constructed by
+/// [`IterBoundPair::into_iter`].
+#[derive(Clone)]
+pub struct BoundPairIter<T> {
+    current: T,
+    upper: Bound<T>,
+}
+
+impl<T> Iterator for BoundPairIter<T>
+where
+    T: Step + Ord + Clone,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.upper.as_ref().map(|upper| upper.clone()) {
+            Excluded(upper) if self.current >= upper => None,
+            Included(upper) if self.current > upper => None,
+            _ => {
+                let new = Step::forward(self.current.clone(), 1);
+                Some(mem::replace(&mut self.current, new))
+            }
+        }
+    }
+}
+
+/// Extension trait to provide an `into_iter` method on a pair of [`Bound`]s
+pub trait IterBoundPair<T>
+where
+    T: Step,
+{
+    /// Construct an iterator over all the values of `T` between the lower and upper bound of a
+    /// [`BoundPair`].
+    ///
+    /// Will return None if the lower bound is [`Unbounded`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::Bound::*;
+    /// use launchpad::intervals::IterBoundPair;
+    ///
+    /// assert_eq!(
+    ///     (Excluded(4_u32), Included(6_u32)).into_iter().unwrap().collect::<Vec<u32>>(),
+    ///     vec![5_u32, 6_u32]
+    /// );
+    /// ```
+    fn into_iter(self) -> Option<BoundPairIter<T>>;
+}
+
+impl<T> IterBoundPair<T> for BoundPair<T>
+where
+    T: Step,
+{
+    fn into_iter(self) -> Option<BoundPairIter<T>> {
+        Some(BoundPairIter {
+            current: match self.0 {
+                Included(x) => x,
+                Excluded(x) => Step::forward(x, 1),
+                Unbounded => return None,
+            },
+            upper: self.1,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +475,29 @@ mod tests {
                 assert!(overlaps(&r1, &r2))
             }
         }
+    }
+
+    mod iter_bound_pair {
+        use super::*;
+
+        macro_rules! bound_pair_iter_test {
+            ($name: ident, $bound_pair: expr => $results: expr) => {
+                #[test]
+                fn $name() {
+                    assert_eq!(
+                        $bound_pair.into_iter().unwrap().collect::<Vec<_>>(),
+                        $results.into_iter().collect::<Vec<_>>()
+                    );
+                }
+            };
+        }
+
+        bound_pair_iter_test!(incl_excl, (Included(0u32), Excluded(7)) => (0..7));
+        bound_pair_iter_test!(incl_incl, (Included(0u32), Included(7)) => (0..=7));
+        bound_pair_iter_test!(excl_incl, (Excluded(0u32), Included(3)) => vec![1, 2, 3]);
+        bound_pair_iter_test!(excl_excl, (Excluded(0u32), Excluded(3)) => vec![1, 2]);
+        bound_pair_iter_test!(excl_excl_equal, (Excluded(0u32), Excluded(0)) => vec![]);
+        bound_pair_iter_test!(excl_incl_equal, (Excluded(0u32), Included(0)) => vec![]);
+        bound_pair_iter_test!(excl_incl_backwards, (Excluded(3u32), Included(0)) => vec![]);
     }
 }
