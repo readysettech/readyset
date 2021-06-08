@@ -275,7 +275,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                     Some(metrics) => res.body(hyper::Body::from(metrics)),
                     None => res
                         .status(404)
-                        .body(hyper::Body::from("No recorder for Prometheus".to_string())),
+                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run Noria with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
             }
@@ -288,10 +288,10 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                         None => res
                             .status(404)
                             .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from("No recorder for Noria".to_string())),
+                            .body(hyper::Body::from("Noria metrics were not enabled. To fix this, run Noria with --noria-metrics".to_string())),
                     }
                 });
-                return Box::pin(async move { Ok(res.unwrap()) });
+                Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/reset_metrics") => {
                 get_global_recorder().clear();

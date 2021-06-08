@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use clap::value_t_or_exit;
 use futures_util::future::{self, Either};
+use metrics_exporter_prometheus::PrometheusBuilder;
 
 use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
@@ -198,6 +199,18 @@ If specified, overrides the value of --external-address"))
                 .takes_value(false)
                 .help("Whether this server should only run reader domains or not.")
         )
+        .arg(
+            Arg::with_name("prometheus-metrics")
+                .long("prometheus-metrics")
+                .takes_value(false)
+                .help("Output prometheus metrics."),
+        )
+        .arg(
+            Arg::with_name("noria-metrics")
+                .long("noria-metrics")
+                .takes_value(false)
+                .help("Output noria metrics."),
+        )
         .get_matches();
 
     let log = noria_server::logger_pls();
@@ -226,12 +239,21 @@ If specified, overrides the value of --external-address"))
         x => Some(x),
     };
     let verbose = matches.is_present("verbose");
+    let use_noria_metrics = matches.is_present("noria-metrics");
+    let use_prometheus_metrics = matches.is_present("prometheus-metrics");
     let deployment_name = matches.value_of("deployment").unwrap();
 
     // SAFETY: we haven't initialized threads that might call the recorder yet
     unsafe {
         let rec = CompositeMetricsRecorder::new();
-        rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+        if use_noria_metrics {
+            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+        }
+        if use_prometheus_metrics {
+            rec.add(MetricsRecorder::Prometheus(
+                PrometheusBuilder::new().build(),
+            ));
+        }
         let bufrec = BufferedRecorder::new(rec, metrics_queue_len);
         install_global_recorder(bufrec).unwrap();
     }
