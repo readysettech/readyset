@@ -46,7 +46,7 @@ pub enum DatabaseConnection {
 }
 
 impl DatabaseConnection {
-    async fn query_drop<Q>(&mut self, stmt: Q) -> anyhow::Result<()>
+    pub async fn query_drop<Q>(&mut self, stmt: Q) -> anyhow::Result<()>
     where
         Q: AsRef<str> + Send + Sync,
     {

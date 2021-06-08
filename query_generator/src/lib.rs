@@ -261,6 +261,12 @@ impl<'a> From<&'a TableName> for &'a str {
     }
 }
 
+impl From<&str> for TableName {
+    fn from(tn: &str) -> Self {
+        TableName(tn.into())
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
 pub struct ColumnName(String);
