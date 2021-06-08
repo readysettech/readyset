@@ -1009,10 +1009,16 @@ impl QueryOperation {
 
                 let alias = state.fresh_alias();
                 let tbl = state.some_table_mut();
+
+                if query.tables.is_empty() {
+                    query.tables.push(tbl.name.clone().into());
+                }
+
                 let col = tbl.fresh_column_with_type(match agg {
                     GroupConcat => SqlType::Text,
                     _ => SqlType::Int(32),
                 });
+
                 let expr = Box::new(Expression::Column(Column {
                     name: col.into(),
                     table: Some(tbl.name.clone().into()),
@@ -1049,6 +1055,10 @@ impl QueryOperation {
                 let alias = state.fresh_alias();
                 let tbl = state.some_table_mut();
                 let col = tbl.some_column_with_type(SqlType::Int(1));
+
+                if query.tables.is_empty() {
+                    query.tables.push(tbl.name.clone().into());
+                }
 
                 let col_expr = Expression::Column(Column {
                     table: Some(tbl.name.clone().into()),
