@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use nom::character::complete::{multispace0, multispace1};
 use nom::error::ErrorKind;
 use nom::multi::many0;
@@ -85,6 +86,12 @@ pub struct CommonTableExpression {
     pub statement: SelectStatement,
 }
 
+impl fmt::Display for CommonTableExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} AS ({})", self.name, self.statement)
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpression>,
@@ -100,6 +107,10 @@ pub struct SelectStatement {
 
 impl fmt::Display for SelectStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if !self.ctes.is_empty() {
+            write!(f, "WITH {} ", self.ctes.iter().join(", "))?;
+        }
+
         write!(f, "SELECT ")?;
         if self.distinct {
             write!(f, "DISTINCT ")?;
@@ -1477,6 +1488,31 @@ mod tests {
         assert_eq!(query.ctes.len(), 2);
         assert_eq!(query.ctes[0].name, "max_val".to_owned());
         assert_eq!(query.ctes[1].name, "min_val".to_owned());
+    }
+
+    #[test]
+    fn format_ctes() {
+        let query = SelectStatement {
+            ctes: vec![CommonTableExpression {
+                name: "foo".to_owned(),
+                statement: SelectStatement {
+                    fields: vec![FieldDefinitionExpression::Expression {
+                        expr: Expression::Column("x".into()),
+                        alias: None,
+                    }],
+                    tables: vec!["t".into()],
+                    ..Default::default()
+                },
+            }],
+            fields: vec![FieldDefinitionExpression::Expression {
+                expr: Expression::Column("x".into()),
+                alias: None,
+            }],
+            tables: vec!["foo".into()],
+            ..Default::default()
+        };
+        let res = query.to_string();
+        assert_eq!(res, "WITH foo AS (SELECT x FROM t) SELECT x FROM foo");
     }
 }
 
