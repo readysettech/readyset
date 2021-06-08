@@ -979,6 +979,17 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
 }
 
 impl QueryOperation {
+    /// Returns true if this query operation is supported inside of subqueries. If this function
+    /// returns false, `add_to_query` will not be called on this query operation when adding it to a
+    /// subquery.
+    fn supported_in_subqueries(&self) -> bool {
+        // We don't currently support query parameters in subqueries
+        !matches!(
+            self,
+            QueryOperation::MultipleParameters | QueryOperation::SingleParameter
+        )
+    }
+
     /// Add this query operation to `query`, recording information about new tables and columns in
     /// `state`.
     fn add_to_query<'state>(&self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
@@ -1643,6 +1654,10 @@ impl GenerateOpts {
                             available_ops
                                 .clone()
                                 .into_iter()
+                                .map(|mut ops| {
+                                    ops.retain(|op| op.supported_in_subqueries());
+                                    ops
+                                })
                                 .flat_map(|operations| {
                                     make_seeds(
                                         subquery_depth - 1,
