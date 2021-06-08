@@ -418,6 +418,16 @@ impl TableSpec {
             .unwrap_or_else(|| self.fresh_column())
     }
 
+    /// Returns the name of *some* column in this table with the given type, potentially generating
+    /// a new column if necessary
+    pub fn some_column_with_type(&mut self, col_type: SqlType) -> ColumnName {
+        self.columns
+            .iter()
+            .find_map(|(n, t)| if *t == col_type { Some(n) } else { None })
+            .cloned()
+            .unwrap_or_else(|| self.fresh_column_with_type(col_type))
+    }
+
     /// Record that the column given by `column_name` should contain `value` at least some of the
     /// time.
     ///
@@ -1037,7 +1047,7 @@ impl QueryOperation {
 
             QueryOperation::Filter(filter) => {
                 let tbl = state.some_table_mut();
-                let col = tbl.fresh_column_with_type(SqlType::Int(1));
+                let col = tbl.some_column_with_type(SqlType::Int(1));
 
                 query.fields.push(FieldDefinitionExpression::from(Column {
                     table: Some(tbl.name.clone().into()),
@@ -1101,7 +1111,7 @@ impl QueryOperation {
             QueryOperation::Join(operator) => {
                 let left_table = state.some_table_mut();
                 let left_table_name = left_table.name.clone();
-                let left_join_key = left_table.fresh_column_with_type(SqlType::Int(32));
+                let left_join_key = left_table.some_column_with_type(SqlType::Int(32));
                 let left_projected = left_table.fresh_column();
 
                 if query.tables.is_empty() {
@@ -1110,7 +1120,7 @@ impl QueryOperation {
 
                 let right_table = state.fresh_table_mut();
                 let right_table_name = right_table.name.clone();
-                let right_join_key = right_table.fresh_column_with_type(SqlType::Int(32));
+                let right_join_key = right_table.some_column_with_type(SqlType::Int(32));
                 let right_projected = right_table.fresh_column();
 
                 query.join.push(JoinClause {
@@ -1195,7 +1205,7 @@ impl QueryOperation {
                         $out.push(Expression::Column(
                             Column {
                                 table: Some($table.name.clone().into()),
-                                ..$table.fresh_column_with_type($arg).into()
+                                ..$table.some_column_with_type($arg).into()
                             }
                         ));
                         add_builtin!(@args_to_expr, $table, $out, $($args)*);
