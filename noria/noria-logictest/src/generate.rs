@@ -15,7 +15,7 @@ use mysql::Params;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expression, SqlQuery, Table,
 };
-use query_generator::{GeneratorState, Operations};
+use query_generator::{GenerateOpts, GeneratorState};
 
 use crate::ast::{
     Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult, Value,
@@ -176,15 +176,15 @@ impl TryFrom<PathBuf> for Seed {
     }
 }
 
-impl TryFrom<Operations> for Seed {
+impl TryFrom<GenerateOpts> for Seed {
     type Error = anyhow::Error;
 
-    fn try_from(Operations(operations): Operations) -> Result<Self, Self::Error> {
+    fn try_from(opts: GenerateOpts) -> Result<Self, Self::Error> {
         let mut gen = query_generator::GeneratorState::default();
-        let queries = operations
-            .into_iter()
-            .map(|ops| -> anyhow::Result<Query> {
-                let query = gen.generate_query(&ops);
+        let queries = opts
+            .into_query_seeds()
+            .map(|seed| -> anyhow::Result<Query> {
+                let query = gen.generate_query(seed);
 
                 Ok(Query {
                     label: None,
@@ -239,20 +239,19 @@ impl TryFrom<Operations> for Seed {
 
 /// Generate test scripts by comparing results against a reference database
 ///
-/// The `generate` command takes either a seed script to generate from or a series of
-/// [operations][0], and generates a logictest test script by running queries against a reference
+/// The `generate` command takes either a seed script to generate from or a set of [generate
+/// options][0], and generates a logictest test script by running queries against a reference
 /// database and saving the results
 ///
-/// [0]: QueryGenerator::Operations
+/// [0]: GenerateOpts
 #[derive(Clap)]
 pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
     #[clap(parse(from_str))]
     from: Option<PathBuf>,
 
-    /// Comma-separated list of query operations to use to generate data
-    #[clap(long)]
-    operations: Option<Operations>,
+    #[clap(flatten)]
+    options: GenerateOpts,
 
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
@@ -313,10 +312,9 @@ where
 
 impl Generate {
     pub fn run(mut self) -> anyhow::Result<()> {
-        let mut seed = match (self.from.take(), self.operations.take()) {
-            (Some(path), None) => Seed::try_from(path)?,
-            (None, Some(operations)) => Seed::try_from(operations)?,
-            _ => bail!("Must specify one of <from> or --operations"),
+        let mut seed = match self.from.take() {
+            Some(path) => Seed::try_from(path)?,
+            None => Seed::try_from(self.options.clone())?,
         };
 
         let mut conn = self.compare_to.connect()?;

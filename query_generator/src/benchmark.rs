@@ -1,10 +1,9 @@
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use clap::Clap;
 
 use humantime::format_duration;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use itertools::Either;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
@@ -12,7 +11,6 @@ use serde_with::{serde_as, DurationNanoSeconds};
 use size_format::SizeFormatterSI;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
-use std::mem;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
@@ -24,7 +22,7 @@ use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
 use noria_server::metrics::NoriaMetricsRecorder;
 use noria_server::{DurabilityMode, PersistenceParameters};
-use query_generator::{ColumnName, GeneratorState, Operations, QueryOperation, TableName};
+use query_generator::{ColumnName, GenerateOpts, GeneratorState, QuerySeed, TableName};
 
 /// Metrics collected during the run of an individual query
 #[serde_as]
@@ -168,14 +166,8 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
 
 #[derive(Clap)]
 pub struct Benchmark {
-    /// Comma-separated list of query operations to benchmark. Required if --max-depth is not
-    /// specified
-    operations: Vec<Operations>,
-
-    /// Maximum number of query operations to generate in a single query. Required if operations are
-    /// not specified
-    #[clap(long)]
-    max_depth: Option<usize>,
+    #[clap(flatten)]
+    options: GenerateOpts,
 
     /// Number of shards to run noria with
     #[clap(long)]
@@ -218,38 +210,20 @@ fn total_upquery_time_us(m: &MetricsDump) -> usize {
 
 impl Benchmark {
     #[tokio::main]
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn run(self) -> anyhow::Result<()> {
         // SAFETY: Called before we spawn any other tasks
         unsafe {
             NoriaMetricsRecorder::install(1024)?;
         }
 
-        let ops = if !self.operations.is_empty() {
-            Either::Left(
-                mem::take(&mut self.operations)
-                    .into_iter()
-                    .flat_map(|Operations(ops)| ops),
-            )
-        } else if let Some(max_depth) = self.max_depth {
-            Either::Right(
-                QueryOperation::permute(max_depth)
-                    .map(|ops| ops.into_iter().cloned().collect::<Vec<_>>()),
-            )
-        } else {
-            bail!("Must specify either --max-depth or a list of operations to benchmark");
-        }
-        .collect::<Vec<_>>();
-
-        eprintln!("Running benchmark of {} queries", ops.len());
-        let mut results = Vec::with_capacity(ops.len());
-        let pb = ProgressBar::new(ops.len() as _);
+        let queries = self.options.clone().into_query_seeds().collect::<Vec<_>>();
+        eprintln!("Running benchmark of {} queries", queries.len());
+        let mut results = Vec::with_capacity(queries.len());
+        let pb = ProgressBar::new(queries.len() as _);
         pb.set_style(ProgressStyle::default_bar().template("{bar:50} {pos}/{len} {wide_msg}"));
-        for ops in ops.iter() {
-            pb.set_message(&format!("{:?}", ops));
-            match self
-                .repeatedly_benchmark_operations(ops, self.samples)
-                .await
-            {
+        for seed in queries {
+            pb.set_message(&format!("{:?}", seed));
+            match self.repeatedly_benchmark_query(seed, self.samples).await {
                 Ok(result) => results.push(result),
                 Err(e) => eprintln!("\n\n{}\n\n", e),
             }
@@ -262,9 +236,9 @@ impl Benchmark {
         Ok(())
     }
 
-    async fn repeatedly_benchmark_operations(
+    async fn repeatedly_benchmark_query(
         &self,
-        ops: &[QueryOperation],
+        seed: QuerySeed,
         n_samples: usize,
     ) -> Result<QueryBenchmarkResult, QueryBenchmarkError> {
         let mut ret = Vec::with_capacity(n_samples);
@@ -276,7 +250,7 @@ impl Benchmark {
         pb.set_message("sampling");
         for _ in (0..n_samples).into_iter() {
             pb.inc(1);
-            let this_qbr = self.benchmark_operations(ops).await?;
+            let this_qbr = self.benchmark_query(seed.clone()).await?;
             if qbr.is_none() {
                 qbr = Some(this_qbr.clone());
             }
@@ -305,12 +279,12 @@ impl Benchmark {
         Ok(qbr)
     }
 
-    async fn benchmark_operations(
+    async fn benchmark_query(
         &self,
-        ops: &[QueryOperation],
+        seed: QuerySeed,
     ) -> Result<QueryBenchmarkResult, QueryBenchmarkError> {
         let mut gen = GeneratorState::default();
-        let mut query = gen.generate_query(ops);
+        let mut query = gen.generate_query(seed);
         let query_str = format!("{}", query.statement);
         let res: anyhow::Result<_> = async {
             if self.verbose {

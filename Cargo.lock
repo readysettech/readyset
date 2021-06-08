@@ -4950,6 +4950,7 @@ dependencies = [
  "humantime-serde",
  "indicatif",
  "itertools 0.10.0",
+ "launchpad",
  "lazy_static",
  "nom-sql",
  "noria",

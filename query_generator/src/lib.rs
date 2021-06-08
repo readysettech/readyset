@@ -22,14 +22,17 @@
 //! Generating a simple query, with a single query parameter and a single inner join:
 //!
 //! ```rust
-//! use query_generator::{GeneratorState, QueryOperation};
+//! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //! use nom_sql::JoinOperator;
 //!
 //! let mut gen = GeneratorState::default();
-//! let query = gen.generate_query(&[
-//!   QueryOperation::SingleParameter,
-//!   QueryOperation::Join(JoinOperator::InnerJoin),
-//! ]);
+//! let query = gen.generate_query(QuerySeed::new(
+//!     vec![
+//!         QueryOperation::SingleParameter,
+//!         QueryOperation::Join(JoinOperator::InnerJoin),
+//!     ],
+//!     vec![],
+//! ));
 //! let query_str = format!("{}", query.statement);
 //! assert_eq!(query_str, "SELECT table_1.column_3, table_2.column_2 \
 //! FROM table_1 \
@@ -52,12 +55,13 @@
 //! [2]: TableSpec::fresh_column
 //! [3]: QueryOperation::permute
 
-#![feature(duration_zero)]
+#![feature(duration_zero, option_insert)]
 
 use anyhow::anyhow;
 use chrono::{NaiveDate, NaiveTime};
+use clap::Clap;
 use derive_more::{Display, From, Into};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use rand::Rng;
@@ -65,17 +69,20 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::error::Error;
 use std::hash::Hash;
-use std::iter;
+use std::iter::{self, FromIterator};
+use std::ops::Bound;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
+use launchpad::intervals::{BoundPair, IterBoundPair};
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CreateTableStatement,
-    Expression, FieldDefinitionExpression, FunctionExpression, ItemPlaceholder, JoinClause,
-    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderClause, OrderType,
-    SelectStatement, SqlType, Table, TableKey,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
+    OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
 
@@ -526,58 +533,12 @@ impl GeneratorState {
         QueryState::new(self)
     }
 
-    /// Generate a new query using the given list of [`QueryOperation`]s
-    pub fn generate_query<'gen, 'a, I>(&'gen mut self, operations: I) -> Query<'gen>
-    where
-        I: IntoIterator<Item = &'a QueryOperation>,
-    {
-        let mut query = SelectStatement::default();
+    /// Generate a new query using the given [`QuerySeed`]
+    pub fn generate_query<'gen>(&'gen mut self, seed: QuerySeed) -> Query<'gen> {
         let mut state = self.new_query();
-        for op in operations {
-            op.add_to_query(&mut state, &mut query);
-        }
-
-        if query.tables.is_empty() {
-            let table = state.tables.iter().next().unwrap();
-            query.tables.push(table.clone().into());
-        }
-
-        if query.fields.is_empty() {
-            query.fields.push(FieldDefinitionExpression::All);
-        }
-
-        if query_has_aggregate(&query) {
-            let mut group_by = query.group_by.take().unwrap_or_default();
-            // Fill the GROUP BY with all columns not mentioned in an aggregate
-            let existing_group_by_cols: HashSet<_> = group_by.columns.iter().cloned().collect();
-            for field in &query.fields {
-                if let FieldDefinitionExpression::Expression { expr, .. } = field {
-                    if !contains_aggregate(expr) {
-                        for col in expr.referred_columns() {
-                            if !existing_group_by_cols.contains(col) {
-                                group_by.columns.push(col.clone());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // TODO: once we support HAVING we'll need to check that here too
-            if !group_by.columns.is_empty() {
-                query.group_by = Some(group_by);
-            }
-        }
+        let query = seed.generate(&mut state);
 
         Query::new(state, query)
-    }
-
-    /// Generate a list of queries given by permutations of all query operations up to length
-    /// `max_depth`
-    pub fn generate_queries(
-        &mut self,
-        max_depth: usize,
-    ) -> impl Iterator<Item = SelectStatement> + '_ {
-        QueryOperation::permute(max_depth).map(move |ops| self.generate_query(ops).statement)
     }
 
     /// Return an iterator over `CreateTableStatement`s for all the tables in the schema
@@ -854,6 +815,15 @@ pub enum BuiltinFunction {
     Round,
 }
 
+/// A representation for where in a query a subquery is located
+///
+/// When we support them, subqueries in `IN` clauses should go here as well
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+pub enum SubqueryPosition {
+    CTE,
+    Join,
+}
+
 /// Operations that can be performed as part of a SQL query
 ///
 /// Members of this enum represent some sense of an individual operation that can be performed on an
@@ -881,6 +851,7 @@ pub enum QueryOperation {
     MultipleParameters,
     ProjectBuiltinFunction(BuiltinFunction),
     TopK(OrderType),
+    Subquery(SubqueryPosition),
 }
 
 const COMPARISON_OPS: &[BinaryOperator] = &[
@@ -950,6 +921,7 @@ lazy_static! {
             .chain(iter::once(QueryOperation::SingleParameter))
             .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
             .chain(ALL_TOPK.iter().cloned())
+            .chain(SubqueryPosition::iter().map(QueryOperation::Subquery))
             .collect()
     };
 }
@@ -976,6 +948,34 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
             FieldDefinitionExpression::Expression { expr, .. } if contains_aggregate(expr),
         )
     })
+}
+
+fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
+    match query.tables.first() {
+        Some(table) => {
+            let table_name = table.name.clone();
+            let column = state
+                .gen
+                .table_mut(&table_name.clone().into())
+                .unwrap()
+                .some_column_name();
+            Column {
+                name: column.into(),
+                table: Some(table_name.into()),
+                function: None,
+            }
+        }
+        None => {
+            let table = state.some_table_mut();
+            query.tables.push(table.name.clone().into());
+            let colname = table.some_column_name();
+            Column {
+                name: colname.into(),
+                table: Some(table.name.clone().into()),
+                function: None,
+            }
+        }
+    }
 }
 
 impl QueryOperation {
@@ -1135,23 +1135,18 @@ impl QueryOperation {
             }
 
             QueryOperation::SingleParameter => {
-                let table = state.some_table_mut();
-                let col = table.fresh_column();
+                let col = column_in_query(state, query);
                 and_where(
                     query,
                     Expression::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(Column {
-                            table: Some(table.name.clone().into()),
-                            ..col.clone().into()
-                        })),
+                        lhs: Box::new(Expression::Column(col.clone())),
                         rhs: Box::new(Expression::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark,
                         ))),
                     },
                 );
-                let table_name = table.name.clone();
-                state.add_parameter(table_name, col);
+                state.add_parameter(col.table.unwrap().into(), col.name.into());
             }
 
             QueryOperation::MultipleParameters => {
@@ -1231,6 +1226,9 @@ impl QueryOperation {
                     offset: 0,
                 })
             }
+            // Subqueries are turned into QuerySeed::subqueries as part of
+            // GeneratorOps::into_query_seeds
+            QueryOperation::Subquery(_) => {}
         }
     }
 
@@ -1240,132 +1238,440 @@ impl QueryOperation {
     }
 }
 
-/// Representation of a subset of permutations of query operations
+/// Representation of a subset of query operations
+///
+/// Operations can be converted from a user-supplied string using [`FromStr::from_str`], which
+/// supports the following speccifications:
+///
+/// | Specification                           | Meaning                           |
+/// |-----------------------------------------|-----------------------------------|
+/// | aggregates                              | All [`AggregateType`]s            |
+/// | count                                   | COUNT aggregates                  |
+/// | sum                                     | SUM aggregates                    |
+/// | avg                                     | AVG aggregates                    |
+/// | group_concat                            | GROUP_CONCAT aggregates           |
+/// | max                                     | MAX aggregates                    |
+/// | min                                     | MIN aggregates                    |
+/// | filters                                 | All constant-valued [`Filter`]s   |
+/// | equal_filters                           | Constant-valued `=` filters       |
+/// | not_equal_filters                       | Constant-valued `!=` filters      |
+/// | greater_filters                         | Constant-valued `>` filters       |
+/// | greater_or_equal_filters                | Constant-valued `>=` filters      |
+/// | less_filters                            | Constant-valued `<` filters       |
+/// | less_or_equal_filters                   | Constant-valued `<=` filters      |
+/// | between_filters                         | Constant-valued `BETWEEN` filters |
+/// | is_null_filters                         | IS NULL and IS NOT NULL filters   |
+/// | distinct                                | `SELECT DISTINCT`                 |
+/// | joins                                   | Joins, with all [`JoinOperator`]s |
+/// | inner_join                              | `INNER JOIN`s                     |
+/// | left_join                               | `LEFT JOIN`s                      |
+/// | single_parameter / single_param / param | A single query parameter          |
+/// | project_literal                         | A projected literal value         |
+/// | multiple_parameters / params            | Multiple query parameters         |
+/// | project_builtin                         | Project a built-in function       |
+/// | subqueries                              | All subqueries                    |
+/// | cte                                     | CTEs (WITH statements)            |
+/// | join_subquery                           | JOIN to a subquery directly       |
+/// | topk                                    | ORDER BY combined with LIMIT      |
 #[repr(transparent)]
-pub struct Operations(pub Vec<Vec<QueryOperation>>);
+#[derive(Debug, PartialEq, Eq, Clone, From, Into)]
+pub struct Operations(pub Vec<QueryOperation>);
 
 impl FromStr for Operations {
     type Err = anyhow::Error;
 
-    /// Parse a specification for a subset of permutations of query operations from a human-supplied
-    /// string.
-    ///
-    /// The supported syntax is a comma-separated list of specifications for query operations, and
-    /// the result will be a list of all permutations of the corresponding query operations.
-    ///
-    /// The supported specifications are:
-    ///
-    /// | Specification                           | Meaning                           |
-    /// |-----------------------------------------|-----------------------------------|
-    /// | aggregates                              | All [`AggregateType`]s            |
-    /// | count                                   | COUNT aggregates                  |
-    /// | sum                                     | SUM aggregates                    |
-    /// | avg                                     | AVG aggregates                    |
-    /// | group_concat                            | GROUP_CONCAT aggregates           |
-    /// | max                                     | MAX aggregates                    |
-    /// | min                                     | MIN aggregates                    |
-    /// | filters                                 | All constant-valued [`Filter`]s   |
-    /// | equal_filters                           | Constant-valued `=` filters       |
-    /// | not_equal_filters                       | Constant-valued `!=` filters      |
-    /// | greater_filters                         | Constant-valued `>` filters       |
-    /// | greater_or_equal_filters                | Constant-valued `>=` filters      |
-    /// | less_filters                            | Constant-valued `<` filters       |
-    /// | less_or_equal_filters                   | Constant-valued `<=` filters      |
-    /// | between_filters                         | Constant-valued `BETWEEN` filters |
-    /// | is_null_filters                         | IS NULL and IS NOT NULL filters   |
-    /// | distinct                                | `SELECT DISTINCT`                 |
-    /// | joins                                   | Joins, with all [`JoinOperator`]s |
-    /// | inner_join                              | `INNER JOIN`s                     |
-    /// | left_join                               | `LEFT JOIN`s                      |
-    /// | single_parameter / single_param / param | A single query parameter          |
-    /// | project_literal                         | A projected literal value         |
-    /// | multiple_parameters / params            | Multiple query parameters         |
-    /// | project_builtin                         | Project a built-in function       |
-    /// | topk                                    | ORDER BY combined with LIMIT      |
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use QueryOperation::*;
 
+        match s {
+            "aggregates" => Ok(AggregateType::iter().map(ColumnAggregate).collect()),
+            "count" => Ok(vec![ColumnAggregate(AggregateType::Count)].into()),
+            "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum)].into()),
+            "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg)].into()),
+            "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)].into()),
+            "max" => Ok(vec![ColumnAggregate(AggregateType::Max)].into()),
+            "min" => Ok(vec![ColumnAggregate(AggregateType::Min)].into()),
+            "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
+            "equal_filters" => Ok(crate::Filter::all_with_operator(BinaryOperator::Equal)
+                .map(Filter)
+                .collect()),
+            "not_equal_filters" => Ok(crate::Filter::all_with_operator(BinaryOperator::NotEqual)
+                .map(Filter)
+                .collect()),
+            "greater_filters" => Ok(crate::Filter::all_with_operator(BinaryOperator::Greater)
+                .map(Filter)
+                .collect()),
+            "greater_or_equal_filters" => Ok(crate::Filter::all_with_operator(
+                BinaryOperator::GreaterOrEqual,
+            )
+            .map(Filter)
+            .collect()),
+            "less_filters" => Ok(crate::Filter::all_with_operator(BinaryOperator::Less)
+                .map(Filter)
+                .collect()),
+            "less_or_equal_filters" => Ok(crate::Filter::all_with_operator(
+                BinaryOperator::LessOrEqual,
+            )
+            .map(Filter)
+            .collect()),
+            "between_filters" => Ok(LogicalOp::iter()
+                .cartesian_product(
+                    iter::once(FilterOp::Between { negated: true })
+                        .chain(iter::once(FilterOp::Between { negated: false })),
+                )
+                .map(|(extend_where_with, operation)| crate::Filter {
+                    extend_where_with,
+                    operation,
+                })
+                .map(Filter)
+                .collect()),
+            "is_null_filters" => Ok(LogicalOp::iter()
+                .cartesian_product(
+                    iter::once(FilterOp::IsNull { negated: true })
+                        .chain(iter::once(FilterOp::IsNull { negated: false })),
+                )
+                .map(|(extend_where_with, operation)| crate::Filter {
+                    extend_where_with,
+                    operation,
+                })
+                .map(Filter)
+                .collect()),
+            "distinct" => Ok(vec![Distinct].into()),
+            "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
+            "inner_join" => Ok(vec![Join(JoinOperator::InnerJoin)].into()),
+            "left_join" => Ok(vec![Join(JoinOperator::LeftJoin)].into()),
+            "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter].into()),
+            "project_literal" => Ok(vec![ProjectLiteral].into()),
+            "multiple_parameters" | "params" => Ok(vec![MultipleParameters].into()),
+            "project_builtin" => Ok(BuiltinFunction::iter()
+                .map(ProjectBuiltinFunction)
+                .collect()),
+            "subqueries" => Ok(SubqueryPosition::iter().map(Subquery).collect()),
+            "cte" => Ok(vec![Subquery(SubqueryPosition::CTE)].into()),
+            "join_subquery" => Ok(vec![Subquery(SubqueryPosition::Join)].into()),
+            "topk" => Ok(ALL_TOPK.to_vec().into()),
+            s => Err(anyhow!("unknown query operation: {}", s)),
+        }
+    }
+}
+
+impl FromIterator<QueryOperation> for Operations {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = QueryOperation>,
+    {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for Operations {
+    type Item = QueryOperation;
+
+    type IntoIter = <Vec<QueryOperation> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Operations {
+    type Item = &'a QueryOperation;
+
+    type IntoIter = <&'a Vec<QueryOperation> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
+    }
+}
+
+/// Representation of a list of subsets of query operations, as specified by the user on the command
+/// line.
+///
+/// `OperationList` can be converted from a (user-supplied) string using [`FromStr::from_str`],
+/// using a comma-separated list of [`Operations`]
+#[repr(transparent)]
+#[derive(Clone)]
+pub struct OperationList(pub Vec<Operations>);
+
+impl FromStr for OperationList {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(
             s.split(',')
-                .map(|s| -> anyhow::Result<Vec<_>> {
-                    match s {
-                        "aggregates" => Ok(AggregateType::iter().map(ColumnAggregate).collect()),
-                        "count" => Ok(vec![ColumnAggregate(AggregateType::Count)]),
-                        "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum)]),
-                        "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg)]),
-                        "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)]),
-                        "max" => Ok(vec![ColumnAggregate(AggregateType::Max)]),
-                        "min" => Ok(vec![ColumnAggregate(AggregateType::Min)]),
-                        "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
-                        "equal_filters" => {
-                            Ok(crate::Filter::all_with_operator(BinaryOperator::Equal)
-                                .map(Filter)
-                                .collect())
-                        }
-                        "not_equal_filters" => {
-                            Ok(crate::Filter::all_with_operator(BinaryOperator::NotEqual)
-                                .map(Filter)
-                                .collect())
-                        }
-                        "greater_filters" => {
-                            Ok(crate::Filter::all_with_operator(BinaryOperator::Greater)
-                                .map(Filter)
-                                .collect())
-                        }
-                        "greater_or_equal_filters" => Ok(crate::Filter::all_with_operator(
-                            BinaryOperator::GreaterOrEqual,
-                        )
-                        .map(Filter)
-                        .collect()),
-                        "less_filters" => {
-                            Ok(crate::Filter::all_with_operator(BinaryOperator::Less)
-                                .map(Filter)
-                                .collect())
-                        }
-                        "less_or_equal_filters" => Ok(crate::Filter::all_with_operator(
-                            BinaryOperator::LessOrEqual,
-                        )
-                        .map(Filter)
-                        .collect()),
-                        "between_filters" => Ok(LogicalOp::iter()
-                            .cartesian_product(
-                                iter::once(FilterOp::Between { negated: true })
-                                    .chain(iter::once(FilterOp::Between { negated: false })),
-                            )
-                            .map(|(extend_where_with, operation)| crate::Filter {
-                                extend_where_with,
-                                operation,
-                            })
-                            .map(Filter)
-                            .collect()),
-                        "is_null_filters" => Ok(LogicalOp::iter()
-                            .cartesian_product(
-                                iter::once(FilterOp::IsNull { negated: true })
-                                    .chain(iter::once(FilterOp::IsNull { negated: false })),
-                            )
-                            .map(|(extend_where_with, operation)| crate::Filter {
-                                extend_where_with,
-                                operation,
-                            })
-                            .map(Filter)
-                            .collect()),
-                        "distinct" => Ok(vec![Distinct]),
-                        "joins" => Ok(JOIN_OPERATORS.iter().cloned().map(Join).collect()),
-                        "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter]),
-                        "project_literal" => Ok(vec![ProjectLiteral]),
-                        "multiple_parameters" | "params" => Ok(vec![MultipleParameters]),
-                        "project_builtin" => Ok(BuiltinFunction::iter()
-                            .map(QueryOperation::ProjectBuiltinFunction)
-                            .collect()),
-                        "topk" => Ok(ALL_TOPK.to_vec()),
-                        s => Err(anyhow!("unknown query operation: {}", s)),
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .multi_cartesian_product()
-                .collect(),
+                .map(Operations::from_str)
+                .collect::<Result<Vec<_>, _>>()?,
         ))
+    }
+}
+
+impl OperationList {
+    /// Generate a set of permutations of all the sets of [`QueryOperation`]s represented by the
+    /// [`Operations`] in this `OperationList`.
+    pub fn permute(&self) -> impl Iterator<Item = Vec<QueryOperation>> + '_ {
+        self.0
+            .iter()
+            .multi_cartesian_product()
+            .map(|ops| ops.into_iter().cloned().collect())
+    }
+}
+
+/// A specification for a subquery included in a query
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subquery {
+    /// Where does the subquery appear in the query?
+    position: SubqueryPosition,
+
+    /// The specification for the query itself
+    seed: QuerySeed,
+}
+
+impl Subquery {
+    fn add_to_query<'state>(self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
+        let mut subquery = self.seed.generate(state);
+        // just use the first selected column as the join key (maybe change this later)
+        let right_join_col = match subquery.fields.first_mut() {
+            Some(FieldDefinitionExpression::Expression {
+                alias: Some(alias), ..
+            }) => alias.clone(),
+            Some(FieldDefinitionExpression::Expression {
+                alias: alias @ None,
+                ..
+            }) => alias.insert(state.fresh_alias()).clone(),
+            _ => panic!("Could not find a join key in subquery: {}", subquery),
+        };
+
+        let left_join_col = column_in_query(state, query);
+
+        let subquery_name = state.fresh_alias();
+        let join_rhs = match self.position {
+            SubqueryPosition::CTE => {
+                query.ctes.push(CommonTableExpression {
+                    name: subquery_name.clone(),
+                    statement: subquery,
+                });
+                JoinRightSide::Table(Table {
+                    name: subquery_name.clone().into(),
+                    schema: None,
+                    alias: None,
+                })
+            }
+            SubqueryPosition::Join => {
+                JoinRightSide::NestedSelect(Box::new(subquery), Some(subquery_name.clone()))
+            }
+        };
+
+        query.join.push(JoinClause {
+            // TODO(grfn): Pick other join operators
+            operator: JoinOperator::InnerJoin,
+            right: join_rhs,
+            constraint: JoinConstraint::On(Expression::BinaryOp {
+                lhs: Box::new(Expression::Column(left_join_col)),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expression::Column(Column {
+                    name: right_join_col,
+                    table: Some(subquery_name),
+                    function: None,
+                })),
+            }),
+        })
+    }
+}
+
+/// A specification for generating an individual query
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuerySeed {
+    /// The set of operations to include in the query
+    operations: Vec<QueryOperation>,
+
+    /// A set of subqueries to include in the query
+    subqueries: Vec<Subquery>,
+}
+
+impl QuerySeed {
+    /// Construct a new QuerySeed with the given operations and subqueries
+    pub fn new(operations: Vec<QueryOperation>, subqueries: Vec<Subquery>) -> Self {
+        Self {
+            operations,
+            subqueries,
+        }
+    }
+
+    fn generate<'gen>(self, state: &mut QueryState<'gen>) -> SelectStatement {
+        let mut query = SelectStatement::default();
+
+        for op in self.operations {
+            op.add_to_query(state, &mut query);
+        }
+
+        for subquery in self.subqueries {
+            subquery.add_to_query(state, &mut query);
+        }
+
+        if query.fields.is_empty() {
+            let col = column_in_query(state, &mut query);
+            query.fields.push(FieldDefinitionExpression::Expression {
+                expr: Expression::Column(col.clone()),
+                alias: Some(state.fresh_alias()),
+            });
+
+            if query.tables.is_empty() {
+                query.tables.push(Table {
+                    name: col.table.unwrap(),
+                    alias: None,
+                    schema: None,
+                });
+            }
+        }
+
+        if query_has_aggregate(&query) {
+            let mut group_by = query.group_by.take().unwrap_or_default();
+            // Fill the GROUP BY with all columns not mentioned in an aggregate
+            let existing_group_by_cols: HashSet<_> = group_by.columns.iter().cloned().collect();
+            for field in &query.fields {
+                if let FieldDefinitionExpression::Expression { expr, .. } = field {
+                    if !contains_aggregate(expr) {
+                        for col in expr.referred_columns() {
+                            if !existing_group_by_cols.contains(col) {
+                                group_by.columns.push(col.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TODO: once we support HAVING we'll need to check that here too
+            if !group_by.columns.is_empty() {
+                query.group_by = Some(group_by);
+            }
+        }
+
+        query
+    }
+}
+
+fn parse_num_operations<T>(s: &str) -> anyhow::Result<BoundPair<T>>
+where
+    T: FromStr + Clone,
+    <T as FromStr>::Err: Send + Sync + Error + 'static,
+{
+    use Bound::*;
+
+    let (lower_s, upper_s) = match s.split_once("..") {
+        Some(lu) => lu,
+        None => {
+            let n = T::from_str(s)?;
+            return Ok((Included(n.clone()), Included(n)));
+        }
+    };
+
+    let lower = T::from_str(lower_s)?;
+
+    if upper_s.starts_with("=") {
+        Ok((Included(lower), Included(T::from_str(&upper_s[1..])?)))
+    } else {
+        Ok((Included(lower), Excluded(T::from_str(upper_s)?)))
+    }
+}
+
+#[derive(Clap, Clone)]
+pub struct GenerateOpts {
+    /// Comma-separated list of query operations to generate top-level queries with
+    ///
+    /// If not specified, will permute the set of all possible query operations.
+    #[clap(long)]
+    pub operations: Option<OperationList>,
+
+    /// Maximum recursion depth to use when generating subqueries
+    #[clap(long, default_value = "2")]
+    pub subquery_depth: usize,
+
+    /// Range of operations to be used in a single query, represented as either a single number or a
+    /// Rust-compatible range
+    ///
+    /// If not specified, queries will all contain a number of operations equal to the length of
+    /// `operations`.
+    #[clap(long, parse(try_from_str = parse_num_operations))]
+    pub num_operations: Option<BoundPair<usize>>,
+}
+
+impl GenerateOpts {
+    /// Construct an iterator of [`QuerySeed`]s from the options in self.
+    ///
+    /// This involves permuting [`Self::operations`] up to [`Self::num_operations`] times, and
+    /// recursively generating subqueries up to a depth of [`Self::subquery_depth`]
+    pub fn into_query_seeds(self) -> impl Iterator<Item = QuerySeed> {
+        let operations: Vec<_> = match self.operations {
+            Some(OperationList(ops)) => ops.into_iter().flat_map(|ops| ops.into_iter()).collect(),
+            None => ALL_OPERATIONS.clone(),
+        };
+
+        let (subqueries, operations): (Vec<SubqueryPosition>, Vec<QueryOperation>) =
+            operations.into_iter().partition_map(|op| {
+                if let QueryOperation::Subquery(position) = op {
+                    Either::Left(position)
+                } else {
+                    Either::Right(op)
+                }
+            });
+
+        let num_operations = match self.num_operations {
+            None => Either::Left(1..=operations.len()),
+            Some(num_ops) => Either::Right(num_ops.into_iter().unwrap()),
+        };
+
+        let available_ops: Vec<_> = num_operations
+            .flat_map(|depth| operations.clone().into_iter().combinations(depth))
+            .collect();
+
+        fn make_seeds(
+            subquery_depth: usize,
+            operations: Vec<QueryOperation>,
+            subqueries: Vec<SubqueryPosition>,
+            available_ops: Vec<Vec<QueryOperation>>,
+        ) -> impl Iterator<Item = QuerySeed> {
+            if subquery_depth == 0 {
+                Either::Left(iter::once(QuerySeed {
+                    operations,
+                    subqueries: vec![],
+                }))
+            } else {
+                Either::Right(
+                    subqueries
+                        .iter()
+                        .cloned()
+                        .map(|position| {
+                            available_ops
+                                .clone()
+                                .into_iter()
+                                .flat_map(|operations| {
+                                    make_seeds(
+                                        subquery_depth - 1,
+                                        operations,
+                                        subqueries.clone(),
+                                        available_ops.clone(),
+                                    )
+                                })
+                                .map(|seed| Subquery { position, seed })
+                                .collect::<Vec<_>>()
+                        })
+                        .multi_cartesian_product()
+                        .map(move |subqueries| QuerySeed {
+                            operations: operations.clone(),
+                            subqueries,
+                        }),
+                )
+            }
+        }
+
+        let subquery_depth = self.subquery_depth;
+        available_ops.clone().into_iter().flat_map(move |ops| {
+            make_seeds(
+                subquery_depth,
+                ops,
+                subqueries.clone(),
+                available_ops.clone(),
+            )
+        })
     }
 }
 
@@ -1373,28 +1679,42 @@ impl FromStr for Operations {
 mod tests {
     use super::*;
 
-    fn generate_query<'a, I>(ops: I) -> SelectStatement
-    where
-        I: IntoIterator<Item = &'a QueryOperation>,
-    {
+    fn generate_query(operations: Vec<QueryOperation>) -> SelectStatement {
         let mut gen = GeneratorState::default();
-        gen.generate_query(ops).statement
+        let seed = QuerySeed {
+            operations,
+            subqueries: vec![],
+        };
+        gen.generate_query(seed).statement
     }
 
     #[test]
-    fn parse_operations() {
+    fn parse_operation_list() {
         let src = "aggregates,joins";
-        let Operations(res) = Operations::from_str(src).unwrap();
-        assert_eq!(res.len(), 18);
-        assert!(res.contains(&vec![
-            QueryOperation::ColumnAggregate(AggregateType::Count),
-            QueryOperation::Join(JoinOperator::LeftJoin)
-        ]))
+        let OperationList(res) = OperationList::from_str(src).unwrap();
+        assert_eq!(
+            res,
+            vec![
+                Operations(vec![
+                    QueryOperation::ColumnAggregate(AggregateType::Count),
+                    QueryOperation::ColumnAggregate(AggregateType::Sum),
+                    QueryOperation::ColumnAggregate(AggregateType::Avg),
+                    QueryOperation::ColumnAggregate(AggregateType::GroupConcat),
+                    QueryOperation::ColumnAggregate(AggregateType::Max),
+                    QueryOperation::ColumnAggregate(AggregateType::Min),
+                ]),
+                Operations(vec![
+                    QueryOperation::Join(JoinOperator::LeftJoin),
+                    QueryOperation::Join(JoinOperator::LeftOuterJoin),
+                    QueryOperation::Join(JoinOperator::InnerJoin),
+                ])
+            ]
+        );
     }
 
     #[test]
     fn single_join() {
-        let query = generate_query(&[QueryOperation::Join(JoinOperator::LeftJoin)]);
+        let query = generate_query(vec![QueryOperation::Join(JoinOperator::LeftJoin)]);
         eprintln!("query: {}", query);
         assert_eq!(query.tables.len(), 1);
         assert_eq!(query.join.len(), 1);
@@ -1420,6 +1740,34 @@ mod tests {
                 }
             }
             constraint => unreachable!("Unexpected constraint: {:?}", constraint),
+        }
+    }
+
+    mod parse_num_operations {
+        use super::*;
+
+        #[test]
+        fn number() {
+            assert_eq!(
+                parse_num_operations::<usize>("13").unwrap(),
+                (Bound::Included(13), Bound::Included(13))
+            );
+        }
+
+        #[test]
+        fn exclusive() {
+            assert_eq!(
+                parse_num_operations::<usize>("0..9").unwrap(),
+                (Bound::Included(0), Bound::Excluded(9))
+            )
+        }
+
+        #[test]
+        fn inclusive() {
+            assert_eq!(
+                parse_num_operations::<usize>("0..=123").unwrap(),
+                (Bound::Included(0), Bound::Included(123))
+            )
         }
     }
 }

@@ -31,3 +31,4 @@ strum = "0.20.0"
 strum_macros = "0.20.1"
 thiserror = "1.0.24"
 tokio = "1.5.0"
+launchpad = { path = "../launchpad" }
