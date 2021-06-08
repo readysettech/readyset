@@ -1,5 +1,7 @@
-use crate::metrics::NoriaMetricsRecorder;
-use crate::{Builder, Handle};
+use std::env;
+use std::sync::Arc;
+use std::time::Duration;
+
 use dataflow::{DurabilityMode, PersistenceParameters};
 use noria::consensus::LocalAuthority;
 use noria::{
@@ -7,9 +9,11 @@ use noria::{
     metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
 };
 
-use std::env;
-use std::sync::Arc;
-use std::time::Duration;
+use crate::metrics::{
+    get_global_recorder_opt, install_global_recorder, BufferedRecorder, CompositeMetricsRecorder,
+    MetricsRecorder, NoriaMetricsRecorder,
+};
+use crate::{Builder, Handle};
 
 pub const DEFAULT_SETTLE_TIME_MS: u64 = 200;
 pub const DEFAULT_SHARDING: usize = 2;
@@ -112,8 +116,11 @@ pub async fn initialize_metrics(
     handle: &mut Handle<LocalAuthority>,
 ) -> MetricsClient<LocalAuthority> {
     unsafe {
-        if !NoriaMetricsRecorder::installed() {
-            NoriaMetricsRecorder::install(1024).unwrap();
+        if get_global_recorder_opt().is_none() {
+            let rec = CompositeMetricsRecorder::new();
+            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+            let bufrec = BufferedRecorder::new(rec, 1024);
+            install_global_recorder(bufrec).unwrap();
         }
     }
 

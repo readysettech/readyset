@@ -36,8 +36,9 @@ pin-project = "1.0.6"
 hyper = { version = "0.14.4", features = [ "stream", "server" ] }
 itertools = "0.10.0"
 maths = { version = "0.0.1", path = "../../maths" }
-metrics = "0.14"
+metrics = "0.14.2"
 metrics-util = "0.6.2"
+metrics-exporter-prometheus = "0.3.0"
 crossbeam = "0.8"
 nom = "5"
 nom-sql = { version = "0.0.11", path = "../../nom-sql" }

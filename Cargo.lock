@@ -3001,6 +3001,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-exporter-prometheus"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d23bb354bd7dd5d244f2e9a389a0c3249bb6b994aca71bd6c2f7cd6fa2657fc"
+dependencies = [
+ "hyper 0.14.7",
+ "metrics",
+ "metrics-util",
+ "parking_lot 0.11.1",
+ "quanta 0.7.2",
+ "thiserror",
+ "tokio 1.5.0",
+]
+
+[[package]]
 name = "metrics-macros"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4043,6 +4058,7 @@ dependencies = [
  "maplit",
  "maths",
  "metrics",
+ "metrics-exporter-prometheus",
  "metrics-util",
  "mysql 18.2.0",
  "mysql_connector",
