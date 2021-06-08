@@ -1046,18 +1046,19 @@ impl QueryOperation {
             }
 
             QueryOperation::Filter(filter) => {
+                let alias = state.fresh_alias();
                 let tbl = state.some_table_mut();
                 let col = tbl.some_column_with_type(SqlType::Int(1));
 
-                query.fields.push(FieldDefinitionExpression::from(Column {
+                let col_expr = Expression::Column(Column {
                     table: Some(tbl.name.clone().into()),
                     ..col.clone().into()
-                }));
+                });
 
-                let col_expr = Box::new(Expression::Column(Column {
-                    table: Some(tbl.name.clone().into()),
-                    ..col.clone().into()
-                }));
+                query.fields.push(FieldDefinitionExpression::Expression {
+                    expr: col_expr.clone(),
+                    alias: Some(alias),
+                });
 
                 let cond = match filter.operation {
                     FilterOp::Comparison { op, rhs } => {
@@ -1077,12 +1078,12 @@ impl QueryOperation {
 
                         Expression::BinaryOp {
                             op,
-                            lhs: col_expr,
+                            lhs: Box::new(col_expr),
                             rhs,
                         }
                     }
                     FilterOp::Between { negated } => Expression::Between {
-                        operand: col_expr,
+                        operand: Box::new(col_expr),
                         min: Box::new(Expression::Literal(Literal::Integer(1))),
                         max: Box::new(Expression::Literal(Literal::Integer(5))),
                         negated,
@@ -1090,7 +1091,7 @@ impl QueryOperation {
                     FilterOp::IsNull { negated } => {
                         tbl.expect_value(col.clone(), DataType::None);
                         Expression::BinaryOp {
-                            lhs: col_expr,
+                            lhs: Box::new(col_expr),
                             op: if negated {
                                 BinaryOperator::Is
                             } else {
@@ -1139,14 +1140,20 @@ impl QueryOperation {
                     }),
                 });
 
-                query.fields.push(FieldDefinitionExpression::from(Column {
-                    table: Some(left_table_name.into()),
-                    ..left_projected.into()
-                }));
-                query.fields.push(FieldDefinitionExpression::from(Column {
-                    table: Some(right_table_name.into()),
-                    ..right_projected.into()
-                }));
+                query.fields.push(FieldDefinitionExpression::Expression {
+                    expr: Expression::Column(Column {
+                        table: Some(left_table_name.into()),
+                        ..left_projected.into()
+                    }),
+                    alias: Some(state.fresh_alias()),
+                });
+                query.fields.push(FieldDefinitionExpression::Expression {
+                    expr: Expression::Column(Column {
+                        table: Some(right_table_name.into()),
+                        ..right_projected.into()
+                    }),
+                    alias: Some(state.fresh_alias()),
+                });
             }
 
             QueryOperation::ProjectLiteral => {
