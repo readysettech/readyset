@@ -1,13 +1,14 @@
 //! Data types representing metrics dumped from a running Noria instance
 
-/// A client for accessing noria metrics for a deployment.
-pub mod client;
-
-pub use metrics::Key;
-use metrics_util::Histogram;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
+
+pub use metrics::Key;
+use metrics_util::Histogram;
+
+/// A client for accessing noria metrics for a deployment.
+pub mod client;
 
 /// Documents the set of metrics that are currently being recorded within
 /// a ReadySet instance.

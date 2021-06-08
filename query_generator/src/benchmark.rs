@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::fmt::{self, Display};
+use std::str::FromStr;
+use std::time::Duration;
+
 use anyhow::anyhow;
 use clap::Clap;
-
 use humantime::format_duration;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
@@ -9,10 +13,6 @@ use regex::Regex;
 use serde::Serialize;
 use serde_with::{serde_as, DurationNanoSeconds};
 use size_format::SizeFormatterSI;
-use std::collections::HashMap;
-use std::fmt::{self, Display};
-use std::str::FromStr;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::time::Instant;
 
@@ -20,7 +20,10 @@ use noria::consensus::LocalAuthority;
 use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
-use noria_server::metrics::NoriaMetricsRecorder;
+use noria_server::metrics::{
+    get_global_recorder, install_global_recorder, BufferedRecorder, Clear,
+    CompositeMetricsRecorder, MetricsRecorder, NoriaMetricsRecorder,
+};
 use noria_server::{DurabilityMode, PersistenceParameters};
 use query_generator::{ColumnName, GenerateOpts, GeneratorState, QuerySeed, TableName};
 
@@ -213,7 +216,9 @@ impl Benchmark {
     pub async fn run(self) -> anyhow::Result<()> {
         // SAFETY: Called before we spawn any other tasks
         unsafe {
-            NoriaMetricsRecorder::install(1024)?;
+            let rec = CompositeMetricsRecorder::new();
+            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+            install_global_recorder(BufferedRecorder::new(rec, 1024))?;
         }
 
         let queries = self.options.clone().into_query_seeds().collect::<Vec<_>>();
@@ -355,7 +360,7 @@ impl Benchmark {
                 .unwrap_or(0f64);
             let forward_time = Duration::from_micros(forward_time.round() as u64);
 
-            NoriaMetricsRecorder::get().clear();
+            get_global_recorder().clear();
             Ok(QueryBenchmarkResult {
                 query: format!("{}", query.statement),
                 rows_per_table: self.rows_per_table,

@@ -53,37 +53,38 @@
 //!
 //! (TODO: write this section)
 
-use crate::controller::{ControllerOuter, ControllerRequest};
-
-use futures_util::future::TryFutureExt;
-use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
-use hyper::{service::make_service_fn, Body, Request, Response};
-use noria::consensus::Authority;
-use noria::metrics::recorded;
-use noria::ControllerDescriptor;
-use noria::ReadySetError;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time;
+use std::time::Duration;
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+
+use futures_util::future::TryFutureExt;
+use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
+use hyper::{service::make_service_fn, Body, Request, Response};
 use stream_cancel::Valve;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
-
-use crate::handle::Handle;
-use crate::worker::{Worker, WorkerRequest};
-use crate::{Config, NoriaMetricsRecorder};
-use dataflow::Readers;
-use noria::metrics::MetricsDump;
-use std::time::Duration;
-use tokio::net::TcpListener;
 use url::Url;
+
+use dataflow::Readers;
+use noria::consensus::Authority;
+use noria::metrics::recorded;
+use noria::ControllerDescriptor;
+use noria::ReadySetError;
+
+use crate::controller::{ControllerOuter, ControllerRequest};
+use crate::handle::Handle;
+use crate::metrics::{get_global_recorder, Clear, RecorderType};
+use crate::worker::{Worker, WorkerRequest};
+use crate::Config;
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// instance. Make sure that this method is run while on a runtime.
@@ -267,18 +268,21 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                 return Box::pin(async move { Ok(res.unwrap()) });
             }
             (&Method::POST, "/metrics_dump") => {
-                let recorder = NoriaMetricsRecorder::get();
-                let (counters, gauges, histograms) =
-                    recorder.with_metrics(|c, g, h| (c.clone(), g.clone(), h.clone()));
-                let md = MetricsDump::from_metrics(counters, gauges, histograms);
-                let res = res
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(hyper::Body::from(serde_json::to_vec(&md).unwrap()));
+                let res = get_global_recorder().flush_and_then(|recorder| {
+                    match recorder.render(RecorderType::Noria) {
+                        Some(metrics) => res
+                            .header(CONTENT_TYPE, "application/json")
+                            .body(hyper::Body::from(metrics)),
+                        None => res
+                            .status(404)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from("No recorder for Noria".to_string())),
+                    }
+                });
                 return Box::pin(async move { Ok(res.unwrap()) });
             }
             (&Method::POST, "/reset_metrics") => {
-                let recorder = NoriaMetricsRecorder::get();
-                recorder.clear();
+                get_global_recorder().clear();
                 let res = res
                     .header(CONTENT_TYPE, "application/json")
                     .body(hyper::Body::from(vec![]));

@@ -1,12 +1,18 @@
 #![warn(clippy::dbg_macro)]
-use clap::value_t_or_exit;
-use futures_util::future::{self, Either};
-use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
+
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::Duration;
+
+use clap::value_t_or_exit;
+use futures_util::future::{self, Either};
+
+use noria_server::metrics::{
+    install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
+};
+use noria_server::{Builder, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority};
 
 const PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 
@@ -224,7 +230,10 @@ If specified, overrides the value of --external-address"))
 
     // SAFETY: we haven't initialized threads that might call the recorder yet
     unsafe {
-        NoriaMetricsRecorder::install(metrics_queue_len).unwrap();
+        let rec = CompositeMetricsRecorder::new();
+        rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+        let bufrec = BufferedRecorder::new(rec, metrics_queue_len);
+        install_global_recorder(bufrec).unwrap();
     }
 
     let mut authority =
