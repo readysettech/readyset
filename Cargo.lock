@@ -1575,6 +1575,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastly-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.0.0-beta.2",
+ "mysql 20.1.0",
+ "nom 5.1.2",
+ "nom-sql",
+ "noria-logictest",
+ "query_generator",
+ "tokio 1.5.0",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,54 @@
+use clap::{Clap, ValueHint};
+use fastly_demo::generate::load;
+use fastly_demo::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use noria_logictest::generate::DatabaseURL;
+use std::convert::TryFrom;
+use std::env;
+use std::path::PathBuf;
+
+#[derive(Clap)]
+#[clap(name = "data_generator")]
+struct DataGenerator {
+    /// The number of rows to generate for the article table.
+    #[clap(long, default_value = "10")]
+    article_table_rows: usize,
+
+    /// The number of rows to generate for the users table.
+    #[clap(long, default_value = "10")]
+    user_table_rows: usize,
+
+    /// The number of rows to generate for the recommendations table per user.
+    #[clap(long, default_value = "10")]
+    per_user_recs: usize,
+
+    /// Path to the fastly data model SQL schema.
+    #[clap(long, value_hint = ValueHint::AnyPath)]
+    schema: Option<PathBuf>,
+
+    /// MySQL database connection string.
+    #[clap(long)]
+    database_url: DatabaseURL,
+}
+
+impl DataGenerator {
+    pub async fn run(self) -> anyhow::Result<()> {
+        let fastly_schema = DatabaseSchema::try_from(self.schema.unwrap_or_else(|| {
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/fastly_db.sql")
+        }))?;
+        let database_spec = DatabaseGenerationSpec::new(fastly_schema)
+            .table_rows("articles", self.article_table_rows)
+            .table_rows("users", self.user_table_rows)
+            .table_rows("recommendations", self.user_table_rows * self.per_user_recs);
+
+        let mut conn = self.database_url.connect().await?;
+        load(&mut conn, database_spec).await?;
+
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let data_generator = DataGenerator::parse();
+    data_generator.run().await
+}

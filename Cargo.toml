@@ -19,7 +19,8 @@ members = [
     "replicators",
     "query_generator",
     "taster",
-    "maths"
+    "maths",
+    "demos/fastly"
 ]
 [profile.release]
 debug=true
