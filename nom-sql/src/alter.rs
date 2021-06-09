@@ -227,7 +227,7 @@ mod tests {
         };
 
         let result = format!("{}", stmt);
-        assert_eq!(result, "ALTER TABLE t ADD COLUMN c INT(32) NULL");
+        assert_eq!(result, "ALTER TABLE t ADD COLUMN c INT(32)");
     }
 
     #[test]
