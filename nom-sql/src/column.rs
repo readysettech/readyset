@@ -18,7 +18,7 @@ use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::{alt, complete, do_parse, map, named, opt, tag, tag_no_case, IResult};
+use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
 use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -93,6 +93,7 @@ impl PartialOrd for Column {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ColumnConstraint {
+    Null,
     NotNull,
     CharacterSet(String),
     Collation(String),
@@ -108,6 +109,7 @@ pub enum ColumnConstraint {
 impl fmt::Display for ColumnConstraint {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            ColumnConstraint::Null => write!(f, "NULL"),
             ColumnConstraint::NotNull => write!(f, "NOT NULL"),
             ColumnConstraint::CharacterSet(ref charset) => write!(f, "CHARACTER SET {}", charset),
             ColumnConstraint::Collation(ref collation) => write!(f, "COLLATE {}", collation),
@@ -195,7 +197,7 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     ))
 }
 
-fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
+fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     let (remaining_input, (_, _, _, def, _)) = tuple((
         multispace0,
         tag_no_case("default"),
@@ -222,7 +224,7 @@ fn default(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         multispace0,
     ))(i)?;
 
-    Ok((remaining_input, Some(ColumnConstraint::DefaultValue(def))))
+    Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
 }
 
 named!(
@@ -243,22 +245,22 @@ named!(
     )
 );
 
-pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
+pub fn column_constraint(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     let not_null = map(
         delimited(multispace0, tag_no_case("not null"), multispace0),
-        |_| Some(ColumnConstraint::NotNull),
+        |_| ColumnConstraint::NotNull,
     );
     let null = map(
         delimited(multispace0, tag_no_case("null"), multispace0),
-        |_| None,
+        |_| ColumnConstraint::Null,
     );
     let auto_increment = map(
         delimited(multispace0, tag_no_case("auto_increment"), multispace0),
-        |_| Some(ColumnConstraint::AutoIncrement),
+        |_| ColumnConstraint::AutoIncrement,
     );
     let primary_key = map(
         delimited(multispace0, tag_no_case("primary key"), multispace0),
-        |_| Some(ColumnConstraint::PrimaryKey),
+        |_| ColumnConstraint::PrimaryKey,
     );
     let unique = map(
         delimited(
@@ -266,7 +268,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
             delimited(tag_no_case("unique"), multispace0, opt(tag_no_case("key"))),
             multispace0,
         ),
-        |_| Some(ColumnConstraint::Unique),
+        |_| ColumnConstraint::Unique,
     );
     let character_set = map(
         preceded(
@@ -275,7 +277,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         ),
         |cs| {
             let char_set = str::from_utf8(cs).unwrap().to_owned();
-            Some(ColumnConstraint::CharacterSet(char_set))
+            ColumnConstraint::CharacterSet(char_set)
         },
     );
     let collate = map(
@@ -285,7 +287,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         ),
         |c| {
             let collation = str::from_utf8(c).unwrap().to_owned();
-            Some(ColumnConstraint::Collation(collation))
+            ColumnConstraint::Collation(collation)
         },
     );
 
@@ -298,7 +300,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], Option<ColumnConstraint>> {
         unique,
         character_set,
         collate,
-        |i| map!(i, on_update_current_timestamp, Some),
+        on_update_current_timestamp,
     ))(i)
 }
 
@@ -320,7 +322,7 @@ pub fn column_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
         ColumnSpecification {
             column,
             sql_type,
-            constraints: constraints.into_iter().flatten().collect(),
+            constraints,
             comment,
         },
     ))
@@ -352,6 +354,14 @@ mod tests_mysql {
                 ]
             }
         );
+    }
+
+    #[test]
+    fn null_round_trip() {
+        let input = b"c INT(32) NULL";
+        let cspec = column_specification(input).unwrap().1;
+        let res = cspec.to_string();
+        assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
     }
 }
 
