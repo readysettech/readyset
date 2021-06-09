@@ -138,12 +138,6 @@ impl fmt::Display for ColumnSpecification {
             escape_if_keyword(&self.column.name),
             self.sql_type
         )?;
-
-        if !self.constraints.contains(&ColumnConstraint::NotNull) {
-            // If the column is not NOT NULL it is NULL
-            write!(f, " NULL")?;
-        }
-
         for constraint in self
             .constraints
             .iter()
