@@ -96,6 +96,17 @@ impl RunOptions {
     }
 }
 
+fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) -> bool {
+    if type_sensitive {
+        return results == expected;
+    }
+
+    results
+        .iter()
+        .zip(expected)
+        .all(|(res, expected)| res.compare_type_insensitive(expected))
+}
+
 impl TestScript {
     pub fn read<R: io::Read>(path: PathBuf, input: R) -> anyhow::Result<Self> {
         let records = parser::read_records(input)?;
@@ -327,7 +338,7 @@ impl TestScript {
                 }
             }
             QueryResults::Results(expected_vals) => {
-                if vals != *expected_vals {
+                if !compare_results(&vals, expected_vals, query.column_types.is_some()) {
                     bail!(
                         "Incorrect values returned from query (left: expected, right: actual): \n{}",
                         pretty_assertions::Comparison::new(expected_vals, &vals)

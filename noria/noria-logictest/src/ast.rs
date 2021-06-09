@@ -354,6 +354,14 @@ impl Value {
         }
         context.compute()
     }
+
+    pub fn compare_type_insensitive(&self, other: &Self) -> bool {
+        match other.typ() {
+            None => *self == Value::Null,
+            Some(typ) => Self::from_mysql_value_with_type(mysql::Value::from(self), &typ)
+                .map_or(false, |v| v == *other),
+        }
+    }
 }
 
 /// The expected results of a query. Past a [`HashThreshold`][Record::HashThreshold], an [`md5`] sum
