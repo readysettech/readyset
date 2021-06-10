@@ -13,7 +13,7 @@ colored = "2.0.0"
 derive_more = "0.99.11"
 hex = "0.4.2"
 md5 = "0.7.0"
-mysql = "20.1.0"
+mysql_async = { git = "https://github.com/readysettech/mysql_async" }
 nom = "5.1.2"
 nom-trace = "0.2.1"
 zookeeper = "0.5.9"
