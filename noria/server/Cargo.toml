@@ -78,7 +78,7 @@ mir = { version = "0.7.0", path = "mir", package = "noria-mir" }
 common = { version = "0.7.0", path = "common", package = "noria-common" }
 noria = { version = "0.7.0", path = "../noria" }
 launchpad = { path = "../../launchpad" }
-mysql_connector = { path = "../../connectors/mysql_connector" }
+replicators = { path = "../../replicators" }
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }

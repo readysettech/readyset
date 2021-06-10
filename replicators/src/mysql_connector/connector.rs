@@ -1,16 +1,17 @@
+use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::proto::MySerialize;
+use noria::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult};
 use std::convert::{TryFrom, TryInto};
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct BinlogPosition {
-    pub binlog_file: String,
-    pub position: u32,
-}
+use crate::noria_adapter::Connector;
+use crate::noria_adapter::ReplicationAction;
+
+use super::BinlogPosition;
 
 const CHECKSUM_QUERY: &str = "SET @master_binlog_checksum='CRC32'";
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
@@ -36,36 +37,9 @@ pub struct MySqlBinlogConnector {
     /// if one is not assigned we will use (u32::MAX - 55)
     server_id: Option<u32>,
     /// If we just want to continue reading the binlog from a previous point
-    next_position: Option<BinlogPosition>,
+    next_position: BinlogPosition,
     /// The list of schemas we are interested in, others will be filtered out
     schemas: Vec<String>,
-}
-
-/// This is the action that the connector wants Noria to execute
-#[derive(Debug)]
-pub enum BinlogAction {
-    /// Database schema has changed (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`)
-    /// the contained value is the raw MySQL query
-    SchemaChange(String),
-    /// Write new rows to the base table, each element in the vector contains is
-    /// of type [`TableOperation::Insert`](noria::TableOperation)
-    WriteRows {
-        /// Base table name
-        table: String,
-        rows: Vec<noria::TableOperation>,
-    },
-    /// Delete rows from the base table, each element in the vector contains is
-    /// of type [`TableOperation::DeleteRow`](noria::TableOperation)
-    DeleteRows {
-        table: String,
-        rows: Vec<noria::TableOperation>,
-    },
-    /// Update rows in the base table, the vector contains pairs of DeleteRow and
-    /// Insert operations
-    UpdateRows {
-        table: String,
-        rows: Vec<noria::TableOperation>,
-    },
 }
 
 impl PartialOrd for BinlogPosition {
@@ -179,13 +153,9 @@ impl MySqlBinlogConnector {
 
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
-        let cmd = if let Some(position) = &self.next_position {
-            mysql_common::packets::ComBinlogDump::new(self.server_id())
-                .with_pos(position.position)
-                .with_filename(position.binlog_file.as_bytes())
-        } else {
-            mysql_common::packets::ComBinlogDump::new(self.server_id()).with_pos(4)
-        };
+        let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
+            .with_pos(self.next_position.position)
+            .with_filename(self.next_position.binlog_file.as_bytes());
 
         let mut buf = Vec::new();
         cmd.serialize(&mut buf);
@@ -213,7 +183,7 @@ impl MySqlBinlogConnector {
     pub async fn connect<S: Into<String>, O: Into<mysql::Opts>>(
         mysql_opts: O,
         schemas: Vec<S>,
-        next_position: Option<BinlogPosition>,
+        next_position: BinlogPosition,
         server_id: Option<u32>,
     ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
@@ -247,15 +217,15 @@ impl MySqlBinlogConnector {
     }
 
     /// Process binlog events until an actionable event occurs
-    pub async fn next_action(&mut self) -> mysql::Result<(BinlogAction, Option<&BinlogPosition>)> {
+    pub(crate) async fn next_action_inner(
+        &mut self,
+    ) -> mysql::Result<(ReplicationAction, &BinlogPosition)> {
         use mysql_common::binlog::events;
 
         loop {
             let binlog_event = self.next_event().await?;
 
-            if let Some(position) = self.next_position.as_mut() {
-                position.position = binlog_event.header().log_pos();
-            }
+            self.next_position.position = binlog_event.header().log_pos();
 
             match binlog_event
                 .header()
@@ -268,11 +238,11 @@ impl MySqlBinlogConnector {
                     // The maximum size is determined by max_binlog_size.
                     let ev: events::RotateEvent = binlog_event.read_event()?;
 
-                    self.next_position = Some(BinlogPosition {
+                    self.next_position = BinlogPosition {
                         binlog_file: ev.name().to_string(),
                         // This should never happen, but better to panic than to get the wrong position
                         position: u32::try_from(ev.position()).unwrap(),
-                    });
+                    };
                 }
 
                 EventType::QUERY_EVENT => {
@@ -293,8 +263,10 @@ impl MySqlBinlogConnector {
                     }
 
                     return Ok((
-                        BinlogAction::SchemaChange(ev.query().to_string()),
-                        self.next_position.as_ref(),
+                        ReplicationAction::SchemaChange {
+                            ddl: ev.query().to_string(),
+                        },
+                        &self.next_position,
                     ));
                 }
 
@@ -333,11 +305,11 @@ impl MySqlBinlogConnector {
                     }
 
                     return Ok((
-                        BinlogAction::WriteRows {
+                        ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
-                            rows: inserted_rows,
+                            actions: inserted_rows,
                         },
-                        self.next_position.as_ref(),
+                        &self.next_position,
                     ));
                 }
 
@@ -380,11 +352,11 @@ impl MySqlBinlogConnector {
                     }
 
                     return Ok((
-                        BinlogAction::UpdateRows {
+                        ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
-                            rows: updated_rows,
+                            actions: updated_rows,
                         },
-                        self.next_position.as_ref(),
+                        &self.next_position,
                     ));
                 }
 
@@ -414,11 +386,11 @@ impl MySqlBinlogConnector {
                     }
 
                     return Ok((
-                        BinlogAction::DeleteRows {
+                        ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
-                            rows: deleted_rows,
+                            actions: deleted_rows,
                         },
-                        self.next_position.as_ref(),
+                        &self.next_position,
                     ));
                 }
 
@@ -552,4 +524,15 @@ fn binlog_row_to_noria_row(
         noria_row.push(binlog_val_to_noria_val(val, kind, meta)?);
     }
     Ok(noria_row)
+}
+
+#[async_trait]
+impl Connector for MySqlBinlogConnector {
+    async fn next_action(
+        &mut self,
+        _: ReplicationOffset,
+    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+        let (action, pos) = self.next_action_inner().await?;
+        Ok((action, pos.try_into()?))
+    }
 }

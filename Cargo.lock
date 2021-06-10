@@ -3567,22 +3567,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mysql_connector"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap 2.33.3",
- "futures 0.3.14",
- "mysql_async 0.27.1",
- "mysql_common 0.27.0",
- "nom-sql",
- "noria",
- "slog",
- "slog-term",
- "tokio 1.5.0",
-]
-
-[[package]]
 name = "named_pipe"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4061,7 +4045,6 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "mysql 18.2.0",
- "mysql_connector",
  "nom 5.1.2",
  "nom-sql",
  "noria",
@@ -4072,6 +4055,7 @@ dependencies = [
  "pin-project 1.0.7",
  "proptest",
  "rand 0.7.3",
+ "replicators",
  "reqwest 0.11.3",
  "serde",
  "serde_derive",
@@ -4747,25 +4731,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "postgres_connector"
-version = "0.1.0"
-dependencies = [
- "bytes 1.0.1",
- "chrono",
- "clap 2.33.3",
- "futures 0.3.14",
- "itertools 0.10.1",
- "native-tls",
- "noria",
- "postgres-native-tls",
- "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
- "slog",
- "slog-term",
- "tokio 1.5.0",
- "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
-]
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5432,6 +5397,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
 dependencies = [
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "replicators"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes 1.0.1",
+ "chrono",
+ "clap 3.0.0-beta.2",
+ "futures 0.3.14",
+ "itertools 0.10.1",
+ "mysql_async 0.27.1",
+ "mysql_common 0.27.0",
+ "native-tls",
+ "nom-sql",
+ "noria",
+ "postgres-native-tls",
+ "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
+ "slog",
+ "slog-term",
+ "tokio 1.5.0",
+ "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
 ]
 
 [[package]]

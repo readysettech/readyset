@@ -1,16 +1,13 @@
+use async_trait::async_trait;
 use futures::FutureExt;
-use noria::{ReadySetError, ReadySetResult, TableOperation};
+use noria::{ReadySetError, ReadySetResult, ReplicationOffset, TableOperation};
 use slog::{debug, error};
 use tokio_postgres as pgsql;
 
-use crate::noria_adapter::{PUBLICATION_NAME, REPLICATION_SLOT};
-use crate::wal_reader::{WalEvent, WalReader};
+use crate::noria_adapter::{Connector, ReplicationAction};
 
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
-pub struct PostgresPosition {
-    /// Postgres Log Sequence Number
-    pub lsn: i64,
-}
+use super::wal_reader::{WalEvent, WalReader};
+use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria" replication slot
 /// with the "noria" publication.
@@ -33,20 +30,11 @@ pub struct PostgresWalConnector {
     reader: Option<WalReader>,
     /// Stores an event that was read but not handled
     peek: Option<(WalEvent, i64)>,
-    /// If we just want to continue reading the binlog from a previous point
+    /// If we just want to continue reading the log from a previous point
     next_position: Option<PostgresPosition>,
     /// The name of the snapshot that was created with the replication slot
     pub(crate) snapshot_name: Option<String>,
     log: slog::Logger,
-}
-
-#[derive(Debug)]
-pub enum WalAction {
-    TableAction {
-        table: String,
-        actions: Vec<TableOperation>,
-        lsn: PostgresPosition,
-    },
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -78,41 +66,6 @@ pub struct CreatedSlot {
     /// The name of the output plugin used by the newly-created replication slot.
     /// Null if the created slot is physical.
     pub(crate) output_plugin: Option<String>,
-}
-
-impl From<&PostgresPosition> for noria::ReplicationOffset {
-    fn from(value: &PostgresPosition) -> Self {
-        noria::ReplicationOffset {
-            replication_log_name: String::new(),
-            offset: value.lsn as _,
-        }
-    }
-}
-
-impl From<PostgresPosition> for noria::ReplicationOffset {
-    fn from(value: PostgresPosition) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<noria::ReplicationOffset> for PostgresPosition {
-    fn from(val: noria::ReplicationOffset) -> Self {
-        PostgresPosition {
-            lsn: val.offset as _,
-        }
-    }
-}
-
-impl From<i64> for PostgresPosition {
-    fn from(val: i64) -> Self {
-        PostgresPosition { lsn: val }
-    }
-}
-
-impl std::fmt::Display for PostgresPosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}/{:x}", self.lsn >> 32, self.lsn & 0xffffffff)
-    }
 }
 
 impl PostgresWalConnector {
@@ -208,92 +161,6 @@ impl PostgresWalConnector {
             }
         } else {
             Err(ReadySetError::ReplicationFailed("Not started".to_string()))
-        }
-    }
-
-    /// Process WAL events and batch them into actions
-    pub async fn next_action(&mut self, acked_lsn: PostgresPosition) -> ReadySetResult<WalAction> {
-        // Calling the Noria API is a bit expensive, therefore we try to queue as many
-        // actions as possible before calling into the API.
-        const MAX_QUEUED_ACTIONS: usize = 100;
-        let mut cur_table = String::new();
-        let mut cur_lsn = 0;
-        let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
-
-        loop {
-            // Don't accumulate too many actions between calls
-            if actions.len() > MAX_QUEUED_ACTIONS {
-                return Ok(WalAction::TableAction {
-                    table: cur_table,
-                    actions,
-                    lsn: cur_lsn.into(),
-                });
-            }
-
-            let (event, lsn) = match self.peek.take() {
-                Some(event) => event,
-                None => self.next_event().await?,
-            };
-
-            // Check if next event is for another table, in which case we have to flush the events accumulated for this table
-            // and store the next event in `peek`.
-            match &event {
-                WalEvent::Insert { table, .. }
-                | WalEvent::DeleteRow { table, .. }
-                | WalEvent::DeleteByKey { table, .. }
-                | WalEvent::UpdateRow { table, .. }
-                | WalEvent::UpdateByKey { table, .. }
-                    if table.as_str() != cur_table =>
-                {
-                    if !actions.is_empty() {
-                        self.peek = Some((event, lsn));
-                        return Ok(WalAction::TableAction {
-                            table: cur_table,
-                            actions,
-                            lsn: cur_lsn.into(),
-                        });
-                    } else {
-                        cur_table = table.clone();
-                    }
-                }
-                _ => {}
-            }
-
-            cur_lsn = lsn;
-
-            match event {
-                WalEvent::WantsKeepaliveResponse => {
-                    self.send_standy_status_update(acked_lsn)?;
-                }
-                WalEvent::Commit => {
-                    if !actions.is_empty() {
-                        // On commit we flush, because there is no knowing when the next commit is comming
-                        return Ok(WalAction::TableAction {
-                            table: cur_table,
-                            actions,
-                            lsn: lsn.into(),
-                        });
-                    }
-                }
-                WalEvent::Insert { tuple, .. } => actions.push(TableOperation::Insert(tuple)),
-                WalEvent::DeleteRow { tuple, .. } => {
-                    actions.push(TableOperation::DeleteRow { row: tuple })
-                }
-                WalEvent::DeleteByKey { key, .. } => {
-                    actions.push(TableOperation::DeleteByKey { key })
-                }
-                WalEvent::UpdateRow {
-                    old_tuple,
-                    new_tuple,
-                    ..
-                } => {
-                    actions.push(TableOperation::DeleteRow { row: old_tuple });
-                    actions.push(TableOperation::Insert(new_tuple));
-                }
-                WalEvent::UpdateByKey { key, set, .. } => {
-                    actions.push(TableOperation::Update { key, set })
-                }
-            }
         }
     }
 
@@ -472,5 +339,103 @@ impl PostgresWalConnector {
         query: &str,
     ) -> ReadySetResult<Vec<pgsql::SimpleQueryMessage>> {
         Ok(self.client.simple_query(query).await?)
+    }
+}
+
+#[async_trait]
+impl Connector for PostgresWalConnector {
+    /// Process WAL events and batch them into actions
+    async fn next_action(
+        &mut self,
+        last_pos: ReplicationOffset,
+    ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+        // Calling the Noria API is a bit expensive, therefore we try to queue as many
+        // actions as possible before calling into the API.
+        const MAX_QUEUED_ACTIONS: usize = 100;
+        let mut cur_table = String::new();
+        let mut cur_lsn: PostgresPosition = 0.into();
+        let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
+
+        loop {
+            // Don't accumulate too many actions between calls
+            if actions.len() > MAX_QUEUED_ACTIONS {
+                return Ok((
+                    ReplicationAction::TableAction {
+                        table: cur_table,
+                        actions,
+                    },
+                    cur_lsn.into(),
+                ));
+            }
+
+            let (event, lsn) = match self.peek.take() {
+                Some(event) => event,
+                None => self.next_event().await?,
+            };
+
+            // Check if next event is for another table, in which case we have to flush the events accumulated for this table
+            // and store the next event in `peek`.
+            match &event {
+                WalEvent::Insert { table, .. }
+                | WalEvent::DeleteRow { table, .. }
+                | WalEvent::DeleteByKey { table, .. }
+                | WalEvent::UpdateRow { table, .. }
+                | WalEvent::UpdateByKey { table, .. }
+                    if table.as_str() != cur_table =>
+                {
+                    if !actions.is_empty() {
+                        self.peek = Some((event, lsn));
+                        return Ok((
+                            ReplicationAction::TableAction {
+                                table: cur_table,
+                                actions,
+                            },
+                            cur_lsn.into(),
+                        ));
+                    } else {
+                        cur_table = table.clone();
+                    }
+                }
+                _ => {}
+            }
+
+            cur_lsn = lsn.into();
+
+            match event {
+                WalEvent::WantsKeepaliveResponse => {
+                    self.send_standy_status_update((&last_pos).into())?;
+                }
+                WalEvent::Commit => {
+                    if !actions.is_empty() {
+                        // On commit we flush, because there is no knowing when the next commit is comming
+                        return Ok((
+                            ReplicationAction::TableAction {
+                                table: cur_table,
+                                actions,
+                            },
+                            cur_lsn.into(),
+                        ));
+                    }
+                }
+                WalEvent::Insert { tuple, .. } => actions.push(TableOperation::Insert(tuple)),
+                WalEvent::DeleteRow { tuple, .. } => {
+                    actions.push(TableOperation::DeleteRow { row: tuple })
+                }
+                WalEvent::DeleteByKey { key, .. } => {
+                    actions.push(TableOperation::DeleteByKey { key })
+                }
+                WalEvent::UpdateRow {
+                    old_tuple,
+                    new_tuple,
+                    ..
+                } => {
+                    actions.push(TableOperation::DeleteRow { row: old_tuple });
+                    actions.push(TableOperation::Insert(new_tuple));
+                }
+                WalEvent::UpdateByKey { key, set, .. } => {
+                    actions.push(TableOperation::Update { key, set })
+                }
+            }
+        }
     }
 }

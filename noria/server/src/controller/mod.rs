@@ -145,8 +145,8 @@ pub struct ControllerOuter<A> {
     pub(crate) our_descriptor: ControllerDescriptor,
     /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
     pub(crate) valve: Valve,
-    /// Primary MySQL server connection URL
-    pub(crate) mysql_url: Option<String>,
+    /// Primary MySQL/PostgresSQL server connection URL that Noria replicates from
+    pub(crate) replicator_url: Option<String>,
     /// A handle to the replicator task
     pub(crate) replicator_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -258,7 +258,7 @@ where
     ///
     /// TODO: how to handle the case where we need a full new replica
     fn start_replication_task(&mut self) {
-        let url = match &self.mysql_url {
+        let url = match &self.replicator_url {
             Some(url) => url.to_string(),
             None => {
                 info!(self.log, "No primary instance specified");
@@ -282,7 +282,8 @@ where
                         }
                     };
 
-                match mysql_connector::Builder::start_with_url(&url, noria, None, log.clone()).await
+                match replicators::NoriaAdapter::start_with_url(&url, noria, None, log.clone())
+                    .await
                 {
                     Ok(()) => unreachable!(), // connector runs in infinite loop, so it will never finish normally
                     Err(err) => {
@@ -571,8 +572,8 @@ mod tests {
         use std::convert::TryInto;
 
         use super::*;
-        use mysql_connector::BinlogPosition;
         use noria::ReplicationOffset;
+        use replicators::BinlogPosition;
 
         #[tokio::test(flavor = "multi_thread")]
         async fn same_log() {

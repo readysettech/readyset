@@ -1,12 +1,12 @@
-use std::convert::{TryFrom, TryInto};
-
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
 use noria::{consensus::Authority, ReadySetResult, ReplicationOffset};
 use slog::{info, Logger};
+use std::convert::{TryFrom, TryInto};
+use std::fmt::{self, Display};
 
-use crate::connector::BinlogPosition;
+use super::BinlogPosition;
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
 
@@ -271,8 +271,8 @@ fn value_to_value(val: &mysql::Value) -> mysql_common::value::Value {
     }
 }
 
-impl std::fmt::Display for TableKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for TableKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TableKind::BaseTable => write!(f, "'BASE TABLE'"),
             TableKind::View => write!(f, "'VIEW'"),

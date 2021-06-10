@@ -16,8 +16,7 @@ members = [
     "psql-srv",
     "unbounded-interval-tree",
     "launchpad",
-    "connectors/postgres_connector",
-    "connectors/mysql_connector",
+    "replicators",
     "query_generator",
     "taster",
     "maths"
