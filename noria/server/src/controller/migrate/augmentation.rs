@@ -6,25 +6,25 @@
 //!  - Existing egress nodes that gain new children must gain channels to facilitate forwarding
 //!  - State must be replayed for materializations in other domains that need it
 
-use crate::controller;
 use dataflow::prelude::*;
 
 use std::collections::{HashMap, HashSet};
 
 use petgraph::graph::NodeIndex;
 
+use crate::controller::migrate::DomainMigrationPlan;
 use dataflow::DomainRequest;
 use slog::Logger;
 
 pub(super) fn inform(
     log: &Logger,
-    controller: &mut controller::ControllerInner,
+    source: NodeIndex,
+    ingredients: &mut Graph,
+    dmp: &mut DomainMigrationPlan,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
 ) -> ReadySetResult<()> {
-    let source = controller.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
-        let ctx = controller.domains.get_mut(&domain).unwrap();
 
         trace!(log, "domain ready for migration");
 
@@ -40,28 +40,26 @@ pub(super) fn inform(
                 continue;
             }
 
-            let node = controller.ingredients.node_weight_mut(ni).unwrap().take();
-            let node = node.finalize(&controller.ingredients);
-            let graph = &controller.ingredients;
+            let node = ingredients.node_weight_mut(ni).unwrap().take();
+            let node = node.finalize(ingredients);
             // new parents already have the right child list
-            let old_parents = graph
+            let old_parents = ingredients
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
                 .filter(|&ni| ni != source)
                 .filter(|ni| old_nodes.contains(ni))
-                .map(|ni| &graph[ni])
+                .map(|ni| &ingredients[ni])
                 .filter(|n| n.domain() == domain)
                 .map(|n| n.local_addr())
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());
-            ctx.send_to_healthy_blocking::<()>(
+            dmp.add_message(
+                domain,
                 DomainRequest::AddNode {
                     node,
                     parents: old_parents,
                 },
-                &controller.workers,
-            )
-            .unwrap();
+            )?;
         }
     }
     Ok(())

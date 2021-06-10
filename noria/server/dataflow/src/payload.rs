@@ -30,7 +30,7 @@ pub enum SourceSelection {
     AllShards(usize),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
@@ -38,7 +38,7 @@ pub enum TriggerEndpoint {
     Local(Vec<usize>),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum InitialState {
     PartialLocal(Vec<(Index, Vec<Tag>)>),
     IndexedLocal(HashSet<Index>),
@@ -76,7 +76,7 @@ pub struct SourceChannelIdentifier {
 }
 
 /// A request issued to a domain through the worker RPC interface.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum DomainRequest {
     /// Request that a domain send usage statistics.

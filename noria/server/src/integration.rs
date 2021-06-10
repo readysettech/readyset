@@ -25,7 +25,7 @@ use noria::{
     ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
-use crate::errors::ReadySetError::MigrationFailed;
+use crate::errors::ReadySetError::MigrationApplyFailed;
 use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -6198,7 +6198,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
             during: _,
             // This 'box' keyword appears to be experimental.
             // So if this test ever fails because of that, feel free to change this.
-            source: box MigrationFailed { .. },
+            source: box MigrationApplyFailed { .. },
         })
     ));
 
@@ -6350,7 +6350,7 @@ async fn replicate_to_unavailable_worker() {
             result,
             Err(ReadySetError::RpcFailed {
                 during: _,
-                source: box ReadySetError::MigrationFailed { .. }
+                source: box ReadySetError::MigrationApplyFailed { .. }
             })
         ),
         "The migration should've failed. Actual result: {:?}",

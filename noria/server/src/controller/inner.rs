@@ -141,24 +141,6 @@ pub(super) fn graphviz(
 }
 
 impl ControllerInner {
-    pub(in crate::controller) fn topo_order(&self, new: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
-        let mut topo_list = Vec::with_capacity(new.len());
-        let mut topo = petgraph::visit::Topo::new(&self.ingredients);
-        while let Some(node) = topo.next(&self.ingredients) {
-            if node == self.source {
-                continue;
-            }
-            if self.ingredients[node].is_dropped() {
-                continue;
-            }
-            if !new.contains(&node) {
-                continue;
-            }
-            topo_list.push(node);
-        }
-        topo_list
-    }
-
     pub(super) fn external_request<A: Authority + 'static>(
         &mut self,
         method: hyper::Method,
@@ -826,8 +808,10 @@ impl ControllerInner {
     {
         info!(self.log, "starting migration: new soup universe");
         let miglog = self.log.new(o!());
+        let ingredients = self.ingredients.clone();
         let mut m = Migration {
-            mainline: self,
+            ingredients,
+            source: self.source,
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
@@ -837,7 +821,7 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m)?;
-        m.commit()?;
+        m.commit(self)?;
         Ok(r)
     }
 
@@ -849,8 +833,10 @@ impl ControllerInner {
     {
         info!(self.log, "starting migration");
         let miglog = self.log.new(o!());
+        let ingredients = self.ingredients.clone();
         let mut m = Migration {
-            mainline: self,
+            ingredients,
+            source: self.source,
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
@@ -860,9 +846,7 @@ impl ControllerInner {
             log: miglog,
         };
         let r = f(&mut m);
-        m.commit().map_err(|e| ReadySetError::MigrationFailed {
-            source: Box::new(e),
-        })?;
+        m.commit(self)?;
         Ok(r)
     }
 
