@@ -354,7 +354,7 @@ impl TestScript {
 
         if let Some(binlog_url) = &run_opts.binlog_url {
             // Add the data base name to the mysql url, and set as binlog source
-            builder.set_mysql_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
+            builder.set_replicator_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
         }
 
         builder.start(authority).await.unwrap()

@@ -1,12 +1,11 @@
-use crate::PostgresPosition;
+use super::PostgresPosition;
 use futures::{pin_mut, StreamExt};
 use noria::{consensus::Authority, ReadySetError, ReadySetResult};
 use postgres_types::Type;
 use slog::{debug, info, trace, Logger};
-use std::{
-    convert::{TryFrom, TryInto},
-    ffi::CString,
-};
+use std::convert::{TryFrom, TryInto};
+use std::ffi::CString;
+use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
@@ -86,8 +85,8 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     }
 }
 
-impl std::fmt::Display for ColumnEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for ColumnEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{} {}{}",
@@ -115,8 +114,8 @@ impl TryFrom<pgsql::Row> for ConstraintEntry {
     }
 }
 
-impl std::fmt::Display for ConstraintEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for ConstraintEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.definition)
     }
 }
@@ -194,8 +193,8 @@ impl TableEntry {
     }
 }
 
-impl std::fmt::Display for TableDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for TableDescription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "CREATE TABLE {} (", self.name)?;
         write!(
             f,

@@ -1,4 +1,4 @@
-use crate::wal::{RelationMapping, WalData, WalError, WalRecord};
+use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use noria::{ReadySetError, ReadySetResult};
 use slog::{debug, error};
 use std::{collections::HashMap, convert::TryInto};
@@ -204,15 +204,15 @@ impl WalReader {
     }
 }
 
-use noria::DataType;
-use postgres_types::Type as PGType;
-
-impl crate::wal::TupleData {
+impl wal::TupleData {
     pub(crate) fn into_noria_vec(
         self,
         relation: &RelationMapping,
         is_key: bool,
     ) -> Result<Vec<noria::DataType>, WalError> {
+        use noria::DataType;
+        use postgres_types::Type as PGType;
+
         if self.n_cols != relation.n_cols {
             return Err(WalError::InvalidMapping(format!(
                 "Relation and tuple must have 1:1 mapping; {:?}; {:?}",
@@ -229,9 +229,9 @@ impl crate::wal::TupleData {
             }
 
             match data {
-                crate::wal::TupleEntry::Null => ret.push(DataType::None),
-                crate::wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
-                crate::wal::TupleEntry::Text(text) => {
+                wal::TupleEntry::Null => ret.push(DataType::None),
+                wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
+                wal::TupleEntry::Text(text) => {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper Noria type
                     let str = String::from_utf8_lossy(&text);
 

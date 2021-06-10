@@ -1,0 +1,27 @@
+[package]
+name = "replicators"
+version = "0.1.0"
+authors = ["Vlad Krasnov <vlad@readyset.io>"]
+edition = "2018"
+
+[dependencies]
+async-trait = "0.1"
+clap = "3.0.0-beta.2"
+native-tls = "0.2.7"
+tokio = { version = "1.5", features = ["full"] }
+futures = { version = "0.3" }
+bytes = "1.0"
+slog = "2.7"
+slog-term = "2.8"
+chrono = "0.4"
+itertools = "0.10.1"
+
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+
+mysql_async = { git = "https://github.com/readysettech/mysql_async" }
+mysql_common = "0.27"
+
+nom-sql = { path = "../nom-sql" }
+noria = { path = "../noria/noria", package = "noria" }

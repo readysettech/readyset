@@ -186,12 +186,11 @@ If specified, overrides the value of --external-address"))
             .env("NORIA_REGION")
             .help("The region the worker is hosted in. Required to route view requests to specific regions."),
         ).arg(
-            Arg::with_name("mysql-url")
-                .long("mysql-url")
+            Arg::with_name("replication-url")
+                .long("replication-url")
                 .takes_value(true)
                 .required(false)
-                .env("MYSQL_URL")
-                .help("Host for mysql connection. Should include username and password if necessary."),
+                .help("A URL identifying a MySQL or PostgreSQL primary server to replicater from. Should include username and password if necessary."),
         )
         .arg(
             Arg::with_name("reader-only")
@@ -302,8 +301,8 @@ If specified, overrides the value of --external-address"))
         .and_then(|p| Some(PathBuf::from(p)));
     builder.set_persistence(persistence_params);
 
-    if let Some(url) = matches.value_of("mysql-url") {
-        builder.set_mysql_url(url.into());
+    if let Some(url) = matches.value_of("replication-url") {
+        builder.set_replicator_url(url.into());
     }
 
     if verbose {
