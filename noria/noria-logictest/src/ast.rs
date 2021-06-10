@@ -15,6 +15,7 @@ use derive_more::{From, TryInto};
 use itertools::Itertools;
 use msql_srv::MysqlTime;
 use mysql::chrono::NaiveDateTime;
+use mysql_async as mysql;
 use noria::{DataType, TIMESTAMP_FORMAT};
 
 /// The expected result of a statement

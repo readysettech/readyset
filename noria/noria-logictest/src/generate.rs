@@ -12,6 +12,7 @@ use colored::Colorize;
 use itertools::Itertools;
 use mysql::prelude::Queryable;
 use mysql::Params;
+use mysql_async as mysql;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expression, SqlQuery, Table,
 };
@@ -31,11 +32,11 @@ pub enum DatabaseURL {
 }
 
 impl DatabaseURL {
-    pub fn connect(&self) -> anyhow::Result<DatabaseConnection> {
+    pub async fn connect(&self) -> anyhow::Result<DatabaseConnection> {
         match self {
-            DatabaseURL::MySQL(opts) => {
-                Ok(DatabaseConnection::MySQL(mysql::Conn::new(opts.clone())?))
-            }
+            DatabaseURL::MySQL(opts) => Ok(DatabaseConnection::MySQL(
+                mysql::Conn::new(opts.clone()).await?,
+            )),
         }
     }
 }
@@ -45,36 +46,40 @@ pub enum DatabaseConnection {
 }
 
 impl DatabaseConnection {
-    fn query_drop<Q>(&mut self, stmt: Q) -> anyhow::Result<()>
+    async fn query_drop<Q>(&mut self, stmt: Q) -> anyhow::Result<()>
     where
-        Q: AsRef<str>,
+        Q: AsRef<str> + Send + Sync,
     {
         match self {
-            DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt)?),
+            DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
         }
     }
 
-    fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
+    async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
     where
         Q: AsRef<str>,
         P: Into<Params>,
     {
         match self {
-            DatabaseConnection::MySQL(conn) => conn
-                .exec_iter(stmt, params)?
-                .map(|r| {
-                    let mut r = r?;
-                    Ok((0..r.columns().len())
-                        .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
-                        .collect::<Result<Vec<_>, _>>()?)
-                })
-                .collect(),
+            DatabaseConnection::MySQL(conn) => {
+                let results = conn
+                    .exec_iter(stmt.as_ref(), params)
+                    .await?
+                    .map(|mut r| {
+                        Ok((0..r.columns().len())
+                            .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
+                            .collect::<Result<Vec<_>, _>>()?)
+                    })
+                    .await?;
+
+                results.into_iter().collect()
+            }
         }
     }
 
-    fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
+    async fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
         match self {
-            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, false),
+            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, false).await,
         }
     }
 }
@@ -311,13 +316,49 @@ where
 }
 
 impl Generate {
-    pub fn run(mut self) -> anyhow::Result<()> {
+    async fn run_queries(
+        &self,
+        queries: &Vec<Query>,
+        conn: &mut DatabaseConnection,
+        hash_threshold: usize,
+    ) -> anyhow::Result<Vec<Record>> {
+        eprintln!(
+            "{}",
+            format!("==> Running {} queries", queries.len()).bold()
+        );
+
+        let mut ret = Vec::new();
+        for q in queries {
+            let results = conn
+                .execute(&q.query, q.params.clone())
+                .await
+                .with_context(|| format!("Running query {}", q.query))?;
+
+            let values = results.into_iter().flatten().collect::<Vec<_>>();
+
+            let query_results = if values.len() > hash_threshold {
+                QueryResults::hash(&values)
+            } else {
+                QueryResults::Results(values)
+            };
+
+            ret.push(Record::Query(Query {
+                results: query_results,
+                sort_mode: Some(SortMode::NoSort),
+                ..q.clone()
+            }))
+        }
+
+        Ok(ret)
+    }
+
+    pub async fn run(mut self) -> anyhow::Result<()> {
         let mut seed = match self.from.take() {
             Some(path) => Seed::try_from(path)?,
             None => Seed::try_from(self.options.clone())?,
         };
 
-        let mut conn = self.compare_to.connect()?;
+        let mut conn = self.compare_to.connect().await?;
 
         eprintln!(
             "{}",
@@ -333,6 +374,7 @@ impl Generate {
                 relation.kind(),
                 relation.name()
             ))
+            .await
             .with_context(|| format!("Dropping {} {}", relation.kind(), relation.name()))?;
         }
 
@@ -376,7 +418,7 @@ impl Generate {
             .collect::<Vec<_>>();
 
         eprintln!("{}", "==> Running original test script".bold());
-        conn.run_script(&seed.script)?;
+        conn.run_script(&seed.script).await?;
 
         eprintln!(
             "{}",
@@ -390,6 +432,7 @@ impl Generate {
                 );
             }
             conn.query_drop(insert_statement.to_string())
+                .await
                 .with_context(|| format!("Inserting seed data for {}", insert_statement.table))?;
         }
 
@@ -399,34 +442,11 @@ impl Generate {
 
         let hash_threshold = seed.hash_threshold;
         let queries = mem::take(&mut seed.queries);
-        let run_queries = |conn: &mut DatabaseConnection| {
-            eprintln!(
-                "{}",
-                format!("==> Running {} queries", queries.len()).bold()
-            );
-            queries
-                .iter()
-                .map(|q| -> anyhow::Result<Record> {
-                    let results = conn
-                        .execute(&q.query, q.params.clone())
-                        .with_context(|| format!("Running query {}", q.query))?;
-                    let values = results.into_iter().flatten().collect::<Vec<_>>();
-                    let query_results = if values.len() > hash_threshold {
-                        QueryResults::hash(&values)
-                    } else {
-                        QueryResults::Results(values)
-                    };
 
-                    Ok(Record::Query(Query {
-                        results: query_results,
-                        sort_mode: Some(SortMode::NoSort),
-                        ..q.clone()
-                    }))
-                })
-                .collect::<Result<Vec<_>, _>>()
-        };
-
-        let new_entries = new_entries.chain(run_queries(&mut conn)?);
+        let new_entries = new_entries.chain(
+            self.run_queries(&queries, &mut conn, hash_threshold)
+                .await?,
+        );
 
         let new_entries: Vec<_> = if self.include_deletes {
             let rows_to_delete = self
@@ -483,12 +503,18 @@ impl Generate {
                     );
                 }
                 conn.query_drop(delete_statement.to_string())
+                    .await
                     .with_context(|| {
                         format!("Deleting seed data for {}", delete_statement.table)
                     })?;
             }
 
-            new_entries.chain(run_queries(&mut conn)?).collect()
+            new_entries
+                .chain(
+                    self.run_queries(&queries, &mut conn, hash_threshold)
+                        .await?,
+                )
+                .collect()
         } else {
             new_entries.collect()
         };

@@ -29,11 +29,11 @@ enum Command {
 }
 
 impl Command {
-    fn run(self) -> anyhow::Result<()> {
+    async fn run(self) -> anyhow::Result<()> {
         match self {
             Self::Parse(parse) => parse.run(),
-            Self::Verify(verify) => verify.run(),
-            Self::Generate(generate) => generate.run(),
+            Self::Verify(verify) => verify.run().await,
+            Self::Generate(generate) => generate.run().await,
         }
     }
 }
@@ -215,16 +215,17 @@ struct Verify {
     #[clap(long, short)]
     verbose: bool,
 
-    /// Enable a mysql backend for the client, with binlog replication to Noria
-    /// all writes will go to mysql first and then replicated to Noria using binlog
-    /// the parameter to this argument is a mysql url with no database specified.
+    /// Enable a MySQL backend for the client, with binlog replication to Noria.
+    /// All writes will pass through to MySQL and be replicated to Noria using binlog.
+    /// The parameter to this argument is a MySQL URL with no database specified.
     #[clap(long)]
     binlog_mysql: Option<String>,
 }
 
 impl Verify {
-    fn run(&self) -> anyhow::Result<()> {
+    async fn run(&self) -> anyhow::Result<()> {
         let mut failed = false;
+
         for InputFile {
             name,
             data,
@@ -233,9 +234,12 @@ impl Verify {
         {
             let script = TestScript::read(name, data)?;
             let run_opts: RunOptions = self.into();
+
             let result = script
                 .run(run_opts)
+                .await
                 .with_context(|| format!("Running test script {}", script.name()));
+
             match result {
                 Ok(_) if expected_result == ExpectedResult::Fail => {
                     failed = true;
@@ -278,7 +282,8 @@ impl Into<RunOptions> for &Verify {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    opts.subcommand.run()
+    opts.subcommand.run().await
 }

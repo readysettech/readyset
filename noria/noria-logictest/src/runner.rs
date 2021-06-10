@@ -1,19 +1,19 @@
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
-use mysql::prelude::Queryable;
-use mysql::Row;
+use mysql_async as mysql;
+use mysql_async::prelude::Queryable;
+use mysql_async::Row;
 use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io;
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Barrier, RwLock};
-use std::thread;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
@@ -81,9 +81,26 @@ impl RunOptions {
         format!("{}:{}", self.zookeeper_host, self.zookeeper_port)
     }
 
+    fn zookeeper_authority(&self) -> ZookeeperAuthority {
+        ZookeeperAuthority::new(&format!(
+            "{}/{}",
+            self.zookeeper_addr(),
+            self.deployment_name
+        ))
+        .unwrap()
+    }
+
+    fn logger(&self) -> slog::Logger {
+        if self.verbose {
+            noria_server::logger_pls()
+        } else {
+            slog::Logger::root(slog::Discard, o!())
+        }
+    }
+
     pub fn mysql_opts_no_db(&self) -> mysql::Opts {
-        mysql::OptsBuilder::new()
-            .ip_or_hostname(Some(self.mysql_host.clone()))
+        mysql::OptsBuilder::default()
+            .ip_or_hostname(self.mysql_host.clone())
             .tcp_port(self.mysql_port)
             .user(Some(self.mysql_user.clone()))
             .into()
@@ -93,24 +110,6 @@ impl RunOptions {
         mysql::OptsBuilder::from_opts(self.mysql_opts_no_db())
             .db_name(Some(self.mysql_db.clone()))
             .into()
-    }
-}
-
-impl Drop for RunOptions {
-    fn drop(&mut self) {
-        if self.use_mysql {
-            if let Ok(mut conn) = mysql::Conn::new(self.mysql_opts_no_db()) {
-                conn.query_drop(format!("DROP DATABASE {}", self.mysql_db))
-                    .unwrap_or(());
-            }
-        } else if let Ok(z) = ZooKeeper::connect(
-            &self.zookeeper_addr(),
-            Duration::from_secs(3),
-            |_: WatchedEvent| {},
-        ) {
-            z.delete_recursive(&format!("/{}", self.deployment_name))
-                .unwrap_or(());
-        }
     }
 }
 
@@ -125,11 +124,6 @@ impl TestScript {
         Self::read(path, file)
     }
 
-    pub fn run_file(path: PathBuf, opts: RunOptions) -> anyhow::Result<()> {
-        let script = Self::open_file(path)?;
-        script.run(opts)
-    }
-
     pub fn name(&self) -> Cow<'_, str> {
         match self.path.file_name() {
             Some(n) => n.to_string_lossy(),
@@ -137,65 +131,142 @@ impl TestScript {
         }
     }
 
-    pub fn run(&self, opts: RunOptions) -> anyhow::Result<()> {
+    pub async fn run(&self, opts: RunOptions) -> anyhow::Result<()> {
         println!(
             "==> {} {}",
             "Running test script".bold(),
             self.path.canonicalize()?.to_string_lossy().blue()
         );
 
-        let use_mysql = opts.use_mysql;
-        let mut conn = if opts.use_mysql {
-            let mut create_db_conn =
-                mysql::Conn::new(opts.mysql_opts_no_db()).with_context(|| "connecting to mysql")?;
-            create_db_conn
-                .query_drop(format!("CREATE DATABASE {}", opts.mysql_db))
-                .with_context(|| "creating database")?;
-            mysql::Conn::new(opts.mysql_opts()).with_context(|| "connecting to mysql")?
-        } else {
-            let conn_opts = self.setup_mysql_adapter(&opts);
-            mysql::Conn::new(conn_opts).with_context(|| "connecting to noria-mysql")?
-        };
+        if opts.use_mysql {
+            self.recreate_test_database(opts.mysql_opts().clone(), &opts.mysql_db)
+                .await?;
+            let mut conn = mysql::Conn::new(opts.mysql_opts())
+                .await
+                .with_context(|| "connecting to mysql")?;
 
-        self.run_on_mysql(&mut conn, opts.binlog_url.is_some())?;
+            self.run_on_mysql(&mut conn, false).await?;
+        } else {
+            if let Some(binlog_url) = &opts.binlog_url {
+                self.recreate_test_database(binlog_url.try_into().unwrap(), &opts.mysql_db)
+                    .await?;
+            }
+
+            self.run_on_noria(&opts).await?;
+
+            // Cleanup zookeeper
+            if let Ok(z) = ZooKeeper::connect(
+                &opts.zookeeper_addr(),
+                Duration::from_secs(3),
+                |_: WatchedEvent| {},
+            ) {
+                z.delete_recursive(&format!("/{}", opts.deployment_name))
+                    .unwrap_or(());
+            }
+        };
 
         println!(
             "{}",
             format!(
                 "==> Successfully ran {} operations against {}",
                 self.records.len(),
-                if use_mysql { "MySQL" } else { "Noria" }
+                if opts.use_mysql { "MySQL" } else { "Noria" }
             )
             .bold()
         );
 
+        if opts.binlog_url.is_some() {
+            // After all tests are done, we don't want to drop Noria right away, as it may cause
+            // some conflicts between binlog propagation and cleanup
+            std::thread::sleep(Duration::from_millis(250));
+        }
+
         Ok(())
     }
 
-    pub fn run_on_mysql(&self, conn: &mut mysql::Conn, needs_sleep: bool) -> anyhow::Result<()> {
+    /// Establish a connection to MySQL and recreate the test database
+    async fn recreate_test_database<S: AsRef<str>>(
+        &self,
+        opts: mysql::Opts,
+        db_name: &S,
+    ) -> anyhow::Result<()> {
+        let mut create_db_conn = mysql::Conn::new(opts)
+            .await
+            .with_context(|| "connecting to mysql")?;
+
+        create_db_conn
+            .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name.as_ref()))
+            .await
+            .with_context(|| "dropping database")?;
+
+        create_db_conn
+            .query_drop(format!("CREATE DATABASE {}", db_name.as_ref()))
+            .await
+            .with_context(|| "creating database")?;
+
+        Ok(())
+    }
+
+    /// Run the test script on Noria server
+    pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
+        let mut noria_handle = self.start_noria_server(&opts).await;
+        let (adapter_task, conn_opts) = self.setup_mysql_adapter(&opts).await;
+
+        let mut conn = mysql::Conn::new(conn_opts)
+            .await
+            .with_context(|| "connecting to noria-mysql")?;
+
+        self.run_on_mysql(&mut conn, opts.binlog_url.is_some())
+            .await?;
+
+        // After all tests are done, stop the adapter
+        adapter_task.abort();
+        let _ = adapter_task.await;
+
+        // Stop Noria
+        noria_handle.shutdown();
+        noria_handle.wait_done().await;
+
+        Ok(())
+    }
+
+    pub async fn run_on_mysql(
+        &self,
+        conn: &mut mysql::Conn,
+        needs_sleep: bool,
+    ) -> anyhow::Result<()> {
+        let mut prev_was_statement = false;
+
         for record in &self.records {
             match record {
-                Record::Statement(stmt) => self
-                    .run_statement(stmt, conn)
-                    .with_context(|| format!("Running statement {}", stmt.command))?,
-                Record::Query(query) => self
-                    .run_query(query, conn)
-                    .with_context(|| format!("Running query {}", query.query))?,
+                Record::Statement(stmt) => {
+                    prev_was_statement = true;
+                    self.run_statement(stmt, conn)
+                        .await
+                        .with_context(|| format!("Running statement {}", stmt.command))?
+                }
+
+                Record::Query(query) => {
+                    if prev_was_statement && needs_sleep {
+                        prev_was_statement = false;
+                        // When binlog replication is enabled, we need to give the statements some time to propagate
+                        // before we can issue the next query
+                        std::thread::sleep(Duration::from_millis(250));
+                    }
+
+                    self.run_query(query, conn)
+                        .await
+                        .with_context(|| format!("Running query {}", query.query))?
+                }
                 Record::HashThreshold(_) => {}
                 Record::Halt => break,
-            }
-
-            if needs_sleep {
-                // When binlog replication is enabled, we need to give the queries some time
-                // to propagate (TODO: only write queries should be affected)
-                std::thread::sleep(Duration::from_millis(10));
             }
         }
         Ok(())
     }
 
-    fn run_statement(&self, stmt: &Statement, conn: &mut mysql::Conn) -> anyhow::Result<()> {
-        let res = conn.query_drop(&stmt.command);
+    async fn run_statement(&self, stmt: &Statement, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+        let res = conn.query_drop(&stmt.command).await;
         match stmt.result {
             StatementResult::Ok => {
                 if let Err(e) = res {
@@ -211,11 +282,11 @@ impl TestScript {
         Ok(())
     }
 
-    fn run_query(&self, query: &Query, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+    async fn run_query(&self, query: &Query, conn: &mut mysql::Conn) -> anyhow::Result<()> {
         let results = if query.params.is_empty() {
-            conn.query(&query.query)?
+            conn.query(&query.query).await?
         } else {
-            conn.exec(&query.query, &query.params)?
+            conn.exec(&query.query, &query.params).await?
         };
 
         let mut rows = results
@@ -299,86 +370,52 @@ impl TestScript {
         Ok(())
     }
 
-    fn setup_mysql_adapter(&self, run_opts: &RunOptions) -> mysql::Opts {
-        let logger = if run_opts.verbose {
-            noria_server::logger_pls()
-        } else {
-            slog::Logger::root(slog::Discard, o!())
-        };
+    async fn start_noria_server(
+        &self,
+        run_opts: &RunOptions,
+    ) -> noria_server::Handle<ZookeeperAuthority> {
+        let mut authority = run_opts.zookeeper_authority();
+        let logger = run_opts.logger();
 
-        let l = logger.clone();
-        let barrier = Arc::new(Barrier::new(2));
-        let n = run_opts.deployment_name.clone();
-        let b = barrier.clone();
-        let zk_addr = run_opts.zookeeper_addr();
-        let disable_reuse = run_opts.disable_reuse;
+        let mut builder = Builder::default();
+        authority.log_with(logger.clone());
+        builder.log_with(logger);
 
+        if run_opts.disable_reuse {
+            builder.set_reuse(ReuseConfigType::NoReuse)
+        }
+
+        if let Some(binlog_url) = &run_opts.binlog_url {
+            // Add the data base name to the mysql url, and set as binlog source
+            builder.set_mysql_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
+        }
+
+        builder.start(Arc::new(authority)).await.unwrap()
+    }
+
+    async fn setup_mysql_adapter(
+        &self,
+        run_opts: &RunOptions,
+    ) -> (tokio::task::JoinHandle<()>, mysql::Opts) {
         let binlog_url = if let Some(binlog_url) = &run_opts.binlog_url {
-            let mysql_opt = mysql::Opts::from_url(binlog_url).unwrap();
-            let mut create_db_conn = mysql::Conn::new(mysql_opt.clone()).unwrap();
-            let _ = create_db_conn
-                .query_drop(format!("DROP DATABASE {}", run_opts.mysql_db))
-                .with_context(|| "dropping database");
-
-            create_db_conn
-                .query_drop(format!("CREATE DATABASE {}", run_opts.mysql_db))
-                .with_context(|| "creating database")
-                .unwrap();
-
             // Append the database name to the binlog mysql url
             Some(format!("{}/{}", binlog_url, run_opts.mysql_db))
         } else {
             None
         };
 
-        let _binlog_url = binlog_url.clone(); // So we can move to both threads
-        thread::spawn(move || {
-            let mut authority = ZookeeperAuthority::new(&format!("{}/{}", &zk_addr, n)).unwrap();
-            let mut builder = Builder::default();
-            authority.log_with(l.clone());
-            builder.log_with(l);
-
-            if disable_reuse {
-                builder.set_reuse(ReuseConfigType::NoReuse)
-            }
-
-            if let Some(url) = _binlog_url {
-                // Add the data base name to the mysql url, and set as binlog source
-                builder.set_mysql_url(url);
-            }
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
-            b.wait();
-            loop {
-                thread::sleep(Duration::from_millis(1000));
-            }
-        });
-
-        barrier.wait();
-
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let mut zk_auth = ZookeeperAuthority::new(&format!(
-            "{}/{}",
-            run_opts.zookeeper_addr(),
-            run_opts.deployment_name
-        ))
-        .unwrap();
-        zk_auth.log_with(logger.clone());
+        let zk_auth = run_opts.zookeeper_authority();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
+        let ch = ControllerHandle::new(zk_auth).await.unwrap();
 
-        thread::spawn(move || {
-            let (s, _) = listener.accept().unwrap();
-            let s = {
-                let _guard = rt.handle().enter();
-                tokio::net::TcpStream::from_std(s).unwrap()
-            };
+        let task = tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+
             let reader = NoriaConnector::new(
                 ch.clone(),
                 auto_increments.clone(),
@@ -390,23 +427,24 @@ impl TestScript {
 
             let backend_builder = if let Some(url) = binlog_url {
                 let writer = MySqlConnector::new(url.into());
-                backend_builder.writer(rt.block_on(writer))
+                backend_builder.writer(writer.await)
             } else {
                 let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);
-                backend_builder.writer(rt.block_on(writer))
+                backend_builder.writer(writer.await)
             };
 
             let backend = backend_builder
-                .reader(rt.block_on(reader))
+                .reader(reader.await)
                 .require_authentication(false)
                 .build();
 
-            rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
-                .unwrap();
-            drop(rt);
+            MysqlIntermediary::run_on_tcp(backend, s).await.unwrap();
         });
 
-        mysql::OptsBuilder::default().tcp_port(addr.port()).into()
+        (
+            task,
+            mysql::OptsBuilder::default().tcp_port(addr.port()).into(),
+        )
     }
 
     /// Get a reference to the test script's records.
