@@ -1,7 +1,6 @@
-use crate::controller::domain_handle::DomainHandle;
 use crate::controller::inner::graphviz;
 use crate::controller::keys::{self, OptColumnRef};
-use crate::controller::{Worker, WorkerIdentifier};
+use crate::controller::migrate::DomainMigrationPlan;
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
@@ -14,8 +13,7 @@ pub(super) struct Plan<'a> {
     m: &'a mut super::Materializations,
     graph: &'a Graph,
     node: NodeIndex,
-    domains: &'a mut HashMap<DomainIndex, DomainHandle>,
-    workers: &'a HashMap<WorkerIdentifier, Worker>,
+    dmp: &'a mut DomainMigrationPlan,
     partial: bool,
 
     tags: HashMap<Index, Vec<(Tag, DomainIndex)>>,
@@ -39,8 +37,7 @@ impl<'a> Plan<'a> {
         m: &'a mut super::Materializations,
         graph: &'a Graph,
         node: NodeIndex,
-        domains: &'a mut HashMap<DomainIndex, DomainHandle>,
-        workers: &'a HashMap<WorkerIdentifier, Worker>,
+        dmp: &'a mut DomainMigrationPlan,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
         let old_paths = m
@@ -52,8 +49,7 @@ impl<'a> Plan<'a> {
             m,
             graph,
             node,
-            domains,
-            workers,
+            dmp,
             paths: Default::default(),
             old_paths,
 
@@ -326,15 +322,13 @@ impl<'a> Plan<'a> {
                             info!(self.m.log, "telling domain about generated columns {:?} on {}",
                                 cols, first.0.index(); "domain" => domain.index());
 
-                            let ctx = self.domains.get_mut(&domain).unwrap();
-                            ctx.send_to_healthy_blocking::<()>(
+                            self.dmp.add_message(
+                                domain,
                                 DomainRequest::GeneratedColumns {
                                     node: self.graph[first.0].local_addr(),
                                     cols: cols.clone(),
                                 },
-                                self.workers,
-                            )
-                            .unwrap();
+                            )?;
                         }
                     }
                 }
@@ -531,29 +525,22 @@ impl<'a> Plan<'a> {
                     // to tell it about this replay path so that it knows
                     // what path to forward replay packets on.
                     let n = &self.graph[nodes.last().unwrap().0];
-                    let workers = &self.workers;
                     if n.is_egress() {
-                        self.domains
-                            .get_mut(&domain)
-                            .unwrap()
-                            .send_to_healthy_blocking::<()>(
-                                DomainRequest::UpdateEgress {
-                                    node: n.local_addr(),
-                                    new_tx: None,
-                                    new_tag: Some((tag, segments[i + 1].1[0].0)),
-                                },
-                                workers,
-                            )
-                            .unwrap();
+                        self.dmp.add_message(
+                            domain,
+                            DomainRequest::UpdateEgress {
+                                node: n.local_addr(),
+                                new_tx: None,
+                                new_tag: Some((tag, segments[i + 1].1[0].0)),
+                            },
+                        )?;
                     } else {
                         assert!(n.is_sharder());
                     }
                 }
 
                 trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
-                let ctx = self.domains.get_mut(&domain).unwrap();
-                ctx.send_to_healthy_blocking::<()>(setup, self.workers)
-                    .unwrap();
+                self.dmp.add_message(domain, setup)?;
             }
 
             if !self.partial {
@@ -588,7 +575,7 @@ impl<'a> Plan<'a> {
                     assert!(r.is_materialized());
 
                     let last_domain = self.graph[self.node].domain();
-                    let num_shards = self.domains[&last_domain].shards();
+                    let num_shards = self.dmp.num_shards(last_domain).unwrap();
 
                     // since we're partially materializing a reader node,
                     // we need to give it a way to trigger replays.
@@ -622,17 +609,13 @@ impl<'a> Plan<'a> {
                 }
             });
 
-        self.domains
-            .get_mut(&self.graph[self.node].domain())
-            .unwrap()
-            .send_to_healthy_blocking::<()>(
-                DomainRequest::PrepareState {
-                    node: self.graph[self.node].local_addr(),
-                    state: s,
-                },
-                self.workers,
-            )
-            .unwrap();
+        self.dmp.add_message(
+            self.graph[self.node].domain(),
+            DomainRequest::PrepareState {
+                node: self.graph[self.node].local_addr(),
+                state: s,
+            },
+        )?;
 
         self.setup_packet_filter()?;
 
@@ -687,17 +670,13 @@ impl<'a> Plan<'a> {
             // Communicate the egress node's domain that any packet sent
             // to the reader's domain ingress node should filter any
             // packets not previously requested.
-            self.domains
-                .get_mut(&self.graph[egress].domain())
-                .unwrap()
-                .send_to_healthy_blocking::<()>(
-                    DomainRequest::AddEgressFilter {
-                        egress_node: egress_local_addr,
-                        target_node: ingress,
-                    },
-                    self.workers,
-                )
-                .unwrap();
+            self.dmp.add_message(
+                self.graph[egress].domain(),
+                DomainRequest::AddEgressFilter {
+                    egress_node: egress_local_addr,
+                    target_node: ingress,
+                },
+            )?;
             Ok(())
         } else {
             Ok(())

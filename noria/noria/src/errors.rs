@@ -58,10 +58,17 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// A migration couldn't be completed.
-    #[error("Migration failed: {source}")]
-    MigrationFailed {
-        /// The error encountered while performing the migration.
+    /// A migration failed during the planning stage. Nothing was touched.
+    #[error("Failed to plan migration: {source}")]
+    MigrationPlanFailed {
+        /// The error encountered while planning the migration.
+        source: Box<ReadySetError>,
+    },
+
+    /// A migration failed to apply. The dataflow graph may be in an inconsistent state.
+    #[error("Failed to apply migration: {source}")]
+    MigrationApplyFailed {
+        /// The error encountered while applying the migration.
         source: Box<ReadySetError>,
     },
 
@@ -313,6 +320,15 @@ pub enum ReadySetError {
         domain_index: usize,
         /// The shard.
         shard: usize,
+    },
+
+    /// A migration tried to reference a domain that doesn't exist.
+    #[error("Migration tried to reference domain {domain_index}.{shard:?}")]
+    MigrationUnknownDomain {
+        /// The index of the domain.
+        domain_index: usize,
+        /// The shard, if there is one.
+        shard: Option<usize>,
     },
 
     /// The remote end isn't ready to handle requests yet, or has fallen over.

@@ -5,9 +5,8 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use crate::controller::domain_handle::DomainHandle;
+use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::{inner::graphviz, keys};
-use crate::controller::{Worker, WorkerIdentifier};
 use crate::errors::internal_err;
 use crate::ReadySetResult;
 use dataflow::prelude::*;
@@ -19,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::Arc;
 use vec1::Vec1;
 
 mod plan;
@@ -49,6 +48,7 @@ impl Default for FrontierStrategy {
     }
 }
 
+#[derive(Clone)]
 pub(in crate::controller) struct Materializations {
     log: Logger,
 
@@ -64,7 +64,7 @@ pub(in crate::controller) struct Materializations {
     partial_enabled: bool,
     frontier_strategy: FrontierStrategy,
 
-    tag_generator: AtomicUsize,
+    tag_generator: Arc<AtomicUsize>,
 }
 
 impl Materializations {
@@ -82,7 +82,7 @@ impl Materializations {
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
 
-            tag_generator: AtomicUsize::default(),
+            tag_generator: Arc::new(AtomicUsize::default()),
         }
     }
 
@@ -527,8 +527,7 @@ impl Materializations {
         &mut self,
         graph: &mut Graph,
         new: &HashSet<NodeIndex>,
-        domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, Worker>,
+        dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
         self.extend(graph, new)?;
 
@@ -884,7 +883,7 @@ impl Materializations {
             // set up, if we're partial).
             // This is somewhat wasteful in some (fully materialized) cases, but it's a lot easier
             // to reason about if all the replay decisions happen in the planner.
-            self.setup(node, &mut index_on, graph, domains, workers)?;
+            self.setup(node, &mut index_on, graph, dmp)?;
             self.log = log;
             index_on.clear();
         }
@@ -903,7 +902,7 @@ impl Materializations {
                 .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, domains, workers)?;
+            self.ready_one(ni, &mut index_on, graph, dmp)?;
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -912,14 +911,13 @@ impl Materializations {
             // different domain before the parent has been readied. it's also important to avoid us
             // returning before the graph is actually fully operational.
             trace!(self.log, "readying node"; "node" => ni.index());
-            let domain = domains.get_mut(&n.domain()).unwrap();
-            domain.send_to_healthy_blocking::<()>(
+            dmp.add_message(
+                n.domain(),
                 DomainRequest::Ready {
                     node: n.local_addr(),
                     purge: n.purge,
                     index: index_on,
                 },
-                workers,
             )?;
             trace!(self.log, "node ready"; "node" => ni.index());
 
@@ -943,8 +941,7 @@ impl Materializations {
         ni: NodeIndex,
         index_on: &mut Indices,
         graph: &Graph,
-        domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, Worker>,
+        dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
         let n = &graph[ni];
         let mut has_state = !index_on.is_empty();
@@ -984,7 +981,7 @@ impl Materializations {
         info!(self.log, "beginning reconstruction of {:?}", n);
         let log = self.log.new(o!("node" => ni.index()));
         let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, domains, workers)?;
+        self.setup(ni, index_on, graph, dmp)?;
         self.log = log;
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -1000,8 +997,7 @@ impl Materializations {
         ni: NodeIndex,
         index_on: &mut Indices,
         graph: &Graph,
-        domains: &mut HashMap<DomainIndex, DomainHandle>,
-        workers: &HashMap<WorkerIdentifier, Worker>,
+        dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
@@ -1020,7 +1016,7 @@ impl Materializations {
 
         // construct and disseminate a plan for each index
         let (pending, paths) = {
-            let mut plan = plan::Plan::new(self, graph, ni, domains, workers);
+            let mut plan = plan::Plan::new(self, graph, ni, dmp);
             for index in index_on.drain() {
                 plan.add(index)?;
             }
@@ -1037,16 +1033,13 @@ impl Materializations {
                 info!(self.log, "telling root domain to start replay";
                    "domain" => pending.source_domain.index());
 
-                domains
-                    .get_mut(&pending.source_domain)
-                    .unwrap()
-                    .send_to_healthy_blocking::<()>(
-                        DomainRequest::StartReplay {
-                            tag: pending.tag,
-                            from: pending.source,
-                        },
-                        workers,
-                    )?;
+                dmp.add_message(
+                    pending.source_domain,
+                    DomainRequest::StartReplay {
+                        tag: pending.tag,
+                        from: pending.source,
+                    },
+                )?;
             }
             // and then wait for the last domain to receive all the records
             let target = graph[ni].domain();
@@ -1054,25 +1047,7 @@ impl Materializations {
                "waiting for done message from target";
                "domain" => target.index(),
             );
-
-            let mut is_done = || -> ReadySetResult<bool> {
-                Ok(domains
-                    .get_mut(&target)
-                    .unwrap()
-                    .send_to_healthy_blocking::<bool>(DomainRequest::QueryReplayDone, workers)?
-                    .into_iter()
-                    .any(|x| x))
-            };
-            let mut spins = 0;
-            // FIXME(eta): this is a bit of a hack... (also, timeouts?)
-            while !is_done()? {
-                spins += 1;
-                if spins == 10 {
-                    warn!(self.log, "waiting for setup()-initiated replay to complete");
-                    spins = 0;
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
+            dmp.add_message(target, DomainRequest::QueryReplayDone)?;
         }
         Ok(())
     }

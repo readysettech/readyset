@@ -6,8 +6,7 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use crate::controller::domain_handle::DomainHandle;
-use crate::controller::{Worker, WorkerIdentifier};
+use crate::controller::migrate::DomainMigrationPlan;
 use crate::errors::internal_err;
 use crate::ReadySetResult;
 use dataflow::prelude::*;
@@ -268,8 +267,7 @@ pub fn add(
 pub(super) fn connect(
     log: &Logger,
     graph: &mut Graph,
-    domains: &mut HashMap<DomainIndex, DomainHandle>,
-    workers: &HashMap<WorkerIdentifier, Worker>,
+    dmp: &mut DomainMigrationPlan,
     new: &HashSet<NodeIndex>,
 ) -> ReadySetResult<()> {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -290,8 +288,7 @@ pub(super) fn connect(
                        "ingress" => node.index()
                 );
 
-                let shards = domains[&n.domain()].shards();
-                let domain = domains.get_mut(&sender_node.domain()).unwrap();
+                let shards = dmp.num_shards(n.domain())?;
                 if shards != 1 && !sender_node.sharded_by().is_none() {
                     // we need to be a bit careful here in the particular case where we have a
                     // sharded egress that sends to another domain sharded by the same key.
@@ -301,14 +298,14 @@ pub(super) fn connect(
                     // because an egress implies that no shuffle was necessary, which again means
                     // that the sharding must be the same.
                     for i in 0..shards {
-                        domain.send_to_healthy_shard_blocking::<()>(
+                        dmp.add_message_for_shard(
+                            sender_node.domain(),
                             i,
                             DomainRequest::UpdateEgress {
                                 node: sender_node.local_addr(),
                                 new_tx: Some((node, n.local_addr(), (n.domain(), i))),
                                 new_tag: None,
                             },
-                            workers,
                         )?;
                     }
                 } else {
@@ -317,13 +314,13 @@ pub(super) fn connect(
                     // sending to a sharded child. but that shouldn't be allowed -- such a node
                     // *must* be a Sharder.
                     invariant_eq!(shards, 1);
-                    domain.send_to_healthy_blocking::<()>(
+                    dmp.add_message(
+                        sender_node.domain(),
                         DomainRequest::UpdateEgress {
                             node: sender_node.local_addr(),
                             new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
                             new_tag: None,
                         },
-                        workers,
                     )?;
                 }
             } else if sender_node.is_sharder() {
@@ -333,18 +330,15 @@ pub(super) fn connect(
                        "ingress" => node.index()
                 );
 
-                let shards = domains[&n.domain()].shards();
+                let shards = dmp.num_shards(n.domain())?;
                 let txs = (0..shards).map(|i| (n.domain(), i)).collect();
-                domains
-                    .get_mut(&sender_node.domain())
-                    .unwrap()
-                    .send_to_healthy_blocking::<()>(
-                        DomainRequest::UpdateSharder {
-                            node: sender_node.local_addr(),
-                            new_txs: (n.local_addr(), txs),
-                        },
-                        workers,
-                    )?;
+                dmp.add_message(
+                    sender_node.domain(),
+                    DomainRequest::UpdateSharder {
+                        node: sender_node.local_addr(),
+                        new_txs: (n.local_addr(), txs),
+                    },
+                )?;
             } else if sender_node.is_source() {
             } else {
                 internal!("ingress parent is not a sender");
