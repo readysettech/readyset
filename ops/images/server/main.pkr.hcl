@@ -5,7 +5,7 @@ packer {
 locals {
   date                = var.date != "" ? var.date : formatdate("YYYYMMDD", timestamp())
   image_name          = format("readyset/images/hvm-ssd/%s-%s-amd64-%s",
-    local.service
+    local.service,
     var.short_commit_id,
     local.date
   )
@@ -88,8 +88,6 @@ source "amazon-ebs" "main" {
   ami_users                 = var.ami_users
   ami_groups                = var.ami_groups
   instance_type             = var.instance_type
-  most_recent               = true
-  owners                    = [local.ubuntu_account]
   region                    = var.region
   skip_create_ami           = var.skip_create_ami
   ssh_clear_authorized_keys = true
@@ -103,6 +101,9 @@ source "amazon-ebs" "main" {
 
   # Retrieve the latest AMI of the Ubuntu release
   source_ami_filter {
+    owners       = [local.ubuntu_account]
+    most_recent  = true
+
     filters = {
       name                = format("ubuntu/images/hvm-ssd/ubuntu-%s-*-amd64-server-*", local.ubuntu_release)
       root-device-type    = local.root_device_type
@@ -120,8 +121,8 @@ build {
   }
 
   provisioner "file" {
-    source      = format("files/%.service", local.service)
-    destination = format("/tmp/%.service", local.service)
+    source      = format("files/%s.service", local.service)
+    destination = format("/tmp/%s.service", local.service)
   }
 
   provisioner "shell" {
