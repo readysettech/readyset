@@ -1248,6 +1248,11 @@ impl QueryOperation {
             }
             QueryOperation::TopK(order_type) => {
                 let table = state.some_table_mut();
+
+                if query.tables.is_empty() {
+                    query.tables.push(table.name.clone().into());
+                }
+
                 let column = table.some_column_name();
                 query.order = Some(OrderClause {
                     columns: vec![(
