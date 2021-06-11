@@ -1672,7 +1672,7 @@ impl GenerateOpts {
             subqueries: Vec<SubqueryPosition>,
             available_ops: Vec<Vec<QueryOperation>>,
         ) -> impl Iterator<Item = QuerySeed> {
-            if subquery_depth == 0 {
+            if subquery_depth == 0 || subqueries.is_empty() {
                 Either::Left(iter::once(QuerySeed {
                     operations,
                     subqueries: vec![],
