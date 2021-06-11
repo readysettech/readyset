@@ -371,9 +371,10 @@ where
     let (remaining, records) = records(bytes.as_slice()).map_err(|e| match e {
         nom::Err::Incomplete(_) => anyhow!("Parse error: Incomplete"),
         nom::Err::Error((input, kind)) | nom::Err::Failure((input, kind)) => {
+            let pos = String::from_utf8_lossy(input);
             anyhow!(
                 "Parse error, at {}: {:?}",
-                &String::from_utf8_lossy(input)[..16],
+                &pos[..std::cmp::min(pos.len(), 16)],
                 kind
             )
         }
