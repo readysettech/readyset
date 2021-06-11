@@ -1,11 +1,13 @@
 #![warn(clippy::dbg_macro)]
 use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
 use clap::Clap;
+use colored::Colorize;
 
 pub mod ast;
 pub mod generate;
@@ -214,27 +216,78 @@ struct Verify {
     binlog_mysql: Option<String>,
 }
 
+#[derive(Default)]
+struct VerifyResult {
+    pub failures: Vec<String>,
+    pub unexpected_passes: Vec<String>,
+    pub passes: usize,
+}
+
+impl VerifyResult {
+    pub fn is_success(&self) -> bool {
+        self.failures.is_empty() && self.unexpected_passes.is_empty()
+    }
+}
+
+impl Display for VerifyResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let n_scripts = |n| format!("{} test script{}", n, if n == 1 { "" } else { "s" });
+        if self.passes > 0 {
+            writeln!(
+                f,
+                "{}",
+                format!("Successfully ran {}\n", n_scripts(self.passes)).green()
+            )?;
+        }
+
+        if !self.failures.is_empty() {
+            writeln!(f, "{} failed:\n", n_scripts(self.failures.len()))?;
+            for script in &self.failures {
+                writeln!(f, "    {}", script)?;
+            }
+        }
+
+        if !self.unexpected_passes.is_empty() {
+            writeln!(
+                f,
+                "{} {} expected to fail, but did not:\n",
+                n_scripts(self.unexpected_passes.len()),
+                if self.unexpected_passes.len() == 1 {
+                    "was"
+                } else {
+                    "were"
+                }
+            )?;
+            for script in &self.unexpected_passes {
+                writeln!(f, "    {}", script)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl Verify {
     async fn run(&self) -> anyhow::Result<()> {
-        let mut failed = false;
-
+        let mut result = VerifyResult::default();
         for InputFile {
             name,
             data,
             expected_result,
         } in InputFiles::try_from(self.paths.as_slice())?
         {
-            let script = TestScript::read(name, data)?;
+            let script = TestScript::read(name.clone(), data)
+                .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
             let run_opts: RunOptions = self.into();
 
-            let result = script
+            let script_result = script
                 .run(run_opts)
                 .await
                 .with_context(|| format!("Running test script {}", script.name()));
 
-            match result {
+            match script_result {
                 Ok(_) if expected_result == ExpectedResult::Fail => {
-                    failed = true;
+                    result.unexpected_passes.push(script.name().into_owned());
                     eprintln!(
                         "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
                         script.name(),
@@ -242,17 +295,21 @@ impl Verify {
                     )
                 }
                 Err(e) if expected_result == ExpectedResult::Pass => {
-                    failed = true;
+                    result.failures.push(script.name().into_owned());
                     eprintln!("{:#}", e);
                 }
-                _ => {}
+                _ => {
+                    result.passes += 1;
+                }
             }
         }
 
-        if failed {
-            Err(anyhow!("One or more test scripts failed"))
-        } else {
+        println!("{}", result);
+
+        if result.is_success() {
             Ok(())
+        } else {
+            Err(anyhow!("Test run failed"))
         }
     }
 }
