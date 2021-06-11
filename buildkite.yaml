@@ -28,9 +28,17 @@ steps:
               exclude:
                 - "ops/**"
 
-            - lavel: ':nodejs: Test js-client'
-              exclude:
-                - "ops/**"
+            - label: ":docker: Build noria-server image"
+              include:
+                - "js-client/**"
+
+            - label: ":rust: Build js-client shared library"
+              include:
+                - "js-client/**"
+
+            - label: ':nodejs: Test js-client'
+              include:
+                - "js-client/**"
 
             - label: ':rust: Run tests'
               exclude:
