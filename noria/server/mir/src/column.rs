@@ -4,7 +4,7 @@ use std::mem;
 use nom_sql::{self, FunctionExpression};
 
 // FIXME: this is _not_ okay! malte knows about it
-#[warn(clippy::derive_hash_xor_eq)]
+#[allow(clippy::derive_hash_xor_eq)]
 #[derive(Clone, Debug, Hash)]
 pub struct Column {
     pub table: Option<String>,

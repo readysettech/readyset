@@ -262,10 +262,7 @@ impl MirNodeInner {
                     _ => false,
                 }
             }
-            MirNodeInner::JoinAggregates => match *other {
-                MirNodeInner::JoinAggregates => true,
-                _ => false,
-            },
+            MirNodeInner::JoinAggregates => matches!(*other, MirNodeInner::JoinAggregates),
             MirNodeInner::LeftJoin {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,

@@ -46,7 +46,7 @@ impl MirNode {
             columns,
             inner,
             ancestors: ancestors.clone(),
-            children: children.clone(),
+            children,
             flow_node: None,
         };
 
@@ -348,10 +348,7 @@ impl MirNode {
 
     #[allow(dead_code)]
     pub fn is_reused(&self) -> bool {
-        match self.inner {
-            MirNodeInner::Reuse { .. } => true,
-            _ => false,
-        }
+        matches!(self.inner, MirNodeInner::Reuse { .. })
     }
 
     pub fn name(&self) -> &str {
@@ -371,7 +368,7 @@ impl MirNode {
                 }
             }
             MirNodeInner::Filter { .. } => {
-                let parent = self.ancestors.iter().next().unwrap();
+                let parent = self.ancestors.first().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
                     if !columns.contains(&c) {
