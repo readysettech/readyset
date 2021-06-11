@@ -28,7 +28,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
             }
         }
         if !missing_any {
-            return Some(cur.clone());
+            return Some(cur);
         }
     }
 }

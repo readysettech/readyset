@@ -27,8 +27,7 @@ pub(super) fn make_universe_naming_consistent(
     queue.push(q.leaf.clone());
 
     let leaf_node: MirNodeRef = new_q.leaf;
-    let mut nodes_to_check: Vec<MirNodeRef> = Vec::new();
-    nodes_to_check.push(leaf_node.clone());
+    let mut nodes_to_check = vec![leaf_node.clone()];
 
     // get the node that is the base table of the universe
     let mut base_node: MirNodeRef = leaf_node;
@@ -71,8 +70,7 @@ pub(super) fn pull_required_base_columns(
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
     sec: bool,
 ) {
-    let mut queue = Vec::new();
-    queue.push(q.leaf.clone());
+    let mut queue = vec![q.leaf.clone()];
 
     if sec {
         match table_mapping {

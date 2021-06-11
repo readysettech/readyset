@@ -13,7 +13,7 @@ steps:
     plugins:
       ecr#v2.2.0:
         login: true
-  
+
   - label: ":docker: Build noria-server image"
     key: noria-server-image
     commands:
@@ -87,6 +87,7 @@ steps:
     - "( echo '--- :rust: Checking psql-srv'; cargo clippy -p psql-srv -- -D warnings)"
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     - "( echo '--- :rust: Checking noria'; cargo clippy -p noria -- -D warnings)"
+    - "( echo '--- :rust: Checking noria-mir'; cargo clippy -p noria-mir -- -D warnings)"
     - "( echo '--- :rust: Checking noria-dataflow'; cargo clippy -p noria-dataflow -- -D warnings)"
     - "( echo '--- :rust: Checking replicators'; cargo clippy -p replicators -- -D warnings)"
     - "( echo '--- :rust: Checking maths'; cargo clippy -p maths -- -D warnings)"
@@ -103,7 +104,7 @@ steps:
           - CARGO_INCREMENTAL=0
       - ecr#v2.2.0:
           login: true
-  
+
   - label: ":rust: Build js-client shared library"
     key: build-js-client-lib
     commands:
