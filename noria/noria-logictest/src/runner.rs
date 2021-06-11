@@ -152,7 +152,7 @@ impl TestScript {
                     .await?;
             }
 
-            self.run_on_noria(&opts).await?;
+            let status = self.run_on_noria(&opts).await;
 
             // Cleanup zookeeper
             if let Ok(z) = ZooKeeper::connect(
@@ -163,6 +163,8 @@ impl TestScript {
                 z.delete_recursive(&format!("/{}", opts.deployment_name))
                     .unwrap_or(());
             }
+
+            status?;
         };
 
         println!(
@@ -174,12 +176,6 @@ impl TestScript {
             )
             .bold()
         );
-
-        if opts.binlog_url.is_some() {
-            // After all tests are done, we don't want to drop Noria right away, as it may cause
-            // some conflicts between binlog propagation and cleanup
-            std::thread::sleep(Duration::from_millis(250));
-        }
 
         Ok(())
     }
