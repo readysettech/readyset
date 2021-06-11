@@ -1138,7 +1138,7 @@ mod tests_mysql {
         let qstring = "CREATE TABLE `user` (
                         user_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
                         user_name varchar(255) binary NOT NULL default '',
-                        user_real_name varchar(255) binary NOT NULL default '',
+                        user_real_name character varying(255) binary NOT NULL default '',
                         user_password tinyblob NOT NULL,
                         user_newpassword tinyblob NOT NULL,
                         user_newpass_time binary(14),

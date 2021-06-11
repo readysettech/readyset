@@ -528,7 +528,16 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         ),
         map(
             tuple((
-                tag_no_case("varchar"),
+                alt((
+                    // The alt expects the same type to be returned for both entries,
+                    // so both have to be tuples with same number of elements
+                    tuple((tag_no_case("varchar"), multispace0, multispace0)),
+                    tuple((
+                        tag_no_case("character"),
+                        multispace1,
+                        tag_no_case("varying"),
+                    )),
+                )),
                 delim_digit,
                 multispace0,
                 opt(tag_no_case("binary")),
