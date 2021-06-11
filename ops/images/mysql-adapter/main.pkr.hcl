@@ -4,6 +4,11 @@ packer {
 
 locals {
   date                = var.date != "" ? var.date : formatdate("YYYYMMDD", timestamp())
+  image_name          = format("readyset/images/hvm-ssd/%s-%s-amd64-%s",
+    local.service
+    var.short_commit_id,
+    local.date
+  )
   root_device_type    = "ebs"
   service             = "readyset-mysql-adapter"
   ssh_username        = "ubuntu"
@@ -76,11 +81,7 @@ variable "skip_create_ami" {
 }
 
 source "amazon-ebs" "main" {
-  ami_name                  = format("readyset/images/hvm-ssd/%s-%s-amd64-%s",
-    local.service
-    var.short_commit_id,
-    local.date
-  )
+  ami_name                  = local.image_name
   ami_description           = var.ami_description
   ami_virtualization_type   = local.virtualization_type
   ami_regions               = var.ami_regions
@@ -93,7 +94,12 @@ source "amazon-ebs" "main" {
   skip_create_ami           = var.skip_create_ami
   ssh_clear_authorized_keys = true
   ssh_username              = local.ssh_username
-  tags                      = local.tags
+  tags                      = merge(
+    {
+      Name = local.image_name
+    },
+    local.tags
+  )
 
   # Retrieve the latest AMI of the Ubuntu release
   source_ami_filter {
