@@ -19,6 +19,8 @@ pub struct CompositeMetricsRecorder {
 pub enum RecorderType {
     /// A Noria recorder.
     Noria,
+    /// A Prometheus recorder.
+    Prometheus,
 }
 
 macro_rules! try_poisoned {
@@ -38,6 +40,9 @@ impl CompositeMetricsRecorder {
         let mut elements = try_poisoned!(self.elements.write());
         match recorder {
             MetricsRecorder::Noria(_) => (*elements).insert(RecorderType::Noria, recorder),
+            MetricsRecorder::Prometheus(_) => {
+                (*elements).insert(RecorderType::Prometheus, recorder)
+            }
         };
     }
 

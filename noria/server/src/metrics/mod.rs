@@ -14,6 +14,7 @@ pub use crate::metrics::recorders::MetricsRecorder;
 mod buffered_recorder;
 mod composite_recorder;
 mod noria_recorder;
+mod prometheus_recorder;
 mod recorders;
 
 /// The type of the static, globally accessible metrics recorder.
