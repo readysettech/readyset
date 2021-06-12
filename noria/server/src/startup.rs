@@ -267,6 +267,18 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                 };
                 return Box::pin(async move { Ok(res.unwrap()) });
             }
+            (&Method::GET, "/prometheus") => {
+                let body =
+                    get_global_recorder().flush_and_then(|x| x.render(RecorderType::Prometheus));
+                let res = res.header(CONTENT_TYPE, "text/plain");
+                let res = match body {
+                    Some(metrics) => res.body(hyper::Body::from(metrics)),
+                    None => res
+                        .status(404)
+                        .body(hyper::Body::from("No recorder for Prometheus".to_string())),
+                };
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
             (&Method::POST, "/metrics_dump") => {
                 let res = get_global_recorder().flush_and_then(|recorder| {
                     match recorder.render(RecorderType::Noria) {

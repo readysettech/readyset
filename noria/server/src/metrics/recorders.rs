@@ -1,4 +1,5 @@
 use metrics::{GaugeValue, Recorder, Unit};
+use metrics_exporter_prometheus::PrometheusRecorder;
 
 use crate::metrics::noria_recorder::NoriaMetricsRecorder;
 use crate::metrics::{Clear, Key, Render};
@@ -7,12 +8,15 @@ use crate::metrics::{Clear, Key, Render};
 pub enum MetricsRecorder {
     /// A recorder for Noria-style metrics.
     Noria(NoriaMetricsRecorder),
+    /// A recorder for Prometheus.
+    Prometheus(PrometheusRecorder),
 }
 
 impl Render for MetricsRecorder {
     fn render(&self) -> String {
         match self {
             MetricsRecorder::Noria(nmr) => nmr.render(),
+            MetricsRecorder::Prometheus(pr) => pr.render(),
         }
     }
 }
@@ -21,6 +25,7 @@ impl Clear for MetricsRecorder {
     fn clear(&self) -> bool {
         match self {
             MetricsRecorder::Noria(nmr) => nmr.clear(),
+            MetricsRecorder::Prometheus(pr) => pr.clear(),
         }
     }
 }
@@ -29,6 +34,8 @@ macro_rules! impl_method {
     ($self:ident, $method:ident,$($arg:tt)*) => {
         match $self {
             MetricsRecorder::Noria(nmr) => nmr.$method($($arg)*),
+            // TODO(fran): Maybe we can filter labels at this point?
+            MetricsRecorder::Prometheus(pr) => pr.$method($($arg)*)
         }
     }
 }
