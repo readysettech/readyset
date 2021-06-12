@@ -185,7 +185,7 @@ steps:
     key: logictest-binlog
     command:
     - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql logictests
+    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:noria@mysql logictests
     timeout_in_minutes: 60
     depends_on:
     - build-image

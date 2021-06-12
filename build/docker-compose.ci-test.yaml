@@ -14,7 +14,17 @@ services:
   mysql:
     image: mysql
     environment:
-    - MYSQL_ROOT_PASSWORD=binlog
+    - MYSQL_ROOT_PASSWORD=noria
+    - MYSQL_DATABASE=noria
+  postgres:
+    image: postgres
+    environment:
+    - POSTGRES_PASSWORD=noria
+    - POSTGRES_DB=noria
+    command:
+    - "postgres"
+    - "-c"
+    - "wal_level=logical"
   app:
     build:
       context: ..
@@ -33,3 +43,4 @@ services:
     - zookeeper
     - redis
     - mysql
+    - postgres

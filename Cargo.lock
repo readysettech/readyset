@@ -5429,6 +5429,7 @@ dependencies = [
  "native-tls",
  "nom-sql",
  "noria",
+ "noria-server",
  "postgres-native-tls",
  "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "slog",
