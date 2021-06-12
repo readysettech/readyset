@@ -25,3 +25,7 @@ mysql_common = "0.27"
 
 nom-sql = { path = "../nom-sql" }
 noria = { path = "../noria/noria", package = "noria" }
+
+[dev-dependencies]
+noria-server = { path = "../noria/server" }
+
