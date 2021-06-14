@@ -93,7 +93,7 @@ impl Signature for QueryGraph {
 
         // Compute relations part of hash
         let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
-        r_vec.sort();
+        r_vec.sort_unstable();
         for r in &r_vec {
             r.hash(&mut hasher);
         }
@@ -241,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::eq_op)]
     fn it_compares_signatures() {
         use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};

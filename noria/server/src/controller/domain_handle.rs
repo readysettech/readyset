@@ -43,7 +43,7 @@ impl DomainHandle {
                 .rpc(WorkerRequestKind::DomainRequest {
                     target_idx: self.idx,
                     target_shard: i,
-                    request: req.clone(),
+                    request: Box::new(req.clone()),
                 })
                 .await
                 .map_err(|e| {
@@ -54,7 +54,7 @@ impl DomainHandle {
                 self.log,
                 "tried to send domain request to failed worker at {}", addr
             );
-            Err(ReadySetError::WorkerFailed { uri: addr.clone() })?
+            Err(ReadySetError::WorkerFailed { uri: addr.clone() })
         }
     }
 

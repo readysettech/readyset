@@ -1,7 +1,6 @@
 //! Functions for assigning new nodes to thread domains.
 
 use dataflow::prelude::*;
-use petgraph;
 use slog::Logger;
 
 pub fn assign(

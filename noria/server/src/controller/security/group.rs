@@ -1,7 +1,6 @@
 use crate::controller::security::policy::Policy;
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use serde_json;
 use serde_json::Value;
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]

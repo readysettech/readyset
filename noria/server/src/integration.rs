@@ -3,6 +3,7 @@
 //! run in parallel. For tests that modify process-level global objects
 //! consider using integration_serial and having the tests run serially
 //! to prevent flaky behavior.
+#![allow(clippy::many_single_char_names)]
 
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
@@ -75,8 +76,8 @@ async fn it_completes() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
     muta.delete(vec![id.clone()]).await.unwrap();
     sleep().await;
     assert_eq!(
@@ -548,9 +549,9 @@ async fn it_works_w_mat() {
     // we should see all the a values
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(res.len(), 3);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 1.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
@@ -563,12 +564,12 @@ async fn it_works_w_mat() {
     // check that value was updated again
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(res.len(), 6);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 5.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 6.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 1.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 3.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 5.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 6.into()]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -617,9 +618,9 @@ async fn it_works_w_partial_mat() {
     // now do some reads
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(res.len(), 3);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 1.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 3.into()]));
 
     // should have one key in the reader now
     assert_eq!(cq.len().await.unwrap(), 1);
@@ -664,9 +665,9 @@ async fn it_works_w_partial_mat_below_empty() {
     // now do some reads
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(res.len(), 3);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 1.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 3.into()]));
 
     // should have one key in the reader now
     assert_eq!(cq.len().await.unwrap(), 1);
@@ -1634,8 +1635,8 @@ async fn empty_migration() {
 
     // check that value was updated again
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1798,7 +1799,7 @@ async fn migrate_added_columns() {
             .count(),
         2
     );
-    assert!(res.iter().any(|r| r == &vec![10.into(), id.clone()]));
+    assert!(res.iter().any(|r| r == vec![10.into(), id.clone()]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1879,10 +1880,7 @@ async fn key_on_added() {
     // set up graph
     let mut g = start_simple("key_on_added").await;
     let a = g
-        .migrate(|mig| {
-            let a = mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()]));
-            a
-        })
+        .migrate(|mig| mig.add_base("a", &["a", "b"], Base::new(vec![1.into(), 2.into()])))
         .await;
 
     // add a maintained view keyed on newly added column
@@ -2613,7 +2611,8 @@ async fn live_writes() {
         // we need to use a batch putter because otherwise we'd wait for 7000 batch intervals
         let fut =
             add.perform_all((0..votes).flat_map(|_| (0..ids).map(|i| vec![0.into(), i.into()])));
-        tx.send(fut.await.unwrap()).unwrap();
+        fut.await.unwrap();
+        tx.send(()).unwrap();
     });
 
     // let a few writes through to make migration take a while
@@ -2700,10 +2699,10 @@ async fn state_replay_migration_query() {
     let res = out.lookup(&[1.into()], true).await.unwrap();
     assert!(res
         .iter()
-        .any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
+        .any(|r| r == vec![1.into(), "a".into(), "n".into()]));
     assert!(res
         .iter()
-        .any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
+        .any(|r| r == vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
@@ -3022,17 +3021,16 @@ macro_rules! get {
     ($private:ident, $public:ident, $uid:expr, $aid:expr) => {{
         // combine private and public results
         // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we try both O:)
-        let v: Vec<_> = $private
+        let private_uid_aid = $private
             .lookup(&[$uid.into(), $aid.into()], true)
             .await
             .unwrap()
-            .into_iter()
-            .chain(
-                $private
-                    .lookup(&[$aid.into(), $uid.into()], true)
-                    .await
-                    .unwrap(),
-            )
+            .into_iter();
+        let private_aid_uid = $private
+            .lookup(&[$aid.into(), $uid.into()], true)
+            .await
+            .unwrap();
+        let v: Vec<_> = private_uid_aid.chain(private_aid_uid)
             .chain($public.lookup(&[$aid.into()], true).await.unwrap())
             .collect();
         eprintln!("check {} as {}: {:?}", $aid, $uid, v);
@@ -4462,13 +4460,13 @@ async fn left_join_null() {
 
     sleep().await;
 
-    let res = q
+    let num_res = q
         .lookup(&[0.into()], true)
         .await
         .unwrap()
         .into_iter()
-        .collect::<Vec<_>>();
-    assert_eq!(res.len(), 2);
+        .count();
+    assert_eq!(num_res, 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4539,7 +4537,7 @@ async fn test_view_includes_replicas() {
     assert_eq!(shards.len(), 1);
 
     // Replicate into the region it is currently not in.
-    let dst_addr = if &shards[0].region == &Some("r1".to_string()) {
+    let dst_addr = if shards[0].region == Some("r1".to_string()) {
         w2_addr
     } else {
         w1_addr

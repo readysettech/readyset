@@ -131,7 +131,7 @@ pub(super) fn graphviz(
                 ""
             }
         ));
-        s.push_str("\n");
+        s.push('\n');
     }
 
     // footer.
@@ -330,7 +330,7 @@ impl ControllerInner {
         if epoch != self.epoch {
             return Err(ReadySetError::EpochMismatch {
                 supplied: Some(epoch),
-                current: Some(self.epoch.clone()),
+                current: Some(self.epoch),
             });
         }
 
@@ -422,7 +422,7 @@ impl ControllerInner {
         let (recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        self.apply_recipe(recovery.clone())?;
+        self.apply_recipe(recovery)?;
 
         // we must do this *after* the migration, since the migration itself modifies the recipe in
         // `recovery`, and we currently need to clone it here.
@@ -442,7 +442,7 @@ impl ControllerInner {
         if epoch != self.epoch {
             return Err(ReadySetError::EpochMismatch {
                 supplied: Some(epoch),
-                current: Some(self.epoch.clone()),
+                current: Some(self.epoch),
             });
         }
 
@@ -550,7 +550,7 @@ impl ControllerInner {
                     // to the user.
                     new_readers
                         .entry(query_name)
-                        .or_insert(Vec::new())
+                        .or_insert_with(Vec::new)
                         .push(reader_index);
                     break;
                 }
@@ -577,7 +577,7 @@ impl ControllerInner {
                 let reader = &self.ingredients[reader_index];
                 domain_mappings
                     .entry(reader.domain())
-                    .or_insert(Vec::new())
+                    .or_insert_with(|| Vec::new())
                     .push(reader_index)
             }
             query_information.insert(query_name.clone(), domain_mappings);
@@ -734,7 +734,7 @@ impl ControllerInner {
                 shard: i,
             })?;
 
-            let idx = domain.index.clone();
+            let idx = domain.index;
             let shard = domain.shard.unwrap_or(0);
 
             // send domain to worker
@@ -759,7 +759,7 @@ impl ControllerInner {
             info!(log, "worker booted domain at {}", ret.external_addr);
 
             self.channel_coordinator
-                .insert_remote((idx.clone(), shard), ret.external_addr.clone());
+                .insert_remote((idx, shard), ret.external_addr);
             domain_addresses.push(DomainDescriptor::new(idx, shard, ret.external_addr));
             assignments.push(w.uri.clone());
         }
@@ -784,7 +784,7 @@ impl ControllerInner {
                     "informing worker at {} about newly placed domain", w.uri
                 );
                 if let Err(e) = futures_executor::block_on(
-                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(dd.clone())),
+                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(dd)),
                 ) {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
@@ -1008,15 +1008,7 @@ impl ControllerInner {
     ) -> Result<Option<Vec<ColumnSpecification>>, ReadySetError> {
         let n = &self.ingredients[view_ni];
         let schema: Vec<_> = (0..n.fields().len())
-            .map(|i| {
-                Ok(schema::column_schema(
-                    &self.ingredients,
-                    view_ni,
-                    &self.recipe,
-                    i,
-                    &self.log,
-                )?)
-            })
+            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
             .collect::<Result<Vec<_>, ReadySetError>>()?;
 
         if schema.iter().any(Option::is_none) {
@@ -1227,7 +1219,7 @@ impl ControllerInner {
             }
         }
 
-        self.add_universe(context.clone(), |mut mig| {
+        self.add_universe(context, |mut mig| {
             r.next();
             let ar = r.create_universe(&mut mig, universe_groups)?;
             info!(log, "{} expressions added", ar.expressions_added);
@@ -1372,8 +1364,9 @@ impl ControllerInner {
                 let new = old.replace(r).unwrap();
                 match self.apply_recipe(new) {
                     Ok(x) => {
-                        if authority
-                            .read_modify_write(STATE_KEY, |state: Option<ControllerState>| {
+                        let install_result = authority.read_modify_write(
+                            STATE_KEY,
+                            |state: Option<ControllerState>| {
                                 match state {
                                     None => unreachable!(),
                                     Some(ref state) if state.epoch > self.epoch => Err(()),
@@ -1388,9 +1381,9 @@ impl ControllerInner {
                                         Ok(state)
                                     }
                                 }
-                            })
-                            .is_err()
-                        {
+                            },
+                        );
+                        if install_result.is_err() {
                             noria::internal!("failed to persist recipe installation")
                         }
                         Ok(x)
@@ -1566,10 +1559,10 @@ impl ControllerInner {
                 .collect()
         };
 
-        if worker.is_some() {
+        if let Some(worker) = worker {
             self.domains
                 .values()
-                .filter(|dh| dh.assigned_to_worker(worker.unwrap()))
+                .filter(|dh| dh.assigned_to_worker(worker))
                 .fold(Vec::new(), |mut acc, dh| {
                     acc.extend(domain_nodes(dh.index()));
                     acc

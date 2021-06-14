@@ -256,7 +256,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                 let res = res
                     .header(CONTENT_TYPE, "text/html")
                     .body(hyper::Body::from(include_str!("graph.html")));
-                return Box::pin(async move { Ok(res.unwrap()) });
+                Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, path) if path.starts_with("/zookeeper/") => {
                 let res = match self.authority.try_read(&format!("/{}", &path[11..])) {
@@ -265,7 +265,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                         .body(hyper::Body::from(data)),
                     _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
                 };
-                return Box::pin(async move { Ok(res.unwrap()) });
+                Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, "/prometheus") => {
                 let body =
@@ -298,7 +298,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                 let res = res
                     .header(CONTENT_TYPE, "application/json")
                     .body(hyper::Body::from(vec![]));
-                return Box::pin(async move { Ok(res.unwrap()) });
+                Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/worker_request") => {
                 metrics::increment_counter!(recorded::SERVER_WORKER_REQUESTS);
@@ -319,12 +319,13 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                         }
                     };
                     let (tx, rx) = tokio::sync::oneshot::channel();
-                    if let Err(_) = wtx
+                    if wtx
                         .send(WorkerRequest {
                             kind: wrq,
                             done_tx: tx,
                         })
                         .await
+                        .is_err()
                     {
                         let res = res.status(StatusCode::SERVICE_UNAVAILABLE);
                         return Ok(res.body(hyper::Body::empty()).unwrap());
@@ -332,7 +333,9 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
 
                     let res = match rx.await {
                         Ok(Ok(ret)) => res.header("Content-Type", "application/octet-stream").body(
-                            hyper::Body::from(ret.unwrap_or(bincode::serialize(&()).unwrap())),
+                            hyper::Body::from(
+                                ret.unwrap_or_else(|| bincode::serialize(&()).unwrap()),
+                            ),
                         ),
                         Ok(Err(e)) => res
                             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -365,7 +368,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                         reply_tx: tx,
                     };
 
-                    if let Err(_) = controller_tx.send(req).await {
+                    if controller_tx.send(req).await.is_err() {
                         let res = res
                             .status(StatusCode::SERVICE_UNAVAILABLE)
                             .header("Content-Type", "text/plain; charset=utf-8");

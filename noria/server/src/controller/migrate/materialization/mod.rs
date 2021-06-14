@@ -438,10 +438,12 @@ impl Materializations {
                                     break;
                                 }
                                 if i == 0 && n_to_skip == 0 {
-                                    if !self.have.contains_key(&node) {
-                                        warn!(self.log, "forcing materialization for node {} with generated columns", node.index());
-                                        self.have.insert(node, HashSet::new());
-                                    }
+                                    let log = &self.log;
+                                    self.have.entry(node).or_insert_with(|| {
+                                        warn!(log, "forcing materialization for node {} with generated columns", node.index());
+                                        HashSet::new()
+                                    });
+
                                     add.entry(node)
                                         .or_insert_with(HashSet::new)
                                         .insert(index.clone());
@@ -719,8 +721,7 @@ impl Materializations {
                     for path in keys::provenance_of(graph, parent, &columns[..])? {
                         let (mat_anc, cols) = path
                             .into_iter()
-                            .skip_while(|&(n, _)| !self.have.contains_key(&n))
-                            .next()
+                            .find(|&(n, _)| self.have.contains_key(&n))
                             .ok_or_else(|| {
                                 internal_err(
                                     "since bases are materialized, \
@@ -990,7 +991,7 @@ impl Materializations {
         // wait for the domain to finish replay, which the ready executed by the outer commit()
         // loop does.
         index_on.clear();
-        return Ok(());
+        Ok(())
     }
 
     /// Reconstruct the materialized state required by the given (new) node through replay.

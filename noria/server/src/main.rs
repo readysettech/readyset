@@ -28,13 +28,13 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 }
 
 pub fn resolve_addr(addr: &str) -> IpAddr {
-    return [addr, ":0"]
+    [addr, ":0"]
         .concat()
         .to_socket_addrs()
         .unwrap()
         .next()
         .unwrap()
-        .ip();
+        .ip()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -223,7 +223,7 @@ If specified, overrides the value of --external-address"))
         Either::Right(future::ok(
             matches
                 .value_of("external_address")
-                .map_or(listen_addr.clone(), |addr| resolve_addr(addr)),
+                .map_or(listen_addr, |addr| resolve_addr(addr)),
         ))
     };
     let external_port = value_t_or_exit!(matches, "external_port", u16);
@@ -297,9 +297,7 @@ If specified, overrides the value of --external-address"))
         Some(deployment_name.to_string()),
         persistence_threads,
     );
-    persistence_params.log_dir = matches
-        .value_of("log-dir")
-        .and_then(|p| Some(PathBuf::from(p)));
+    persistence_params.log_dir = matches.value_of("log-dir").map(PathBuf::from);
     builder.set_persistence(persistence_params);
 
     if let Some(url) = matches.value_of("replication-url") {

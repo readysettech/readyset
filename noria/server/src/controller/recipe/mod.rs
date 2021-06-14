@@ -280,16 +280,13 @@ impl Recipe {
                     is_leaf = true;
                 }
 
-                match n {
-                    Some(ref name) => {
-                        assert!(
-                            !aliases.contains_key(name) || aliases[name] == qid,
-                            "Query name exists but existing query is different: {}",
-                            name
-                        );
-                        aliases.insert(name.clone(), qid);
-                    }
-                    None => {}
+                if let Some(ref name) = n {
+                    assert!(
+                        !aliases.contains_key(name) || aliases[name] == qid,
+                        "Query name exists but existing query is different: {}",
+                        name
+                    );
+                    aliases.insert(name.clone(), qid);
                 }
                 (qid, (n, q, is_leaf))
             })
@@ -512,7 +509,7 @@ impl Recipe {
             // FIXME(eta): error handling impl overhead
             .collect::<ReadySetResult<Vec<_>>>()?
             .into_iter()
-            .filter_map(|x| x)
+            .flatten()
             .collect();
 
         Ok(result)
@@ -633,7 +630,7 @@ impl Recipe {
         for l in lines {
             if !l.ends_with(';') && i < linecount {
                 q.push_str(l);
-                q.push_str(" ");
+                q.push(' ');
             } else {
                 // either line ends with semicolor, or it does not and this is the last line
                 // in both cases, we're at the end of the query
@@ -681,7 +678,7 @@ impl Recipe {
     /// Returns the predecessor from which this `Recipe` was migrated to.
     // crate viz for tests
     pub(crate) fn prior(&self) -> Option<&Recipe> {
-        self.prior.as_ref().map(|p| &**p)
+        self.prior.as_deref()
     }
 
     fn remove_query(&mut self, qname: &str) -> bool {
@@ -810,7 +807,7 @@ mod tests {
         let q0_id = hash_query(&q0);
         let q1_id = hash_query(&q1);
 
-        let pq_a = vec![(None, q0.clone(), true), (None, q1.clone(), true)];
+        let pq_a = vec![(None, q0.clone(), true), (None, q1, true)];
         let r1 = Recipe::from_queries(pq_a, None);
 
         // delta from empty recipe
@@ -828,7 +825,7 @@ mod tests {
         // bring on a new query set
         let q2 = sql_parser::parse_query("SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
-        let pq_b = vec![(None, q0, true), (None, q2.clone(), true)];
+        let pq_b = vec![(None, q0, true), (None, q2, true)];
         let r2 = Recipe::from_queries(pq_b, None);
 
         // delta should show addition and removal

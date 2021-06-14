@@ -169,10 +169,7 @@ impl<'a> Migration<'a> {
             None => "global".into(),
         };
 
-        let group = match self.context.get("group") {
-            Some(g) => Some(g.clone()),
-            None => None,
-        };
+        let group = self.context.get("group").cloned();
 
         (id, group)
     }

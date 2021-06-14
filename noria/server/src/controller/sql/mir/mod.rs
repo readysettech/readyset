@@ -180,7 +180,6 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             columns
-                .clone()
                 .into_iter()
                 .map(|mut c| {
                     sanitize_leaf_column(&mut c, name);
@@ -277,7 +276,7 @@ impl SqlToMirConverter {
                     keys: vec![],
                     operator: BinaryOperator::Equal,
                 },
-                vec![final_node.clone()],
+                vec![final_node],
                 vec![],
             )
         } else {
@@ -306,10 +305,11 @@ impl SqlToMirConverter {
     pub(super) fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,
-            Some(ref node) => match node.borrow().flow_node {
-                None => None,
-                Some(ref flow_node) => Some(flow_node.address()),
-            },
+            Some(ref node) => node
+                .borrow()
+                .flow_node
+                .as_ref()
+                .map(|flow_node| flow_node.address()),
         }
     }
 
@@ -460,7 +460,7 @@ impl SqlToMirConverter {
             // newest schema first
             existing_schemas.reverse();
 
-            #[warn(clippy::never_loop)]
+            #[allow(clippy::never_loop)]
             for (existing_sv, ref schema) in existing_schemas {
                 // TODO(malte): check the keys too
                 if &schema[..] == cols {
@@ -550,7 +550,7 @@ impl SqlToMirConverter {
 
                         // remember the schema for this version
                         let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
-                        base_schemas.push((self.schema_version, columns.clone()));
+                        base_schemas.push((self.schema_version, columns));
 
                         return Ok(MirNode::adapt_base(
                             existing_node,
@@ -591,8 +591,8 @@ impl SqlToMirConverter {
         base_schemas.push((self.schema_version, cols.to_vec()));
 
         // make node
-        Ok(if !primary_keys.is_empty() {
-            match **primary_keys.iter().next().unwrap() {
+        Ok(if let Some(pk) = primary_keys.first() {
+            match **pk {
                 TableKey::PrimaryKey(ref key_cols) => {
                     debug!(
                         self.log,
@@ -821,7 +821,7 @@ impl SqlToMirConverter {
             self.schema_version,
             columns,
             MirNodeInner::Union { emit },
-            ancestors.clone(),
+            ancestors,
             vec![],
         ))
     }
@@ -866,8 +866,7 @@ impl SqlToMirConverter {
         let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
             if distinct {
                 let new_name = name.to_owned() + "_distinct";
-                let mut dist_col = Vec::new();
-                dist_col.push(over);
+                let mut dist_col = vec![over];
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
                 out_nodes.push(node.clone());
@@ -1013,7 +1012,7 @@ impl SqlToMirConverter {
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: agg,
                 },
-                vec![parent_node.clone()],
+                vec![parent_node],
                 vec![],
             ),
             GroupedNodeType::Extremum(extr) => MirNode::new(
@@ -1025,7 +1024,7 @@ impl SqlToMirConverter {
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: extr,
                 },
-                vec![parent_node.clone()],
+                vec![parent_node],
                 vec![],
             ),
         }
@@ -1115,7 +1114,7 @@ impl SqlToMirConverter {
             self.schema_version,
             fields,
             inner,
-            vec![left_node.clone(), right_node.clone()],
+            vec![left_node, right_node],
             vec![],
         ))
     }
@@ -1126,7 +1125,7 @@ impl SqlToMirConverter {
         aggregates: &[MirNodeRef; 2],
     ) -> ReadySetResult<MirNodeRef> {
         let fields = aggregates
-            .into_iter()
+            .iter()
             .map(|node| node.borrow().columns().to_owned())
             .flatten()
             .unique()
@@ -1155,7 +1154,7 @@ impl SqlToMirConverter {
             parent,
             fn_cols,
             vec![],
-            vec![(String::from("grp"), DataType::from(0 as i32))],
+            vec![(String::from("grp"), DataType::from(0i32))],
             false,
         )
     }
@@ -1210,7 +1209,7 @@ impl SqlToMirConverter {
                 literals,
                 expressions,
             },
-            vec![parent_node.clone()],
+            vec![parent_node],
             vec![],
         )
     }
@@ -1286,15 +1285,12 @@ impl SqlToMirConverter {
     ) -> ReadySetResult<MirNodeRef> {
         let combined_columns = parent.borrow().columns().to_vec();
 
-        let order = match *order {
-            Some(ref o) => Some(
-                o.columns
-                    .iter()
-                    .map(|(c, o)| (Column::from(c), o.clone()))
-                    .collect(),
-            ),
-            None => None,
-        };
+        let order = order.as_ref().map(|o| {
+            o.columns
+                .iter()
+                .map(|(c, o)| (Column::from(c), *o))
+                .collect()
+        });
 
         if limit.offset != 0 {
             unsupported!(
@@ -1314,7 +1310,7 @@ impl SqlToMirConverter {
                 k: limit.limit as usize,
                 offset: 0,
             },
-            vec![parent.clone()],
+            vec![parent],
             vec![],
         ))
     }
@@ -1332,7 +1328,7 @@ impl SqlToMirConverter {
             Expression::BinaryOp { lhs, op, rhs } => {
                 match op {
                     BinaryOperator::And => {
-                        let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
+                        let left = self.make_predicate_nodes(name, parent, lhs, nc)?;
                         let right = self.make_predicate_nodes(
                             name,
                             left.last().unwrap().clone(),
@@ -1340,13 +1336,13 @@ impl SqlToMirConverter {
                             nc + left.len(),
                         )?;
 
-                        pred_nodes.extend(left.clone());
-                        pred_nodes.extend(right.clone());
+                        pred_nodes.extend(left);
+                        pred_nodes.extend(right);
                     }
                     BinaryOperator::Or => {
                         let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
                         let right =
-                            self.make_predicate_nodes(name, parent.clone(), rhs, nc + left.len())?;
+                            self.make_predicate_nodes(name, parent, rhs, nc + left.len())?;
 
                         debug!(self.log, "Creating union node for `or` predicate");
 
@@ -1358,8 +1354,8 @@ impl SqlToMirConverter {
                             output_cols,
                         )?;
 
-                        pred_nodes.extend(left.clone());
-                        pred_nodes.extend(right.clone());
+                        pred_nodes.extend(left);
+                        pred_nodes.extend(right);
                         pred_nodes.push(union);
                     }
                     _ => {
@@ -1409,7 +1405,7 @@ impl SqlToMirConverter {
         created_predicates: &mut Vec<&'a Expression>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut predicates_above_group_by_nodes = Vec::new();
-        let mut prev_node = parent.clone();
+        let mut prev_node = parent;
 
         let ces = column_to_predicates.get(&over_col).unwrap();
         for ce in ces {
@@ -1532,7 +1528,7 @@ impl SqlToMirConverter {
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
-            sorted_rels.sort();
+            sorted_rels.sort_unstable();
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
                     continue;
@@ -1772,12 +1768,13 @@ impl SqlToMirConverter {
                 new_node_count += func_nodes.len();
 
                 // 9. Get the final node
-                let mut final_node: MirNodeRef = if prev_node.is_some() {
-                    prev_node.unwrap().clone()
-                } else {
-                    // no join, filter, or function node --> base node is parent
-                    invariant_eq!(sorted_rels.len(), 1);
-                    node_for_rel[sorted_rels.last().unwrap()].clone()
+                let mut final_node: MirNodeRef = match prev_node {
+                    Some(n) => n,
+                    None => {
+                        // no join, filter, or function node --> base node is parent
+                        invariant_eq!(sorted_rels.len(), 1);
+                        node_for_rel[sorted_rels.last().unwrap()].clone()
+                    }
                 };
 
                 // 10. Potentially insert TopK node below the final node
@@ -1796,7 +1793,7 @@ impl SqlToMirConverter {
                             final_node.clone(),
                             cols.iter().collect(),
                             vec![],
-                            vec![("bogokey".into(), DataType::from(0 as i32))],
+                            vec![("bogokey".into(), DataType::from(0i32))],
                             false,
                         );
                         new_node_count += 1;
@@ -1934,7 +1931,7 @@ impl SqlToMirConverter {
                     // If there are no parameters, use a dummy "bogokey" for the lookup key.
                     // Ensure the "bogokey" is projected if that has not been done already.
                     if !projected_columns.contains(&Column::new(None, "bogokey")) {
-                        projected_literals.push(("bogokey".into(), DataType::from(0 as i32)));
+                        projected_literals.push(("bogokey".into(), DataType::from(0i32)));
                     }
                     Some(vec![Column::new(None, "bogokey")])
                 }
@@ -2041,7 +2038,7 @@ impl SqlToMirConverter {
                         keys: key_columns,
                         operator,
                     },
-                    vec![leaf_project_node.clone()],
+                    vec![leaf_project_node],
                     vec![],
                 );
                 nodes_added.push(leaf_node);

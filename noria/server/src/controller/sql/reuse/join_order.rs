@@ -50,8 +50,8 @@ impl JoinChain {
         let stopped = self.stopped && other.stopped;
 
         JoinChain {
-            tables,
             join_order,
+            tables,
             stopped,
         }
     }

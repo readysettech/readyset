@@ -136,8 +136,8 @@ pub fn setup_mysql(addr: &str) -> mysql::Pool {
     use mysql::Opts;
 
     let addr = format!("mysql://{}", addr);
-    let db = &addr[addr.rfind("/").unwrap() + 1..];
-    let options = Opts::from_url(&addr[0..addr.rfind("/").unwrap()]).unwrap();
+    let db = &addr[addr.rfind('/').unwrap() + 1..];
+    let options = Opts::from_url(&addr[0..addr.rfind('/').unwrap()]).unwrap();
 
     // clear the db (note that we strip of /db so we get default)
     let opts = OptsBuilder::from_opts(options.clone())
@@ -234,9 +234,9 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
 
 /// Compare two sets of results, returning none if they are the same, and the diff between them
 /// otherwise.
-fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<String> {
-    let mut mysql = mysql.clone();
-    let mut soup = soup.clone();
+fn compare_results(mysql: &[Vec<String>], soup: &[Vec<String>]) -> Option<String> {
+    let mut mysql = mysql.to_vec();
+    let mut soup = soup.to_vec();
     mysql.sort();
     soup.sort();
 
@@ -324,14 +324,11 @@ async fn check_query(
             })
             .collect();
 
-        match compare_results(&target_results, &query_results) {
-            Some(diff) => {
-                return Err(format!(
-                    "MySQL and Soup results do not match for ? = {:?}\n{}",
-                    query_parameter, diff
-                ));
-            }
-            None => {}
+        if let Some(diff) = compare_results(&target_results, &query_results) {
+            return Err(format!(
+                "MySQL and Soup results do not match for ? = {:?}\n{}",
+                query_parameter, diff
+            ));
         }
     }
     g.shutdown();
@@ -342,7 +339,7 @@ async fn check_query(
 #[test]
 #[ignore]
 fn mysql_comparison() {
-    println!("");
+    println!();
 
     let mut schemas: BTreeMap<String, Schema> = BTreeMap::new();
     run_for_all_in_directory("schemas", |file_name, contents| {
@@ -373,7 +370,7 @@ fn mysql_comparison() {
                 let mut line = String::new();
                 while reader.read_line(&mut line).unwrap() > 0 {
                     data.push(
-                        line.split("\t")
+                        line.split('\t')
                             .map(str::trim)
                             .map(|s| s.to_owned())
                             .collect(),
@@ -398,14 +395,14 @@ fn mysql_comparison() {
 
         for (query_name, query) in schema.queries.iter() {
             print!("{}.{}... ", schema.name, query_name);
-            io::stdout().flush().ok().expect("Could not flush stdout");
+            io::stdout().flush().expect("Could not flush stdout");
 
             if let Some(true) = query.ignore {
                 println!("\x1B[33mIGNORED\x1B[m");
                 continue;
             }
 
-            if query.values.len() == 0 {
+            if query.values.is_empty() {
                 println!("\x1B[33mPASS\x1B[m");
                 continue;
             }

@@ -156,7 +156,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut expected = InValue::Subquery(Box::new(sq.clone()));
+        let mut expected = InValue::Subquery(Box::new(sq));
 
         // select pid from post where author in (select userid from role where type=1)
         let st = SelectStatement {

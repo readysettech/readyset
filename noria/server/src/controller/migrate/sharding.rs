@@ -2,7 +2,6 @@ use dataflow::node;
 use dataflow::ops;
 use dataflow::prelude::*;
 use noria::{internal, invariant, invariant_eq, ReadySetResult};
-use petgraph;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -358,6 +357,7 @@ pub fn shard(
                 }
             }
 
+            #[allow(clippy::if_same_then_else)]
             if need_sharding.is_empty() {
                 // if we get here, that means no one column resolves to matching shardings across
                 // all ancestors. we have two options here, either force no sharding or force

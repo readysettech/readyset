@@ -17,7 +17,7 @@ impl ReuseConfiguration for Full {
     ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         // sort keys to make reuse deterministic
         let mut sorted_keys: Vec<u64> = query_graphs.keys().cloned().collect();
-        sorted_keys.sort();
+        sorted_keys.sort_unstable();
         Ok(sorted_keys
             .iter()
             .map(|k| (ReuseType::DirectExtension, (*k, &query_graphs[k])))
