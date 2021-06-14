@@ -80,23 +80,7 @@ steps:
   - label: ':clippy: Check clippy'
     key: check-clippy
     commands:
-    - "( echo '--- :rust: Checking launchpad'; cargo clippy -p launchpad -- -D warnings)"
-    - "( echo '--- :rust: Checking msql-srv'; cargo clippy -p msql-srv -- -D warnings)"
-    - "( echo '--- :rust: Checking nom-sql'; cargo clippy -p nom-sql -- -D warnings)"
-    - "( echo '--- :rust: Checking nom-sql-postgres'; cargo clippy -p nom-sql --features postgres -- -D warnings)"
-    - "( echo '--- :rust: Checking psql-srv'; cargo clippy -p psql-srv -- -D warnings)"
-    - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
-    - "( echo '--- :rust: Checking noria'; cargo clippy -p noria -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-mir'; cargo clippy -p noria-mir -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-server'; cargo clippy -p noria-server --all-targets -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-dataflow'; cargo clippy -p noria-dataflow -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-logictest'; cargo clippy -p noria-logictest -- -D warnings)"
-    - "( echo '--- :rust: Checking replicators'; cargo clippy -p replicators -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-applications'; cargo clippy -p noria-applications -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-client'; cargo clippy -p noria-client -- -D warnings)"
-    - "( echo '--- :rust: Checking noria-psql'; cargo clippy -p noria-psql -- -D warnings)"
-    - "( echo '--- :rust: Checking maths'; cargo clippy -p maths -- -D warnings)"
-    - "( echo '--- :rust: Checking taster'; cargo clippy -p taster -- -D warnings)"
+    - cargo clippy --all -- -D warnings
     depends_on:
     - build-image
     plugins:
