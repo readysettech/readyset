@@ -183,14 +183,6 @@ struct Verify {
     #[clap(parse(from_str))]
     paths: Vec<PathBuf>,
 
-    /// Zookeeper host to connect to
-    #[clap(long, default_value = "127.0.0.1")]
-    zookeeper_host: String,
-
-    /// Zookeeper port to connect to
-    #[clap(long, default_value = "2181")]
-    zookeeper_port: u16,
-
     /// Connect to and run verification against a MySQL server rather than using noria
     #[clap(long)]
     mysql: bool,
@@ -269,8 +261,6 @@ impl Into<RunOptions> for &Verify {
     #[allow(clippy::field_reassign_with_default)]
     fn into(self) -> RunOptions {
         let mut opts = RunOptions::default();
-        opts.zookeeper_host = self.zookeeper_host.clone();
-        opts.zookeeper_port = self.zookeeper_port;
         opts.use_mysql = self.mysql;
         opts.mysql_host = self.mysql_host.clone();
         opts.mysql_port = self.mysql_port;

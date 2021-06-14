@@ -14,7 +14,11 @@ struct MysqlHandler;
 
 #[async_trait]
 impl ConnectionHandler for MysqlHandler {
-    async fn process_connection(&mut self, stream: net::TcpStream, backend: Backend) {
+    async fn process_connection(
+        &mut self,
+        stream: net::TcpStream,
+        backend: Backend<noria::ZookeeperAuthority>,
+    ) {
         if let Err(noria_client::backend::error::Error::Io(e)) =
             MysqlIntermediary::run_on_tcp(backend, stream).await
         {

@@ -1,3 +1,4 @@
+use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::results::Results;
 use noria::{internal, unsupported, DataType, ReadySetError};
@@ -89,17 +90,17 @@ async fn write_column<W: AsyncWrite + Unpin>(
 }
 
 #[derive(From)]
-pub enum Writer {
+pub enum Writer<A: 'static + Authority> {
     MySqlConnector(MySqlConnector),
-    NoriaConnector(NoriaConnector),
+    NoriaConnector(NoriaConnector<A>),
 }
 
 /// Builder for a [`Backend`]
-pub struct BackendBuilder {
+pub struct BackendBuilder<A: 'static + Authority> {
     sanitize: bool,
     static_responses: bool,
-    writer: Option<Writer>,
-    reader: Option<NoriaConnector>,
+    writer: Option<Writer<A>>,
+    reader: Option<NoriaConnector<A>>,
     slowlog: bool,
     permissive: bool,
     users: HashMap<String, String>,
@@ -108,7 +109,7 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
 }
 
-impl Default for BackendBuilder {
+impl<A: 'static + Authority> Default for BackendBuilder<A> {
     fn default() -> Self {
         BackendBuilder {
             sanitize: true,
@@ -125,12 +126,12 @@ impl Default for BackendBuilder {
     }
 }
 
-impl BackendBuilder {
+impl<A: 'static + Authority> BackendBuilder<A> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn build(self) -> Backend {
+    pub fn build(self) -> Backend<A> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
@@ -161,12 +162,12 @@ impl BackendBuilder {
         self
     }
 
-    pub fn writer<W: Into<Writer>>(mut self, writer: W) -> Self {
+    pub fn writer<W: Into<Writer<A>>>(mut self, writer: W) -> Self {
         self.writer = Some(writer.into());
         self
     }
 
-    pub fn reader(mut self, reader: NoriaConnector) -> Self {
+    pub fn reader(mut self, reader: NoriaConnector<A>) -> Self {
         self.reader = Some(reader);
         self
     }
@@ -203,7 +204,7 @@ impl BackendBuilder {
     }
 }
 
-pub struct Backend {
+pub struct Backend<A: 'static + Authority> {
     //if false, queries are not sanitized which improves latency.
     sanitize: bool,
     // a cache of all previously parsed queries
@@ -212,8 +213,8 @@ pub struct Backend {
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     static_responses: bool,
-    writer: Writer,
-    reader: NoriaConnector,
+    writer: Writer<A>,
+    reader: NoriaConnector<A>,
     slowlog: bool,
     permissive: bool,
     /// Map from username to password for all users allowed to connect to the db
@@ -292,7 +293,7 @@ pub enum QueryResult {
     },
 }
 
-impl Backend {
+impl<A: 'static + Authority> Backend<A> {
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -670,7 +671,7 @@ impl Backend {
         if let Writer::MySqlConnector(connector) = &mut self.writer {
             let res = connector.on_query(q, false).await;
             let res = res.map(|(row_count, last_insert, _)| (row_count, last_insert));
-            Backend::write_query_results(res, results).await
+            Backend::<A>::write_query_results(res, results).await
         } else {
             results
                 .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
@@ -695,7 +696,11 @@ impl Backend {
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
+impl<W, A> MysqlShim<W> for Backend<A>
+where
+    W: AsyncWrite + Unpin + Send + 'static,
+    A: 'static + Authority,
+{
     type Error = Error;
 
     async fn on_prepare(
@@ -780,16 +785,16 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
             Ok(QueryResult::NoriaInsert {
                 num_rows_inserted,
                 first_inserted_id,
-            }) => Backend::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            }) => Backend::<A>::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
             Ok(QueryResult::NoriaUpdate {
                 num_rows_updated,
                 last_inserted_id
-            }) => Backend::write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            }) => Backend::<A>::write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
             Ok(QueryResult::MySqlWrite {
                 num_rows_affected,
                 last_inserted_id,
             }) => {
-                Backend::write_query_results(
+                Backend::<A>::write_query_results(
                     Ok((num_rows_affected, last_inserted_id)),
                     results,
                 )
@@ -847,8 +852,11 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 num_rows_inserted,
                 first_inserted_id,
             }) => {
-                Backend::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results)
-                    .await
+                Backend::<A>::write_query_results(
+                    Ok((num_rows_inserted, first_inserted_id)),
+                    results,
+                )
+                .await
             }
             Ok(QueryResult::NoriaSelect {
                 data,
@@ -885,7 +893,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 num_rows_updated,
                 last_inserted_id,
             }) => {
-                Backend::write_query_results(Ok((num_rows_updated, last_inserted_id)), results)
+                Backend::<A>::write_query_results(Ok((num_rows_updated, last_inserted_id)), results)
                     .await
             }
             Ok(QueryResult::NoriaDelete { num_rows_deleted }) => {
@@ -895,8 +903,11 @@ impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
                 num_rows_affected,
                 last_inserted_id,
             }) => {
-                Backend::write_query_results(Ok((num_rows_affected, last_inserted_id)), results)
-                    .await
+                Backend::<A>::write_query_results(
+                    Ok((num_rows_affected, last_inserted_id)),
+                    results,
+                )
+                .await
             }
             e @ Err(Error::ReadySet(ReadySetError::UnparseableQuery { .. })) => {
                 if self.permissive {

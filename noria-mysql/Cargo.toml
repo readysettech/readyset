@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 async-trait = "0.1"
 msql-srv = { version = "0.8.7", path = "../msql-srv" }
+noria = { path = "../noria/noria" }
 noria-client = { version = "0.1.0", path = "../noria-client" }
 noria-client-adapter = { version = "0.1.0", path = "../noria-client/adapter" }
 tokio = { version = "1.5.0" }

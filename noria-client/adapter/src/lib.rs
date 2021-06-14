@@ -26,7 +26,11 @@ use tracing::Level;
 
 #[async_trait]
 pub trait ConnectionHandler {
-    async fn process_connection(&mut self, stream: net::TcpStream, backend: Backend);
+    async fn process_connection(
+        &mut self,
+        stream: net::TcpStream,
+        backend: Backend<ZookeeperAuthority>,
+    );
 }
 
 pub struct NoriaAdapter<H> {
@@ -240,7 +244,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
                 let _g = connection.enter();
 
-                let writer: Writer = if mysql_url.is_some() {
+                let writer: Writer<ZookeeperAuthority> = if mysql_url.is_some() {
                     let url = mysql_url.unwrap();
                     let writer = MySqlConnector::new(url).await;
 

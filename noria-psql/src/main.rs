@@ -11,7 +11,11 @@ struct PsqlHandler;
 
 #[async_trait]
 impl ConnectionHandler for PsqlHandler {
-    async fn process_connection(&mut self, stream: net::TcpStream, backend: cl::Backend) {
+    async fn process_connection(
+        &mut self,
+        stream: net::TcpStream,
+        backend: cl::Backend<noria::ZookeeperAuthority>,
+    ) {
         let backend = Backend(backend);
         run_backend(backend, stream).await;
     }

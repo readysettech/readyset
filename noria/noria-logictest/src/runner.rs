@@ -15,11 +15,11 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::consensus::LocalAuthority;
+use noria::ControllerHandle;
 use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
@@ -46,8 +46,6 @@ impl From<Vec<Record>> for TestScript {
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub deployment_name: String,
-    pub zookeeper_host: String,
-    pub zookeeper_port: u16,
     pub use_mysql: bool,
     pub mysql_host: String,
     pub mysql_port: u16,
@@ -62,8 +60,6 @@ impl Default for RunOptions {
     fn default() -> Self {
         Self {
             deployment_name: "sqllogictest".to_string(),
-            zookeeper_host: "127.0.0.1".to_string(),
-            zookeeper_port: 2181,
             use_mysql: false,
             mysql_host: "localhost".to_string(),
             mysql_port: 3306,
@@ -77,19 +73,6 @@ impl Default for RunOptions {
 }
 
 impl RunOptions {
-    pub fn zookeeper_addr(&self) -> String {
-        format!("{}:{}", self.zookeeper_host, self.zookeeper_port)
-    }
-
-    fn zookeeper_authority(&self) -> ZookeeperAuthority {
-        ZookeeperAuthority::new(&format!(
-            "{}/{}",
-            self.zookeeper_addr(),
-            self.deployment_name
-        ))
-        .unwrap()
-    }
-
     fn logger(&self) -> slog::Logger {
         if self.verbose {
             noria_server::logger_pls()
@@ -152,19 +135,7 @@ impl TestScript {
                     .await?;
             }
 
-            let status = self.run_on_noria(&opts).await;
-
-            // Cleanup zookeeper
-            if let Ok(z) = ZooKeeper::connect(
-                &opts.zookeeper_addr(),
-                Duration::from_secs(3),
-                |_: WatchedEvent| {},
-            ) {
-                z.delete_recursive(&format!("/{}", opts.deployment_name))
-                    .unwrap_or(());
-            }
-
-            status?;
+            self.run_on_noria(&opts).await?;
         };
 
         println!(
@@ -205,8 +176,9 @@ impl TestScript {
 
     /// Run the test script on Noria server
     pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
-        let mut noria_handle = self.start_noria_server(&opts).await;
-        let (adapter_task, conn_opts) = self.setup_mysql_adapter(&opts).await;
+        let authority = Arc::new(LocalAuthority::default());
+        let mut noria_handle = self.start_noria_server(&opts, Arc::clone(&authority)).await;
+        let (adapter_task, conn_opts) = self.setup_mysql_adapter(&opts, authority).await;
 
         let mut conn = mysql::Conn::new(conn_opts)
             .await
@@ -366,15 +338,14 @@ impl TestScript {
         Ok(())
     }
 
-    async fn start_noria_server(
+    async fn start_noria_server<A: 'static + noria::consensus::Authority>(
         &self,
         run_opts: &RunOptions,
-    ) -> noria_server::Handle<ZookeeperAuthority> {
-        let mut authority = run_opts.zookeeper_authority();
+        authority: Arc<A>,
+    ) -> noria_server::Handle<A> {
         let logger = run_opts.logger();
 
         let mut builder = Builder::default();
-        authority.log_with(logger.clone());
         builder.log_with(logger);
 
         if run_opts.disable_reuse {
@@ -386,12 +357,13 @@ impl TestScript {
             builder.set_mysql_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
         }
 
-        builder.start(Arc::new(authority)).await.unwrap()
+        builder.start(authority).await.unwrap()
     }
 
-    async fn setup_mysql_adapter(
+    async fn setup_mysql_adapter<A: 'static + noria::consensus::Authority>(
         &self,
         run_opts: &RunOptions,
+        authority: Arc<A>,
     ) -> (tokio::task::JoinHandle<()>, mysql::Opts) {
         let binlog_url = if let Some(binlog_url) = &run_opts.binlog_url {
             // Append the database name to the binlog mysql url
@@ -405,9 +377,7 @@ impl TestScript {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let zk_auth = run_opts.zookeeper_authority();
-
-        let ch = ControllerHandle::new(zk_auth).await.unwrap();
+        let ch = ControllerHandle::<A>::new(authority).await.unwrap();
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
