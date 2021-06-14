@@ -314,18 +314,18 @@ impl Verify {
     }
 }
 
-impl Into<RunOptions> for &Verify {
-    #[allow(clippy::field_reassign_with_default)]
-    fn into(self) -> RunOptions {
-        let mut opts = RunOptions::default();
-        opts.use_mysql = self.mysql;
-        opts.mysql_host = self.mysql_host.clone();
-        opts.mysql_port = self.mysql_port;
-        opts.mysql_db = self.mysql_db.clone();
-        opts.verbose = self.verbose;
-        opts.disable_reuse = self.no_reuse;
-        opts.binlog_url = self.binlog_mysql.clone();
-        opts
+impl From<&Verify> for RunOptions {
+    fn from(verify: &Verify) -> Self {
+        Self {
+            use_mysql: verify.mysql,
+            mysql_host: verify.mysql_host.clone(),
+            mysql_port: verify.mysql_port,
+            mysql_db: verify.mysql_db.clone(),
+            verbose: verify.verbose,
+            disable_reuse: verify.no_reuse,
+            binlog_url: verify.binlog_mysql.clone(),
+            ..Self::default()
+        }
     }
 }
 
