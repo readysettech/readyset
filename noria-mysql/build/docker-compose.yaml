@@ -12,8 +12,6 @@ services:
     environment:
       - MYSQL_ROOT_PASSWORD=binlog
       - MYSQL_TCP_PORT=3307
-  zookeeper:
-    image: zookeeper
   app:
     build:
       context: ../..
@@ -25,8 +23,5 @@ services:
     - 'target:/workdir/target'
     - 'cargo-registry:/usr/local/cargo/registry'
     - '../..:/workdir'
-    environment:
-    - ZOOKEEPER_HOST=zookeeper
     depends_on:
     - mysql
-    - zookeeper

@@ -658,7 +658,7 @@ steps:
     key: logictest
     command:
     - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest -- verify logictests --zookeeper-host zookeeper
+    - cargo run --bin noria-logictest -- verify logictests
     depends_on:
     - build-image
     - build-noria-mysql
@@ -680,7 +680,7 @@ steps:
     key: logictest-binlog
     command:
     - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql:3307 logictests --zookeeper-host zookeeper
+    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql:3307 logictests
     depends_on:
     - build-image
     - build-noria-mysql
