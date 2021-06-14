@@ -1,4 +1,3 @@
-use chrono;
 use msql_srv::{Value, ValueInner};
 use nom_sql::{Literal, Real};
 use noria::{DataType, ReadySetError};
@@ -8,13 +7,13 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 pub(crate) trait ToDataType {
-    fn to_datatype(self) -> Result<DataType, ReadySetError>;
+    fn into_datatype(self) -> Result<DataType, ReadySetError>;
 }
 
 const TINYTEXT_WIDTH: usize = 15;
 
 impl ToDataType for Literal {
-    fn to_datatype(self) -> Result<DataType, ReadySetError> {
+    fn into_datatype(self) -> Result<DataType, ReadySetError> {
         Ok(match self {
             Literal::Null => DataType::None,
             Literal::String(b) => b.into(),
@@ -51,7 +50,7 @@ impl ToDataType for Literal {
 }
 
 impl<'a> ToDataType for Value<'a> {
-    fn to_datatype(self) -> Result<DataType, ReadySetError> {
+    fn into_datatype(self) -> Result<DataType, ReadySetError> {
         Ok(match self.into_inner() {
             ValueInner::Null => DataType::None,
             ValueInner::Bytes(b) => DataType::try_from(b).unwrap(),

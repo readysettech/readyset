@@ -90,7 +90,7 @@ pub(crate) fn sanitize_query(query: &str) -> String {
 //    and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
     cond: &Expression,
-    pkey: &Vec<&Column>,
+    pkey: &[&Column],
     mut flattened: &mut HashSet<Vec<(String, DataType)>>,
 ) -> ReadySetResult<bool> {
     Ok(match *cond {
@@ -120,10 +120,7 @@ fn do_flatten_conditional(
                 .find(|key| {
                     key.len() < pkey.len() && !key.iter().any(|&(ref name, _)| name == &c.name)
                 })
-                // Not a very happy clone, but using a HashSet here simplifies the AND
-                // logic by letting us ignore identical clauses (and we need the .clone()
-                // to be able to "mutate" key).
-                .and_then(|key| Some(key.clone()));
+                .cloned();
 
             if let Some(mut key) = with_space {
                 flattened.remove(&key);
@@ -178,7 +175,7 @@ fn do_flatten_conditional(
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([[1]])
 pub(crate) fn flatten_conditional(
     cond: &Expression,
-    pkey: &Vec<&Column>,
+    pkey: &[&Column],
 ) -> ReadySetResult<Option<Vec<Vec<DataType>>>> {
     let mut flattened = HashSet::new();
     Ok(if do_flatten_conditional(cond, pkey, &mut flattened)? {
@@ -448,11 +445,13 @@ where
     Ok(updates)
 }
 
+type ExtractedUpdate = (Vec<DataType>, Vec<(usize, Modification)>);
+
 pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
     mut params: Option<I>,
     schema: &CreateTableStatement,
-) -> ReadySetResult<(Vec<DataType>, Vec<(usize, Modification)>)>
+) -> ReadySetResult<ExtractedUpdate>
 where
     I: Iterator<Item = DataType>,
 {
@@ -479,8 +478,7 @@ pub(crate) fn coerce_params(
     q: &SqlQuery,
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Option<Vec<DataType>>> {
-    if params.is_some() {
-        let prms = params.unwrap();
+    if let Some(prms) = params {
         let mut coerced_params = vec![];
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
@@ -520,7 +518,7 @@ mod tests {
             })
             .collect();
 
-        let pkey_ref = pkey.iter().map(|c| c).collect();
+        let pkey_ref = pkey.iter().collect::<Vec<_>>();
         if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref).unwrap() {
             let mut expected: Vec<Vec<DataType>> = expected
                 .unwrap()

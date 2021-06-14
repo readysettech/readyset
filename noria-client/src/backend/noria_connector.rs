@@ -213,23 +213,19 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!("insert::extract schema");
         let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
 
-        match sql_q {
-            // set column names (insert schema) if not set
-            nom_sql::SqlQuery::Insert(ref mut q) => {
-                if q.fields.is_none() {
-                    q.fields = Some(
-                        mutator
-                            .schema()
-                            .as_ref()
-                            .unwrap()
-                            .fields
-                            .iter()
-                            .map(|cs| cs.column.clone())
-                            .collect(),
-                    );
-                }
+        if let nom_sql::SqlQuery::Insert(ref mut q) = sql_q {
+            if q.fields.is_none() {
+                q.fields = Some(
+                    mutator
+                        .schema()
+                        .as_ref()
+                        .unwrap()
+                        .fields
+                        .iter()
+                        .map(|cs| cs.column.clone())
+                        .collect(),
+                );
             }
-            _ => (),
         }
 
         let params: Vec<_> = {
@@ -241,13 +237,13 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                     //let mut cc = c.clone();
                     //cc.table = Some(q.table.name.clone());
                     //schema_for_column(table_schemas, &cc)
-                    Ok(schema
+                    schema
                         .iter()
                         .cloned()
                         .find(|mc| c.name == mc.column)
                         .ok_or_else(|| {
                             internal_err(format!("column '{}' missing in mutator schema", c))
-                        })?)
+                        })
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
@@ -316,14 +312,14 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             utils::get_primary_key(cts)
                 .into_iter()
                 .map(|(_, c)| c)
-                .collect()
+                .collect::<Vec<_>>()
         } else {
             unsupported!("cannot delete from view");
         };
 
         trace!("delete::flatten conditionals");
         match utils::flatten_conditional(&cond, &pkey)? {
-            None => Ok(0 as u64),
+            None => Ok(0_u64),
             Some(ref flattened) if flattened.is_empty() => {
                 unsupported!("DELETE only supports WHERE-clauses on primary keys")
             }
@@ -333,7 +329,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 for key in flattened {
                     if let Err(e) = mutator.delete(key).await {
                         error!(error = %e, "failed");
-                        Err(e)?
+                        return Err(e.into());
                     };
                 }
                 trace!("delete::done");
@@ -455,7 +451,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                         ) {
                             error!(error = %e, "add query failed");
-                            Err(e)?
+                            return Err(e.into());
                         }
 
                         let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());
@@ -509,7 +505,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .collect();
         if auto_increment_columns.len() > 1 {
             // can only have zero or one AUTO_INCREMENT columns
-            Err(table_err(table, ReadySetError::MultipleAutoIncrement))?
+            return Err(table_err(table, ReadySetError::MultipleAutoIncrement).into());
         }
 
         let ai = &mut self.auto_increments;
@@ -520,7 +516,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 ai.write()
                     .unwrap()
                     .entry(table.to_owned())
-                    .or_insert(atomic::AtomicUsize::new(0));
+                    .or_insert_with(|| atomic::AtomicUsize::new(0));
             }
         });
         let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
@@ -547,7 +543,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             trace!("insert::construct ops");
 
             for (ri, ref row) in data.iter().enumerate() {
-                if let Some(col) = auto_increment_columns.iter().next() {
+                if let Some(col) = auto_increment_columns.get(0) {
                     let idx = schema
                         .fields
                         .iter()
@@ -637,7 +633,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         qname: &str,
         q: &nom_sql::SelectStatement,
         mut keys: Vec<Vec<DataType>>,
-        schema: &Vec<Column>,
+        schema: &[Column],
         key_column_indices: &[usize],
         ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
@@ -671,10 +667,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             })
             .next()
             .map(|(idx, col, operator)| -> ReadySetResult<_> {
-                let mut key = keys
-                    .drain(0..1)
-                    .next()
-                    .ok_or_else(|| ReadySetError::EmptyKey)?;
+                let mut key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
                 if !keys.is_empty() {
                     unsupported!(
                         "LIKE/ILIKE not currently supported for more than one lookup key at a time"
@@ -729,9 +722,9 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                         .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
                         .collect::<ReadySetResult<Vec<DataType>>>()?;
 
-                    Ok((k, binop_to_use)
+                    (k, binop_to_use)
                         .try_into()
-                        .map_err(|_| ReadySetError::EmptyKey)?)
+                        .map_err(|_| ReadySetError::EmptyKey)
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
@@ -834,7 +827,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
         let keys: Vec<Vec<DataType>> = use_params
             .into_iter()
-            .map(|l| Ok(vec1![l.to_datatype()?].into()))
+            .map(|l| Ok(vec1![l.into_datatype()?].into()))
             .collect::<Result<Vec<Vec<DataType>>, ReadySetError>>()?;
 
         // we need the schema for the result writer
@@ -960,7 +953,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
                 Some(e) => e.clone(),
-                None => Err(PreparedStatementMissing)?,
+                None => return Err(PreparedStatementMissing.into()),
             }
         };
 
@@ -981,8 +974,8 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                         // that we rewrote to WHERE x = ? AND y = ? AND z = ?
                         // so we need to turn that into the keys:
                         // [[a, b, d], [a, c, d]]
-                        if params.len() == 0 {
-                            Err(ReadySetError::EmptyKey)?
+                        if params.is_empty() {
+                            return Err(ReadySetError::EmptyKey.into());
                         }
                         (0..*nrewritten)
                             .map(|poffset| {
@@ -997,7 +990,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                             .collect()
                     }
                     None => {
-                        if params.len() > 0 {
+                        if !params.is_empty() {
                             vec![params]
                         } else {
                             vec![]

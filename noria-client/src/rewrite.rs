@@ -165,7 +165,6 @@ pub(crate) fn collapse_where_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql;
 
     #[test]
     fn collapsed_where_placeholders() {
