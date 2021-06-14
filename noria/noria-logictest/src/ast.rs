@@ -198,7 +198,7 @@ impl TryFrom<mysql::Value> for Value {
                     h.into(),
                     min.into(),
                     s.into(),
-                    us.into(),
+                    us,
                 ),
             )),
             Time(neg, d, h, m, s, us) => Ok(Self::Time(MysqlTime::from_hmsus(
@@ -240,7 +240,7 @@ impl TryFrom<DataType> for Value {
             DataType::None => Ok(Value::Null),
             DataType::Int(i) => Ok(Value::Integer(i.into())),
             DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
-            DataType::BigInt(bi) => Ok(Value::Integer(bi.into())),
+            DataType::BigInt(bi) => Ok(Value::Integer(bi)),
             DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
             DataType::Real(mantissa, exponent, sign, _) => {
                 Ok(maths::float::encode_f64(mantissa, exponent, sign).into())
@@ -450,14 +450,14 @@ impl Display for QueryParams {
     }
 }
 
-impl Into<mysql::Params> for QueryParams {
-    fn into(self) -> mysql::Params {
-        match self {
+impl From<QueryParams> for mysql::Params {
+    fn from(qp: QueryParams) -> Self {
+        match qp {
             qp if qp.is_empty() => mysql::Params::Empty,
-            Self::PositionalParams(vs) => {
+            QueryParams::PositionalParams(vs) => {
                 mysql::Params::Positional(vs.into_iter().map(mysql::Value::from).collect())
             }
-            Self::NumberedParams(nps) => mysql::Params::Named(
+            QueryParams::NumberedParams(nps) => mysql::Params::Named(
                 nps.into_iter()
                     .map(|(n, v)| (n.to_string(), mysql::Value::from(v)))
                     .collect(),
@@ -519,7 +519,7 @@ impl Display for Record {
         match self {
             Record::Statement(s) => write!(f, "{}", s),
             Record::Query(q) => write!(f, "{}", q),
-            Record::HashThreshold(ht) => write!(f, "hash-threshold {}\n", ht),
+            Record::HashThreshold(ht) => writeln!(f, "hash-threshold {}", ht),
             Record::Halt => f.write_str("halt\n"),
         }
     }

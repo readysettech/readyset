@@ -283,19 +283,17 @@ impl TestScript {
                                     row.len()
                                 )
                             })?;
-                            Ok(Value::from_mysql_value_with_type(val, col_type)
-                                .with_context(|| format!("Converting value to {:?}", col_type))?)
+                            Value::from_mysql_value_with_type(val, col_type)
+                                .with_context(|| format!("Converting value to {:?}", col_type))
                         })
                         .collect(),
-                    None => {
-                        row.unwrap()
-                            .into_iter()
-                            .map(|val| {
-                                Ok(Value::try_from(val)
-                                    .with_context(|| format!("Converting value"))?)
-                            })
-                            .collect()
-                    }
+                    None => row
+                        .unwrap()
+                        .into_iter()
+                        .map(|val| {
+                            Value::try_from(val).with_context(|| "Converting value".to_string())
+                        })
+                        .collect(),
                 }
             });
 
@@ -376,12 +374,10 @@ impl TestScript {
         run_opts: &RunOptions,
         authority: Arc<A>,
     ) -> (tokio::task::JoinHandle<()>, mysql::Opts) {
-        let binlog_url = if let Some(binlog_url) = &run_opts.binlog_url {
+        let binlog_url = run_opts.binlog_url.as_ref().map(|binlog_url| {
             // Append the database name to the binlog mysql url
-            Some(format!("{}/{}", binlog_url, run_opts.mysql_db))
-        } else {
-            None
-        };
+            format!("{}/{}", binlog_url, run_opts.mysql_db)
+        });
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
@@ -403,7 +399,7 @@ impl TestScript {
             let backend_builder = BackendBuilder::new();
 
             let backend_builder = if let Some(url) = binlog_url {
-                let writer = MySqlConnector::new(url.into());
+                let writer = MySqlConnector::new(url);
                 backend_builder.writer(writer.await)
             } else {
                 let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);

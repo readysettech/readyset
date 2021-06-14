@@ -66,9 +66,9 @@ impl DatabaseConnection {
                     .exec_iter(stmt.as_ref(), params)
                     .await?
                     .map(|mut r| {
-                        Ok((0..r.columns().len())
+                        (0..r.columns().len())
                             .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
-                            .collect::<Result<Vec<_>, _>>()?)
+                            .collect::<Result<Vec<_>, _>>()
                     })
                     .await?;
 
@@ -135,7 +135,7 @@ impl TryFrom<PathBuf> for Seed {
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
         let mut file = File::open(&path)?;
-        let script = TestScript::read(path.clone(), &mut file)?;
+        let script = TestScript::read(path, &mut file)?;
 
         let mut relations_to_drop = vec![];
         let mut tables = vec![];
@@ -318,7 +318,7 @@ where
 impl Generate {
     async fn run_queries(
         &self,
-        queries: &Vec<Query>,
+        queries: &[Query],
         conn: &mut DatabaseConnection,
         hash_threshold: usize,
     ) -> anyhow::Result<Vec<Record>> {
@@ -389,7 +389,7 @@ impl Generate {
             .clone()
             .into_iter()
             .map(|table_name| {
-                let spec = generator.table(&table_name.clone().into()).unwrap();
+                let spec = generator.table(&table_name.into()).unwrap();
                 (spec, spec.generate_data(self.rows_per_table, self.random))
             })
             .collect::<Vec<_>>();

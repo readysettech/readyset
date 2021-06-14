@@ -101,9 +101,9 @@ named!(
             >> result: terminated!(statement_header, line_ending)
             >> command: statement_command
             >> (Statement {
-                conditionals,
                 result,
-                command
+                command,
+                conditionals
             })
     )
 );
