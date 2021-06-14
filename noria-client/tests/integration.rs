@@ -989,7 +989,7 @@ fn order_by_basic() {
     sleep();
 
     let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
-    rows.sort();
+    rows.sort_unstable();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test ORDER BY x DESC", ()).unwrap();
     assert_eq!(rows, vec![(4, 2), (2, 4), (1, 3)]);
@@ -1016,7 +1016,7 @@ fn order_by_limit_basic() {
     sleep();
 
     let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).unwrap();
-    rows.sort();
+    rows.sort_unstable();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn
         .exec("SELECT * FROM test ORDER BY x DESC LIMIT 3", ())

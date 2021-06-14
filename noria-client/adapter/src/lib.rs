@@ -244,8 +244,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
                 let _g = connection.enter();
 
-                let writer: Writer<ZookeeperAuthority> = if mysql_url.is_some() {
-                    let url = mysql_url.unwrap();
+                let writer: Writer<ZookeeperAuthority> = if let Some(url) = mysql_url {
                     let writer = MySqlConnector::new(url).await;
 
                     Writer::MySqlConnector(writer)

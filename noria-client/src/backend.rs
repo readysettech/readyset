@@ -542,7 +542,7 @@ impl<A: 'static + Authority> Backend<A> {
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         let (num_rows_affected, last_inserted_id, identifier) = connector
-                            .on_query(&query, !self.timestamp_client.is_none())
+                            .on_query(&query, self.timestamp_client.is_some())
                             .await?;
 
                         // Update ticket if RYW enabled
@@ -655,7 +655,8 @@ impl<A: 'static + Authority> Backend<A> {
                         error!(%query, "query can't be parsed: \"{}\"", query);
                         Err(ReadySetError::UnparseableQuery {
                             query: query.to_string(),
-                        })?
+                        }
+                        .into())
                     }
                 }
             }
@@ -747,7 +748,7 @@ where
     ) -> std::result::Result<(), Error> {
         let datatype_params: Vec<DataType> = params
             .into_iter()
-            .map(|p| p.value.to_datatype())
+            .map(|p| p.value.into_datatype())
             .collect::<Result<Vec<_>, _>>()?;
 
         let res = match self.execute(id, datatype_params).await {
@@ -919,7 +920,7 @@ where
                     return self
                         .handle_failure(&query, results, e.unwrap_err().to_string())
                         .await
-                        .map_err(|e| Error::Io(e));
+                        .map_err(Error::Io);
                 }
             }
             Err(e) => {
