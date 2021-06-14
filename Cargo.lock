@@ -4024,6 +4024,7 @@ version = "0.7.0"
 dependencies = [
  "ahash 0.3.8",
  "anyhow",
+ "assert_approx_eq",
  "async-bincode",
  "backtrace",
  "bincode",

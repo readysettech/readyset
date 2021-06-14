@@ -155,7 +155,6 @@ impl Builder {
     }
 
     /// Start a server instance and return a handle to it.
-    #[must_use]
     pub fn start<A: Authority + 'static>(
         self,
         authority: Arc<A>,
@@ -190,7 +189,6 @@ impl Builder {
     }
 
     /// Start a local-only worker, and return a handle to it.
-    #[must_use]
     pub fn start_local(
         self,
     ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {

@@ -163,7 +163,7 @@ fn rewrite_between_condition(operand: Expression, min: Expression, max: Expressi
         }),
         op: BinaryOperator::And,
         rhs: Box::new(Expression::BinaryOp {
-            lhs: Box::new(operand.clone()),
+            lhs: Box::new(operand),
             op: BinaryOperator::LessOrEqual,
             rhs: Box::new(rewrite_expression(max)),
         }),

@@ -34,20 +34,15 @@ impl ReuseConfig {
     ) -> Result<Vec<(ReuseType, (u64, &'a QueryGraph))>, ReadySetError> {
         let reuse_candidates = match self.config {
             ReuseConfigType::Finkelstein => {
-                finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)
+                finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)?
             }
-            ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs),
-            ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
+            ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs)?,
+            ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs)?,
             _ => unreachable!(),
         };
 
-        match reuse_candidates {
-            Err(e) => return Err(e),
-            Ok(cands) => {
-                self.reorder_joins(qg, &cands)?;
-                Ok(cands)
-            }
-        }
+        self.reorder_joins(qg, &reuse_candidates)?;
+        Ok(reuse_candidates)
     }
 
     fn reorder_joins(

@@ -242,19 +242,21 @@ pub(super) fn make_grouped(
                     .filter_map(|mut c| {
                         let pn = parent_node.borrow();
                         let pc = pn.columns().iter().position(|pc| *pc == c);
-                        if pc.is_none() {
-                            Some(c)
-                        } else if !have_parent_cols.contains(&pc) {
-                            have_parent_cols.insert(pc);
-                            let pc = pn.columns()[pc.unwrap()].clone();
-                            if pc.name != c.name || pc.table != c.table {
-                                // remember the alias with the parent column
-                                c.aliases.push(pc);
+                        if let Some(pc) = pc {
+                            if !have_parent_cols.contains(&pc) {
+                                have_parent_cols.insert(pc);
+                                let pc = pn.columns()[pc].clone();
+                                if pc.name != c.name || pc.table != c.table {
+                                    // remember the alias with the parent column
+                                    c.aliases.push(pc);
+                                }
+                                Some(c)
+                            } else {
+                                // we already have this column, so eliminate duplicate
+                                None
                             }
-                            Some(c)
                         } else {
-                            // we already have this column, so eliminate duplicate
-                            None
+                            Some(c)
                         }
                     })
                     .collect();
@@ -334,9 +336,9 @@ pub(super) fn make_grouped(
 //
 // The projection node would represent the 5 * being applied to sum(col1), which we would not want
 // to accidentally join.
-fn joinable_aggregate_nodes(agg_nodes: &Vec<MirNodeRef>) -> Vec<MirNodeRef> {
+fn joinable_aggregate_nodes(agg_nodes: &[MirNodeRef]) -> Vec<MirNodeRef> {
     agg_nodes
-        .into_iter()
+        .iter()
         .filter_map(|node| match node.borrow().inner {
             MirNodeInner::Aggregation { .. } => Some(node.clone()),
             MirNodeInner::Extremum { .. } => Some(node.clone()),

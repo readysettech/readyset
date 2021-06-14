@@ -22,10 +22,11 @@ pub const DEFAULT_SHARDING: usize = 2;
 /// avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
 /// fail).
 pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
-    let mut params = PersistenceParameters::default();
-    params.mode = DurabilityMode::DeleteOnExit;
-    params.log_prefix = String::from(prefix);
-    params
+    PersistenceParameters {
+        mode: DurabilityMode::DeleteOnExit,
+        log_prefix: String::from(prefix),
+        ..Default::default()
+    }
 }
 
 /// Builds a local worker.

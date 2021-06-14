@@ -73,7 +73,7 @@ pub(super) fn make_joins(
 pub(super) fn make_joins_for_aggregates(
     mir_converter: &SqlToMirConverter,
     name: &str,
-    ancestors: &Vec<MirNodeRef>,
+    ancestors: &[MirNodeRef],
     node_count: usize,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     invariant!(ancestors.len() >= 2);
@@ -88,7 +88,7 @@ pub(super) fn make_joins_for_aggregates(
     let mut join_nodes = vec![parent_join];
 
     // We skip the first two because those were used for the initial parent join.
-    for ancestor in ancestors.into_iter().skip(2) {
+    for ancestor in ancestors.iter().skip(2) {
         // We want top join our most recent join node to our next ancestor.
         let jn = mir_converter.make_join_aggregates_node(
             &format!("{}_n{}", name, node_count),

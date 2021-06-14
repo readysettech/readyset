@@ -41,9 +41,9 @@ impl ReuseConfiguration for Finkelstein {
 }
 
 impl Finkelstein {
-    fn choose_best_option<'a>(
-        options: Vec<(ReuseType, (u64, &'a QueryGraph))>,
-    ) -> (ReuseType, (u64, &'a QueryGraph)) {
+    fn choose_best_option(
+        options: Vec<(ReuseType, (u64, &QueryGraph))>,
+    ) -> (ReuseType, (u64, &QueryGraph)) {
         let mut best_choice = None;
         let mut best_score = 0;
 

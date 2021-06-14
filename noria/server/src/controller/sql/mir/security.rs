@@ -81,7 +81,7 @@ impl SecurityBoundary for SqlToMirConverter {
                     &qg,
                     &HashMap::new(), // we only care about this, if no parent node is specified.
                     node_count,
-                    &mut Some(node.clone()),
+                    &mut Some(node),
                     true,
                     &HashMap::new(),
                 )?;
@@ -104,7 +104,7 @@ impl SecurityBoundary for SqlToMirConverter {
     ) -> Result<(Vec<MirNodeRef>, Vec<MirNodeRef>), ReadySetError> {
         let mut security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut last_security_nodes: Vec<MirNodeRef> = Vec::new();
-        let mut prev_node = prev_node.unwrap().clone();
+        let mut prev_node = prev_node.unwrap();
 
         if universe.0 == "global".into() {
             return Ok((vec![prev_node], security_nodes));
@@ -134,7 +134,7 @@ impl SecurityBoundary for SqlToMirConverter {
         }
 
         if last_security_nodes.is_empty() {
-            last_security_nodes.push(prev_node.clone());
+            last_security_nodes.push(prev_node);
         }
 
         Ok((last_security_nodes, security_nodes))
@@ -182,7 +182,7 @@ fn make_security_nodes(
 
         let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
 
-        sorted_rels.sort();
+        sorted_rels.sort_unstable();
 
         // all base nodes should be present in local_node_for_rel, except for context views
         // if policy uses a context view, add it to local_node_for_rel

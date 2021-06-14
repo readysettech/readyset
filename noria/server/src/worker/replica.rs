@@ -395,13 +395,13 @@ impl Replica {
                         match unsafe { input.deref() }.data {
                             PacketPayload::Input(_) => Box::new(Packet::Input {
                                 inner: input,
-                                src: Some(SourceChannelIdentifier { token, tag, epoch }),
+                                src: Some(SourceChannelIdentifier { token, epoch, tag }),
                                 senders: Vec::new(),
                             }),
                             PacketPayload::Timestamp(_) => Box::new(Packet::Timestamp {
                                 // The link values propagated to the base table are not used.
                                 link: None,
-                                src: Some(SourceChannelIdentifier { token, tag, epoch }),
+                                src: Some(SourceChannelIdentifier { token, epoch, tag }),
                                 timestamp: input,
                             }),
                         }
@@ -600,7 +600,7 @@ impl Future for Replica {
                 match this.requests.poll_recv(cx) {
                     Poll::Ready(Some(req)) => {
                         let ret = d.domain_request(req.req, out);
-                        if let Err(_) = req.done_tx.send(ret) {
+                        if req.done_tx.send(ret).is_err() {
                             warn!(this.log, "domain request sender hung up");
                         }
                     }

@@ -147,7 +147,7 @@ where
             // don't break the path if we're only a 1-node replay path
             if dcs.break_path && current.len() > 1 {
                 let mut ret = vec![current];
-                let next = vec![current_colref.clone(), next_colref];
+                let next = vec![current_colref, next_colref];
                 ret.extend(continue_replay_path(graph, next, stop_at)?);
                 Ok(ret)
             } else {
@@ -289,7 +289,7 @@ fn trace(
         .iter()
         .flat_map(|(i, origins)| {
             assert!(!origins.is_empty());
-            origins.into_iter().map(move |o| (i, o))
+            origins.iter().map(move |o| (i, o))
         })
         .fold(
             HashMap::new(),

@@ -232,22 +232,16 @@ impl AliasRemoval for SqlQuery {
 
                     _ => aliases
                         .into_iter()
-                        .filter_map(|a| match a {
-                            None => {
-                                // No rewrite is needed for the unaliased table name.
-                                None
-                            }
-
-                            Some(alias) => {
-                                // The alias is one among multiple distinct references to the
-                                // table. Create a globally unique view name, derived from the
-                                // query name, and rewrite to remove the alias and refer to this
-                                // view.
-                                Some(TableAliasRewrite::ToView {
-                                    from: alias.clone(),
-                                    to_view: format!("__{}__{}", query_name, alias),
-                                    for_table: name.clone(),
-                                })
+                        .flatten()
+                        .map(|alias| {
+                            // The alias is one among multiple distinct references to the
+                            // table. Create a globally unique view name, derived from the
+                            // query name, and rewrite to remove the alias and refer to this
+                            // view.
+                            TableAliasRewrite::ToView {
+                                from: alias.clone(),
+                                to_view: format!("__{}__{}", query_name, alias),
+                                for_table: name.clone(),
                             }
                         })
                         .collect(),
@@ -339,10 +333,10 @@ impl AliasRemoval for SqlQuery {
                 .collect();
 
             // Rewrite column table aliases in conditions.
-            sq.where_clause = match sq.where_clause {
-                None => None,
-                Some(ref wc) => Some(rewrite_expression(&col_table_remap, wc)),
-            };
+            sq.where_clause = sq
+                .where_clause
+                .as_ref()
+                .map(|wc| rewrite_expression(&col_table_remap, wc));
 
             // Extract remappings for FROM and JOIN table references from the alias rewrites.
             let table_remap = table_alias_rewrites
@@ -525,7 +519,7 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(col_small.clone())],
             where_clause: Some(Expression::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column(col_small.clone())),
+                lhs: Box::new(Expression::Column(col_small)),
                 rhs: Box::new(Expression::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
@@ -547,7 +541,7 @@ mod tests {
                     tq.where_clause,
                     Some(Expression::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(col_full.clone())),
+                        lhs: Box::new(Expression::Column(col_full)),
                         rhs: Box::new(Expression::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),

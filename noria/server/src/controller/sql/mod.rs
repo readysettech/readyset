@@ -797,7 +797,7 @@ impl SqlIncorporator {
         );
 
         // compare to existing query MIR and reuse prefix
-        let mut reused_mir = new_opt_mir.clone();
+        let mut reused_mir = new_opt_mir;
         let mut num_reused_nodes = 0;
         for m in reuse_mirs {
             if !self.mir_queries.contains_key(&m) {
@@ -1000,7 +1000,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
-                        Err(ReadySetError::TableNotFound(t.name.clone()))?
+                        return Err(ReadySetError::TableNotFound(t.name.clone()));
                     }
                 }
             }
@@ -1008,13 +1008,13 @@ impl SqlIncorporator {
 
         // Run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        Ok(q.rewrite_between()
+        q.rewrite_between()
             .remove_negation()?
             .strip_post_filters()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)?
-            .rewrite_count_star(&self.view_schemas)?)
+            .rewrite_count_star(&self.view_schemas)
     }
 
     fn nodes_for_named_query(
@@ -1132,7 +1132,7 @@ impl<'a> ToFlowParts for &'a str {
             Ok(q) => inc.add_parsed_query(q, name, true, mig),
             Err(_) => Err(ReadySetError::UnparseableQuery {
                 query: String::from(*self),
-            })?,
+            }),
         }
     }
 }
@@ -1177,7 +1177,7 @@ mod tests {
 
         let mut hasher = DefaultHasher::new();
         let mut r_vec: Vec<&str> = relations.to_vec();
-        r_vec.sort(); // QueryGraph.signature() sorts them, so we must to match
+        r_vec.sort_unstable(); // QueryGraph.signature() sorts them, so we must to match
         for r in &r_vec {
             r.hash(&mut hasher);
         }
@@ -1737,7 +1737,7 @@ mod tests {
             assert_eq!(qfp.new_nodes.len(), 1);
             assert_eq!(get_node(&inc, mig, &qfp.name).description(true), "≡");
             // we should be based off the identity as our leaf
-            let id_node = qfp.new_nodes.iter().next().unwrap();
+            let id_node = qfp.new_nodes.get(0).unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
 
             // Do it again with a parameter on yet a different column.
@@ -1759,7 +1759,7 @@ mod tests {
                 "π[0, 1, 2]"
             );
             // we should be based off the new projection as our leaf
-            let id_node = qfp.new_nodes.iter().next().unwrap();
+            let id_node = qfp.new_nodes.get(0).unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
         })
         .await;

@@ -68,7 +68,7 @@ pub enum WorkerRequestKind {
         /// The shard of the target domain.
         target_shard: usize,
         /// The actual request.
-        request: DomainRequest,
+        request: Box<DomainRequest>, // box for perf (clippy::large-enum-variant)
     },
 
     /// Sent to validate that a connection actually works. Provokes an empty response.
@@ -199,9 +199,9 @@ impl Worker {
                         self.http
                             .post(controller_uri.join("/worker_rx/register")?)
                             .body(bincode::serialize(&RegisterPayload {
-                                epoch: epoch.clone(),
+                                epoch,
                                 worker_uri: self.worker_uri.clone(),
-                                reader_addr: self.reader_addr.clone(),
+                                reader_addr: self.reader_addr,
                                 region: self.region.clone(),
                                 reader_only: self.reader_only,
                             })?),
@@ -227,7 +227,7 @@ impl Worker {
 
                 info!(self.log, "received domain {}.{} to run", idx.index(), shard);
 
-                let bind_on = self.domain_bind.clone();
+                let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
                     .map_err(|e| {
                         internal_err(format!(
@@ -242,8 +242,8 @@ impl Worker {
                 let bind_actual = listener.local_addr().map_err(|e| {
                     internal_err(format!("couldn't get TCP local address for domain: {}", e))
                 })?;
-                let mut bind_external = bind_actual.clone();
-                bind_external.set_ip(self.domain_external.clone());
+                let mut bind_external = bind_actual;
+                bind_external.set_ip(self.domain_external);
 
                 let state_size = Arc::new(AtomicUsize::new(0));
                 let domain = builder.build(
@@ -336,7 +336,7 @@ impl Worker {
                 let _ = dh
                     .req_tx
                     .send(WrappedDomainRequest {
-                        req: request,
+                        req: *request,
                         done_tx: tx,
                     })
                     .await
@@ -474,7 +474,7 @@ async fn do_eviction(
                 // so we distribute how much we're over the limit across the 3 largest nodes.
                 // -1* so we sort in descending order
                 // TODO: be smarter than 3 here
-                sizes.sort_unstable_by_key(|&(_, s)| -1 * (s as i64));
+                sizes.sort_unstable_by_key(|&(_, s)| -(s as i64));
                 sizes.truncate(3);
 
                 // don't evict from tiny things (< 10% of max)

@@ -88,6 +88,7 @@ steps:
     - "( echo '--- :rust: Checking unbounded-interval-tree'; cargo clippy -p unbounded-interval-tree -- -D warnings)"
     - "( echo '--- :rust: Checking noria'; cargo clippy -p noria -- -D warnings)"
     - "( echo '--- :rust: Checking noria-mir'; cargo clippy -p noria-mir -- -D warnings)"
+    - "( echo '--- :rust: Checking noria-server'; cargo clippy -p noria-server --all-targets -- -D warnings)"
     - "( echo '--- :rust: Checking noria-dataflow'; cargo clippy -p noria-dataflow -- -D warnings)"
     - "( echo '--- :rust: Checking replicators'; cargo clippy -p replicators -- -D warnings)"
     - "( echo '--- :rust: Checking maths'; cargo clippy -p maths -- -D warnings)"

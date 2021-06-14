@@ -89,7 +89,7 @@ impl<A: Authority + 'static> Handle<A> {
         let (ret_tx, ret_rx) = tokio::sync::oneshot::channel();
         let (fin_tx, fin_rx) = tokio::sync::oneshot::channel();
         let b = Box::new(move |m: &mut Migration| {
-            if let Err(_) = ret_tx.send(f(m)) {
+            if ret_tx.send(f(m)).is_err() {
                 internal!("could not return migration result")
             }
             Ok(())
@@ -111,14 +111,12 @@ impl<A: Authority + 'static> Handle<A> {
     }
 
     /// Install a new set of policies on the controller.
-    #[must_use]
     pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
         self.rpc("set_security_config", p).await?;
         Ok(())
     }
 
     /// Install a new set of policies on the controller.
-    #[must_use]
     pub async fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,

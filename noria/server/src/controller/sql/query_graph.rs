@@ -391,7 +391,7 @@ fn classify_conditionals(
                             rhs: Box::new(ces.last().unwrap().clone()),
                         };
 
-                        let e = local.entry(t.to_string()).or_default();
+                        let e = local.entry(t).or_default();
                         e.push(new_ce);
                     } else {
                         // OR between different tables => global predicate
@@ -452,7 +452,7 @@ fn classify_conditionals(
                 // right-hand side is a placeholder, so this must be a query parameter
                 Expression::Literal(Literal::Placeholder(_)) => {
                     if let Expression::Column(ref lf) = **lhs {
-                        params.push((lf.clone(), op.clone()));
+                        params.push((lf.clone(), *op));
                     }
                 }
                 // right-hand side is a non-placeholder literal, so this is a predicate

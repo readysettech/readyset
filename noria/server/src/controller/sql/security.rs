@@ -96,7 +96,7 @@ impl Multiverse for SqlIncorporator {
             (uc_name, config.get_group_policies(group_name.to_string()))
         };
 
-        let base = self.add_base(uc_name.clone(), &mut fields, mig);
+        let base = self.add_base(uc_name, &mut fields, mig);
         qfps.push(base);
 
         // Then, we need to transform policies' predicates into QueryGraphs.
@@ -174,10 +174,10 @@ impl Multiverse for SqlIncorporator {
         let mut s = String::new();
         s.push_str(&format!("CREATE TABLE `{}` (", name));
         for k in fields {
-            s.push_str("\n");
+            s.push('\n');
             s.push_str(&format!("`{}` text NOT NULL,", k));
         }
-        s.push_str("\n");
+        s.push('\n');
         s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
 
         let parsed_query = sql_parser::parse_query(&s).unwrap();

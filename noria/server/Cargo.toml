@@ -89,6 +89,7 @@ mysql = "18.0.0"
 proptest = "0.10.1"
 chrono = "0.4.19"
 serial_test = "0.5.1"
+assert_approx_eq = "1.1.0"
 
 [lib]
 name = "noria_server"

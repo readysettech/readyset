@@ -750,14 +750,14 @@ fn make_join_aggregates_node(
         .columns
         .iter()
         .enumerate()
-        .filter_map(|(i, c)| {
+        .map(|(i, c)| {
             if let Some(j) = right_map.get(&c) {
                 // If the column was found in both, it's a group_by column and gets added as
                 // JoinSource::B.
-                Some(JoinSource::B(i, *j))
+                JoinSource::B(i, *j)
             } else {
                 // Column exclusively in left parent, so gets added as JoinSource::L.
-                Some(JoinSource::L(i))
+                JoinSource::L(i)
             }
         })
         .chain(

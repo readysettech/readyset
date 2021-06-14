@@ -11,7 +11,6 @@ use dataflow::prelude::*;
 
 use std::collections::{HashMap, HashSet};
 
-use petgraph;
 use petgraph::graph::NodeIndex;
 
 use dataflow::DomainRequest;

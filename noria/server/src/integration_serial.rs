@@ -10,6 +10,7 @@
 use crate::integration_utils::*;
 use crate::Builder;
 use crate::DataType;
+use assert_approx_eq::assert_approx_eq;
 use dataflow::node::special::Base;
 use dataflow::ops::union::Union;
 use noria::consensus::LocalAuthority;
@@ -77,15 +78,15 @@ async fn it_works_basic() {
 
     let metrics = metrics_client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
-    assert_eq!(
+    assert_approx_eq!(
         get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
         1.0
     );
-    assert_eq!(
+    assert_approx_eq!(
         get_counter(recorded::EGRESS_NODE_DROPPED_PACKETS, metrics_dump),
         2.0
     );
-    assert_eq!(
+    assert_approx_eq!(
         get_counter(recorded::EGRESS_NODE_SENT_PACKETS, metrics_dump),
         1.0
     );
@@ -117,8 +118,8 @@ async fn it_works_basic() {
 
     // check that value was updated again
     let res = cq.lookup(&[id.clone()], true).await.unwrap();
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
 
     // check that looking up columns by name works
     assert!(res.iter().all(|r| r.get::<i32>("a").unwrap().unwrap() == 1));
@@ -132,7 +133,7 @@ async fn it_works_basic() {
     // This request does not hit the base table.
     let metrics = metrics_client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
-    assert_eq!(
+    assert_approx_eq!(
         get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
         1.0
     );
