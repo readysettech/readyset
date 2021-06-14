@@ -67,6 +67,7 @@ impl Resultset {
 // An iterator over the rows contained within the `Resultset`.
 impl IntoIterator for Resultset {
     type Item = Row;
+    #[allow(clippy::type_complexity)]
     type IntoIter = std::iter::Map<
         std::iter::Zip<
             std::iter::Flatten<std::vec::IntoIter<Results>>,
