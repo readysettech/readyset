@@ -76,7 +76,7 @@ pub struct QueryBenchmarkResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
     Table,
-    JSON,
+    Json,
 }
 
 #[derive(Error, Debug)]
@@ -92,7 +92,7 @@ impl FromStr for OutputFormat {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "table" => Ok(Self::Table),
-            "json" => Ok(Self::JSON),
+            "json" => Ok(Self::Json),
             s => Err(anyhow!(
                 "Invalid format {}, expected one of \"table\" or \"json\"",
                 s
@@ -105,7 +105,7 @@ impl Display for OutputFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Table => f.write_str("table"),
-            Self::JSON => f.write_str("json"),
+            Self::Json => f.write_str("json"),
         }
     }
 }
@@ -160,7 +160,7 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
             }
             table.printstd();
         }
-        OutputFormat::JSON => {
+        OutputFormat::Json => {
             println!("{}", serde_json::to_string(results).unwrap());
         }
     }
@@ -275,8 +275,8 @@ impl Benchmark {
         }
         medians_by_key! {
             ret, n_samples, median_metrics,
-            cold_materialization_size, cold_read_time, cold_write_time, upquery_time, forward_time,
-            warm_materialization_size, warm_read_time, warm_write_time
+            cold_materialization_size, cold_write_time, upquery_time, forward_time, cold_read_time,
+            warm_write_time, warm_read_time, warm_materialization_size
         }
         let mut qbr = qbr.expect("no samples taken");
         qbr.metrics = median_metrics;
@@ -368,11 +368,11 @@ impl Benchmark {
                     cold_materialization_size,
                     cold_write_time,
                     upquery_time,
+                    forward_time,
                     cold_read_time,
                     warm_write_time,
                     warm_read_time,
                     warm_materialization_size,
-                    forward_time,
                 },
             })
         }

@@ -544,7 +544,7 @@ impl GeneratorState {
     }
 
     /// Generate a new query using the given [`QuerySeed`]
-    pub fn generate_query<'gen>(&'gen mut self, seed: QuerySeed) -> Query<'gen> {
+    pub fn generate_query(&mut self, seed: QuerySeed) -> Query {
         let mut state = self.new_query();
         let query = seed.generate(&mut state);
 
@@ -695,7 +695,7 @@ impl<'a> QueryState<'a> {
             );
             self.unique_parameters
                 .entry(table_name.clone())
-                .or_insert_with(|| vec![])
+                .or_insert_with(Vec::new)
                 .push((column_name.clone(), val.clone()));
             self.datatype_counter += 1;
             ret.push(val);
@@ -830,7 +830,7 @@ pub enum BuiltinFunction {
 /// When we support them, subqueries in `IN` clauses should go here as well
 #[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
 pub enum SubqueryPosition {
-    CTE,
+    Cte,
     Join,
 }
 
@@ -913,10 +913,7 @@ lazy_static! {
             .iter()
             .cloned()
             .cartesian_product(LogicalOp::iter())
-            .map(|(operation, extend_where_with)| Filter {
-                operation,
-                extend_where_with,
-            })
+            .map(|(operation, extend_where_with)| Filter { extend_where_with, operation })
             .collect()
     };
 
@@ -971,7 +968,7 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
                 .some_column_name();
             Column {
                 name: column.into(),
-                table: Some(table_name.into()),
+                table: Some(table_name),
                 function: None,
             }
         }
@@ -1046,7 +1043,7 @@ impl QueryOperation {
                 };
 
                 query.fields.push(FieldDefinitionExpression::Expression {
-                    alias: Some(alias.clone()),
+                    alias: Some(alias),
                     expr: Expression::Call(func),
                 });
             }
@@ -1074,7 +1071,7 @@ impl QueryOperation {
                     FilterOp::Comparison { op, rhs } => {
                         let rhs = Box::new(match rhs {
                             FilterRHS::Constant => {
-                                tbl.expect_value(col.clone(), 1i32.into());
+                                tbl.expect_value(col, 1i32.into());
                                 Expression::Literal(Literal::Integer(1))
                             }
                             FilterRHS::Column => {
@@ -1099,7 +1096,7 @@ impl QueryOperation {
                         negated,
                     },
                     FilterOp::IsNull { negated } => {
-                        tbl.expect_value(col.clone(), DataType::None);
+                        tbl.expect_value(col, DataType::None);
                         Expression::BinaryOp {
                             lhs: Box::new(col_expr),
                             op: if negated {
@@ -1390,7 +1387,7 @@ impl FromStr for Operations {
                 .map(ProjectBuiltinFunction)
                 .collect()),
             "subqueries" => Ok(SubqueryPosition::iter().map(Subquery).collect()),
-            "cte" => Ok(vec![Subquery(SubqueryPosition::CTE)].into()),
+            "cte" => Ok(vec![Subquery(SubqueryPosition::Cte)].into()),
             "join_subquery" => Ok(vec![Subquery(SubqueryPosition::Join)].into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
@@ -1423,7 +1420,7 @@ impl<'a> IntoIterator for &'a Operations {
     type IntoIter = <&'a Vec<QueryOperation> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        (&self.0).iter()
     }
 }
 
@@ -1487,13 +1484,13 @@ impl Subquery {
 
         let subquery_name = state.fresh_alias();
         let join_rhs = match self.position {
-            SubqueryPosition::CTE => {
+            SubqueryPosition::Cte => {
                 query.ctes.push(CommonTableExpression {
                     name: subquery_name.clone(),
                     statement: subquery,
                 });
                 JoinRightSide::Table(Table {
-                    name: subquery_name.clone().into(),
+                    name: subquery_name.clone(),
                     schema: None,
                     alias: None,
                 })
@@ -1539,7 +1536,7 @@ impl QuerySeed {
         }
     }
 
-    fn generate<'gen>(self, state: &mut QueryState<'gen>) -> SelectStatement {
+    fn generate(self, state: &mut QueryState) -> SelectStatement {
         let mut query = SelectStatement::default();
 
         for op in self.operations {
@@ -1609,8 +1606,8 @@ where
 
     let lower = T::from_str(lower_s)?;
 
-    if upper_s.starts_with("=") {
-        Ok((Included(lower), Included(T::from_str(&upper_s[1..])?)))
+    if let Some(without_equals) = upper_s.strip_prefix("=") {
+        Ok((Included(lower), Included(T::from_str(without_equals)?)))
     } else {
         Ok((Included(lower), Excluded(T::from_str(upper_s)?)))
     }
