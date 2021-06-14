@@ -1,7 +1,7 @@
+use noria::consensus::Authority;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
     ReadySetResult, Table, TableOperation, View, ViewQuery, ViewQueryFilter, ViewQueryOperator,
-    ZookeeperAuthority,
 };
 
 use msql_srv::{self, *};
@@ -58,8 +58,8 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
-pub struct NoriaBackendInner {
-    noria: ControllerHandle<ZookeeperAuthority>,
+pub struct NoriaBackendInner<A: 'static + Authority> {
+    noria: ControllerHandle<A>,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
 }
@@ -73,8 +73,8 @@ macro_rules! noria_await {
     }};
 }
 
-impl NoriaBackendInner {
-    async fn new(mut ch: ControllerHandle<ZookeeperAuthority>) -> Self {
+impl<A: 'static + Authority> NoriaBackendInner<A> {
+    async fn new(mut ch: ControllerHandle<A>) -> Self {
         ch.ready().await.unwrap();
         let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
         let mut i = BTreeMap::new();
@@ -134,8 +134,8 @@ impl NoriaBackendInner {
     }
 }
 
-pub struct NoriaConnector {
-    inner: NoriaBackendInner,
+pub struct NoriaConnector<A: 'static + Authority> {
+    inner: NoriaBackendInner<A>,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
     /// global cache of view endpoints and prepared statements
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
@@ -146,9 +146,9 @@ pub struct NoriaConnector {
     region: Option<String>,
 }
 
-impl NoriaConnector {
+impl<A: 'static + Authority> NoriaConnector<A> {
     pub async fn new(
-        ch: ControllerHandle<ZookeeperAuthority>,
+        ch: ControllerHandle<A>,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
@@ -423,7 +423,7 @@ impl NoriaConnector {
     }
 }
 
-impl NoriaConnector {
+impl<A: 'static + Authority> NoriaConnector<A> {
     async fn get_or_create_view(
         &mut self,
         q: &nom_sql::SelectStatement,

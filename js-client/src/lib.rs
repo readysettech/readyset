@@ -21,14 +21,14 @@ use std::sync::{Arc, RwLock};
 type BoxedClient = JsBox<RefCell<JsClient>>;
 
 struct JsClient {
-    backend: Arc<tokio::sync::Mutex<Backend>>,
+    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority>>>,
     runtime: Runtime,
 }
 
 impl Finalize for JsClient {}
 
 impl JsClient {
-    pub fn new(b: Backend, rt: Runtime) -> Self {
+    pub fn new(b: Backend<ZookeeperAuthority>, rt: Runtime) -> Self {
         JsClient {
             backend: Arc::new(tokio::sync::Mutex::new(b)),
             runtime: rt,
