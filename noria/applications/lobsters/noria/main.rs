@@ -17,8 +17,8 @@ use tower_service::Service;
 use tower_util::ServiceExt;
 use trawler::{LobstersRequest, TrawlerRequest};
 
-const SCHEMA: &'static str = include_str!("schema.sql");
-const QUERIES: &'static str = include_str!("queries.sql");
+const SCHEMA: &str = include_str!("schema.sql");
+const QUERIES: &str = include_str!("queries.sql");
 
 struct NoriaTrawlerBuilder(Option<ZookeeperAuthority>);
 
@@ -68,6 +68,7 @@ mod endpoints;
 impl Service<bool> for NoriaTrawlerBuilder {
     type Response = NoriaTrawler;
     type Error = anyhow::Error;
+    #[allow(clippy::type_complexity)]
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
     fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

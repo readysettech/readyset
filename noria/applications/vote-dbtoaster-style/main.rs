@@ -46,19 +46,23 @@ async fn main() {
     let votes = value_t_or_exit!(args, "votes", usize);
     let batch = value_t_or_exit!(args, "batch-size", usize);
 
-    let mut persistence = PersistenceParameters::default();
-    persistence.mode = DurabilityMode::MemoryOnly;
-    // force tuple-at-a-time
-    persistence.flush_timeout = time::Duration::new(0, 0);
-    persistence.log_prefix = "vote-dbtoaster".to_string();
+    let persistence = PersistenceParameters {
+        mode: DurabilityMode::MemoryOnly,
+        // force tuple-at-a-time
+        flush_timeout: time::Duration::new(0, 0),
+        log_prefix: "vote-dbtoaster".to_string(),
+        ..Default::default()
+    };
 
     // setup db
-    let mut s = graph::Builder::default();
-    s.logging = args.is_present("verbose");
-    s.sharding = None;
-    s.stupid = false;
-    s.partial = false;
-    s.threads = Some(1);
+    let s = graph::Builder {
+        logging: args.is_present("verbose"),
+        sharding: None,
+        stupid: false,
+        partial: false,
+        threads: Some(1),
+        ..Default::default()
+    };
     let mut g = s.start(persistence).await.unwrap();
 
     {

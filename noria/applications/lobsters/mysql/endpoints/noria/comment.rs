@@ -1,5 +1,3 @@
-use chrono;
-use my;
 use my::prelude::*;
 use std::future::Future;
 use trawler::{CommentId, StoryId, UserId};

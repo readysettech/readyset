@@ -1,7 +1,6 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use anyhow::anyhow;
-use clap;
-use memcached;
+
 use memcached::proto::{MultiOperation, ProtoType};
 use std::future::Future;
 use std::task::{Context, Poll};
@@ -88,11 +87,10 @@ impl Conn {
                                     }
 
                                     // title (vc has key i+1)
-                                    match (vals.get(&**key), vals.get(keys[i + 1])) {
-                                        (Some(_), Some(_)) => {
-                                            rows += 1;
-                                        }
-                                        _ => {}
+                                    if let (Some(_), Some(_)) =
+                                        (vals.get(&**key), vals.get(keys[i + 1]))
+                                    {
+                                        rows += 1;
                                     }
                                 }
                             }
@@ -194,7 +192,7 @@ impl Service<ReadRequest> for Conn {
         let res = self.c.try_send((Req::Read(self.fast, keys), tx));
 
         async move {
-            if let Err(_) = res {
+            if res.is_err() {
                 anyhow!("backing thread failed for read");
             }
 
@@ -224,7 +222,7 @@ impl Service<WriteRequest> for Conn {
         let res = self.c.try_send((Req::Write(keys), tx));
 
         async move {
-            if let Err(_) = res {
+            if res.is_err() {
                 anyhow!("backing thread failed for write");
             }
 

@@ -113,7 +113,7 @@ impl Backend {
         let query_name = query.split(':').next().unwrap();
 
         let mut new_recipe = self.r.clone();
-        new_recipe.push_str("\n");
+        new_recipe.push('\n');
         new_recipe.push_str(query);
 
         let start = time::Instant::now();
@@ -155,7 +155,7 @@ impl Backend {
         let num = ((keys.keys_size(&query_name) as f32) * read_scale) as usize;
         let params = keys.generate_parameter(&query_name, num);
 
-        let read_view = async move {
+        async move {
             let mut ok = 0usize;
 
             let start = time::Instant::now();
@@ -176,9 +176,7 @@ impl Backend {
                 f64::from(num as i32) / dur,
                 ok
             );
-        };
-
-        read_view
+        }
     }
 }
 
@@ -373,7 +371,7 @@ async fn main() {
             for nq in item_queries.iter() {
                 wait.push(backend.read(&mut keys, nq, read_scale).await);
             }
-            while let Some(_) = wait.next().await {}
+            while wait.next().await.is_some() {}
         } else {
             for nq in item_queries.iter() {
                 backend.read(&mut keys, nq, read_scale).await.await;

@@ -13,9 +13,9 @@ use std::time;
 use tower_service::Service;
 use trawler::{LobstersRequest, TrawlerRequest};
 
-const ORIGINAL_SCHEMA: &'static str = include_str!("db-schema/original.sql");
-const NORIA_SCHEMA: &'static str = include_str!("db-schema/noria.sql");
-const NATURAL_SCHEMA: &'static str = include_str!("db-schema/natural.sql");
+const ORIGINAL_SCHEMA: &str = include_str!("db-schema/original.sql");
+const NORIA_SCHEMA: &str = include_str!("db-schema/noria.sql");
+const NATURAL_SCHEMA: &str = include_str!("db-schema/natural.sql");
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum Variant {
@@ -53,6 +53,7 @@ mod endpoints;
 impl Service<bool> for MysqlTrawlerBuilder {
     type Response = MysqlTrawler;
     type Error = my::error::Error;
+    #[allow(clippy::type_complexity)]
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
     fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -92,7 +93,7 @@ impl Service<bool> for MysqlTrawlerBuilder {
                         continue;
                     }
                     if !current_q.is_empty() {
-                        current_q.push_str(" ");
+                        current_q.push(' ');
                     }
                     current_q.push_str(line);
                     if current_q.ends_with(';') {
@@ -376,10 +377,7 @@ fn main() {
     opts.pool_options(my::PoolOptions::with_constraints(
         my::PoolConstraints::new(in_flight, in_flight).unwrap(),
     ));
-    let s = MysqlTrawlerBuilder {
-        variant,
-        opts: opts.into(),
-    };
+    let s = MysqlTrawlerBuilder { opts, variant };
 
     wl.run(s, args.is_present("prime"));
 }

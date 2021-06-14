@@ -59,8 +59,10 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
     let every = time::Duration::from_millis(200);
 
     // default persistence (memory only)
-    let mut persistence_params = noria::PersistenceParameters::default();
-    persistence_params.mode = noria::DurabilityMode::MemoryOnly;
+    let persistence_params = noria::PersistenceParameters {
+        mode: noria::DurabilityMode::MemoryOnly,
+        ..Default::default()
+    };
 
     // make the graph!
     eprintln!("Setting up soup");
@@ -133,10 +135,9 @@ async fn one(s: &graph::Builder, skewed: bool, args: &clap::ArgMatches<'_>, w: O
                 let id_zipf = zipf.sample(&mut rand::thread_rng());
                 let id: usize = if skewed { id_zipf } else { id_uniform };
                 let r = read_old.lookup(&[DataType::from(id)], false).await;
-                if succeeded && !r.is_ok() {
+                if succeeded && r.is_err() {
                     // an error occurred after the view became available...
-                    r.unwrap();
-                    return;
+                    panic!("an error occurred after the view became available: {:?}", r);
                 }
                 succeeded = r.is_ok();
                 tokio::time::sleep(time::Duration::from_micros(10)).await;
@@ -341,11 +342,13 @@ async fn main() {
         .get_matches();
 
     // set config options
-    let mut s = graph::Builder::default();
-    s.sharding = args
-        .value_of("shards")
-        .map(|_| value_t_or_exit!(args, "shards", usize));
-    s.logging = args.is_present("verbose");
+    let mut s = graph::Builder {
+        sharding: args
+            .value_of("shards")
+            .map(|_| value_t_or_exit!(args, "shards", usize)),
+        logging: args.is_present("verbose"),
+        ..Default::default()
+    };
 
     if args.is_present("all") || args.is_present("relevant") {
         let narticles = value_t_or_exit!(args, "narticles", usize);

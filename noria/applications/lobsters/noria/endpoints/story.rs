@@ -1,4 +1,3 @@
-use chrono;
 use noria::DataType;
 use std::collections::HashSet;
 use std::convert::TryFrom;
