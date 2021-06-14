@@ -95,6 +95,7 @@ steps:
     - "( echo '--- :rust: Checking noria-applications'; cargo clippy -p noria-applications -- -D warnings)"
     - "( echo '--- :rust: Checking noria-client'; cargo clippy -p noria-client -- -D warnings)"
     - "( echo '--- :rust: Checking maths'; cargo clippy -p maths -- -D warnings)"
+    - "( echo '--- :rust: Checking taster'; cargo clippy -p taster -- -D warnings)"
     depends_on:
     - build-image
     plugins:

@@ -135,8 +135,7 @@ where
     // call our callback, `f`, in a loop here.
     if ssh_username_requested {
         debug_assert!(res.is_err());
-        let mut attempts = Vec::new();
-        attempts.push("git".to_string());
+        let mut attempts = vec!["git".to_string()];
         if let Ok(s) = env::var("USER").or_else(|_| env::var("USERNAME")) {
             attempts.push(s);
         }
@@ -191,7 +190,7 @@ where
     // we try to give a more helpful error message about precisely what we
     // tried.
     let mut msg = "failed to authenticate when downloading repository".to_string();
-    if ssh_agent_attempts.len() > 0 {
+    if !ssh_agent_attempts.is_empty() {
         let names = ssh_agent_attempts
             .iter()
             .map(|s| format!("`{}`", s))

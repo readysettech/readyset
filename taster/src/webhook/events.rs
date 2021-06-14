@@ -21,6 +21,7 @@ impl Default for Value {
 
 /// Enumeration of available Github events
 #[derive(Debug, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     CommitComment {
         action: String,

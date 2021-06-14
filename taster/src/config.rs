@@ -33,7 +33,7 @@ impl Error {
 }
 
 #[derive(Clone, Debug)]
-pub struct JSONMetricFormat {
+pub struct JsonMetricFormat {
     pub name: String,
     pub key: String,
     pub lower_is_better: bool,
@@ -50,9 +50,9 @@ pub enum OutputFormat {
         regression_threshold: f64,
     },
 
-    JSON {
+    Json {
         benchmark_name_key: String,
-        metrics: Vec<JSONMetricFormat>,
+        metrics: Vec<JsonMetricFormat>,
     },
 }
 
@@ -69,13 +69,11 @@ impl OutputFormat {
                     .ok_or_else(|| Error::invalid_type("regexs", "array"))?
                     .iter()
                     .map(|r| {
-                        Ok(Regex::new(
+                        Regex::new(
                             r.as_str()
                                 .ok_or_else(|| Error::invalid_type("regexs", "array of string"))?,
                         )
-                        .map_err(|_| {
-                            Error::invalid_type("regexs", "array of regular expression")
-                        })?)
+                        .map_err(|_| Error::invalid_type("regexs", "array of regular expression"))
                     })
                     .collect::<Result<Vec<_>, Error>>()?,
                 lower_is_better: match val.get("lower_better") {
@@ -98,7 +96,7 @@ impl OutputFormat {
                 },
             })
         } else if val.get("format").and_then(|x| x.as_str()) == Some("json") {
-            Ok(Self::JSON {
+            Ok(Self::Json {
                 benchmark_name_key: val
                     .get("benchmark_name_key")
                     .ok_or_else(|| Error::missing_key("benchmark_name_key"))?
@@ -112,7 +110,7 @@ impl OutputFormat {
                     .ok_or_else(|| Error::invalid_type("metrics", "table"))?
                     .iter()
                     .map(|(name, v)| {
-                        Ok(JSONMetricFormat {
+                        Ok(JsonMetricFormat {
                             name: name.clone(),
                             key: v
                                 .get("key")
@@ -238,13 +236,13 @@ pub fn parse_config(
         .collect::<HashMap<_, _>>();
 
     // Taster config version
-    let version = match value.remove("version") {
-        None => None,
-        Some(v) => Some(
+    let version = value
+        .remove("version")
+        .map(|v| {
             v.as_integer()
-                .ok_or_else(|| Error::invalid_type("version", "integer"))?,
-        ),
-    };
+                .ok_or_else(|| Error::invalid_type("version", "integer"))
+        })
+        .transpose()?;
 
     let run_tests = value.remove("run_tests").map_or(Ok(true), |v| {
         v.as_bool()

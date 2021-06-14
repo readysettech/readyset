@@ -48,6 +48,7 @@ pub struct TastingResult {
     pub build: bool,
     pub test: bool,
     pub bench: bool,
+    #[allow(clippy::type_complexity)]
     pub results: Option<Vec<(Benchmark, ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>,
 }
 
@@ -69,26 +70,30 @@ fn run_benchmark(workdir: &str, bench: &Benchmark, timeout: Option<u64>) -> Outp
         .args(bench.args.as_slice());
 
     cmd.output()
-        .expect(&format!("Failed to execute benchmark '{}'!", bench.name))
+        .unwrap_or_else(|_| panic!("Failed to execute benchmark '{}'!", bench.name))
 }
 
 fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
     use std::fs::File;
     use std::io::Write;
 
-    let mut stdout_file =
-        File::create(&format!("{}-{}-stdout.log", commit_id, name)).expect(&format!(
-            "Failed to create stdout log file for '{}' at commit '{}'.",
-            name, commit_id
-        ));
+    let mut stdout_file = File::create(&format!("{}-{}-stdout.log", commit_id, name))
+        .unwrap_or_else(|_| {
+            panic!(
+                "Failed to create stdout log file for '{}' at commit '{}'.",
+                name, commit_id
+            )
+        });
     stdout_file
         .write_all(output.stdout.as_slice())
         .expect("Failed to write output to stdout log file!");
-    let mut stderr_file =
-        File::create(&format!("{}-{}-stderr.log", commit_id, name)).expect(&format!(
-            "Failed to create stderr log file for '{}' at commit '{}'.",
-            name, commit_id
-        ));
+    let mut stderr_file = File::create(&format!("{}-{}-stderr.log", commit_id, name))
+        .unwrap_or_else(|_| {
+            panic!(
+                "Failed to create stderr log file for '{}' at commit '{}'.",
+                name, commit_id
+            )
+        });
     stderr_file
         .write_all(output.stderr.as_slice())
         .expect("Failed to write output to stderr log file!");
@@ -137,14 +142,12 @@ fn parse_output(
                     } else {
                         BenchmarkResult::Neutral(val, change(val, old_val))
                     }
+                } else if val >= old_val * (1.0 + improvement_threshold) {
+                    BenchmarkResult::Improvement(val, change(val, old_val))
+                } else if val < old_val * (1.0 - regression_threshold) {
+                    BenchmarkResult::Regression(val, change(val, old_val))
                 } else {
-                    if val >= old_val * (1.0 + improvement_threshold) {
-                        BenchmarkResult::Improvement(val, change(val, old_val))
-                    } else if val < old_val * (1.0 - regression_threshold) {
-                        BenchmarkResult::Regression(val, change(val, old_val))
-                    } else {
-                        BenchmarkResult::Neutral(val, change(val, old_val))
-                    }
+                    BenchmarkResult::Neutral(val, change(val, old_val))
                 }
             }
         };
@@ -202,7 +205,7 @@ fn parse_output(
                 }
             }
         }
-        OutputFormat::JSON {
+        OutputFormat::Json {
             benchmark_name_key,
             metrics,
         } => {
@@ -299,10 +302,7 @@ pub fn taste_commit(
 
     let branch = match push.push_ref {
         None => None,
-        Some(ref pr) => match pr.rfind("/") {
-            None => None,
-            Some(i) => Some(String::from(&pr[i + 1..])),
-        },
+        Some(ref pr) => pr.rfind('/').map(|i| String::from(&pr[i + 1..])),
     };
 
     let version_output = version(&ws.path);
