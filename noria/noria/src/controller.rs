@@ -299,12 +299,6 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn view<'a>(&'a mut self, name: &str) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        // This call attempts to detect if this function is being called in a loop. If this is
-        // getting false positives, then it is safe to increase the allowed hit count, however, the
-        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         let name = name.to_string();
         let request = ViewRequest { name, filter: None };
         self.request_view(request)
@@ -318,12 +312,6 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         name: &str,
         workers: Vec<Url>,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        // This call attempts to detect if this function is being called in a loop. If this is
-        // getting false positives, then it is safe to increase the allowed hit count, however, the
-        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         let name = name.to_string();
         let request = ViewRequest {
             name,
@@ -342,12 +330,6 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         name: &str,
         region: String,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        // This call attempts to detect if this function is being called in a loop. If this is
-        // getting false positives, then it is safe to increase the allowed hit count, however, the
-        // limit_mutator_creation test in src/controller/handle.rs should then be updated as well.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         let name = name.to_string();
         let request = ViewRequest {
             name,
@@ -410,11 +392,6 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn table<'a>(&'a mut self, name: &str) -> impl Future<Output = ReadySetResult<Table>> + 'a {
-        // This call attempts to detect if this function is being called in a loop. If this
-        // is getting false positives, then it is safe to increase the allowed hit count.
-        #[cfg(debug_assertions)]
-        assert_infrequent::at_most(200);
-
         let domains = self.domains.clone();
         let name = name.to_string();
         async move {
