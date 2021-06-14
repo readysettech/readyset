@@ -32,51 +32,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Test maths'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test noria-logictest'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test taster'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test launchpad'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test nom-sql'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test unbounded-interval-tree'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test noria'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test noria-client'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test noria-mysql'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test noria-psql'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test msql-srv'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Test psql-srv'
+            - label: ':rust: Run tests'
               exclude:
                 - "ops/**"
 
@@ -107,20 +63,9 @@ steps:
       - build-image
       - check-rustfmt
       - check-clippy
-      - test-maths
-      - test-noria-logictest
-      - test-taster
-      - test-launchpad
-      - test-nom-sql
-      - unbounded-interval-tree
-      - test-noria
-      - test-noria-client
-      - test-noria-mysql
-      - test-noria-psql
+      - rust-tests
       - logictest
       - logictest-binlog
-      - test-mssql-srv
-      - test-psql-srv
 
   - label: ':rust: Build noria-server release binary'
     key: build-noria-release

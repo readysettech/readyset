@@ -138,237 +138,23 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Test noria-logictest'
-    key: test-noria-logictest
+  - label: ':rust: Run tests'
+    key: rust-tests
     command:
     - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-logictest
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test maths'
-    key: test-maths
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p maths
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test taster'
-    key: test-taster
-    commands:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p taster
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-          config: taster/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test launchpad'
-    key: test-launchpad
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p launchpad
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test nom-sql'
-    key: test-nom-sql
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p nom-sql
-    - cargo test -v -p nom-sql --features postgres
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test unbounded-interval-tree'
-    key: unbounded-interval-tree
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cd unbounded-interval-tree
-    - cargo test -v -p unbounded-interval-tree
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test noria'
-    key: test-noria
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria -p noria-server -p noria-applications -p noria-dataflow -p noria-common -p noria-dataflow -p reader_map -p noria-mir -- --skip integration_serial
+    - cargo test --all --exclude clustertest -- --skip integration_serial
+    - cargo test -p noria-server integration_serial -- --test-threads=1
     timeout_in_minutes: 60
     depends_on:
     - build-image
     plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-  - label: ':rust: Test noria-integration-serial'
-    key: test-noria-integration-serial
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-server integration_serial -- --test-threads=1
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-
-
-  - label: ':rust: Test noria-client'
-    key: test-noria-client
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-client
-    depends_on:
-    - build-image
-    timeout_in_minutes: 60
-    plugins:
       - docker-compose#v3.7.0:
           run: app
           env:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-          config: noria-client/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test noria-mysql'
-    key: test-noria-mysql
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-mysql
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-          config: noria-mysql/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-
-  - label: ':rust: Test noria-psql'
-    key: test-noria-psql
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p noria-psql
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          run: app
-          env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-          config: noria-psql/build/docker-compose.yaml
+          config: build/docker-compose.ci-test.yaml
       - ecr#v2.2.0:
           login: true
     env:
@@ -379,6 +165,7 @@ steps:
     command:
     - 'echo +++ Running noria-logictest'
     - cargo run --bin noria-logictest -- verify logictests
+    timeout_in_minutes: 60
     depends_on:
     - build-image
     plugins:
@@ -388,7 +175,7 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-          config: noria-mysql/build/docker-compose.yaml
+          config: build/docker-compose.ci-test.yaml
       - ecr#v2.2.0:
           login: true
     env:
@@ -398,7 +185,8 @@ steps:
     key: logictest-binlog
     command:
     - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql:3307 logictests
+    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql logictests
+    timeout_in_minutes: 60
     depends_on:
     - build-image
     plugins:
@@ -409,47 +197,7 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-          config: noria-mysql/build/docker-compose.yaml
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test msql-srv'
-    key: test-mssql-srv
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p msql-srv
-    depends_on:
-    - build-msql-srv
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
-          login: true
-
-  - label: ':rust: Test psql-srv'
-    key: test-psql-srv
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test -v -p psql-srv
-    depends_on:
-    - build-psql-srv
-    plugins:
-      - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          volumes:
-          - 'target:/workdir/target'
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
+          config: build/docker-compose.ci-test.yaml
       - ecr#v2.2.0:
           login: true
 

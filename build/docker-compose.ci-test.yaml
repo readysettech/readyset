@@ -7,21 +7,29 @@ volumes:
     external: true
 
 services:
+  zookeeper:
+    image: zookeeper
+  redis:
+    image: redis:6.2
   mysql:
     image: mysql
     environment:
-      - MYSQL_ROOT_PASSWORD=binlog
-      - MYSQL_TCP_PORT=3307
+    - MYSQL_ROOT_PASSWORD=binlog
   app:
     build:
-      context: ../..
+      context: ..
       dockerfile: build/Dockerfile
       cache_from:
-      - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql-build:latest
+      - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-client-build:latest
     working_dir: /workdir
     volumes:
     - 'target:/workdir/target'
     - 'cargo-registry:/usr/local/cargo/registry'
-    - '../..:/workdir'
+    - '..:/workdir'
+    environment:
+    - ZOOKEEPER_HOST=zookeeper
+    - REDIS_URL=redis://redis:6379/
     depends_on:
+    - zookeeper
+    - redis
     - mysql
