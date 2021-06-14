@@ -27,12 +27,8 @@ steps:
             - label: ':clippy: Check clippy'
               exclude:
                 - "ops/**"
-            
-            - lavel: ':nodejs: Test js-client'
-              exclude:
-                - "ops/**"
 
-            - label: ':rust: Build maths'
+            - lavel: ':nodejs: Test js-client'
               exclude:
                 - "ops/**"
 
@@ -40,19 +36,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build noria-logictest'
-              exclude:
-                - "ops/**"
-
             - label: ':rust: Test noria-logictest'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build query-generator'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build taster'
               exclude:
                 - "ops/**"
 
@@ -60,15 +44,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build launchpad'
-              exclude:
-                - "ops/**"
-
             - label: ':rust: Test launchpad'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build nom-sql'
               exclude:
                 - "ops/**"
 
@@ -76,15 +52,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build unbounded-interval-tree'
-              exclude:
-                - "ops/**"
-
             - label: ':rust: Test unbounded-interval-tree'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build noria'
               exclude:
                 - "ops/**"
 
@@ -92,19 +60,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build noria-client'
-              exclude:
-                - "ops/**"
-
             - label: ':rust: Test noria-client'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build noria-client-adapter'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build noria-mysql'
               exclude:
                 - "ops/**"
 
@@ -112,19 +68,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build noria-psql'
-              exclude:
-                - "ops/**"
-
             - label: ':rust: Test noria-psql'
-              exclude:
-                - "ops/**"
-
-            - label: 'Run logictest'
-              exclude:
-                - "ops/**"
-
-            - label: ':rust: Build msql-srv'
               exclude:
                 - "ops/**"
 
@@ -132,11 +76,11 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Build psql-srv'
+            - label: ':rust: Test psql-srv'
               exclude:
                 - "ops/**"
 
-            - label: ':rust: Test psql-srv'
+            - label: 'Run logictest'
               exclude:
                 - "ops/**"
 
@@ -163,33 +107,19 @@ steps:
       - build-image
       - check-rustfmt
       - check-clippy
-      - check-maths
       - test-maths
-      - build-noria-logictest
       - test-noria-logictest
-      - build-query-generator
-      - build-taster
       - test-taster
-      - build-launchpad
       - test-launchpad
-      - build-nom-sql
       - test-nom-sql
-      - build-unbounded-interval-tree
       - unbounded-interval-tree
-      - build-noria
       - test-noria
-      - build-noria-client
       - test-noria-client
-      - build-noria-client-adapter
-      - build-noria-mysql
       - test-noria-mysql
-      - build-noria-psql
       - test-noria-psql
       - logictest
       - logictest-binlog
-      - build-msql-srv
       - test-mssql-srv
-      - build-psql-srv
       - test-psql-srv
 
   - label: ':rust: Build noria-server release binary'
