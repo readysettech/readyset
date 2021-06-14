@@ -190,7 +190,8 @@ If specified, overrides the value of --external-address"))
                 .long("replication-url")
                 .takes_value(true)
                 .required(false)
-                .help("A URL identifying a MySQL or PostgreSQL primary server to replicater from. Should include username and password if necessary."),
+                .env("REPLICATION_URL")
+                .help("A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include username and password if necessary."),
         )
         .arg(
             Arg::with_name("reader-only")
