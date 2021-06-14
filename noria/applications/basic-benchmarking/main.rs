@@ -60,7 +60,7 @@ impl BenchmarkApplication {
         let pool = Pool::new(url).unwrap();
         let conn = pool.get_conn().unwrap();
 
-        BenchmarkApplication { g: g, mysql: conn }
+        BenchmarkApplication { g, mysql: conn }
     }
 
     pub async fn run_benchmarks(
@@ -335,7 +335,7 @@ impl BenchmarkApplication {
             employees.push(vec![i.into(), age.into(), gender.into()]);
             employees_mysql.push(Employee {
                 emp_no: i,
-                age: age,
+                age,
                 gender: gender.to_string(),
             });
         }
@@ -439,7 +439,7 @@ impl BenchmarkApplication {
             salaries.push(vec![emp.into(), salary.into(), i.into()]);
             salaries_mysql.push(Salary {
                 emp_no: emp,
-                salary: salary,
+                salary,
                 id: i,
             });
         }

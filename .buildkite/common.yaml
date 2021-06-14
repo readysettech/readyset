@@ -92,6 +92,7 @@ steps:
     - "( echo '--- :rust: Checking noria-dataflow'; cargo clippy -p noria-dataflow -- -D warnings)"
     - "( echo '--- :rust: Checking noria-logictest'; cargo clippy -p noria-logictest -- -D warnings)"
     - "( echo '--- :rust: Checking replicators'; cargo clippy -p replicators -- -D warnings)"
+    - "( echo '--- :rust: Checking noria-applications'; cargo clippy -p noria-applications -- -D warnings)"
     - "( echo '--- :rust: Checking maths'; cargo clippy -p maths -- -D warnings)"
     depends_on:
     - build-image

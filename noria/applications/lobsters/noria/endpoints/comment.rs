@@ -1,4 +1,3 @@
-use chrono;
 use noria::DataType;
 use std::future::Future;
 use tower_util::ServiceExt;

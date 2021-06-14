@@ -82,7 +82,7 @@ fn reformat(queries: Vec<(String, String)>) -> Vec<(String, String)> {
             if !q.ends_with(';') {
                 (qn, format!("{};", q))
             } else {
-                (qn, q.to_string())
+                (qn, q)
             }
         })
         .collect()

@@ -1,7 +1,7 @@
 use crate::clients::localsoup::graph::RECIPE;
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
 use anyhow::Context as AnyhowContext;
-use clap;
+
 use noria::{self, ControllerHandle, TableOperation, TableRequest, ZookeeperAuthority};
 use std::future::Future;
 use std::task::{Context, Poll};

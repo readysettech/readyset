@@ -77,7 +77,7 @@ impl Backend {
             Some(qf) => {
                 let mut qf = File::open(qf).unwrap();
                 qf.read_to_string(&mut s).unwrap();
-                rs.push_str("\n");
+                rs.push('\n');
                 rs.push_str(
                     &s.lines()
                         .filter(|ref l| {

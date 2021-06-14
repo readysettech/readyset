@@ -290,19 +290,17 @@ async fn main() {
     let use_secondary = args.is_present("secondary-indices");
     let flush_ns = value_t_or_exit!(args, "flush-timeout", u32);
 
-    let mut persistence = PersistenceParameters::default();
-    persistence.flush_timeout = Duration::new(0, flush_ns);
-    persistence.persistence_threads = value_t_or_exit!(args, "persistence-threads", i32);
-    persistence.log_prefix = "replay".to_string();
-    persistence.mode = if durable {
-        DurabilityMode::Permanent
-    } else {
-        DurabilityMode::MemoryOnly
+    let persistence = PersistenceParameters {
+        flush_timeout: Duration::new(0, flush_ns),
+        persistence_threads: value_t_or_exit!(args, "persistence-threads", i32),
+        log_prefix: "replay".to_string(),
+        mode: if durable {
+            DurabilityMode::Permanent
+        } else {
+            DurabilityMode::MemoryOnly
+        },
+        log_dir: args.value_of("log-dir").map(PathBuf::from),
     };
-
-    persistence.log_dir = args
-        .value_of("log-dir")
-        .and_then(|p| Some(PathBuf::from(p)));
 
     let zk_address = args.value_of("zookeeper-address").unwrap();
     let authority = Arc::new(ZookeeperAuthority::new(zk_address).unwrap());

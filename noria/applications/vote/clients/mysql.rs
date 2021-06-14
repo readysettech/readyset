@@ -1,5 +1,5 @@
 use crate::clients::{Parameters, ReadRequest, VoteClient, WriteRequest};
-use clap;
+
 use mysql_async::prelude::*;
 use std::future::Future;
 use std::pin::Pin;
@@ -102,7 +102,7 @@ impl VoteClient for Conn {
                         if i != 0 {
                             sql.push_str(", ");
                         }
-                        sql.push_str("(");
+                        sql.push('(');
                         sql.push_str(&format!("{}, 'Article #{}'", aid, aid));
                         sql.push_str(", 0)");
                         aid += 1;

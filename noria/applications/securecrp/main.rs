@@ -69,7 +69,7 @@ impl Backend {
             Some(qf) => {
                 let mut qf = File::open(qf).unwrap();
                 qf.read_to_string(&mut s).unwrap();
-                rs.push_str("\n");
+                rs.push('\n');
                 rs.push_str(&s);
             }
         }
@@ -177,8 +177,7 @@ async fn main() {
 
     test_populate::dump_all_papers(&mut backend).await;
 
-    if gloc.is_some() {
-        let graph_fname = gloc.unwrap();
+    if let Some(graph_fname) = gloc {
         let mut gf = File::create(graph_fname).unwrap();
         assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());
     }

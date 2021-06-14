@@ -35,37 +35,37 @@ impl VoteClient for LocalNoria {
         let verbose = args.is_present("verbose");
         let fudge = args.is_present("fudge-rpcs");
 
-        let mut persistence = PersistenceParameters::default();
-        persistence.mode = if args.is_present("durability") {
-            if args.is_present("retain-logs-on-exit") {
-                DurabilityMode::Permanent
-            } else {
-                DurabilityMode::DeleteOnExit
-            }
-        } else {
-            DurabilityMode::MemoryOnly
-        };
         let flush_ns = value_t_or_exit!(args, "flush-timeout", u32);
-        persistence.flush_timeout = time::Duration::new(0, flush_ns);
-        persistence.persistence_threads = value_t_or_exit!(args, "persistence-threads", i32);
-        persistence.log_prefix = "vote".to_string();
-        persistence.log_dir = args
-            .value_of("log-dir")
-            .and_then(|p| Some(PathBuf::from(p)));
+        let persistence = PersistenceParameters {
+            mode: if args.is_present("durability") {
+                if args.is_present("retain-logs-on-exit") {
+                    DurabilityMode::Permanent
+                } else {
+                    DurabilityMode::DeleteOnExit
+                }
+            } else {
+                DurabilityMode::MemoryOnly
+            },
+            flush_timeout: time::Duration::new(0, flush_ns),
+            persistence_threads: value_t_or_exit!(args, "persistence-threads", i32),
+            log_prefix: "vote".to_string(),
+            log_dir: args.value_of("log-dir").map(PathBuf::from),
+        };
 
         // setup db
-        let mut s = graph::Builder::default();
-        s.logging = verbose;
-        s.sharding = match value_t_or_exit!(args, "shards", usize) {
-            0 => None,
-            x => Some(x),
+        let graph_builder = graph::Builder {
+            logging: verbose,
+            sharding: match value_t_or_exit!(args, "shards", usize) {
+                0 => None,
+                x => Some(x),
+            },
+            stupid: args.is_present("stupid"),
+            purge: args.value_of("purge").unwrap().to_string(),
+            ..Default::default()
         };
-        s.stupid = args.is_present("stupid");
-        let purge = args.value_of("purge").unwrap().to_string();
-        s.purge = purge.clone();
 
         async move {
-            let mut g = s.start(persistence).await?;
+            let mut g = graph_builder.start(persistence).await?;
 
             // prepopulate
             if verbose {

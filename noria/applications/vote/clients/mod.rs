@@ -1,4 +1,3 @@
-use clap;
 use std::future::Future;
 
 #[derive(Copy, Clone, Debug)]
