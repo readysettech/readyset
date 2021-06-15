@@ -44,6 +44,23 @@ steps:
       ecr#v2.2.0:
         login: true
 
+  - label: ':docker: Build cargo-audit image'
+    key: cargo-audit-image
+    commands:
+    - 'echo --- :docker: Pulling image'
+    - 'docker pull 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+    - 'echo --- :docker: Building image'
+    - >-
+      docker build -f build/Dockerfile.cargo-audit \
+        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
+        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
+        .
+    - 'echo --- :docker: Pushing image'
+    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
   - label: ':rust: Check rustfmt'
     key: check-rustfmt
     commands:
@@ -70,6 +87,21 @@ steps:
     plugins:
       - docker#v3.7.0:
           image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: :lock: Check cargo-audit'
+    commands:
+    - cargo audit
+    depends_on:
+    - cargo-audit-image
+    plugins:
+      - docker#v3.7.0:
+          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role

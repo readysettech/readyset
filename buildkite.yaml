@@ -24,6 +24,14 @@ steps:
 
             - label: ':prettier: Check prettier'
 
+            - label: ':docker: Build cargo-audit imate'
+              include:
+                - 'Cargo.lock'
+
+            - label: ':docker: Check cargo-audit'
+              include:
+                - 'Cargo.lock'
+
             - label: ':clippy: Check clippy'
               exclude:
                 - "ops/**"
