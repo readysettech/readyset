@@ -42,7 +42,7 @@ thiserror = "1.0.24"
 [dev-dependencies]
 postgres = "0.15.2"
 mysql = "17.0.0"
-mysql_async = "0.23.0"
+mysql_async = "0.27.1"
 slab = "0.4.2"
 futures = "0.1.26"
 proptest = "0.10.1"
