@@ -8,9 +8,8 @@
 //!
 //! [0]: https://dev.mysql.com/doc/internals/en/secure-password-authentication.html
 
-use crypto::digest::Digest;
-use crypto::sha1::Sha1;
 use getrandom::getrandom;
+use sha1::{Digest, Sha1};
 
 pub type AuthData = [u8; 20];
 
@@ -28,11 +27,9 @@ pub fn generate_auth_data() -> AuthData {
 }
 
 fn sha1(input: &[u8]) -> [u8; 20] {
-    let mut digest = Sha1::new();
-    digest.input(input);
-    let mut res = [0u8; 20];
-    digest.result(&mut res);
-    res
+    let mut hasher = Sha1::new();
+    hasher.update(input);
+    hasher.finalize().into()
 }
 
 /// Hash a password alongside random challenge data per the mysql [secure password authentication

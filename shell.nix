@@ -21,6 +21,7 @@ mkShell {
     rdkafka
     rust-analyzer
     docker-compose
+    cargo-audit
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib/libclang.so";
