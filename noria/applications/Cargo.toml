@@ -16,7 +16,7 @@ hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec a
                       # https://github.com/nucypher/rust-umbral/issues/34
 itertools = "0.9"
 memcached-rs = "0.4.2"
-mysql_async = "0.23.0"
+mysql_async = "0.27.1"
 nom-sql = { path = "../../nom-sql", version = "0.0.11" }
 noria = { path = "../server", package = "noria-server" }
 num_cpus = "1"
@@ -33,7 +33,7 @@ tower-service = "0.3.0"
 tower-limit = "0.3.1"
 # need 0.3.1 for https://github.com/tower-rs/tower/pull/427
 tower-util = "0.3.1"
-trawler = "0.11.0-alpha.4"
+trawler = { git = "https://github.com/readysettech/trawler" } # for https://github.com/jonhoo/trawler/pull/4
 vec_map = { version = "0.8.0" }
 zipf = "6"
 zookeeper = "0.5.3"

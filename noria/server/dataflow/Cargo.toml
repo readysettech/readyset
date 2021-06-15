@@ -62,5 +62,5 @@ thiserror = "1.0.24"
 test-strategy = "0.1.1"
 
 [dev-dependencies]
-pretty_assertions = "0.6.1"
+pretty_assertions = "0.7.2"
 proptest = "0.10.1"

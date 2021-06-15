@@ -144,7 +144,7 @@ impl GroupedOperation for Aggregator {
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> ReadySetResult<DataType> {
-        let apply_count = |curr, diff: Self::Diff| -> ReadySetResult<DataType> {
+        let apply_count = |curr: DataType, diff: Self::Diff| -> ReadySetResult<DataType> {
             if diff.positive {
                 &curr + &DataType::Int(1)
             } else {
@@ -152,7 +152,7 @@ impl GroupedOperation for Aggregator {
             }
         };
 
-        let apply_sum = |curr, diff: Self::Diff| -> ReadySetResult<DataType> {
+        let apply_sum = |curr: DataType, diff: Self::Diff| -> ReadySetResult<DataType> {
             if diff.positive {
                 &curr + &diff.value
             } else {
