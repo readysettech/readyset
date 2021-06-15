@@ -316,21 +316,74 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
         })
 }
 
+/// Method to use to generate column information.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ColumnGenerationSpec {
+    /// Repeatedly returns a single constant value.
+    Constant(ConstantGenerator),
+    /// Returns a unique value. For integer types this is a
+    /// 0-indexed incrementing value.
+    Unique(UniqueGenerator),
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ConstantGenerator {
+    value: DataType,
+}
+
+impl From<SqlType> for ConstantGenerator {
+    fn from(t: SqlType) -> Self {
+        Self {
+            value: value_of_type(&t),
+        }
+    }
+}
+
+impl ConstantGenerator {
+    fn gen(&self) -> DataType {
+        self.value.clone()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct UniqueGenerator {
+    index: u8,
+    sql_type: SqlType,
+}
+
+impl From<SqlType> for UniqueGenerator {
+    fn from(sql_type: SqlType) -> Self {
+        Self { index: 0, sql_type }
+    }
+}
+
+impl UniqueGenerator {
+    fn gen(&mut self) -> DataType {
+        let val = unique_value_of_type(&self.sql_type, self.index);
+        self.index += 1;
+        val
+    }
+}
+
+/// Column data type and data generation information.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ColumnSpec {
+    sql_type: SqlType,
+    gen_spec: ColumnGenerationSpec,
+    /// Values per column that should be present in that column at least some of the time.
+    ///
+    /// This is used to ensure that queries that filter on constant values get at least some results
+    expected_values: HashSet<DataType>,
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TableSpec {
     pub name: TableName,
-    pub columns: HashMap<ColumnName, SqlType>,
-    /// Columns that should *always* be unique
-    pub unique_columns: HashSet<ColumnName>,
+    pub columns: HashMap<ColumnName, ColumnSpec>,
     column_name_counter: u32,
 
     /// Name of the primary key columnfor the table, if any
     pub primary_key: Option<ColumnName>,
-
-    /// Values per column that should be present in that column at least some of the time.
-    ///
-    /// This is used to ensure that queries that filter on constant values get at least some results
-    expected_values: HashMap<ColumnName, HashSet<DataType>>,
 }
 
 impl From<CreateTableStatement> for TableSpec {
@@ -338,18 +391,32 @@ impl From<CreateTableStatement> for TableSpec {
         let primary_key: Option<ColumnName> =
             find_primary_keys(&stmt).map(|cspec| cspec.column.clone().into());
 
-        TableSpec {
+        let mut spec = TableSpec {
             name: stmt.table.name.into(),
             columns: stmt
                 .fields
                 .into_iter()
-                .map(|field| (field.column.name.into(), field.sql_type))
+                .map(|field| {
+                    (
+                        field.column.name.into(),
+                        // We default to generating fields with a constant value.
+                        ColumnSpec {
+                            sql_type: field.sql_type.clone(),
+                            gen_spec: ColumnGenerationSpec::Constant(field.sql_type.into()),
+                            expected_values: HashSet::new(),
+                        },
+                    )
+                })
                 .collect(),
-            unique_columns: stmt
-                .keys
-                .into_iter()
-                .flatten()
-                .flat_map(|k| match k {
+            column_name_counter: 0,
+            primary_key,
+        };
+
+        for col in stmt
+            .keys
+            .into_iter()
+            .flatten()
+            .flat_map(|k| match k {
                     TableKey::PrimaryKey(ks)
                     | TableKey::UniqueKey(_, ks)
                       // HACK(grfn): To get foreign keys filled, we just mark them as unique, which
@@ -360,12 +427,15 @@ impl From<CreateTableStatement> for TableSpec {
                     | TableKey::ForeignKey { columns: ks, .. } => ks,
                     _ => vec![],
                 })
-                .map(|c| c.name.into())
-                .collect(),
-            column_name_counter: 0,
-            expected_values: Default::default(),
-            primary_key,
+            .map(|c| ColumnName::from(c.name))
+        {
+            // Unwrap: Unique key columns come from the CreateTableStatement we just
+            // generated the TableSpec from. They should be valid columns.
+            let col_spec = spec.columns.get_mut(&col).unwrap();
+            col_spec.gen_spec = ColumnGenerationSpec::Unique(col_spec.sql_type.clone().into());
         }
+
+        spec
     }
 }
 
@@ -378,7 +448,7 @@ impl From<TableSpec> for CreateTableStatement {
                 .into_iter()
                 .map(|(col_name, col_type)| ColumnSpecification {
                     column: col_name.into(),
-                    sql_type: col_type,
+                    sql_type: col_type.sql_type,
                     constraints: vec![],
                     comment: None,
                 })
@@ -396,8 +466,6 @@ impl TableSpec {
             name,
             columns: Default::default(),
             column_name_counter: 0,
-            expected_values: Default::default(),
-            unique_columns: Default::default(),
             primary_key: None,
         }
     }
@@ -407,11 +475,18 @@ impl TableSpec {
         self.fresh_column_with_type(SqlType::Int(32))
     }
 
-    /// Generate a new, unique column in this table with the specified type and return its name
+    /// Generate a new, unique column in this table with the specified type and return its name.
     pub fn fresh_column_with_type(&mut self, col_type: SqlType) -> ColumnName {
         self.column_name_counter += 1;
         let column_name = ColumnName(format!("column_{}", self.column_name_counter));
-        self.columns.insert(column_name.clone(), col_type);
+        self.columns.insert(
+            column_name.clone(),
+            ColumnSpec {
+                sql_type: col_type.clone(),
+                gen_spec: ColumnGenerationSpec::Constant(col_type.into()),
+                expected_values: HashSet::new(),
+            },
+        );
         column_name
     }
 
@@ -430,9 +505,23 @@ impl TableSpec {
     pub fn some_column_with_type(&mut self, col_type: SqlType) -> ColumnName {
         self.columns
             .iter()
-            .find_map(|(n, t)| if *t == col_type { Some(n) } else { None })
+            .find_map(|(n, t)| {
+                if t.sql_type == col_type {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
             .cloned()
             .unwrap_or_else(|| self.fresh_column_with_type(col_type))
+    }
+
+    /// Specifies that the column given by `column_name` should be a primary key value
+    /// and generate unique column data.
+    pub fn set_primary_key_column(&mut self, column_name: &ColumnName) {
+        assert!(self.columns.contains_key(column_name));
+        let col_spec = self.columns.get_mut(column_name).unwrap();
+        col_spec.gen_spec = ColumnGenerationSpec::Unique(col_spec.sql_type.clone().into());
     }
 
     /// Record that the column given by `column_name` should contain `value` at least some of the
@@ -442,44 +531,53 @@ impl TableSpec {
     /// constant value return at least some results
     pub fn expect_value(&mut self, column_name: ColumnName, value: DataType) {
         assert!(self.columns.contains_key(&column_name));
-        self.expected_values
-            .entry(column_name)
-            .or_default()
+        self.columns
+            .get_mut(&column_name)
+            .unwrap()
+            .expected_values
             .insert(value);
     }
 
-    /// Generate `num_rows` rows of data for this table
+    pub fn generate_row(&mut self, index: usize, random: bool) -> HashMap<ColumnName, DataType> {
+        self.columns
+            .iter_mut()
+            .map(
+                |(
+                    col_name,
+                    ColumnSpec {
+                        sql_type: col_type,
+                        gen_spec: col_spec,
+                        expected_values,
+                    },
+                )| {
+                    let value = match col_spec {
+                        ColumnGenerationSpec::Unique(u) => u.gen(),
+                        _ if index % 2 == 0 && !expected_values.is_empty() => expected_values
+                            .iter()
+                            .nth(index / 2 % expected_values.len())
+                            .unwrap()
+                            .clone(),
+
+                        _ if random => random_value_of_type(&col_type),
+                        ColumnGenerationSpec::Constant(c) => c.gen(),
+                    };
+
+                    (col_name.clone(), value)
+                },
+            )
+            .collect()
+    }
+
+    /// Generate `num_rows` rows of data for this table. If `random` is true, columns
+    /// that are not unique and do not need to yield expected values, have their
+    /// DataGenerationSpec overriden with DataGenerationSpec::Random.
     pub fn generate_data(
-        &self,
+        &mut self,
         num_rows: usize,
         random: bool,
-    ) -> Vec<HashMap<&ColumnName, DataType>> {
+    ) -> Vec<HashMap<ColumnName, DataType>> {
         (0..num_rows)
-            .map(|n| {
-                self.columns
-                    .iter()
-                    .map(|(col_name, col_type)| {
-                        let value = if self.unique_columns.contains(col_name) {
-                            unique_value_of_type(col_type, n as _)
-                        } else if n % 2 == 0 {
-                            // if we have expected values, yield them half the time
-                            self.expected_values
-                                .get(col_name)
-                                .map(|vals| {
-                                    // yield an even distribution of the expected values
-                                    vals.iter().nth((n / 2) % vals.len()).unwrap().clone()
-                                })
-                                .unwrap_or_else(|| value_of_type(col_type))
-                        } else if random {
-                            random_value_of_type(col_type)
-                        } else {
-                            value_of_type(col_type)
-                        };
-
-                        (col_name, value)
-                    })
-                    .collect()
-            })
+            .map(|n| self.generate_row(n, random))
             .collect()
     }
 
@@ -487,7 +585,7 @@ impl TableSpec {
     pub fn primary_key(&mut self) -> &ColumnName {
         if self.primary_key.is_none() {
             let col = self.fresh_column_with_type(SqlType::Int(32));
-            self.unique_columns.insert(col.clone());
+            self.set_primary_key_column(&col);
             self.primary_key = Some(col)
         }
 
@@ -576,12 +674,15 @@ impl GeneratorState {
     ///
     /// Panics if `table_name` is not a known table
     pub fn generate_data_for_table(
-        &self,
+        &mut self,
         table_name: &TableName,
         num_rows: usize,
         random: bool,
-    ) -> Vec<HashMap<&ColumnName, DataType>> {
-        self.tables[table_name].generate_data(num_rows, random)
+    ) -> Vec<HashMap<ColumnName, DataType>> {
+        self.tables
+            .get_mut(table_name)
+            .unwrap()
+            .generate_data(num_rows, random)
     }
 
     /// Get a reference to the generator state's tables.
@@ -659,12 +760,13 @@ impl<'a> QueryState<'a> {
     /// If `make_unique` is true and `make_unique_key` was previously called, the returned rows
     /// are modified to match the key returned by `make_unique_key`.
     pub fn generate_data(
-        &self,
+        &mut self,
         rows_per_table: usize,
         make_unique: bool,
         random: bool,
-    ) -> HashMap<&TableName, Vec<HashMap<&ColumnName, DataType>>> {
-        self.tables
+    ) -> HashMap<TableName, Vec<HashMap<ColumnName, DataType>>> {
+        let table_names = self.tables.clone();
+        table_names
             .iter()
             .map(|table_name| {
                 let mut rows = self
@@ -674,12 +776,12 @@ impl<'a> QueryState<'a> {
                     if let Some(column_data) = self.unique_parameters.get(table_name) {
                         for row in &mut rows {
                             for (column, data) in column_data {
-                                row.insert(&column, data.clone());
+                                row.insert(column.clone(), data.clone());
                             }
                         }
                     }
                 }
-                (table_name, rows)
+                (table_name.clone(), rows)
             })
             .collect()
     }
@@ -697,7 +799,7 @@ impl<'a> QueryState<'a> {
         let mut ret = Vec::with_capacity(self.parameters.len());
         for (table_name, column_name) in self.parameters.iter() {
             let val = unique_value_of_type(
-                &self.gen.tables[table_name].columns[column_name],
+                &self.gen.tables[table_name].columns[column_name].sql_type,
                 self.datatype_counter,
             );
             self.unique_parameters
@@ -715,7 +817,7 @@ impl<'a> QueryState<'a> {
         self.parameters
             .iter()
             .map(|(table_name, column_name)| {
-                value_of_type(&self.gen.tables[table_name].columns[column_name])
+                value_of_type(&self.gen.tables[table_name].columns[column_name].sql_type)
             })
             .collect()
     }
