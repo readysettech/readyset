@@ -383,20 +383,24 @@ impl Generate {
             .iter()
             .map(|t| t.table.name.clone())
             .collect::<Vec<_>>();
-        let generator = GeneratorState::from(seed.tables.clone());
+        let mut generator = GeneratorState::from(seed.tables.clone());
 
         let data = tables_in_order
             .clone()
             .into_iter()
             .map(|table_name| {
-                let spec = generator.table(&table_name.into()).unwrap();
-                (spec, spec.generate_data(self.rows_per_table, self.random))
+                let spec = generator.table_mut(&table_name.clone().into()).unwrap();
+                (
+                    table_name,
+                    spec.generate_data(self.rows_per_table, self.random),
+                )
             })
             .collect::<Vec<_>>();
 
         let insert_statements = data
             .iter()
-            .map(|(spec, data)| {
+            .map(|(table_name, data)| {
+                let spec = generator.table(&table_name.clone().into()).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
                 nom_sql::InsertStatement {
                     table: spec.name.clone().into(),
@@ -455,7 +459,8 @@ impl Generate {
 
             let delete_statements: Vec<DeleteStatement> = data
                 .iter()
-                .map(|(spec, data)| {
+                .map(|(table_name, data)| {
+                    let spec = generator.table(&table_name.clone().into()).unwrap();
                     let table: Table = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(

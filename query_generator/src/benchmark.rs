@@ -308,7 +308,7 @@ impl Benchmark {
             let data = query.state.generate_data(self.rows_per_table, false, false);
             let start = Instant::now();
             for (table_name, rows) in data {
-                self.seed_data(&mut noria, table_name, rows).await?;
+                self.seed_data(&mut noria, &table_name, rows).await?;
             }
             let cold_write_time = start.elapsed();
 
@@ -351,7 +351,7 @@ impl Benchmark {
                 .is_none());
             let start = Instant::now();
             for (table_name, rows) in unique_data {
-                self.seed_data(&mut noria, table_name, rows).await?;
+                self.seed_data(&mut noria, &table_name, rows).await?;
             }
             view.lookup(&unique_key, true).await?;
             let warm_write_time = start.elapsed();
@@ -388,7 +388,7 @@ impl Benchmark {
         &self,
         noria: &mut noria_server::Handle<LocalAuthority>,
         table_name: &TableName,
-        data: Vec<HashMap<&ColumnName, DataType>>,
+        data: Vec<HashMap<ColumnName, DataType>>,
     ) -> anyhow::Result<()> {
         let mut table = noria.table(table_name.into()).await?;
         let columns = table

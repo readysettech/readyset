@@ -6,10 +6,10 @@ use anyhow::{Context, Result};
 use noria_logictest::generate::DatabaseConnection;
 use std::convert::TryInto;
 
-pub async fn load(db: &mut DatabaseConnection, spec: DatabaseGenerationSpec) -> Result<()> {
+pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random
     // data.
-    for (table_name, table_spec) in spec.tables.iter() {
+    for (table_name, table_spec) in spec.tables.iter_mut() {
         println!("Generating {} rows for {}", table_spec.num_rows, table_name);
         let data = table_spec.table.generate_data(table_spec.num_rows, true);
         let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
