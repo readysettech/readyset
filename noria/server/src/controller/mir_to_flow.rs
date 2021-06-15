@@ -944,14 +944,12 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
                         right: Box::new(make_comparison(rhs)?),
                     })
                 })
+            } else if negated {
+                // x IN () is always false
+                Ok(DataflowExpression::Literal(DataType::None))
             } else {
-                if negated {
-                    // x IN () is always false
-                    Ok(DataflowExpression::Literal(DataType::None))
-                } else {
-                    // x NOT IN () is always false
-                    Ok(DataflowExpression::Literal(DataType::from(1)))
-                }
+                // x NOT IN () is always false
+                Ok(DataflowExpression::Literal(DataType::from(1)))
             }
         }
         Expression::Exists(_) => unsupported!("EXISTS not currently supported"),
