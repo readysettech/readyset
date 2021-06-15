@@ -15,6 +15,9 @@ pub struct MemoryState {
     state: Vec<SingleState>,
     by_tag: HashMap<Tag, usize>,
     mem_size: u64,
+    /// The latest replication offset that has been written to the base table backed by this
+    /// [`PersistentState`]
+    replication_offset: Option<ReplicationOffset>,
 }
 
 impl SizeOf for MemoryState {
@@ -82,7 +85,7 @@ impl State for MemoryState {
         &mut self,
         records: &mut Records,
         partial_tag: Option<Tag>,
-        _replication_offset: Option<ReplicationOffset>,
+        replication_offset: Option<ReplicationOffset>,
     ) {
         if self.is_partial() {
             records.retain(|r| {
@@ -119,6 +122,8 @@ impl State for MemoryState {
                 }
             }
         }
+
+        self.replication_offset = replication_offset;
     }
 
     fn rows(&self) -> usize {
@@ -243,6 +248,10 @@ impl State for MemoryState {
             state.clear();
         }
         self.mem_size = 0;
+    }
+
+    fn replication_offset(&self) -> Option<&ReplicationOffset> {
+        self.replication_offset.as_ref()
     }
 }
 

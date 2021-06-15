@@ -1348,6 +1348,8 @@ impl ControllerInner {
                 let new = old.replace(r).unwrap();
                 match self.apply_recipe(new) {
                     Ok(x) => {
+                        self.replication_offset = r_txt_spec.replication_offset.clone();
+
                         let install_result = authority.read_modify_write(
                             STATE_KEY,
                             |state: Option<ControllerState>| {
@@ -1361,7 +1363,6 @@ impl ControllerInner {
                                         // offset entirely
                                         state.replication_offset =
                                             r_txt_spec.replication_offset.clone();
-
                                         Ok(state)
                                     }
                                 }
