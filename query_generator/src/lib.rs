@@ -282,6 +282,12 @@ impl From<ColumnName> for Column {
     }
 }
 
+impl From<&str> for ColumnName {
+    fn from(col: &str) -> Self {
+        Self(col.into())
+    }
+}
+
 impl From<nom_sql::Column> for ColumnName {
     fn from(col: nom_sql::Column) -> Self {
         col.name.into()
@@ -316,9 +322,24 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
         })
 }
 
-/// Method to use to generate column information.
+/// Variants and their parameters used to construct
+/// their respective ColumnGenerator.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnGenerationSpec {
+    Unique,
+}
+
+impl ColumnGenerationSpec {
+    fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
+        match self {
+            ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
+        }
+    }
+}
+
+/// Method to use to generate column information.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ColumnGenerator {
     /// Repeatedly returns a single constant value.
     Constant(ConstantGenerator),
     /// Returns a unique value. For integer types this is a
@@ -369,7 +390,7 @@ impl UniqueGenerator {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ColumnSpec {
     sql_type: SqlType,
-    gen_spec: ColumnGenerationSpec,
+    gen_spec: ColumnGenerator,
     /// Values per column that should be present in that column at least some of the time.
     ///
     /// This is used to ensure that queries that filter on constant values get at least some results
@@ -402,7 +423,7 @@ impl From<CreateTableStatement> for TableSpec {
                         // We default to generating fields with a constant value.
                         ColumnSpec {
                             sql_type: field.sql_type.clone(),
-                            gen_spec: ColumnGenerationSpec::Constant(field.sql_type.into()),
+                            gen_spec: ColumnGenerator::Constant(field.sql_type.into()),
                             expected_values: HashSet::new(),
                         },
                     )
@@ -432,7 +453,7 @@ impl From<CreateTableStatement> for TableSpec {
             // Unwrap: Unique key columns come from the CreateTableStatement we just
             // generated the TableSpec from. They should be valid columns.
             let col_spec = spec.columns.get_mut(&col).unwrap();
-            col_spec.gen_spec = ColumnGenerationSpec::Unique(col_spec.sql_type.clone().into());
+            col_spec.gen_spec = ColumnGenerator::Unique(col_spec.sql_type.clone().into());
         }
 
         spec
@@ -483,7 +504,7 @@ impl TableSpec {
             column_name.clone(),
             ColumnSpec {
                 sql_type: col_type.clone(),
-                gen_spec: ColumnGenerationSpec::Constant(col_type.into()),
+                gen_spec: ColumnGenerator::Constant(col_type.into()),
                 expected_values: HashSet::new(),
             },
         );
@@ -521,7 +542,7 @@ impl TableSpec {
     pub fn set_primary_key_column(&mut self, column_name: &ColumnName) {
         assert!(self.columns.contains_key(column_name));
         let col_spec = self.columns.get_mut(column_name).unwrap();
-        col_spec.gen_spec = ColumnGenerationSpec::Unique(col_spec.sql_type.clone().into());
+        col_spec.gen_spec = ColumnGenerator::Unique(col_spec.sql_type.clone().into());
     }
 
     /// Record that the column given by `column_name` should contain `value` at least some of the
@@ -538,7 +559,26 @@ impl TableSpec {
             .insert(value);
     }
 
-    pub fn generate_row(&mut self, index: usize, random: bool) -> HashMap<ColumnName, DataType> {
+    /// Overrides the existing `gen_spec` for a column with `spec`.
+    pub fn set_column_generator_spec(
+        &mut self,
+        column_name: ColumnName,
+        spec: ColumnGenerationSpec,
+    ) {
+        assert!(self.columns.contains_key(&column_name));
+        let col_spec = self.columns.get_mut(&column_name).unwrap();
+        self.columns.get_mut(&column_name).unwrap().gen_spec =
+            spec.generator_for_col(col_spec.sql_type.clone());
+    }
+
+    /// Overrides the existing `gen_spec` for a set of columns..
+    pub fn set_column_generator_specs(&mut self, specs: &[(ColumnName, ColumnGenerationSpec)]) {
+        for s in specs {
+            self.set_column_generator_spec(s.0.clone(), s.1.clone());
+        }
+    }
+
+    fn generate_row(&mut self, index: usize, random: bool) -> HashMap<ColumnName, DataType> {
         self.columns
             .iter_mut()
             .map(
@@ -551,7 +591,7 @@ impl TableSpec {
                     },
                 )| {
                     let value = match col_spec {
-                        ColumnGenerationSpec::Unique(u) => u.gen(),
+                        ColumnGenerator::Unique(u) => u.gen(),
                         _ if index % 2 == 0 && !expected_values.is_empty() => expected_values
                             .iter()
                             .nth(index / 2 % expected_values.len())
@@ -559,7 +599,7 @@ impl TableSpec {
                             .clone(),
 
                         _ if random => random_value_of_type(&col_type),
-                        ColumnGenerationSpec::Constant(c) => c.gen(),
+                        ColumnGenerator::Constant(c) => c.gen(),
                     };
 
                     (col_name.clone(), value)
