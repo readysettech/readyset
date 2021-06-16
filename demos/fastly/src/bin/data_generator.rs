@@ -2,6 +2,7 @@ use clap::{Clap, ValueHint};
 use fastly_demo::generate::load;
 use fastly_demo::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use noria_logictest::generate::DatabaseURL;
+use query_generator::ColumnGenerationSpec;
 use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
@@ -35,10 +36,14 @@ impl DataGenerator {
         let fastly_schema = DatabaseSchema::try_from(self.schema.unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/fastly_db.sql")
         }))?;
-        let database_spec = DatabaseGenerationSpec::new(fastly_schema)
+        let mut database_spec = DatabaseGenerationSpec::new(fastly_schema)
             .table_rows("articles", self.article_table_rows)
             .table_rows("users", self.user_table_rows)
             .table_rows("recommendations", self.user_table_rows * self.per_user_recs);
+
+        // Article table overrides.
+        let table = database_spec.table_spec("articles");
+        table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
 
         let mut conn = self.database_url.connect().await?;
         load(&mut conn, database_spec).await?;

@@ -61,6 +61,12 @@ impl DatabaseGenerationSpec {
             );
         }
     }
+
+    /// Retrieves the TableSpec for a table, `table_name`. Panics if the
+    /// table does not exist in the DatabaseGenerationSpec.
+    pub fn table_spec(&mut self, table_name: &str) -> &mut TableSpec {
+        &mut self.tables.get_mut(&table_name.into()).unwrap().table
+    }
 }
 
 /// A database schema parsed from a file of CREATE TABLE
