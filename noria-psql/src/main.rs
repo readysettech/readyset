@@ -1,10 +1,12 @@
 #![warn(clippy::dbg_macro)]
+
 use async_trait::async_trait;
+use tokio::net;
+
 use noria_client::backend as cl;
-use noria_client_adapter::{ConnectionHandler, NoriaAdapter};
+use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use noria_psql::backend::Backend;
 use psql_srv::run_backend;
-use tokio::net;
 
 #[derive(Clone, Copy)]
 struct PsqlHandler;
@@ -28,6 +30,7 @@ fn main() {
         description: "PostgreSQL adapter for Noria.",
         default_address: "127.0.0.1:5432",
         connection_handler: PsqlHandler,
+        database_type: DatabaseType::Psql,
     };
     adapter.run()
 }

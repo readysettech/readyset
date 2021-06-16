@@ -1,0 +1,11 @@
+[package]
+name = "noria-client-metrics"
+version = "0.1.0"
+authors = ["ReadySet"]
+edition = "2018"
+
+[dependencies]
+metrics = "0.14.2"
+
+[lib]
+path = "src/lib.rs"

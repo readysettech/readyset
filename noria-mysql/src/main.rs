@@ -2,12 +2,14 @@
 #[macro_use]
 extern crate tracing;
 
+use std::io;
+
 use async_trait::async_trait;
+use tokio::net;
+
 use msql_srv::MysqlIntermediary;
 use noria_client::backend::Backend;
-use noria_client_adapter::{ConnectionHandler, NoriaAdapter};
-use std::io;
-use tokio::net;
+use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 
 #[derive(Clone, Copy)]
 struct MysqlHandler;
@@ -39,6 +41,7 @@ fn main() {
         description: "MySQL adapter for Noria.",
         default_address: "127.0.0.1:3306",
         connection_handler: MysqlHandler,
+        database_type: DatabaseType::Mysql,
     };
     adapter.run()
 }

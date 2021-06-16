@@ -1,28 +1,31 @@
 #![warn(clippy::dbg_macro)]
-#[macro_use]
-extern crate clap;
 extern crate anyhow;
 #[macro_use]
+extern crate clap;
+#[macro_use]
 extern crate tracing;
+
+use std::collections::HashMap;
+use std::io;
+use std::marker::Send;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
+use metrics_exporter_prometheus::PrometheusBuilder;
+use tokio::net;
+use tokio_stream::wrappers::TcpListenerStream;
+use tracing::Level;
+
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
     Writer,
 };
-use std::collections::HashMap;
-use std::io;
-use std::marker::Send;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
-use tokio::net;
-use tokio_stream::wrappers::TcpListenerStream;
-use tracing::Level;
 
 #[async_trait]
 pub trait ConnectionHandler {
@@ -33,12 +36,23 @@ pub trait ConnectionHandler {
     );
 }
 
+/// Represents which database interface is being adapted to
+/// communicate with Noria.
+#[derive(Copy, Clone)]
+pub enum DatabaseType {
+    /// MySQL database.
+    Mysql,
+    /// PostgreSQL database.
+    Psql,
+}
+
 pub struct NoriaAdapter<H> {
     pub name: &'static str,
     pub version: &'static str,
     pub description: &'static str,
     pub default_address: &'static str,
     pub connection_handler: H,
+    pub database_type: DatabaseType,
 }
 
 impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
@@ -143,6 +157,12 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 .env("NORIA_REGION")
                 .help("The region the worker is hosted in. Required to route view requests to specific regions."),
             )
+            .arg(
+                Arg::with_name("prometheus-metrics")
+                    .long("prometheus-metrics")
+                    .takes_value(false)
+                    .help("Records and exposes Prometheus metrics."),
+            )
             .get_matches();
 
         let listen_addr = value_t_or_exit!(matches, "address", String);
@@ -217,6 +237,16 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 })
                 .into_stream(),
         ));
+
+        if matches.is_present("prometheus-metrics") {
+            let _guard = rt.enter();
+            let database_label: noria_client_metrics::recorded::DatabaseType =
+                self.database_type.into();
+            PrometheusBuilder::new()
+                .add_global_label("database_type", database_label)
+                .install()
+                .unwrap();
+        }
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let ch = ch.clone();
@@ -375,4 +405,13 @@ where
         // f returned false, so we should keep yielding
         true
     })
+}
+
+impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
+    fn from(database_type: DatabaseType) -> Self {
+        match database_type {
+            DatabaseType::Mysql => noria_client_metrics::recorded::DatabaseType::Mysql,
+            DatabaseType::Psql => noria_client_metrics::recorded::DatabaseType::Psql,
+        }
+    }
 }
