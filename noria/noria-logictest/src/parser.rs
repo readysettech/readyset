@@ -331,10 +331,20 @@ named!(
     )
 );
 
+named!(
+    halt<Record>,
+    do_parse!(
+        conditionals: conditionals
+            >> tag!("halt")
+            >> opt!(comment)
+            >> (Record::Halt { conditionals })
+    )
+);
+
 named!(pub record<Record>, alt!(
     statement => { |stmt| Record::Statement(stmt) } |
     query => { |query| Record::Query(query) } |
-    terminated!(tag!("halt"), line_ending) => { |_| Record::Halt } |
+    halt |
     hash_threshold
 ));
 

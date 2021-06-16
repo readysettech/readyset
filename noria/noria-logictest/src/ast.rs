@@ -511,7 +511,9 @@ pub enum Record {
     HashThreshold(usize),
 
     /// Stop testing and halt immediately. Useful when debugging.
-    Halt,
+    Halt {
+        conditionals: Vec<Conditional>,
+    },
 }
 
 impl Display for Record {
@@ -520,7 +522,9 @@ impl Display for Record {
             Record::Statement(s) => write!(f, "{}", s),
             Record::Query(q) => write!(f, "{}", q),
             Record::HashThreshold(ht) => writeln!(f, "hash-threshold {}", ht),
-            Record::Halt => f.write_str("halt\n"),
+            Record::Halt { conditionals } => {
+                writeln!(f, "{}\nhalt\n", conditionals.iter().join("\n"))
+            }
         }
     }
 }

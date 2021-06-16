@@ -238,7 +238,7 @@ impl TestScript {
                         .with_context(|| format!("Running query {}", query.query))?
                 }
                 Record::HashThreshold(_) => {}
-                Record::Halt => break,
+                Record::Halt { .. } => break,
             }
         }
         Ok(())
