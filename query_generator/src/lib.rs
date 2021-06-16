@@ -197,6 +197,20 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
     }
 }
 
+/// Generate a random value from a uniform distribution with the given integer
+/// [`SqlType`] for a given range of values.If the range of `min` and `max`
+/// exceeds the storage of the type, this truncates to fit.
+fn uniform_random_value(min: &DataType, max: &DataType) -> DataType {
+    let mut rng = rand::thread_rng();
+    match (min, max) {
+        (DataType::Int(i), DataType::Int(j)) => rng.gen_range(*i..*j).into(),
+        (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => rng.gen_range(*i..*j).into(),
+        (DataType::UnsignedBigInt(i), DataType::UnsignedBigInt(j)) => rng.gen_range(*i..*j).into(),
+        (DataType::BigInt(i), DataType::BigInt(j)) => rng.gen_range(*i..*j).into(),
+        (_, _) => unimplemented!("DataTypes unsupported for random uniform value generation"),
+    }
+}
+
 /// Generate a unique value with the given [`SqlType`] from a monotonically increasing counter,
 /// `idx`.
 ///
@@ -221,14 +235,14 @@ fn unique_value_of_type(typ: &SqlType, idx: u8) -> DataType {
         | SqlType::Text
         | SqlType::Binary(_)
         | SqlType::Varbinary(_) => format!("{}", idx).into(),
-        SqlType::Int(_) => (2i32 + idx as i32).into(),
-        SqlType::Bigint(_) => (2i64 + idx as i64).into(),
-        SqlType::UnsignedInt(_) => (2u32 + idx as u32).into(),
-        SqlType::UnsignedBigint(_) => (2u64 + idx as u64).into(),
-        SqlType::Tinyint(_) => (2i8 + idx as i8).into(),
-        SqlType::UnsignedTinyint(_) => (2u8 + idx).into(),
-        SqlType::Smallint(_) => (2i16 + idx as i16).into(),
-        SqlType::UnsignedSmallint(_) => (1u16 + idx as u16).into(),
+        SqlType::Int(_) => (idx as i32).into(),
+        SqlType::Bigint(_) => (idx as i64).into(),
+        SqlType::UnsignedInt(_) => (idx as u32).into(),
+        SqlType::UnsignedBigint(_) => (idx as u64).into(),
+        SqlType::Tinyint(_) => (idx as i8).into(),
+        SqlType::UnsignedTinyint(_) => (idx).into(),
+        SqlType::Smallint(_) => (idx as i16).into(),
+        SqlType::UnsignedSmallint(_) => (idx as u16).into(),
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             (1.5 + idx as f64).try_into().unwrap()
         }
@@ -327,12 +341,18 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnGenerationSpec {
     Unique,
+    /// Generates an integer in the specified range.
+    Uniform(DataType, DataType),
 }
 
 impl ColumnGenerationSpec {
     fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
         match self {
             ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
+            ColumnGenerationSpec::Uniform(a, b) => ColumnGenerator::Uniform(UniformGenerator {
+                min: a.clone(),
+                max: b.clone(),
+            }),
         }
     }
 }
@@ -345,6 +365,9 @@ pub enum ColumnGenerator {
     /// Returns a unique value. For integer types this is a
     /// 0-indexed incrementing value.
     Unique(UniqueGenerator),
+    /// Returns a randomly generated value between a min and
+    /// max value.
+    Uniform(UniformGenerator),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -383,6 +406,18 @@ impl UniqueGenerator {
         let val = unique_value_of_type(&self.sql_type, self.index);
         self.index += 1;
         val
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct UniformGenerator {
+    min: DataType,
+    max: DataType,
+}
+
+impl UniformGenerator {
+    fn gen(&self) -> DataType {
+        uniform_random_value(&self.min, &self.max)
     }
 }
 
@@ -600,6 +635,7 @@ impl TableSpec {
 
                         _ if random => random_value_of_type(&col_type),
                         ColumnGenerator::Constant(c) => c.gen(),
+                        ColumnGenerator::Uniform(u) => u.gen(),
                     };
 
                     (col_name.clone(), value)
