@@ -75,6 +75,11 @@ impl NoriaServerRunner {
         self.args.push("--log-dir".to_string());
         self.args.push(path.to_str().unwrap().to_string());
     }
+
+    pub fn set_mysql(&mut self, addr: &str) {
+        self.args.push("--replication-url".to_string());
+        self.args.push(addr.to_string());
+    }
 }
 
 /// Manages running a noria-mysql binary with the correct arguments.
@@ -116,5 +121,10 @@ impl NoriaMySQLRunner {
     pub fn set_port(&mut self, port: u16) {
         self.args.push("-a".to_string());
         self.args.push(format!("127.0.0.1:{}", port.to_string()));
+    }
+
+    pub fn set_mysql(&mut self, addr: &str) {
+        self.args.push("--mysql-url".to_string());
+        self.args.push(addr.to_string());
     }
 }
