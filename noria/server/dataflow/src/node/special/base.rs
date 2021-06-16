@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use itertools::Itertools;
+use launchpad::Indices;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
 use noria::{internal, Modification, Operation, ReplicationOffset, TableOperation};
@@ -235,13 +236,28 @@ impl Base {
         // Group the operations by their key, so we can process each group independently
         let ops = ops.group_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
         let mut results = Vec::with_capacity(n_ops);
+        /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of the current batch that
+        /// was not yet persisted to the base node.
+        enum TouchedKey<'a> {
+            Deleted,
+            Inserted(Cow<'a, [DataType]>),
+        }
+        let mut touched_keys: HashMap<Vec<DataType>, TouchedKey> = HashMap::new();
 
         for (key, ops) in &ops {
-            let stored_value = match db.lookup(key_cols, &KeyType::from(&key)) {
-                LookupResult::Missing => internal!(),
-                LookupResult::Some(rows) if rows.is_empty() => None,
-                LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
-                LookupResult::Some(rows) => internal!("key {:?} not unique; n={}", key, rows.len()),
+            // It is not enough to check the persisted value for the key, as it may have been changed in previous iteration,
+            // therefore we have to check it was not changed in one of the outstanding records
+            let stored_value = match touched_keys.get(&key) {
+                Some(TouchedKey::Inserted(row)) => Some(row.clone()), // Row was added in previous iteration
+                Some(TouchedKey::Deleted) => None,                    // Row was deleted previously
+                None => match db.lookup(key_cols, &KeyType::from(&key)) {
+                    LookupResult::Missing => internal!(),
+                    LookupResult::Some(rows) if rows.is_empty() => None,
+                    LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
+                    LookupResult::Some(rows) => {
+                        internal!("key {:?} not unique; n={}", key, rows.len())
+                    }
+                },
             };
 
             // Current value for the given key following the operations that were already applied to it
@@ -292,10 +308,15 @@ impl Base {
                 // If the stored value and the new computed value differ we need to update the stored value
                 if let Some(row) = stored_value {
                     // First delete the existing value, if any
+                    touched_keys.insert(key, TouchedKey::Deleted); // We don't remove here so we know not to look in db
                     results.push(Record::Negative(row.into_owned()));
                 }
                 if let Some(row) = value {
-                    // Then store the new value, if any
+                    // Second store the new value, if any
+                    touched_keys.insert(
+                        row.cloned_indices(key_cols.to_vec()),
+                        TouchedKey::Inserted(row.clone()),
+                    );
                     results.push(Record::Positive(row.into_owned()));
                 }
             }
@@ -516,7 +537,7 @@ mod tests {
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
             let mut state: Box<dyn State> = Box::new(PersistentState::new(
-                String::from("delete_row_not_in_batch"),
+                String::from("delete_row_not_in_batch_keyed"),
                 None,
                 &PersistenceParameters::default(),
             ));
@@ -545,6 +566,57 @@ mod tests {
                     records: vec![
                         Record::Positive(vec![1.into(), 2.into(), 3.into()]),
                         Record::Negative(vec![2.into(), 3.into(), 4.into()])
+                    ]
+                    .into(),
+                    replication_offset: None,
+                }
+            )
+        }
+
+        #[test]
+        fn delete_after_key_update() {
+            let mut b = Base::new(vec![]).with_key(vec![0]);
+
+            let ni = unsafe { LocalNodeIndex::make(0u32) };
+
+            let mut state: Box<dyn State> = Box::new(PersistentState::new(
+                String::from("delete_after_key_update"),
+                None,
+                &PersistenceParameters::default(),
+            ));
+
+            state.add_key(&Index::hash_map(vec![0]), None);
+
+            let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
+            state.process_records(&mut recs, None, None);
+
+            let mut state_map = Map::new();
+            state_map.insert(ni, state);
+
+            assert_eq!(
+                b.process(
+                    ni,
+                    vec![
+                        TableOperation::Update {
+                            key: vec![2.into()],
+                            update: vec![
+                                Modification::Set(3.into()),
+                                Modification::None,
+                                Modification::None
+                            ]
+                        },
+                        TableOperation::DeleteByKey {
+                            key: vec![3.into()]
+                        }
+                    ],
+                    &state_map
+                )
+                .unwrap(),
+                BaseWrite {
+                    records: vec![
+                        Record::Negative(vec![2.into(), 3.into(), 4.into()]),
+                        Record::Positive(vec![3.into(), 3.into(), 4.into()]),
+                        Record::Negative(vec![3.into(), 3.into(), 4.into()])
                     ]
                     .into(),
                     replication_offset: None,
