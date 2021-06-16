@@ -165,7 +165,7 @@ named!(
         whole: flat_map!(digit1, parse_to!(i64))
             >> tag!(".")
             >> fractional: flat_map!(digit1, parse_to!(u32))
-            >> (Value::Real(whole, fractional * 100_000_000))
+            >> (Value::Real(whole, (fractional as u64) * 100_000_000))
     )
 );
 
