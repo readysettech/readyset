@@ -50,11 +50,6 @@ csv = "1.1.5"
 path = "lib.rs"
 
 [[bin]]
-name = "vote"
-path = "vote/main.rs"
-doc = false
-
-[[bin]]
 name = "tpc_w"
 path = "tpc_w/tpc_w.rs"
 doc = false
@@ -85,16 +80,6 @@ path = "evict-o-rama/main.rs"
 doc = false
 
 [[bin]]
-name = "vote-migration"
-path = "vote-migration/main.rs"
-doc = false
-
-[[bin]]
-name = "vote-dbtoaster-style"
-path = "vote-dbtoaster-style/main.rs"
-doc = false
-
-[[bin]]
 name = "vote-purge-stress"
 path = "vote-purge-stress/main.rs"
 doc = false
@@ -102,16 +87,6 @@ doc = false
 [[bin]]
 name = "replay"
 path = "replay/main.rs"
-doc = false
-
-[[bin]]
-name = "lobsters-mysql"
-path = "lobsters/mysql/main.rs"
-doc = false
-
-[[bin]]
-name = "lobsters-noria"
-path = "lobsters/noria/main.rs"
 doc = false
 
 [[bin]]

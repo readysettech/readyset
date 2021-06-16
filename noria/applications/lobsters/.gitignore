@@ -1,6 +1,0 @@
-*.log
-*.hist
-*.json
-/target/
-**/*.rs.bk
-Cargo.lock
