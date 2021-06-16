@@ -3848,9 +3848,12 @@ dependencies = [
  "clap 2.33.3",
  "futures-util",
  "maplit",
+ "metrics",
+ "metrics-exporter-prometheus",
  "nom-sql",
  "noria",
  "noria-client",
+ "noria-client-metrics",
  "slog",
  "slog-term",
  "tokio 1.7.0",
@@ -3858,6 +3861,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-timing",
+]
+
+[[package]]
+name = "noria-client-metrics"
+version = "0.1.0"
+dependencies = [
+ "metrics",
 ]
 
 [[package]]

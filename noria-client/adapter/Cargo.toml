@@ -12,6 +12,9 @@ maplit = "1.0.2"
 nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
 noria = { version = "0.7", path = "../../noria/noria/" }
 noria-client = { version = "0.1.0", path = ".." }
+noria-client-metrics = { version = "0.1.0", path = "../metrics" }
+metrics = "0.14.2"
+metrics-exporter-prometheus = "0.3.0"
 slog = "2.4.0"
 slog-term = "2.4.0"
 tokio = { version = "1.5.0", features = ["signal", "rt-multi-thread", "time", "net"] }
