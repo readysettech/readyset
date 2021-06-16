@@ -468,18 +468,21 @@ impl Table {
                             ));
                         }
                     }
-                    TableOperation::Update { ref set, ref key } => {
+                    TableOperation::Update {
+                        ref update,
+                        ref key,
+                    } => {
                         if key.len() != self.key.len() {
                             return Err(ReadySetError::WrongKeyColumnCount(
                                 self.key.len(),
                                 key.len(),
                             ));
                         }
-                        if set.len() > self.columns.len() {
+                        if update.len() > self.columns.len() {
                             // NOTE: < is okay to allow dropping tailing no-ops
                             return Err(ReadySetError::WrongColumnCount(
                                 self.columns.len(),
-                                set.len(),
+                                update.len(),
                             ));
                         }
                     }
@@ -849,7 +852,7 @@ impl Table {
             unsupported!("update operations can only be applied to base nodes with key columns")
         }
 
-        let mut set = vec![Modification::None; self.columns.len()];
+        let mut update = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
             if coli >= self.columns.len() {
                 return Err(table_err(
@@ -857,11 +860,11 @@ impl Table {
                     ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
                 ));
             }
-            set[coli] = m;
+            update[coli] = m;
         }
 
         self.quick_n_dirty(TableRequest::TableOperations(vec![
-            TableOperation::Update { key, set },
+            TableOperation::Update { key, update },
         ]))
         .await
     }

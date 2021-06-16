@@ -433,7 +433,7 @@ impl Connector for PostgresWalConnector {
                     actions.push(TableOperation::Insert(new_tuple));
                 }
                 WalEvent::UpdateByKey { key, set, .. } => {
-                    actions.push(TableOperation::Update { key, set })
+                    actions.push(TableOperation::Update { key, update: set })
                 }
             }
         }

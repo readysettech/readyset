@@ -1606,7 +1606,7 @@ pub enum TableOperation {
     /// Update an existing row with the given `key`.
     Update {
         /// The modifications to make to each column of the existing row.
-        set: Vec<Modification>,
+        update: Vec<Modification>,
         /// The key used to identify the row to update.
         key: Vec<DataType>,
     },
