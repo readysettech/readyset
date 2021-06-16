@@ -1,6 +1,7 @@
 use clap::{Clap, ValueHint};
 use fastly_demo::generate::load;
 use fastly_demo::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use noria::DataType;
 use noria_logictest::generate::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
 use std::convert::TryFrom;
@@ -43,7 +44,34 @@ impl DataGenerator {
 
         // Article table overrides.
         let table = database_spec.table_spec("articles");
+        table.set_column_generator_specs(&[
+            ("id".into(), ColumnGenerationSpec::Unique),
+            (
+                "priority".into(),
+                ColumnGenerationSpec::Uniform(DataType::Int(0), DataType::Int(128)),
+            ),
+        ]);
+
+        let table = database_spec.table_spec("users");
         table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
+
+        let table = database_spec.table_spec("recommendations");
+        table.set_column_generator_specs(&[
+            (
+                "user_id".into(),
+                ColumnGenerationSpec::Uniform(
+                    DataType::UnsignedInt(0),
+                    DataType::UnsignedInt(self.user_table_rows as u32),
+                ),
+            ),
+            (
+                "article_id".into(),
+                ColumnGenerationSpec::Uniform(
+                    DataType::UnsignedInt(0),
+                    DataType::UnsignedInt(self.article_table_rows as u32),
+                ),
+            ),
+        ]);
 
         let mut conn = self.database_url.connect().await?;
         load(&mut conn, database_spec).await?;
