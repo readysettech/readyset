@@ -3964,6 +3964,7 @@ dependencies = [
  "query_generator",
  "slog",
  "tokio 1.7.0",
+ "walkdir",
  "zookeeper",
 ]
 

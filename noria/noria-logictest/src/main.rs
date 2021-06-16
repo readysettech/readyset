@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 use clap::Clap;
 use colored::Colorize;
+use walkdir::WalkDir;
 
 pub mod ast;
 pub mod generate;
@@ -40,6 +41,21 @@ impl Command {
     }
 }
 
+#[derive(Clap)]
+struct InputFileOptions {
+    /// Files or directories containing test scripts to run. If `-`, will read from standard input
+    ///
+    /// Any files whose name ends in `.fail.test` will be run, but will be expected to *fail* for
+    /// some reason - if any of them pass, the overall run will fail (and noria-logictest will exit
+    /// with a non-zero status code)
+    #[clap(parse(from_str))]
+    paths: Vec<PathBuf>,
+
+    /// Load input files from subdirectories of the given paths recursively
+    #[clap(long, short = 'r')]
+    recursive: bool,
+}
+
 /// The set of input files we are going to run over
 #[derive(Default)]
 struct InputFiles {
@@ -50,34 +66,38 @@ struct InputFiles {
     expected_failures: Vec<(PathBuf, Box<dyn io::Read>)>,
 }
 
-impl TryFrom<&[PathBuf]> for InputFiles {
+impl<'a> TryFrom<&'a InputFileOptions> for InputFiles {
     type Error = anyhow::Error;
 
-    fn try_from(paths: &[PathBuf]) -> Result<Self, Self::Error> {
-        if paths == vec![Path::new("-")] {
+    fn try_from(opts: &InputFileOptions) -> Result<Self, Self::Error> {
+        if opts.paths == vec![Path::new("-")] {
             Ok(InputFiles {
                 expected_passes: vec![("stdin".to_string().into(), Box::new(io::stdin()))],
                 ..Default::default()
             })
         } else {
-            let (expected_failures, expected_passes) = paths
+            let (expected_failures, expected_passes) = opts
+                .paths
                 .iter()
                 .map(
                     |path| -> anyhow::Result<Vec<(PathBuf, Box<dyn io::Read>)>> {
                         if path.is_file() {
                             Ok(vec![(path.to_path_buf(), Box::new(File::open(path)?))])
                         } else if path.is_dir() {
-                            Ok(path
-                                .read_dir()?
-                                .filter_map(|entry| -> Option<(PathBuf, Box<dyn io::Read>)> {
-                                    let path = entry.ok()?.path();
-                                    if path.is_file() {
-                                        Some((path.clone(), Box::new(File::open(&path).unwrap())))
-                                    } else {
-                                        None
-                                    }
+                            let mut walker = WalkDir::new(path);
+                            if !opts.recursive {
+                                walker = walker.max_depth(1);
+                            }
+
+                            walker
+                                .into_iter()
+                                .filter(|e| e.as_ref().map_or(true, |e| e.file_type().is_file()))
+                                .map(|entry| -> anyhow::Result<(PathBuf, Box<dyn io::Read>)> {
+                                    let entry = entry?;
+                                    let path = entry.path();
+                                    Ok((path.to_owned(), Box::new(File::open(path)?)))
                                 })
-                                .collect())
+                                .collect()
                         } else {
                             Err(anyhow!(
                                 "Invalid path {}, must be a filename, directory, or `-`",
@@ -141,9 +161,8 @@ impl IntoIterator for InputFiles {
 /// Test the parser on one or more sqllogictest files
 #[derive(Clap)]
 struct Parse {
-    /// Files or directories to parse. If `-`, will read from standard input
-    #[clap(parse(from_str))]
-    paths: Vec<PathBuf>,
+    #[clap(flatten)]
+    input_opts: InputFileOptions,
 
     /// Output the resulting parsed records after parsing
     #[clap(short, long)]
@@ -152,7 +171,7 @@ struct Parse {
 
 impl Parse {
     pub fn run(&self) -> anyhow::Result<()> {
-        for InputFile { name, data, .. } in InputFiles::try_from(self.paths.as_slice())? {
+        for InputFile { name, data, .. } in InputFiles::try_from(&self.input_opts)? {
             let filename = name.canonicalize()?;
             println!("Parsing records from {}", filename.to_string_lossy());
             match parser::read_records(data) {
@@ -177,13 +196,8 @@ impl Parse {
 /// database
 #[derive(Clap)]
 struct Verify {
-    /// Files or directories containing test scripts to run. If `-`, will read from standard input
-    ///
-    /// Any files whose name ends in `.fail.test` will be run, but will be expected to *fail* for
-    /// some reason - if any of them pass, the overall run will fail (and noria-logictest will exit
-    /// with status code 0)
-    #[clap(parse(from_str))]
-    paths: Vec<PathBuf>,
+    #[clap(flatten)]
+    input_opts: InputFileOptions,
 
     /// Connect to and run verification against a MySQL server rather than using noria
     #[clap(long)]
@@ -274,7 +288,7 @@ impl Verify {
             name,
             data,
             expected_result,
-        } in InputFiles::try_from(self.paths.as_slice())?
+        } in InputFiles::try_from(&self.input_opts)?
         {
             let script = TestScript::read(name.clone(), data)
                 .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
