@@ -1,4 +1,0 @@
-{
-  "type": "commonjs",
-  "main": "./api.server.js"
-}

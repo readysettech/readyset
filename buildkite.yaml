@@ -35,8 +35,6 @@ steps:
             - label: ':clippy: Check clippy'
               exclude:
                 - "ops/**"
-                - "demos/next-server-components/**"
-                - "demos/server-components-demo/**"
 
             - label: ":docker: Build noria-server image"
               include:
@@ -53,14 +51,10 @@ steps:
             - label: ':rust: Run tests'
               exclude:
                 - "ops/**"
-                - "demos/next-server-components/**"
-                - "demos/server-components-demo/**"
 
             - label: 'Run logictest'
               exclude:
                 - "ops/**"
-                - "demos/next-server-components/**"
-                - "demos/server-components-demo/**"
 
             - label: ':rust: Deploy docs'
               exclude:
