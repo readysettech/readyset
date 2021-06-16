@@ -165,7 +165,7 @@ impl TryFrom<PathBuf> for Seed {
                 Record::HashThreshold(ht) => {
                     hash_threshold = *ht;
                 }
-                Record::Halt => break,
+                Record::Halt { .. } => break,
             }
         }
 
