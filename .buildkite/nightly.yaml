@@ -34,22 +34,3 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
-
-  - label: 'Run generated logictests with binlog replication'
-    key: logictest-binlog
-    command:
-    - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:binlog@mysql logictests/generated
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
-          run: app
-          environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
-          - CARGO_INCREMENTAL=0
-          config: build/docker-compose.ci-test.yaml
-      - ecr#v2.2.0:
-          login: true
