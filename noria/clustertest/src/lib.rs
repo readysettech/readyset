@@ -8,8 +8,9 @@ mod readyset;
 mod readyset_mysql;
 
 use anyhow::{anyhow, Result};
-use docker::{kill_zookeeper, start_zookeeper};
+use docker::{kill_mysql, kill_zookeeper, start_mysql, start_zookeeper};
 use futures::executor;
+use mysql::prelude::Queryable;
 use noria::consensus::ZookeeperAuthority;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
@@ -94,6 +95,8 @@ pub struct DeploymentParams {
     servers: Vec<ServerParams>,
     /// Deploy the mysql adapter.
     mysql_adapter: bool,
+    /// Deploy mysql and use binlog replication.
+    mysql: bool,
 }
 
 impl DeploymentParams {
@@ -106,6 +109,7 @@ impl DeploymentParams {
             primary_region: None,
             servers: vec![],
             mysql_adapter: false,
+            mysql: false,
         }
     }
 
@@ -123,6 +127,10 @@ impl DeploymentParams {
 
     pub fn deploy_mysql_adapter(&mut self) {
         self.mysql_adapter = true;
+    }
+
+    pub fn deploy_mysql(&mut self) {
+        self.mysql = true;
     }
 }
 
@@ -157,6 +165,8 @@ pub struct DeploymentHandle {
     name: String,
     /// The zookeeper connect string for the deployment.
     zookeeper_addr: String,
+    /// The MySql connect string for the deployment.
+    mysql_addr: Option<String>,
     /// A handle to each noria server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
@@ -186,6 +196,7 @@ impl DeploymentHandle {
             self.primary_region.as_ref(),
             &self.zookeeper_addr,
             port,
+            self.mysql_addr.as_ref(),
         )?;
         let server_addr = handle.addr.clone();
         self.noria_server_handles
@@ -239,6 +250,7 @@ impl DeploymentHandle {
             let _ = adapter_handle.process.kill();
         }
         kill_zookeeper(&self.name).await?;
+        kill_mysql(&self.name).await?;
         std::fs::remove_dir_all(&get_log_path(&self.name))?;
 
         self.shutdown = true;
@@ -255,6 +267,10 @@ impl DeploymentHandle {
 
     pub fn mysql_connection_str(&self) -> Option<String> {
         self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
+    }
+
+    pub fn mysql_db_str(&self) -> Option<String> {
+        self.mysql_addr.clone()
     }
 }
 
@@ -298,6 +314,7 @@ fn get_log_path(deployment_name: &str) -> PathBuf {
     std::env::temp_dir().join(deployment_name)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_server(
     server_params: &ServerParams,
     noria_server_path: &Path,
@@ -306,6 +323,7 @@ fn start_server(
     primary_region: Option<&String>,
     zookeeper_addr: &str,
     port: u16,
+    mysql: Option<&String>,
 ) -> Result<ServerHandle> {
     let mut runner = NoriaServerRunner::new(noria_server_path);
     runner.set_deployment(deployment_name);
@@ -320,6 +338,9 @@ fn start_server(
     }
     if let Some(region) = primary_region.as_ref() {
         runner.set_primary_region(region);
+    }
+    if let Some(mysql) = mysql {
+        runner.set_mysql(mysql);
     }
     let log_path = get_log_path(deployment_name).join(port.to_string());
     std::fs::create_dir_all(&log_path)?;
@@ -338,11 +359,16 @@ fn start_mysql_adapter(
     deployment_name: &str,
     zookeeper_addr: &str,
     port: u16,
+    mysql: Option<&String>,
 ) -> Result<ProcessHandle> {
     let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
     runner.set_deployment(deployment_name);
     runner.set_port(port);
     runner.set_zookeeper(zookeeper_addr);
+
+    if let Some(mysql) = mysql {
+        runner.set_mysql(mysql);
+    }
 
     runner.start()
 }
@@ -410,6 +436,26 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     kill_zookeeper(&params.name).await?;
     start_zookeeper(&params.name, port).await?;
 
+    // If this deployment includes binlog replication and a mysql instance.
+    let mut mysql_addr = None;
+    if params.mysql {
+        port = get_next_good_port(Some(port));
+        kill_mysql(&params.name).await?;
+        start_mysql(&params.name, port).await?;
+        mysql_addr = Some(format!("mysql://root@127.0.0.1:{}", &port));
+
+        // The mysql container takes awhile to start up.
+        sleep(Duration::from_secs(15));
+
+        let opts = mysql::Opts::from_url(&mysql_addr.clone().unwrap()).unwrap();
+        let mut conn = mysql::Conn::new(opts).unwrap();
+        let _ = conn.query_drop("CREATE DATABASE test;").unwrap();
+
+        // Include the database in the mysql connection string so that noria-server
+        // and noria-mysql connect using the correct db.
+        mysql_addr = Some(format!("mysql://root@127.0.0.1:{}/test", &port));
+    }
+
     let noria_binary_paths = match params.noria_server_source {
         // TODO(justin): Make building the noria container start in a seperate
         // thread to parallelize zookeeper startup and binary building.
@@ -418,7 +464,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             &build_params.target_dir,
             build_params.release,
             build_params.rebuild,
-            params.mysql_adapter,
+            params.mysql_adapter || params.mysql,
         )?,
         NoriaBinarySource::Existing(binary_paths) => binary_paths,
     };
@@ -435,6 +481,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             params.primary_region.as_ref(),
             &zookeeper_addr,
             port,
+            mysql_addr.as_ref(),
         )?;
 
         handles.insert(handle.addr.clone(), handle);
@@ -452,13 +499,14 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     let metrics = MetricsClient::new(metrics_handle).unwrap();
 
     // Start a MySQL adapter instance.
-    let mysql_adapter_handle = if params.mysql_adapter {
+    let mysql_adapter_handle = if params.mysql_adapter || params.mysql {
         port = get_next_good_port(Some(port));
         let process = start_mysql_adapter(
             noria_binary_paths.noria_mysql.as_ref().unwrap(),
             &params.name,
             &zookeeper_addr,
             port,
+            mysql_addr.as_ref(),
         )?;
         // Sleep to give the adapter time to startup.
         sleep(Duration::from_millis(500));
@@ -475,6 +523,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
         metrics,
         name: params.name.clone(),
         zookeeper_addr,
+        mysql_addr,
         noria_server_handles: handles,
         shutdown: false,
         noria_binary_paths,
@@ -531,7 +580,7 @@ mod tests {
             "Error starting deployment: {}",
             deployment.err().unwrap()
         );
-        assert!(docker::zookeeper_container_running(&zookeeper_container_name).await);
+        assert!(docker::container_running(&zookeeper_container_name).await);
 
         let mut deployment = deployment.unwrap();
 
@@ -549,7 +598,7 @@ mod tests {
             "Error tearing down deployment: {}",
             res.err().unwrap()
         );
-        assert!(!docker::zookeeper_container_exists(&zookeeper_container_name).await);
+        assert!(!docker::container_exists(&zookeeper_container_name).await);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -659,5 +708,29 @@ mod tests {
         deployment.add_server(ServerParams::default().with_region("r2"));
 
         assert!(start_multi_process(deployment).await.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn clustertest_with_binlog() {
+        let cluster_name = "ct_with_binlog";
+        let mut deployment = DeploymentParams::new(
+            cluster_name,
+            NoriaBinarySource::Build(BuildParams {
+                root_project_path: get_project_root(),
+                target_dir: get_project_root().join("test_target"),
+                release: true,
+                rebuild: false,
+            }),
+        );
+        deployment.add_server(ServerParams::default());
+        deployment.add_server(ServerParams::default());
+        deployment.deploy_mysql();
+
+        let mut deployment = start_multi_process(deployment).await.unwrap();
+
+        // Check that we currently have two workers.
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+        deployment.teardown().await.unwrap();
     }
 }
