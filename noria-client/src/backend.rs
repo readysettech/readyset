@@ -1,21 +1,29 @@
-use noria::consensus::Authority;
-use noria::consistency::Timestamp;
-use noria::results::Results;
-use noria::{internal, unsupported, DataType, ReadySetError};
-use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
-
-use derive_more::From;
-use msql_srv::{self, *};
-use nom_sql::{self, DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
-
-use async_trait::async_trait;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io;
 use std::time;
+
+use async_trait::async_trait;
+use derive_more::From;
+use metrics::histogram;
 use tokio::io::AsyncWrite;
 use tracing::Level;
 
+use msql_srv::{self, *};
+use mysql_connector::MySqlConnector;
+use nom_sql::{self, DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
+use noria::consensus::Authority;
+use noria::consistency::Timestamp;
+use noria::errors::internal_err;
+use noria::errors::ReadySetError::PreparedStatementMissing;
+use noria::results::Results;
+use noria::{internal, unsupported, DataType, ReadySetError};
+use noria_client_metrics::recorded::SqlQueryType;
+use noria_connector::NoriaConnector;
+use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
+
+use crate::backend::error::Error;
 use crate::convert::ToDataType;
 use crate::rewrite;
 use crate::utils;
@@ -24,13 +32,6 @@ pub mod mysql_connector;
 pub mod noria_connector;
 
 pub mod error;
-
-use crate::backend::error::Error;
-use mysql_connector::MySqlConnector;
-use noria::errors::internal_err;
-use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria_connector::NoriaConnector;
-use std::convert::TryFrom;
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -468,16 +469,30 @@ impl<A: 'static + Authority> Backend<A> {
 
         let query = self.sanitize_query(query);
         let (parsed_query, use_params) = self.parse_query(&query, true)?;
+        let parse_time = start.elapsed().as_micros();
 
         let res = match &mut self.writer {
             // Interacting directly with Noria writer (No RYW support)
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
             Writer::NoriaConnector(connector) => match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
+                    let execution_timer = std::time::Instant::now();
                     let (data, select_schema) = self
                         .reader
                         .handle_select(q, use_params, self.ticket.clone())
                         .await?;
+                    let execution_time = execution_timer.elapsed().as_micros();
+
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
+                        parse_time as f64,
+                        "query_type" => SqlQueryType::Read
+                    );
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
+                        execution_time as f64,
+                        "query_type" => SqlQueryType::Read
+                    );
                     Ok(QueryResult::NoriaSelect {
                         data,
                         select_schema,
