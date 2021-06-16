@@ -28,6 +28,8 @@ derive_more = "0.99.11"
 async-trait = "0.1.49"
 thiserror = "1.0"
 launchpad = { path = "../launchpad" }
+metrics = "0.14.2"
+noria-client-metrics = { version = "0.1.0", path = "metrics" }
 
 [dev-dependencies]
 slog = "2.4.0"
