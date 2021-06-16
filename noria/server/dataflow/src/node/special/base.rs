@@ -1,9 +1,9 @@
 use crate::prelude::*;
+use itertools::Itertools;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
 use noria::{internal, Modification, Operation, ReplicationOffset, TableOperation};
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use vec_map::VecMap;
@@ -102,6 +102,7 @@ impl Base {
             .collect()
     }
 
+    /// Extend a row with default values if it does not match the current schema length
     pub(crate) fn fix(&self, row: &mut Vec<DataType>) {
         if self.unmodified {
             return;
@@ -164,181 +165,139 @@ impl Base {
         Clone::clone(self)
     }
 
-    /// Apply the list of `TableOperation` to the base table
+    /// Process table operations for a base table that doesn't have a key, such tables can
+    /// have multiple copies of the same row, and delete operations are free to remove any of them
+    fn process_unkeyed(&mut self, operations: Vec<TableOperation>) -> ReadySetResult<BaseWrite> {
+        // Keep track of the maximal replication offset in the list, if any
+        let mut replication_offset: Option<ReplicationOffset> = None;
+
+        // This is a non keyed table, can only apply non-keyed operations
+        let mut records = Vec::with_capacity(operations.len());
+        for op in operations {
+            match op {
+                TableOperation::Insert(mut row) => {
+                    self.fix(&mut row);
+                    records.push(Record::Positive(row));
+                }
+                TableOperation::DeleteRow { mut row } => {
+                    self.fix(&mut row);
+                    records.push(Record::Negative(row));
+                }
+                TableOperation::SetReplicationOffset(offset) => {
+                    offset.try_max_into(&mut replication_offset)?;
+                }
+                _ => {
+                    internal!("unkeyed base got keyed operation {:?}", op);
+                }
+            }
+        }
+
+        Ok(BaseWrite {
+            records: records.into(),
+            replication_offset,
+        })
+    }
+
+    /// Compute the deltas required to apply the list of the provided `TableOperation` to the base table
     pub(in crate::node) fn process(
         &mut self,
-        us: LocalNodeIndex,
+        our_index: LocalNodeIndex,
         mut ops: Vec<TableOperation>,
         state: &StateMap,
     ) -> ReadySetResult<BaseWrite> {
-        // Keep track of the maximal replication offset in the list, if any
-        let mut replication_offset: Option<ReplicationOffset> = None;
         if self.primary_key.is_none() || ops.is_empty() {
-            // This is a non keyed table, can only apply non-keyed operations
-            let mut records = Vec::with_capacity(ops.len());
-            for r in ops {
-                match r {
-                    TableOperation::Insert(mut r) => {
-                        self.fix(&mut r);
-                        records.push(Record::Positive(r));
-                    }
-                    TableOperation::DeleteRow { mut row } => {
-                        self.fix(&mut row);
-                        records.push(Record::Negative(row));
-                    }
-                    TableOperation::SetReplicationOffset(offset) => {
-                        offset.try_max_into(&mut replication_offset)?;
-                    }
-                    _ => {
-                        internal!("unkeyed base got non-insert operation {:?}", r);
-                    }
-                }
-            }
-
-            return Ok(BaseWrite {
-                records: records.into(),
-                replication_offset,
-            });
+            return self.process_unkeyed(ops);
         }
 
+        let mut n_ops = ops.len();
         let key_cols = &self.primary_key.as_ref().unwrap()[..];
         // Sort all of the operations lexicographically by key types, all unkeyed operations will move
-        // to the front of the vector (which can only be `SetReplicationOffset`)
+        // to the front of the vector (which can only be `SetReplicationOffset`), for the rest of the operations
+        // it will group them by their key value.
         ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
         let mut ops = ops.into_iter().peekable();
 
+        // First compute the replication offset
+        let mut replication_offset: Option<ReplicationOffset> = None;
         while let Some(TableOperation::SetReplicationOffset(offset)) = ops.peek() {
             // Process all of the `SetReplicationOffset` ops, then proceed to the keyed operations as usual
             offset.try_max_into(&mut replication_offset)?;
             ops.next();
+            n_ops -= 1;
         }
 
-        let mut this_key: Vec<_> = match ops.peek() {
-            Some(op) => key_of(key_cols, op).cloned().collect(),
-            None => {
-                return Ok(BaseWrite {
-                    records: Records::default(),
-                    replication_offset,
-                });
-            }
-        };
-
         // starting record state
-        let db = match state.get(us) {
+        let db = match state.get(our_index) {
             Some(x) => x,
             None => internal!("base with primary key must be materialized"),
         };
 
-        let get_current = |current_key: &'_ _| -> ReadySetResult<_> {
-            match db.lookup(key_cols, &KeyType::from(current_key)) {
-                LookupResult::Some(rows) => {
-                    match rows.len() {
-                        0 => Ok(None),
-                        1 => Ok(rows.into_iter().next()),
-                        n => {
-                            // primary key, so better be unique!
-                            if n != 1 {
-                                internal!("key {:?} not unique (n = {})!", current_key, n);
-                            }
-                            internal!();
-                        }
-                    }
-                }
+        // Group the operations by their key, so we can process each group independently
+        let ops = ops.group_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
+        let mut results = Vec::with_capacity(n_ops);
+
+        for (key, ops) in &ops {
+            let stored_value = match db.lookup(key_cols, &KeyType::from(&key)) {
                 LookupResult::Missing => internal!(),
-            }
-        };
-        let mut current = get_current(&this_key)?;
-        let mut was = current.clone();
-
-        let mut results = Vec::with_capacity(ops.len());
-        for op in ops {
-            if this_key.iter().cmp(key_of(key_cols, &op)) != Ordering::Equal {
-                if current != was {
-                    if let Some(was) = was {
-                        results.push(Record::Negative(was.into_owned()));
-                    }
-                    if let Some(current) = current {
-                        results.push(Record::Positive(current.into_owned()));
-                    }
-                }
-
-                this_key = key_of(key_cols, &op).cloned().collect();
-                current = get_current(&this_key)?;
-                was = current.clone();
-            }
-
-            let update = match op {
-                TableOperation::Insert(row) => {
-                    if let Some(ref was) = was {
-                        eprintln!("base ignoring {:?} since it already has {:?}", row, was);
-                    } else {
-                        current = Some(Cow::Owned(row));
-                    }
-                    continue;
-                }
-                TableOperation::DeleteByKey { .. } => {
-                    if current.is_some() {
-                        current = None;
-                    } else {
-                        // supposed to delete a non-existing row?
-                        // TODO: warn?
-                    }
-                    continue;
-                }
-                TableOperation::DeleteRow { row } => {
-                    if current == Some(Cow::Borrowed(&row)) {
-                        current = None;
-                    } else {
-                        results.push(Record::Negative(row))
-                    }
-                    continue;
-                }
-                TableOperation::Update { set, .. } => set,
-                TableOperation::InsertOrUpdate { row, update } => {
-                    if current.is_none() {
-                        current = Some(Cow::Owned(row));
-                        continue;
-                    }
-                    update
-                }
-                TableOperation::SetReplicationOffset(offset) => {
-                    offset.try_max_into(&mut replication_offset)?;
-                    continue;
-                }
+                LookupResult::Some(rows) if rows.is_empty() => None,
+                LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
+                LookupResult::Some(rows) => internal!("key {:?} not unique; n={}", key, rows.len()),
             };
 
-            if current.is_none() {
-                // supposed to update a non-existing row?
-                // TODO: also warn here?
-                continue;
-            }
+            // Current value for the given key following the operations that were already applied to it
+            let mut value = stored_value.clone();
 
-            let mut future = current.unwrap().into_owned();
-            for (col, op) in update.into_iter().enumerate() {
-                // XXX: make sure user doesn't update primary key?
+            for op in ops {
                 match op {
-                    Modification::Set(v) => future[col] = v,
-                    Modification::Apply(op, v) => {
-                        let old: i128 = <i128>::try_from(future[col].clone())?;
-                        let delta: i128 = <i128>::try_from(v)?;
-                        future[col] = match op {
-                            Operation::Add => DataType::try_from(old + delta)?,
-                            Operation::Sub => DataType::try_from(old - delta)?,
-                        };
+                    TableOperation::Insert(row) if value.is_none() => value = Some(Cow::Owned(row)),
+                    TableOperation::DeleteByKey { .. } => value = None,
+                    TableOperation::DeleteRow { row } if value == Some(Cow::Borrowed(&row)) => {
+                        // Delete the row, but only if it fully matches the current row
+                        value = None;
                     }
-                    Modification::None => {}
+                    TableOperation::SetReplicationOffset(offset) => {
+                        offset.try_max_into(&mut replication_offset)?
+                    }
+                    TableOperation::InsertOrUpdate { row, .. } if value.is_none() => {
+                        value = Some(Cow::Owned(row))
+                    }
+                    TableOperation::InsertOrUpdate { update, .. }
+                    | TableOperation::Update { update, .. }
+                        if value.is_some() =>
+                    {
+                        if let Some(updated) = value.as_mut().map(Cow::to_mut) {
+                            for (col, op) in update.into_iter().enumerate() {
+                                // XXX: make sure user doesn't update primary key?
+                                match op {
+                                    Modification::Set(v) => updated[col] = v,
+                                    Modification::Apply(op, v) => {
+                                        let old: i128 = <i128>::try_from(updated[col].clone())?;
+                                        let delta: i128 = <i128>::try_from(v)?;
+                                        updated[col] = match op {
+                                            Operation::Add => DataType::try_from(old + delta)?,
+                                            Operation::Sub => DataType::try_from(old - delta)?,
+                                        };
+                                    }
+                                    Modification::None => {}
+                                }
+                            }
+                        }
+                    }
+                    op => eprintln!("Base ignoring operation: {:?}", op),
                 }
             }
-            current = Some(Cow::Owned(future));
-        }
 
-        // we may have changed things in the last iteration of the loop above
-        if current != was {
-            if let Some(was) = was {
-                results.push(Record::Negative(was.into_owned()));
-            }
-            if let Some(current) = current {
-                results.push(Record::Positive(current.into_owned()));
+            // Finished processing operations for this key
+            if stored_value != value {
+                // If the stored value and the new computed value differ we need to update the stored value
+                if let Some(row) = stored_value {
+                    // First delete the existing value, if any
+                    results.push(Record::Negative(row.into_owned()));
+                }
+                if let Some(row) = value {
+                    // Then store the new value, if any
+                    results.push(Record::Positive(row.into_owned()));
+                }
             }
         }
 
@@ -470,7 +429,7 @@ mod tests {
                     },
                     TableOperation::Update {
                         key: vec![1.into(), 1.into()],
-                        set: vec![
+                        update: vec![
                             Modification::None,
                             Modification::Set("e".into()),
                             Modification::None,
@@ -478,7 +437,7 @@ mod tests {
                     },
                     TableOperation::Update {
                         key: vec![2.into(), 1.into()],
-                        set: vec![
+                        update: vec![
                             Modification::None,
                             Modification::Set("2x".into()),
                             Modification::None,
@@ -563,6 +522,9 @@ mod tests {
             ));
 
             state.add_key(&Index::hash_map(vec![0]), None);
+
+            let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
+            state.process_records(&mut recs, None, None);
 
             let mut state_map = Map::new();
             state_map.insert(ni, state);
