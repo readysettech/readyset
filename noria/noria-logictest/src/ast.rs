@@ -167,7 +167,7 @@ impl Display for SortMode {
 pub enum Value {
     Text(String),
     Integer(i64),
-    Real(i64, u32),
+    Real(i64, u64),
     Date(NaiveDateTime),
     Time(MysqlTime),
     Null,
@@ -190,7 +190,7 @@ impl TryFrom<mysql::Value> for Value {
                 }
                 Ok(Self::Real(
                     f.trunc() as i64,
-                    (f.fract() * 1_000_000_000.0).round() as u32,
+                    (f.fract() * 1_000_000_000.0).round() as _,
                 ))
             }
             Date(y, mo, d, h, min, s, us) => Ok(Self::Date(
@@ -217,7 +217,7 @@ impl From<Value> for mysql::Value {
         match val {
             Value::Text(x) => x.into(),
             Value::Integer(x) => x.into(),
-            Value::Real(i, f) => (i as f64 + (f64::from(f) / 1_000_000_000.0)).into(),
+            Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
             Value::Null => mysql::Value::NULL,
             Value::Date(dt) => mysql::Value::from(dt),
             Value::Time(t) => mysql::Value::Time(
@@ -284,10 +284,7 @@ impl Display for Value {
 
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
-        Self::Real(
-            f.trunc() as i64,
-            (f.fract() * 1_000_000_000.0).round() as u32,
-        )
+        Self::Real(f.trunc() as i64, (f.fract() * 1_000_000_000.0).round() as _)
     }
 }
 
@@ -330,7 +327,7 @@ impl Value {
                 let f: f64 = mysql::from_value_opt(val)?;
                 Ok(Self::Real(
                     f.trunc() as i64,
-                    (f.fract() * 1_000_000_000.0).round() as u32,
+                    (f.fract() * 1_000_000_000.0).round() as _,
                 ))
             }
             Type::Date => Ok(Self::Date(mysql::from_value_opt(val)?)),
