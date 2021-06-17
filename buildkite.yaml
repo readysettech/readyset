@@ -140,6 +140,7 @@ steps:
 
   - block: ":packer: Build Packer images?"
     key: build-packer-images
+    depends_on: []
 
   - label: ':pipeline: Build Packer pipeline'
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
