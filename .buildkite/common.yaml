@@ -304,3 +304,18 @@ steps:
           "--only", "terraform_standard_module_structure",
           "--only", "terraform_workspace_remote"
         ]
+
+  - label: ':packer: Lint Packer configuration'
+    key: packer-lint
+    plugins:
+      - docker#v3.7.0:
+          image: 'hashicorp/packer:latest'
+          command: ["fmt", "-check", "-diff", "-recursive", "ops/images"]
+          workdir: /workspace
+
+  - label: ':pipeline: Build validate packer pipeline'
+    command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
+    env:
+      ONLY_VALIDATE: 1
+    depends_on:
+      - packer-lint

@@ -8,21 +8,6 @@ SHORT_COMMIT_ID=$(echo ${BUILDKITE_COMMIT} | cut -c 1-7)
 
 echo "steps:"
 
-echo "  - label: ':packer: Lint Packer configuration'"
-echo "    key: packer-lint"
-echo "    depends_on:"
-echo "      - build-packer-images"
-echo "    plugins:"
-echo "      - docker#v3.7.0:"
-echo "          image: 'hashicorp/packer:latest'"
-echo "          command: [\"fmt\", \"-check\", \"-diff\", \"-recursive\", \"${IMAGES_DIR}\"]"
-echo "          workdir: /workspace"
-echo
-
-# Make sure all images wait until the Packer lint is successfull
-echo "  - wait: ~"
-echo
-
 # A step to validate each Packer image
 find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   PACKER_IMAGE=$(basename $(dirname $image))
@@ -47,6 +32,8 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo
 done
 
+if [ -n "$ONLY_VALIDATE" ]; then exit 0; fi
+
 # A step to do a dry run build of each Packer image
 find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   PACKER_IMAGE=$(basename $(dirname $image))
@@ -56,8 +43,6 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "      automatic:"
   echo "        - exit_status: \"*\""
   echo "          limit: ${MAX_FAILED_JOB_RETRIES}"
-  echo "    depends_on:"
-  echo "      - validate-packer-image-${PACKER_IMAGE}"
   echo "    branches: \"!master !main\""
   echo "    command:"
   echo "      - mkdir binaries && ls -lah && pwd"
@@ -88,8 +73,6 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "      automatic:"
   echo "        - exit_status: \"*\""
   echo "          limit: ${MAX_FAILED_JOB_RETRIES}"
-  echo "    depends_on:"
-  echo "      - packer-lint"
   echo "    branches: \"master main\""
   echo "    command:"
   echo "      - mkdir binaries && ls -lah && pwd"

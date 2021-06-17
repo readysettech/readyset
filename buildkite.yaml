@@ -78,6 +78,14 @@ steps:
               include:
                 - "ops/**"
 
+            - label: ':packer: Lint Packer configuration'
+              include:
+                - "ops/images/**"
+
+            - label: ':pipeline: Build validate packer pipeline'
+              include:
+                - "ops/images/**"
+
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries
     depends_on:
