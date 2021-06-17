@@ -10,7 +10,7 @@ locals {
     local.date
   )
   root_device_type    = "ebs"
-  service             = "readyset-adapter"
+  service             = "readyset-server"
   ssh_username        = "ubuntu"
   ubuntu_account      = "099720109477" # https://wiki.ubuntu.com/Minimal
   ubuntu_release      = "focal"        # 20.04 LTS
