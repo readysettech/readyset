@@ -3,8 +3,8 @@ packer {
 }
 
 locals {
-  date                = var.date != "" ? var.date : formatdate("YYYYMMDD", timestamp())
-  image_name          = format("readyset/images/hvm-ssd/%s-%s-amd64-%s",
+  date = var.date != "" ? var.date : formatdate("YYYYMMDD", timestamp())
+  image_name = format("readyset/images/hvm-ssd/%s-%s-amd64-%s",
     local.service,
     var.short_commit_id,
     local.date
@@ -92,7 +92,7 @@ source "amazon-ebs" "main" {
   skip_create_ami           = var.skip_create_ami
   ssh_clear_authorized_keys = true
   ssh_username              = local.ssh_username
-  tags                      = merge(
+  tags = merge(
     {
       Name = local.image_name
     },
@@ -101,8 +101,8 @@ source "amazon-ebs" "main" {
 
   # Retrieve the latest AMI of the Ubuntu release
   source_ami_filter {
-    owners       = [local.ubuntu_account]
-    most_recent  = true
+    owners      = [local.ubuntu_account]
+    most_recent = true
 
     filters = {
       name                = format("ubuntu/images/hvm-ssd/ubuntu-%s-*-amd64-server-*", local.ubuntu_release)
