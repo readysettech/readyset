@@ -1,5 +1,6 @@
 use std::fmt;
 use std::str;
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::select::{JoinClause, SelectStatement};
@@ -39,7 +40,7 @@ impl fmt::Display for JoinRightSide {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum JoinOperator {
     Join,
     LeftJoin,

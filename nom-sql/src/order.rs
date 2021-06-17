@@ -1,6 +1,7 @@
 use nom::character::complete::{multispace0, multispace1};
 use std::fmt;
 use std::str;
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::common::{column_identifier_no_alias, ws_sep_comma};
@@ -11,7 +12,7 @@ use nom::multi::many0;
 use nom::sequence::{preceded, tuple};
 use nom::IResult;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,

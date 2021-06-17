@@ -3,6 +3,7 @@ use itertools::{Either, Itertools};
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use std::fmt::{self, Display};
 use std::iter;
+use test_strategy::Arbitrary;
 
 use nom::character::complete::{multispace0, multispace1};
 use nom::{
@@ -121,7 +122,7 @@ impl Display for FunctionExpression {
 ///
 /// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
 /// operator - since it must have either a subquery or a list of expressions on its right-hand side
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum BinaryOperator {
     /// `AND`
     And,
