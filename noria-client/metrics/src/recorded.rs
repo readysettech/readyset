@@ -22,6 +22,8 @@ pub const QUERY_EXECUTION_TIME: &str = "noria-client.execution_time";
 pub enum SqlQueryType {
     /// Read query.
     Read,
+    /// Write query.
+    Write,
 }
 
 // Implementing this so it can be used directly as a metric label.
@@ -29,6 +31,7 @@ impl From<SqlQueryType> for SharedString {
     fn from(query_type: SqlQueryType) -> Self {
         match query_type {
             SqlQueryType::Read => SharedString::const_str("read"),
+            SqlQueryType::Write => SharedString::const_str("write"),
         }
     }
 }

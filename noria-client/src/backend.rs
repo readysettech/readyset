@@ -507,21 +507,60 @@ impl<A: 'static + Authority> Backend<A> {
                     Ok(QueryResult::NoriaCreateTable)
                 }
                 nom_sql::SqlQuery::Insert(q) => {
+                    let execution_timer = std::time::Instant::now();
                     let (num_rows_inserted, first_inserted_id) = connector.handle_insert(q).await?;
+                    let execution_time = execution_timer.elapsed().as_micros();
+
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
+                        parse_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
+                        execution_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
                     Ok(QueryResult::NoriaInsert {
                         num_rows_inserted,
                         first_inserted_id,
                     })
                 }
                 nom_sql::SqlQuery::Update(q) => {
+                    let execution_timer = std::time::Instant::now();
                     let (num_rows_updated, last_inserted_id) = connector.handle_update(q).await?;
+                    let execution_time = execution_timer.elapsed().as_micros();
+
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
+                        parse_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
+                        execution_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
                     Ok(QueryResult::NoriaUpdate {
                         num_rows_updated,
                         last_inserted_id,
                     })
                 }
                 nom_sql::SqlQuery::Delete(q) => {
+                    let execution_timer = std::time::Instant::now();
                     let num_rows_deleted = connector.handle_delete(q).await?;
+                    let execution_time = execution_timer.elapsed().as_micros();
+
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
+                        parse_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
+                    histogram!(
+                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
+                        execution_time as f64,
+                        "query_type" => SqlQueryType::Write
+                    );
                     Ok(QueryResult::NoriaDelete { num_rows_deleted })
                 }
                 nom_sql::SqlQuery::DropTable(_) => {
