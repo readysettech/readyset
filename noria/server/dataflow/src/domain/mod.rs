@@ -1,4 +1,3 @@
-use petgraph::graph::NodeIndex;
 use std::borrow::Cow;
 use std::cell;
 use std::cmp;
@@ -9,27 +8,28 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
+use ahash::RandomState;
+use futures_util::{future::FutureExt, stream::StreamExt};
+use metrics::{counter, gauge, histogram};
+use petgraph::graph::NodeIndex;
+use slog::Logger;
+use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use vec1::Vec1;
+
+pub use internal::DomainIndex as Index;
+use noria::channel::{self};
+use noria::errors::{internal_err, ReadySetResult};
+use noria::metrics::recorded;
+use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
+
 use crate::group_commit::GroupCommitQueueSet;
 use crate::node::NodeProcessingResult;
 use crate::payload::{ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
-use crate::state::RangeLookupResult;
-use ahash::RandomState;
-use futures_util::{future::FutureExt, stream::StreamExt};
-pub use internal::DomainIndex as Index;
-use metrics::{counter, gauge, histogram};
-use noria::channel::{self};
-use noria::metrics::recorded;
-use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
-use slog::Logger;
-use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{DomainRequest, Readers};
-use noria::errors::{internal_err, ReadySetResult};
-
 use crate::processing::ColumnMiss;
-use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
-use vec1::Vec1;
+use crate::state::RangeLookupResult;
+use crate::{DomainRequest, Readers};
 
 #[derive(Debug)]
 pub enum PollEvent {
@@ -3361,6 +3361,13 @@ impl Domain {
                 node,
                 mut num_bytes,
             } => {
+                counter!(
+                    recorded::DOMAIN_EVICTION_REQUESTS,
+                    1,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string()
+                );
+                let mut total_freed = 0;
                 let nodes = if let Some(node) = node {
                     vec![(node, num_bytes)]
                 } else {
@@ -3486,7 +3493,14 @@ impl Domain {
                     }
                     debug!(self.log, "evicted {} from node {:?}", freed, n);
                     self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                    total_freed += freed;
                 }
+                counter!(
+                    recorded::DOMAIN_EVICTION_FREED_MEMORY,
+                    total_freed,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string()
+                )
             }
             Packet::EvictKeys {
                 link: Link { dst, .. },

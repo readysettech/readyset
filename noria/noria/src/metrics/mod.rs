@@ -300,6 +300,22 @@ pub mod recorded {
     /// | node | The NodeIndex of the ingress node were the packet was sent. |
     pub const EGRESS_NODE_SENT_PACKETS: &str = "egress.sent_packets";
 
+    /// Counter: The number of eviction packets that a domain has received.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain. |
+    /// | shard | The shard identifier of the domain. |
+    pub const DOMAIN_EVICTION_REQUESTS: &str = "domain.eviction_requests";
+
+    /// Counter: The total number of bytes that a domain has evicted.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain. |
+    /// | shard | The shard identifier of the domain. |
+    pub const DOMAIN_EVICTION_FREED_MEMORY: &str = "domain.eviction_freed_memory";
+
     /// How the view processed a query;
     pub enum ViewQueryResultTag {
         /// A replay was required to serve the ViewQuery.
