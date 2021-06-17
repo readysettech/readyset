@@ -320,3 +320,26 @@ steps:
       DEPLOY_ARTIFACTS_BUCKET: readysettech-deploy-artifacts-us-west-2/readyset
     depends_on:
       - packer-lint
+
+  - key: list-frameworks
+    label: "List frameworks"
+    plugins:
+      - docker#v3.8.0:
+          image: python:3
+          command: ["./.buildkite/list-frameworks.sh"]
+          mount-buildkite-agent: true
+          mount-ssh-agent: true
+  - key: generate-pipeline
+    label: "Generate framework pipeline"
+    depends_on:
+    - list-frameworks
+    plugins:
+      - docker#v3.8.0:
+          image: python:3
+          command: ["./.buildkite/generate-framework-pipeline.py"]
+          mount-buildkite-agent: true
+          propagate-environment: true
+          environment:
+          - MYSQL_ONLY=true
+    artifact_paths:
+      - ".buildkite/gen/*"

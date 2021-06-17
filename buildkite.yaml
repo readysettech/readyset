@@ -90,6 +90,14 @@ steps:
               include:
                 - "ops/images/**"
 
+            - label: 'List frameworks'
+              include:
+                - "readyset-framework-testing/frameworks/**"
+
+            - label: 'Generate framework pipeline'
+              include:
+                - "readyset-framework-testing/frameworks/**"
+
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries
     depends_on:
