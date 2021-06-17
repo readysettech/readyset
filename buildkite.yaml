@@ -30,11 +30,11 @@ steps:
               exclude:
                 - "js-client/**"
 
-            - label: ':docker: Build cargo-audit imate'
+            - label: ':docker: Build cargo-audit image'
               include:
                 - 'Cargo.lock'
 
-            - label: ':docker: Check cargo-audit'
+            - label: ':rust: :lock: Check cargo-audit'
               include:
                 - 'Cargo.lock'
 
