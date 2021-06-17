@@ -32,3 +32,5 @@ strum_macros = "0.20.1"
 thiserror = "1.0.24"
 tokio = "1.5.0"
 launchpad = { path = "../launchpad" }
+proptest = "1.0.0"
+test-strategy = "0.1.1"

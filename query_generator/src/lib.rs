@@ -76,6 +76,7 @@ use std::ops::Bound;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use test_strategy::Arbitrary;
 
 use launchpad::intervals::{BoundPair, IterBoundPair};
 use nom_sql::{
@@ -754,7 +755,7 @@ impl<'gen> Query<'gen> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
 pub enum AggregateType {
     Count,
     Sum,
@@ -764,13 +765,13 @@ pub enum AggregateType {
     Min,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
 pub enum FilterRHS {
     Constant,
     Column,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
 pub enum LogicalOp {
     And,
     Or,
@@ -786,7 +787,7 @@ impl From<LogicalOp> for BinaryOperator {
 }
 
 /// An individual filter operation
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum FilterOp {
     /// Compare a column with either another column, or a value
     Comparison { op: BinaryOperator, rhs: FilterRHS },
@@ -799,7 +800,7 @@ pub enum FilterOp {
 }
 
 /// A full representation of a filter to be added to a query
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub struct Filter {
     /// How to add the filter to the WHERE clause of the query
     pub extend_where_with: LogicalOp,
@@ -820,7 +821,7 @@ impl Filter {
 }
 
 // The names of the built-in functions we can generate for use in a project expression
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
 pub enum BuiltinFunction {
     ConvertTZ,
     DayOfWeek,
@@ -834,7 +835,7 @@ pub enum BuiltinFunction {
 /// A representation for where in a query a subquery is located
 ///
 /// When we support them, subqueries in `IN` clauses should go here as well
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
 pub enum SubqueryPosition {
     Cte,
     Join,
@@ -856,7 +857,7 @@ pub enum SubqueryPosition {
 /// - ilike
 ///
 /// each of which should be relatively straightforward to add here.
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum QueryOperation {
     ColumnAggregate(AggregateType),
     Filter(Filter),
@@ -1462,7 +1463,7 @@ impl OperationList {
 }
 
 /// A specification for a subquery included in a query
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
 pub struct Subquery {
     /// Where does the subquery appear in the query?
     position: SubqueryPosition,
@@ -1524,7 +1525,7 @@ impl Subquery {
 }
 
 /// A specification for generating an individual query
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
 pub struct QuerySeed {
     /// The set of operations to include in the query
     operations: Vec<QueryOperation>,
