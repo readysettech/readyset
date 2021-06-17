@@ -1,0 +1,141 @@
+#!/usr/bin/env python
+
+# Note that this excludes certain examples because they seem to be incompatible
+#    with MySQL itself; errors include the following:
+# * sqlalchemy.exc.CompileError: VARCHAR requires a length on dialect mysql
+# * OSError: Multiple exceptions: [Errno 111] Connect call failed ('127.0.0.1', 5432), [Errno 99] Cannot assign requested address
+# * AttributeError: 'AppenderQuery' object has no attribute 'values'
+
+import os
+import subprocess
+import sys
+
+import MySQLdb
+
+exclude_files = [
+	'./association/dict_of_sets_with_default.py',
+	# asyncio is built for postgres specifically
+	'./asyncio/async_orm.py',
+	'./asyncio/basic.py',
+	'./asyncio/greenlet_orm.py',
+	'./custom_attributes/active_column_defaults.py', # This one seems like it should work
+	# dogpile_caching should likely work, but fails importing files, which
+	#    isn't really a failure for our purposes; we should figure out why it
+	#    fails and fix it, though, to ensure good coverage.
+	'./dogpile_caching/__init__.py',
+	'./dogpile_caching/advanced.py',
+	'./dogpile_caching/caching_query.py',
+	'./dogpile_caching/environment.py',
+	'./dogpile_caching/fixture_data.py',
+	'./dogpile_caching/helloworld.py',
+	'./dogpile_caching/local_session_caching.py',
+	'./dogpile_caching/model.py',
+	'./dogpile_caching/relationship_caching.py',
+	'./dynamic_dict/dynamic_dict.py', # This seems like it's just a broken example.
+	'./elementtree/adjacency_list.py',
+	'./elementtree/optimized_al.py',
+	'./extending_query/filter_public.py',
+	'./generic_associations/discriminator_on_association.py',
+	'./generic_associations/generic_fk.py',
+	'./generic_associations/table_per_association.py',
+	'./generic_associations/table_per_related.py',
+	'./join_conditions/cast.py',
+	'./join_conditions/threeway.py',
+	# large_collection is built for postgres specifically
+	'./large_collection/large_collection.py',
+	# materialized_paths is built for postgres specifically
+	'./materialized_paths/materialized_paths.py',
+	'./nested_sets/nested_sets.py',
+	# performance should likely work, but fails importing files, which isn't
+	#    really a failure for our purposes; we should figure out why it fails
+	#    and fix it, though, to ensure good coverage.
+	'./performance/__init__.py',
+	'./performance/__main__.py',
+	'./performance/bulk_inserts.py',
+	'./performance/bulk_updates.py',
+	'./performance/large_resultsets.py',
+	'./performance/short_selects.py',
+	'./performance/single_inserts.py',
+	# postgis is built for postgres specifically
+	'./postgis/postgis.py',
+	'./sharding/separate_databases.py', # This only makes sense with four actual separate databases, and we can'"'"'t really do that with the simple sed replace in here
+	'./space_invaders/space_invaders.py',
+	'./versioned_history/test_versioning.py', # relative import problem again
+	'./versioned_rows/versioned_map.py',
+	'./versioned_rows/versioned_rows.py',
+	'./versioned_rows/versioned_rows_w_versionid.py',
+	'./versioned_rows/versioned_update_old_row.py',
+	# vertical has relative import problem
+	'./vertical/dictlike-polymorphic.py',
+	'./vertical/dictlike.py'
+]
+
+if(os.environ.get('RS_DIALECT') == 'mysql80'):
+	exclude_files.append('./association/proxied_association.py')
+	exclude_files.append('./inheritance/joined.py')
+	exclude_files.append('./inheritance/single.py')
+
+args = {}
+
+args['host'] = os.environ.get('RS_HOST')
+if(args['host'] is None):
+	print('RS_HOST must be set')
+	os.Exit(1)
+
+port = os.environ.get('RS_PORT')
+if(port is None):
+	args['port'] = 3306
+else:
+	args['port'] = int(port)
+
+args['user'] = os.environ.get('RS_USERNAME')
+if(args['user'] is None):
+	print('RS_USERNAME must be set')
+	os.Exit(2)
+
+password = os.environ.get('RS_PASSWORD')
+if(password is not None):
+	args['passwd'] = password
+
+args['db'] = os.environ.get('RS_DATABASE')
+if(args['db'] is None):
+	print('RS_DATABASE must be set')
+	os.Exit(3)
+
+database_url = 'mysql://' + args['user'] + ((':' + args['passwd']) if 'passwd' in args else '') + '@' + args['host'] + ':' + str(args['port']) + '/' + args['db']
+connection = MySQLdb.connect(**args)
+
+os.chdir('upstream/examples')
+testfiles = []
+for path, dirs, files in os.walk('.'):
+	for filename in files:
+		if(filename[-3:] == '.py'):
+			filename = os.path.join(path, filename)
+			testfiles.append(filename)
+
+for filename in testfiles:
+	print("file:", filename, flush = True)
+	subprocess.call(['sed', '-i', 's%create_engine("[^"]*"%create_engine("' + database_url + '"%', filename]);
+	if(os.path.basename(filename) != '__init__.py' and filename not in exclude_files):
+		with connection.cursor() as cursor:
+			complete = False
+			while(not complete):
+				try:
+					cursor.execute('SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL')
+					keys = cursor.fetchall()
+					for (table, key) in keys:
+						cursor.execute('ALTER TABLE `%s` DROP FOREIGN KEY `%s`' % (table, key))
+					cursor.execute('SHOW TABLES')
+					tables = cursor.fetchall()
+					if(len(tables) == 0):
+						complete = True
+						break
+					tables = ','.join(['`' + table[0] + '`' for table in tables])
+					cursor.execute('DROP TABLE ' + tables)
+					complete = True
+				except MySQLdb._exceptions.IntegrityError as e:
+					print(e)
+		code = subprocess.call(['python3', filename], stdout = sys.stdout, stderr = sys.stderr)
+		if(code != 0):
+			sys.exit(code)
+

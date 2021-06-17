@@ -1,0 +1,19 @@
+#!/bin/bash -ex
+
+DATABASE_URL="mysql://${RS_USERNAME}:${RS_PASSWORD}@${RS_HOST}:${RS_PORT}/${RS_DATABASE}"
+
+docker-php-entrypoint apache2-foreground &
+timeout 5s sh -c 'until curl -s localhost; do sleep 0.1; done'
+
+echo | drush site:install --db-url="${DATABASE_URL}"
+
+/usr/local/bin/php core/scripts/run-tests.sh \
+	--php /usr/local/bin/php \
+	--sqlite test.db \
+	--dburl "${DATABASE_URL}" \
+	--verbose \
+	Database
+code="$?"
+kill %1
+exit "${code}"
+

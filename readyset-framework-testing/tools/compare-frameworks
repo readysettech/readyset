@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import yaml
+import glob
+import pathlib
+
+def missing(list1, list2):
+    return [v for v in list1 if v not in list2]
+
+def frameworks_on_disk():
+    frameworks = []
+    for framework in glob.glob('frameworks/*/*'):
+        framework_parts = pathlib.Path(framework).parts[1:]
+        frameworks.append(str(pathlib.Path(*framework_parts)))
+
+    return sorted(frameworks)
+
+def frameworks_in_workflow(workflow_file):
+    with open(workflow_file) as workflow:
+         config = yaml.load(workflow, Loader=yaml.SafeLoader)
+         configured_frameworks = \
+                config['jobs']['run_tests']['strategy']['matrix']['framework']
+
+    return sorted(configured_frameworks)
+
+def frameworks_in_config(config_file):
+    with open(config_file) as conf:
+        config = yaml.load(conf, Loader=yaml.SafeLoader)
+        configured_frameworks = config['frameworks']
+    return sorted(configured_frameworks)
+
+def compare(name, configured):
+    on_disk = frameworks_on_disk()
+    missing_from_config = missing(on_disk, configured)
+    missing_from_disk = missing(configured, on_disk)
+
+    success = True
+    print(name)
+    if len(missing_from_config) > 0:
+        success = False
+        print("  Missing from config:", missing_from_config)
+    if len(missing_from_disk) > 0:
+        success = False
+        print("  Missing from disk:", missing_from_disk)
+    return success
+
+def compare_for_workflow(workflow_file):
+    in_workflow = frameworks_in_workflow(workflow_file)
+    return compare('Workflow ' + workflow_file, in_workflow)
+
+def compare_for_config(config_file):
+    configured = frameworks_in_config(config_file)
+    return compare('Config ' + config_file, configured)
+
+exit = 0
+if(not compare_for_config(".github/frameworks.yaml")):
+    exit = 1
+
+sys.exit(exit)
+

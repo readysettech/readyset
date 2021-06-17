@@ -1,0 +1,8 @@
+#!/bin/sh -ex
+cat src/main/resources/application.properties.tpl | envsubst > src/main/resources/application.properties;
+./gradlew --no-daemon test --stacktrace --info;
+timeout -t 30 ./gradlew --no-daemon bootRun &
+sleep 20;
+curl -v -X POST -d "name=username&email=useremail" localhost:8080/demo/add;
+curl -v localhost:8080/demo/all | jq;
+

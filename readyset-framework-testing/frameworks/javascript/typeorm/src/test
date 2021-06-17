@@ -1,0 +1,5 @@
+#!/bin/sh -e
+
+cat ormconfig.json.tpl | envsubst > ormconfig.json;
+npm start;
+

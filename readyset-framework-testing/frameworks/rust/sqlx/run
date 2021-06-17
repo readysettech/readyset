@@ -1,0 +1,8 @@
+#!/bin/sh -e
+
+export DATABASE_URL="mysql://${RS_USERNAME}:${RS_PASSWORD}@${RS_HOST}:${RS_PORT}/${RS_DATABASE}?ssl-mode=DISABLED";
+
+sqlx migrate run
+
+cargo run
+

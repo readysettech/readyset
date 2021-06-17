@@ -1,0 +1,43 @@
+default: &default
+  pool: 5
+  timeout: 5000
+
+development:
+  <<: *default
+  adapter: sqlite3
+  database: db/development.sqlite3
+
+#development:
+#  <<: *default
+#  adapter: postgresql
+#  encoding: unicode
+#  host: db
+#  username: postgres
+#  password:
+#  database: sample_rails_app_db
+
+test:
+  <<: *default
+  adapter: sqlite3
+  database: db/test.sqlite3
+
+#test:
+#  <<: *default
+#  adapter: postgresql
+#  encoding: unicode
+#  host: db
+#  username: postgres
+#  password:
+#  database: sample_rails_app_db_test
+
+production:
+  adapter: mysql2
+  encoding: utf8mb4
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  host: <%= ENV.fetch("RS_HOST") %>
+  database: <%= ENV.fetch("RS_DATABASE") %>
+  username: <%= ENV.fetch("RS_USERNAME") %>
+  password: <%= ENV.fetch("RS_PASSWORD") %>
+  port: <%= ENV.fetch("RS_PORT") %>
+  init_command: "SET GLOBAL sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))"
+

@@ -1,0 +1,13 @@
+#!/bin/sh -ex
+
+cat test.sql | mysql -h"$RS_HOST" -P"$RS_PORT" -u"$RS_USERNAME" -p"$RS_PASSWORD" "$RS_DATABASE";
+skeema init -d test -h "${RS_HOST}" -P "${RS_PORT}" -u "${RS_USERNAME}" -p"${RS_PASSWORD}" --schema "$RS_DATABASE";
+
+cp -vf test.step1/* test/;
+skeema diff -p"${RS_PASSWORD}" --allow-unsafe || true;
+skeema push -p"${RS_PASSWORD}" --allow-unsafe;
+
+cp -vf test.step2/* test/;
+skeema diff -p"${RS_PASSWORD}" || true;
+skeema push -p"${RS_PASSWORD}";
+

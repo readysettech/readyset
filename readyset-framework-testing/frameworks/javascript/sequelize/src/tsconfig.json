@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "target": "es6",
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+  },
+  "include": [
+    "**/*.ts",
+    "./*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

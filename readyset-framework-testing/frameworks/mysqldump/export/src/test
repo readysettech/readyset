@@ -1,0 +1,8 @@
+#!/bin/sh -e
+
+echo '--- No options';
+mysqldump "-h${RS_HOST}" "-P${RS_PORT}" "-u${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" >/dev/null;
+
+echo '--- --single-transaction';
+mysqldump --single-transaction "-h${RS_HOST}" "-P${RS_PORT}" "-u${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" >/dev/null;
+

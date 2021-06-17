@@ -1,0 +1,5 @@
+es:
+  static_pages:
+    home:
+      #welcome: "Bienvenida a la Sample App"
+      #signup: "Regístrate ahora!"

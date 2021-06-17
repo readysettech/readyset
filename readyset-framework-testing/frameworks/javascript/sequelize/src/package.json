@@ -1,0 +1,17 @@
+{
+  "name": "framework",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "tsc && node app.js"
+  },
+  "dependencies": {
+    "mysql2": "^2.1.0",
+    "sequelize": "^6.3.4",
+    "sequelize-cli": "^6.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^14.0.27",
+    "typescript": "^3.9.7"
+  }
+}

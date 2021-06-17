@@ -1,0 +1,12 @@
+[package]
+name = "mysql-test"
+version = "0.1.0"
+authors = ["Mike Cronce <mc@planetscale.com>", "Peter Farr <peter@prismaphonic.com>"]
+edition = "2018"
+
+[dependencies]
+mysql = "20"
+tablefy = "0.1"
+tablefy_derive = "0.2"
+prettytable-rs = "0.8"
+

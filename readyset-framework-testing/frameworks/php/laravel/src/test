@@ -1,0 +1,6 @@
+#!/bin/sh -e
+
+./artisan migrate:install
+./artisan migrate:fresh --force
+./artisan db:seed --force
+

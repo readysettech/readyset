@@ -1,0 +1,25 @@
+#!/bin/bash -ex
+
+export DATABASE_URL="mysql://${RS_USERNAME}:${RS_PASSWORD}@${RS_HOST}:${RS_PORT}/${RS_DATABASE}?ssl-mode=DISABLED"
+
+pushd all_about_inserts
+diesel database setup
+cargo test -- --test-threads 1
+popd
+
+for dir in getting_started_step_*; do
+	pushd "${dir}"
+	diesel migration run
+	popd
+done
+
+cd getting_started_step_3
+sed -i 's/^\([a-z_]\+!\)/diesel::\1/' src/schema.rs
+cargo run --bin show_posts
+(echo 'test'; echo 'post body') | cargo run --bin write_post
+cargo run --bin show_posts
+cargo run --bin publish_post -- 1
+cargo run --bin show_posts
+cargo run --bin delete_post -- test
+cargo run --bin show_posts
+
