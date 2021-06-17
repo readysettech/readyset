@@ -7,5 +7,5 @@ RUN strip target/release/noria-server
 FROM debian:10
 COPY --from=0 /readyset/target/release/noria-server /noria-server
 RUN apt-get update
-RUN apt-get install -y libssl-dev
-CMD ./noria-server --deployment $DEPLOYMENT --no-reuse --address $LISTEN_ADDRESS --external-address $EXTERNAL_ADDRESS -z $ZOOKEEPER_HOST:2181 --shards 0
+RUN apt-get install -y libssl-dev curl
+CMD ./noria-server --deployment $DEPLOYMENT --no-reuse --address $LISTEN_ADDRESS --external-address $EXTERNAL_ADDRESS -z $ZOOKEEPER_HOST:2181 --prometheus-metrics --shards 0
