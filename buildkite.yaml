@@ -62,6 +62,10 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: 'Run logictest with binlog replication'
+              exclude:
+                - "ops/**"
+
             - label: ':rust: Deploy docs'
               exclude:
                 - "ops/**"
