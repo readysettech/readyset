@@ -5,6 +5,7 @@ set -euo pipefail
 IMAGES_DIR="ops/images"
 MAX_FAILED_JOB_RETRIES="3"
 SHORT_COMMIT_ID=$(echo ${BUILDKITE_COMMIT} | cut -c 1-7)
+RELEASE_VERSION=$(.buildkite/latest-release-version.sh)
 
 echo "steps:"
 
@@ -18,7 +19,7 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    branches: \"!master !main\""
   echo "    command:"
   echo "      - mkdir binaries && ls -lah && pwd"
-  echo "      - unset BUILDKITE_BUILD_ID"
+  echo "      - export BUILDKITE_BUILD_ID=\"$RELEASE_VERSION\""
   echo "      - buildkite-agent artifact download target/release/* binaries/"
   echo "      - packer validate ."
   echo "    plugins:"
@@ -47,7 +48,7 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    branches: \"!master !main\""
   echo "    command:"
   echo "      - mkdir binaries && ls -lah && pwd"
-  echo "      - unset BUILDKITE_BUILD_ID"
+  echo "      - export BUILDKITE_BUILD_ID=\"$RELEASE_VERSION\""
   echo "      - buildkite-agent artifact download target/release/* binaries/"
   echo "      - packer build ."
   echo "    plugins:"
@@ -78,6 +79,7 @@ find ${IMAGES_DIR}/* -type f -name '*.pkr.hcl' | while read -r image; do
   echo "    branches: \"master main\""
   echo "    command:"
   echo "      - mkdir binaries && ls -lah && pwd"
+  echo "      - export BUILDKITE_BUILD_ID=\"$RELEASE_VERSION\""
   echo "      - buildkite-agent artifact download target/release/* binaries/"
   echo "      - packer build ."
   echo "    plugins:"

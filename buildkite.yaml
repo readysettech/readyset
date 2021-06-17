@@ -149,11 +149,24 @@ steps:
       - ecr#v2.2.0:
           login: true
 
+  - label: ':s3: Set release binary version in S3'
+    key: set-release-version
+    commands:
+    - .buildkite/set-release-version.sh
+    depends_on:
+    - build-noria-release
+    - build-noria-mysql-release
+    env:
+      DEPLOY_ARTIFACTS_BUCKET: readysettech-deploy-artifacts-us-west-2/readyset
+
   - block: ":packer: Build Packer images?"
     key: build-packer-images
     depends_on: []
 
   - label: ':pipeline: Build Packer pipeline'
-    command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
+    commands:
+    - .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
     depends_on:
       - build-packer-images
+    env:
+      DEPLOY_ARTIFACTS_BUCKET: readysettech-deploy-artifacts-us-west-2/readyset
