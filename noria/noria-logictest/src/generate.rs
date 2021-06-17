@@ -56,7 +56,7 @@ impl DatabaseConnection {
         }
     }
 
-    async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
+    pub async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
     where
         Q: AsRef<str>,
         P: Into<Params>,

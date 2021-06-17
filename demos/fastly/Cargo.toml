@@ -10,6 +10,7 @@ clap = "3.0.0-beta.2"
 anyhow = "1.0.38"
 nom = "5.1.2"
 mysql = "20.1.0"
+rand = "0.8.3"
 
 # local dependencies
 demo-utils = { path = "../utils/" }
@@ -21,3 +22,7 @@ noria-logictest = { path = "../../noria/noria-logictest" }
 [[bin]]
 name = "data_generator"
 path = "src/bin/data_generator.rs"
+
+[[bin]]
+name = "reader"
+path = "src/bin/reader.rs"
