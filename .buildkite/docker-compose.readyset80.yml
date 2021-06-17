@@ -1,0 +1,49 @@
+version: "3.8"
+services:
+  zookeeper:
+    image: zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  noria-server:
+    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      - ZOOKEEPER_HOST=zookeeper
+      - LISTEN_ADDRESS=0.0.0.0
+      - EXTERNAL_ADDRESS=noria-server
+      - DEPLOYMENT=frameworktests
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
+    expose:
+      - 3306
+    environment:
+      - ZOOKEEPER_HOST=zookeeper
+      - ADDRESS=0.0.0.0:3306
+      - DEPLOYMENT=frameworktests
+    links:
+      - noria-server
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      noria-server:
+        condition: service_healthy

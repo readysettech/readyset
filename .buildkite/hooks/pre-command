@@ -5,3 +5,12 @@
 # even if they're the first steps to run on an agent
 docker volume create target
 docker volume create cargo-registry
+
+## Setup for framework testing
+set -ex
+mkdir -pv .buildkite/gen .buildkite/image
+buildkite-agent artifact download '.buildkite/gen/*' ./ || true
+buildkite-agent artifact download '.buildkite/image/**/*.tar.gz' ./ || true
+find .buildkite/image -type f | while read tarball; do
+	docker load < "$tarball"
+done

@@ -1,0 +1,54 @@
+steps:
+  - label: ":docker: Build noria-server image"
+    key: noria-server-image
+    commands:
+      - "echo --- :docker: Building noria-server image"
+      - >-
+        docker build -f build/Dockerfile.noria-server \
+          --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          .
+      - "echo --- :docker: Pushing image"
+      - "docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
+    plugins:
+      ecr#v2.2.0:
+        login: true
+  - label: ":docker: Build noria-mysql image"
+    key: noria-mysql-image
+    commands:
+      - "echo --- :docker: Building noria-mysql image"
+      - >-
+        docker build -f build/Dockerfile.noria-mysql \
+          --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
+          -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
+          .
+      - "echo --- :docker: Pushing image"
+      - "docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest"
+    plugins:
+      ecr#v2.2.0:
+        login: true
+  - key: list-frameworks
+    label: "List frameworks"
+    depends_on:
+    - noria-server-image
+    - noria-mysql-image
+    plugins:
+      - docker#v3.8.0:
+          image: python:3
+          command: ["./.buildkite/list-frameworks.sh"]
+          mount-buildkite-agent: true
+          mount-ssh-agent: true
+          environment:
+          - NIGHTLY=true
+  - key: generate-pipeline
+    label: "Generate test pipeline"
+    depends_on:
+    - list-frameworks
+    plugins:
+      - docker#v3.8.0:
+          image: python:3
+          command: ["./.buildkite/generate-framework-pipeline.py"]
+          mount-buildkite-agent: true
+          propagate-environment: true
+    artifact_paths:
+      - ".buildkite/gen/*"
