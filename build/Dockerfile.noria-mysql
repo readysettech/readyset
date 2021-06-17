@@ -1,0 +1,12 @@
+FROM 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest
+COPY . /readyset
+WORKDIR /readyset
+RUN cargo build --release --bin noria-mysql
+RUN strip target/release/noria-mysql
+
+FROM debian:10
+COPY --from=0 /readyset/target/release/noria-mysql /noria-mysql
+RUN apt-get update
+# We install mariadb-client so we have access to mysqladmin for healthchecks
+RUN apt-get install -y libssl-dev mariadb-client
+CMD ./noria-mysql --deployment $DEPLOYMENT --address $ADDRESS -z $ZOOKEEPER_HOST:2181 --no-require-authentication
