@@ -100,7 +100,6 @@ steps:
       - rust-tests
       - logictest
       - logictest-binlog
-      - test-replicators
 
   - label: ':rust: Build noria-server release binary'
     key: build-noria-release
