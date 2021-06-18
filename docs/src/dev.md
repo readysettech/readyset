@@ -42,7 +42,7 @@
     * `cargo run --release --bin noria-mysql -- --deployment myapp --no-require-authentication --permissive -a 127.0.0.1:3333`
 4. Load the test database
    * `cd <path to testdb>`
-   * `mysql -h 127.0.0.1 < employees.tiny.noria.sql`
+   * `mysql -h 127.0.0.1 < employees.sql`
 5. Make queries! (Note that many SQL queries are NOT supported yet by Noria, and may not fail gracefully either, we're working on improving this!)
   * `mysql -h 127.0.0.1`
   * From inside the shell: `SELECT * FROM employees WHERE emp_no=10001;` (although, note, this is just a sanity check–-- typically you use ReadySet with prepared statements and *then* issue a query with the parameters filled in)
