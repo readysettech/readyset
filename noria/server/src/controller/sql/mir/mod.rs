@@ -989,7 +989,7 @@ impl SqlToMirConverter {
                 }),
                 false,
             ),
-            _ => unimplemented!(),
+            _ => unimplemented!("{:?}", func),
         }
     }
 
