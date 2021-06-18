@@ -1,0 +1,42 @@
+statement ok
+create table t1 (id int, value int);
+
+statement ok
+insert into t1 values (1, 1), (2, 2), (3, 3), (4, 4), (-7, 3);
+
+query I nosort
+select value in (2, 3) as x from t1 order by value;
+----
+0
+1
+1
+1
+0
+
+query I nosort
+select value in (2, 3) as x from t1 order by id;
+----
+1
+0
+1
+1
+0
+
+query I nosort
+select value in (2, 3) as x from t1 order by x;
+----
+0
+0
+1
+1
+1
+
+query I nosort
+select value in (2, 3) as value from t1 order by value;
+----
+0
+0
+1
+1
+1
+

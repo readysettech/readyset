@@ -38,7 +38,6 @@ pub enum PreparedStatement {
     Select {
         name: String,
         statement: nom_sql::SelectStatement,
-        schema: Vec<msql_srv::Column>,
         key_column_indices: Vec<usize>,
         rewritten_columns: Option<(usize, usize)>,
     },
@@ -630,7 +629,6 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         qname: &str,
         q: &nom_sql::SelectStatement,
         mut keys: Vec<Vec<DataType>>,
-        schema: &[Column],
         key_column_indices: &[usize],
         ticket: Option<Timestamp>,
     ) -> std::result::Result<(Vec<Results>, SelectSchema), Error> {
@@ -645,6 +643,8 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
+        let schema = getter_schema.to_cols();
+
         let mut key_types = getter_schema.col_types(key_column_indices)?;
         trace!("select::lookup");
         let bogo = vec![vec1![DataType::from(0i32)].into()];
@@ -729,16 +729,17 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .map(|oc| -> ReadySetResult<_> {
                 invariant!(!oc.columns.is_empty());
 
-                // TODO(eta): figure out whether this can actually fail
                 let col_indices = oc
                     .columns
                     .iter()
                     .map(|&(ref col, typ)| {
-                        schema
-                            .iter()
-                            .position(|x| x.column == col.name)
-                            .ok_or_else(|| {
-                                ReadySetError::NoSuchColumn(oc.columns[0].0.name.clone())
+                        getter_schema
+                            .index_for_col(&col.name, col.table.as_deref())
+                            .or_else(|_| {
+                                // The column didn't get an exact match in the schema, so it must be
+                                // a column that is outside the schema (marked with prefixed `-` in `to_query_graph`)
+                                let maybe_discarded = format!("-{}", col.name);
+                                getter_schema.index_for_col(&maybe_discarded, col.table.as_deref())
                             })
                             .map(|x| (x, typ == nom_sql::OrderType::OrderDescending))
                     })
@@ -772,7 +773,13 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
         let data = getter.raw_lookup(vq).await?;
         trace!("select::complete");
-        let schema = schema.to_vec();
+        // The returned schema is the original schema, with the discardable entries removed
+        let schema = schema
+            .iter()
+            .cloned()
+            .filter(|c| !c.column.starts_with('-'))
+            .collect();
+
         Ok((
             data,
             SelectSchema {
@@ -835,13 +842,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
-        let schema = getter_schema.to_cols();
-
         let key_column_indices = getter_schema
             .indices_for_cols(utils::select_statement_parameter_columns(&q).into_iter())?;
 
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &q, keys, &schema, &key_column_indices, ticket)
+        self.do_read(&qname, &q, keys, &key_column_indices, ticket)
             .await
     }
 
@@ -880,27 +885,21 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
-        let schema = getter_schema.to_cols();
-
         let key_column_indices = getter_schema.indices_for_cols(param_columns.iter())?;
-
         // now convert params to msql_srv types; we have to do this here because we don't have
         // access to the schema yet when we extract them above.
         let mut params = getter_schema.to_cols_with_indices(&key_column_indices)?;
-
         params.iter_mut().for_each(|mut c| c.table = qname.clone());
 
-        let select_schema = schema.clone();
         trace!(id = statement_id, "select::registered");
         let ps = PreparedStatement::Select {
             name: qname,
             statement: q,
-            schema: select_schema,
             key_column_indices,
             rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
-        Ok((statement_id, params, schema))
+        Ok((statement_id, params, getter_schema.to_cols()))
     }
 
     pub(crate) async fn execute_prepared_select(
@@ -920,7 +919,6 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             PreparedStatement::Select {
                 name,
                 statement: q,
-                schema,
                 key_column_indices,
                 rewritten_columns: rewritten,
             } => {
@@ -958,7 +956,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 };
 
                 return self
-                    .do_read(name, q, keys, schema, key_column_indices, ticket)
+                    .do_read(name, q, keys, key_column_indices, ticket)
                     .await;
             }
             _ => {

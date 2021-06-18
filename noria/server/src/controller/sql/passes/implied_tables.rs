@@ -228,6 +228,8 @@ fn rewrite_selection(
     };
 
     let mut tables: Vec<Table> = sq.tables.clone();
+    // Keep track of fields that have aliases so we will not assign tables to alias references later
+    let mut known_aliases: Vec<&str> = Vec::new();
     // tables mentioned in JOINs are also available for expansion
     for jc in sq.join.iter() {
         match jc.right {
@@ -242,15 +244,23 @@ fn rewrite_selection(
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
                 internal!("Must apply StarExpansion pass before ImpliedTableExpansion")
             }
-            FieldDefinitionExpression::Expression { ref mut expr, .. } => {
+            FieldDefinitionExpression::Expression {
+                ref mut expr,
+                ref alias,
+            } => {
                 rewrite_expression(&expand_columns, expr, &tables);
+                if let Some(alias) = alias.as_deref() {
+                    known_aliases.push(alias);
+                }
             }
         }
     }
+
     // Expand within WHERE clause
     if let Some(wc) = &mut sq.where_clause {
         rewrite_expression(&expand_columns, wc, &tables);
     }
+
     // Expand within GROUP BY clause
     if let Some(gbc) = &mut sq.group_by {
         for col in &mut gbc.columns {
@@ -264,7 +274,9 @@ fn rewrite_selection(
     // Expand within ORDER BY clause
     if let Some(oc) = &mut sq.order {
         for (col, _) in &mut oc.columns {
-            expand_columns(col, &tables);
+            if col.function.is_some() || !known_aliases.contains(&col.name.as_str()) {
+                expand_columns(col, &tables);
+            }
         }
     }
 

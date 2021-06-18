@@ -142,6 +142,20 @@ impl ViewSchema {
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| internal_err("Schema expects all columns to be present"))
     }
+
+    /// Get the index for one column in the schema, possibly by alias or base name
+    pub fn index_for_col(&self, column: &str, table: Option<&str>) -> ReadySetResult<usize> {
+        self.0
+            .iter()
+            .position(|e| {
+                e.spec.column.name == column
+                    || e.base
+                        .as_ref()
+                        .map(|b| b.column == column && Some(b.table.as_str()) == table)
+                        .unwrap_or(false)
+            })
+            .ok_or_else(|| internal_err("Schema expects the column to be present"))
+    }
 }
 
 impl ColumnSchema {
