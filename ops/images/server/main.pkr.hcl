@@ -133,7 +133,7 @@ build {
       "sudo apt-get upgrade -y",
       "sudo apt-get install -y locales-all",
       format("sudo install -o root -g root -m 755 /tmp/%s /usr/sbin/", local.service),
-      format("sudo install -o root -g -root -m 644 /tmp/%s.service /etc/systemd/system/", local.service),
+      format("sudo install -o root -g root -m 644 /tmp/%s.service /etc/systemd/system/", local.service),
       format("sudo touch /etc/default/%s", local.service),
       "sudo systemctl daemon-reload",
     ]
