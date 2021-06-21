@@ -174,7 +174,7 @@ where
         from: LocalNodeIndex,
         rs: Records,
         replay_key_cols: Option<&[usize]>,
-        _: &DomainNodes,
+        nodes: &DomainNodes,
         state: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
@@ -186,7 +186,7 @@ where
             });
         }
 
-        let group_by = &self.group_by;
+        let group_by = self.group_by.clone();
         let cmp = |a: &Record, b: &Record| {
             group_by
                 .iter()
@@ -210,22 +210,21 @@ where
         let mut lookups = Vec::new();
         let mut out = Vec::new();
         {
-            let out_key = &self.out_key;
-            let mut handle_group = |inner: &mut T,
+            let mut handle_group = |this: &mut Self,
                                     group_rs: ::std::vec::Drain<Record>,
                                     mut diffs: ::std::vec::Drain<_>|
              -> ReadySetResult<()> {
                 let mut group_rs = group_rs.peekable();
 
-                let group = get_group_values(group_by, group_rs.peek().unwrap());
+                let group = get_group_values(&group_by, group_rs.peek().unwrap());
 
                 let rs = {
-                    match db.lookup(&out_key[..], &KeyType::from(&group[..])) {
+                    match db.lookup(&this.out_key[..], &KeyType::from(&group[..])) {
                         LookupResult::Some(rs) => {
                             if replay_key_cols.is_some() {
                                 lookups.push(Lookup {
                                     on: *us,
-                                    cols: out_key.clone(),
+                                    cols: this.out_key.clone(),
                                     key: group
                                         .clone()
                                         .try_into()
@@ -242,7 +241,7 @@ where
                                 .map(|r| {
                                     Ok(Miss {
                                         on: *us,
-                                        lookup_idx: out_key.clone(),
+                                        lookup_idx: this.out_key.clone(),
                                         lookup_cols: group_by.clone(),
                                         replay_cols: replay_key_cols.map(Vec::from),
                                         record: r
@@ -267,7 +266,62 @@ where
                 });
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = inner.apply(current.as_deref(), &mut diffs as &mut _)?;
+                let new = match this.inner.apply(current.as_deref(), &mut diffs as &mut _) {
+                    Ok(v) => v,
+                    Err(ReadySetError::GroupedStateLost) => {
+                        // we lost the grouped state, so we need to start afresh.
+                        // let's query the parent for ALL records in this group, and then feed them
+                        // through, starting with a blank `current` value.
+                        let all_group_rs = {
+                            match this.lookup(
+                                *this.src,
+                                &group_by,
+                                &KeyType::from(&group[..]),
+                                nodes,
+                                state,
+                            ).ok_or_else(|| internal_err("grouped operators must have their parents' state materialized"))?
+                            {
+                                None => {
+                                    let rs = group_rs
+                                        .map(|r| {
+                                            Ok(Miss {
+                                                on: *this.src,
+                                                lookup_idx: group_by.clone(),
+                                                lookup_cols: group_by.clone(),
+                                                replay_cols: replay_key_cols.map(Vec::from),
+                                                record: r
+                                                    .into_row()
+                                                    .try_into()
+                                                    .map_err(|_| internal_err("Empty record"))?,
+                                            })
+                                        })
+                                        .collect::<ReadySetResult<Vec<_>>>()?;
+                                    misses.extend(rs.into_iter());
+                                    return Ok(());
+                                }
+                                Some(rs) => {
+                                    if replay_key_cols.is_some() {
+                                        lookups.push(Lookup {
+                                            on: *this.src,
+                                            cols: group_by.clone(),
+                                            key: group
+                                                .clone()
+                                                .try_into()
+                                                .map_err(|_| internal_err("Empty group"))?,
+                                        });
+                                    }
+                                    rs.into_iter().map(|x| x.into_owned()).collect::<Vec<_>>()
+                                }
+                            }
+                        };
+                        let diffs = all_group_rs
+                            .into_iter()
+                            .map(|x| this.inner.to_diff(&x, true))
+                            .collect::<ReadySetResult<Vec<_>>>()?;
+                        this.inner.apply(None, &mut diffs.into_iter())?
+                    }
+                    Err(e) => return Err(e),
+                };
                 match current {
                     Some(ref current) if new == **current => {
                         // no change
@@ -280,7 +334,7 @@ where
                         }
 
                         // emit positive, which is group + new, unless it's the empty value
-                        if !inner.empty_value().contains(&new) {
+                        if !this.inner.empty_value().contains(&new) {
                             let mut rec = group;
                             rec.push(new);
                             out.push(Record::Positive(rec));
@@ -294,12 +348,12 @@ where
             let mut group_rs = Vec::new();
             for r in rs {
                 if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
-                    handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..))?;
+                    handle_group(self, group_rs.drain(..), diffs.drain(..))?;
                 }
                 diffs.push(self.inner.to_diff(&r[..], r.is_positive())?);
                 group_rs.push(r);
             }
-            handle_group(&mut self.inner, group_rs.drain(..), diffs.drain(..))?;
+            handle_group(self, group_rs.drain(..), diffs.drain(..))?;
         }
 
         Ok(ProcessingResult {
@@ -310,8 +364,10 @@ where
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
-        // index by our primary key
         hashmap! {
+            // index the parent for state repopulation purposes
+            self.src.as_global() => Index::hash_map(self.group_by.clone()),
+            // index by our primary key
             this => Index::hash_map(self.out_key.clone())
         }
     }

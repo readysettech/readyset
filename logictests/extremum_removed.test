@@ -1,0 +1,18 @@
+statement ok
+create table t1 (id int primary key, value int);
+
+statement ok
+insert into t1 values (1, 2), (2, 2), (3, 2), (4, 2);
+
+query I valuesort
+select max(id) from t1 where value = 2;
+----
+4
+
+statement ok
+delete from t1 where id = 4;
+
+query I valuesort
+select max(id) from t1 where value = 2;
+----
+3
