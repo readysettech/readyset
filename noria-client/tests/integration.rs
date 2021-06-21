@@ -18,6 +18,7 @@ use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
+use noria_client::backend::Reader;
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 struct Deployment {
@@ -134,11 +135,17 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
             query_cache.clone(),
             None,
         );
-        let reader = NoriaConnector::new(ch, auto_increments, query_cache, None);
+
+        let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None);
+        let mysql_connector = None;
+        let reader = Reader {
+            mysql_connector,
+            noria_connector: rt.block_on(noria_connector),
+        };
 
         let backend = BackendBuilder::new()
             .writer(rt.block_on(writer))
-            .reader(rt.block_on(reader))
+            .reader(reader)
             .require_authentication(false)
             .build();
 

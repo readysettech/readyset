@@ -24,7 +24,7 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
-    Writer,
+    Reader, Writer,
 };
 
 #[async_trait]
@@ -265,13 +265,22 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 // thought, there is no benefit to sharing any implentation between the two. the
                 // only potential shared state is the query_cache, however, the set of queries
                 // handles by a reader and writer are disjoint
-                let reader = NoriaConnector::new(
+                let noria_conn = NoriaConnector::new(
                     ch.clone(),
                     auto_increments.clone(),
                     query_cache.clone(),
                     r.clone(),
                 )
                 .await;
+
+                let reader = Reader {
+                    noria_connector: noria_conn,
+                    mysql_connector: if mysql_url.is_some() {
+                        Some(MySqlConnector::new(mysql_url.clone().unwrap()).await)
+                    } else {
+                        None
+                    },
+                };
 
                 let _g = connection.enter();
 

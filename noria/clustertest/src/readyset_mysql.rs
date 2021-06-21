@@ -37,3 +37,11 @@ async fn create_table_insert_test() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn show_tables_test() {}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn describe_table_test() {}

@@ -8,7 +8,7 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder, QueryResult,
-    Writer,
+    Reader, Writer,
 };
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
@@ -28,7 +28,14 @@ async fn main() {
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
 
     let mut ch = ControllerHandle::new(zk_auth).await.unwrap();
-    let reader = NoriaConnector::new(
+
+    // Construct the Writer (to an underlying DB)
+    let mysql_url = String::from(mysql_url);
+    let writer = MySqlConnector::new(mysql_url.clone()).await;
+    let writer = Writer::MySqlConnector(writer);
+
+    let mysql_connector = Some(MySqlConnector::new(mysql_url).await);
+    let noria_connector = NoriaConnector::new(
         ch.clone(),
         auto_increments.clone(),
         query_cache.clone(),
@@ -36,13 +43,11 @@ async fn main() {
     )
     .await;
 
-    // Construct the Writer (to an underlying DB)
-    let mysql_url = String::from(mysql_url);
-    let writer = MySqlConnector::new(mysql_url).await;
-    let writer = Writer::MySqlConnector(writer);
-
     let mut b = BackendBuilder::new()
-        .reader(reader)
+        .reader(Reader {
+            mysql_connector,
+            noria_connector,
+        })
         .writer(writer)
         .require_authentication(false)
         .enable_ryw(true)

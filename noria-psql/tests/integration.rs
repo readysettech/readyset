@@ -5,6 +5,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use nom_sql::SelectStatement;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
+use noria_client::backend::Reader;
 use noria_psql::backend::Backend;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use postgres::{config::Config, Client, NoTls, SimpleQueryMessage};
@@ -133,12 +134,17 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
             query_cache.clone(),
             None,
         );
-        let reader = NoriaConnector::new(ch, auto_increments, query_cache, None);
+        let noria_connector =
+            rt.block_on(NoriaConnector::new(ch, auto_increments, query_cache, None));
+        let mysql_connector = None;
 
         let backend = Backend(
             BackendBuilder::new()
                 .writer(rt.block_on(writer))
-                .reader(rt.block_on(reader))
+                .reader(Reader {
+                    mysql_connector,
+                    noria_connector,
+                })
                 .require_authentication(false)
                 .build(),
         );

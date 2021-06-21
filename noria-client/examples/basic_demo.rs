@@ -2,7 +2,9 @@ use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder, QueryResult, Writer};
+use noria_client::backend::{
+    noria_connector::NoriaConnector, BackendBuilder, QueryResult, Reader, Writer,
+};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -30,7 +32,12 @@ async fn main() -> Result<()> {
         .await;
         Writer::NoriaConnector(writer)
     };
-    let reader = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+    let mysql_connector = None;
+    let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+    let reader = Reader {
+        mysql_connector,
+        noria_connector,
+    };
     let slowlog = false;
     let permissive = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {

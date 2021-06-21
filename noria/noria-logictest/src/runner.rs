@@ -4,6 +4,7 @@ use itertools::Itertools;
 use mysql_async as mysql;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
+use noria_client::backend::Reader;
 use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -434,12 +435,20 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
-            let reader = NoriaConnector::new(
+            let noria_connector = NoriaConnector::new(
                 ch.clone(),
                 auto_increments.clone(),
                 query_cache.clone(),
                 None,
-            );
+            )
+            .await;
+
+            // cannot use .await inside map
+            #[allow(clippy::manual_map)]
+            let mysql_connector = match binlog_url.clone() {
+                Some(url) => Some(MySqlConnector::new(url.clone()).await),
+                None => None,
+            };
 
             let backend_builder = BackendBuilder::new();
 
@@ -452,7 +461,10 @@ impl TestScript {
             };
 
             let backend = backend_builder
-                .reader(reader.await)
+                .reader(Reader {
+                    mysql_connector,
+                    noria_connector,
+                })
                 .require_authentication(false)
                 .build();
 
