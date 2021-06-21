@@ -117,6 +117,8 @@ build {
 
   provisioner "shell" {
     inline = [
+      "echo Wait for cloud-init to update /etc/apt/sources.list",
+      "timeout 180 /bin/sh -c 'until stat /var/lib/cloud/instance/boot-finished 2>&1 > /dev/null; do sleep 1; done'",
       "sudo apt-get update",
       "sudo apt-get upgrade -y",
       "sudo apt-get install -y locals-all zookeeperd",
