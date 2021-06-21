@@ -340,18 +340,49 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
 /// their respective ColumnGenerator.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnGenerationSpec {
+    /// Generates a unique value for every row.
     Unique,
+    /// Generates a new unique value every n rows.
+    UniqueRepeated(u32),
     /// Generates an integer in the specified range.
     Uniform(DataType, DataType),
+    /// Non-repeating Uniform, an optional batch size can be specified to
+    /// reset the distribution after n rows are generated.
+    ///
+    /// As this repeatedly pulls from a uniform distribution until we
+    /// receive a value we have not yet seen in a batch, the batch
+    /// size should be much smaller than the size of the distribution.
+    UniformWithoutReplacement {
+        min: DataType,
+        max: DataType,
+        batch_size: Option<u32>,
+    },
 }
 
 impl ColumnGenerationSpec {
     fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
         match self {
             ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
+            ColumnGenerationSpec::UniqueRepeated(n) => {
+                ColumnGenerator::Unique(UniqueGenerator::new(col_type, *n))
+            }
             ColumnGenerationSpec::Uniform(a, b) => ColumnGenerator::Uniform(UniformGenerator {
                 min: a.clone(),
                 max: b.clone(),
+                with_replacement: true,
+                batch_size: None,
+                pulled: HashSet::new(),
+            }),
+            ColumnGenerationSpec::UniformWithoutReplacement {
+                min: a,
+                max: b,
+                batch_size: opt_n,
+            } => ColumnGenerator::Uniform(UniformGenerator {
+                min: a.clone(),
+                max: b.clone(),
+                with_replacement: false,
+                batch_size: *opt_n,
+                pulled: HashSet::new(),
             }),
         }
     }
@@ -391,20 +422,40 @@ impl ConstantGenerator {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct UniqueGenerator {
+    /// The number of values we have generated in this generator so far.
+    generated: u32,
+    /// The current index to use to generate the random value. Incremented
+    /// every batch_size.
     index: u8,
+    /// The number of values to generate before incrementing `index`.
+    batch_size: u32,
     sql_type: SqlType,
 }
 
+impl UniqueGenerator {
+    fn new(sql_type: SqlType, batch_size: u32) -> Self {
+        Self {
+            generated: 0,
+            index: 0,
+            batch_size,
+            sql_type,
+        }
+    }
+}
+
 impl From<SqlType> for UniqueGenerator {
-    fn from(sql_type: SqlType) -> Self {
-        Self { index: 0, sql_type }
+    fn from(t: SqlType) -> Self {
+        UniqueGenerator::new(t, 1)
     }
 }
 
 impl UniqueGenerator {
     fn gen(&mut self) -> DataType {
         let val = unique_value_of_type(&self.sql_type, self.index);
-        self.index += 1;
+        self.generated += 1;
+        if self.generated % self.batch_size == 0 {
+            self.index += 1;
+        }
         val
     }
 }
@@ -413,11 +464,44 @@ impl UniqueGenerator {
 pub struct UniformGenerator {
     min: DataType,
     max: DataType,
+    /// Whether we should replace values within the uniform distribution.
+    with_replacement: bool,
+    /// The number of values to generate before resetting the
+    /// distribution. Only relevant if `with_replacement` is true.
+    batch_size: Option<u32>,
+
+    /// Values we have already pulled from the uniform distribution
+    /// if we are not replacing values.
+    pulled: HashSet<DataType>,
 }
 
 impl UniformGenerator {
-    fn gen(&self) -> DataType {
-        uniform_random_value(&self.min, &self.max)
+    fn gen(&mut self) -> DataType {
+        if self.with_replacement {
+            uniform_random_value(&self.min, &self.max)
+        } else {
+            let mut val = uniform_random_value(&self.min, &self.max);
+            let mut iters = 0;
+            while self.pulled.contains(&val) {
+                val = uniform_random_value(&self.min, &self.max);
+                iters += 1;
+
+                if iters > 100000 {
+                    panic!("Too many iterations when trying to generate a single random value");
+                }
+            }
+            self.pulled.insert(val.clone());
+
+            // If this is the last value in a batch, reset the values we have
+            // seen to start a new batch.
+            if let Some(batch) = self.batch_size {
+                if self.pulled.len() as u32 == batch {
+                    self.pulled = HashSet::new();
+                }
+            }
+
+            val
+        }
     }
 }
 
@@ -632,7 +716,6 @@ impl TableSpec {
                             .nth(index / 2 % expected_values.len())
                             .unwrap()
                             .clone(),
-
                         _ if random => random_value_of_type(&col_type),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
