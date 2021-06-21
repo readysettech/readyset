@@ -11,6 +11,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io;
+use std::iter::FromIterator;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -40,6 +41,18 @@ impl From<Vec<Record>> for TestScript {
             path: "".into(),
             records,
         }
+    }
+}
+
+impl FromIterator<Record> for TestScript {
+    fn from_iter<T: IntoIterator<Item = Record>>(iter: T) -> Self {
+        Self::from(iter.into_iter().collect::<Vec<_>>())
+    }
+}
+
+impl Extend<Record> for TestScript {
+    fn extend<T: IntoIterator<Item = Record>>(&mut self, iter: T) {
+        self.records.extend(iter)
     }
 }
 
