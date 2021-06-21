@@ -361,6 +361,11 @@ pub enum ReadySetError {
         /// The shard.
         shard: usize,
     },
+
+    /// A `GroupedOperation` has insufficient state to produce the next result, and must have all
+    /// of its state replayed through it to continue.
+    #[error("Grouped operation lost state")]
+    GroupedStateLost,
 }
 
 impl ReadySetError {

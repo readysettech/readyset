@@ -168,8 +168,7 @@ impl GroupedOperation for ExtremumOperator {
             return DataType::try_from(extreme);
         }
 
-        // TODO: handle this case by querying into the parent.
-        unimplemented!();
+        Err(ReadySetError::GroupedStateLost)
     }
 
     fn description(&self, detailed: bool) -> String {
