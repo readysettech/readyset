@@ -1111,6 +1111,12 @@ pub enum SubqueryPosition {
 /// [`add_to_query`](QueryOperation::add_to_query)) with the aid of a mutable reference to a
 /// [`GeneratorState`].
 ///
+/// Some operations are parametrized on fields that, due to having too large of a state space to
+/// enumerate exhaustively, are hardcoded when query operations are built from a user-supplied
+/// string on the command-line (via [`Operations`]), and can only be changed when generating queries
+/// randomly via the proptest [`Arbitrary`] implementation. See [this design doc][0] for more
+/// information
+///
 /// Note that not every operation that Noria supports is currently included in this enum - planned
 /// for the future are:
 ///
@@ -1120,6 +1126,8 @@ pub enum SubqueryPosition {
 /// - ilike
 ///
 /// each of which should be relatively straightforward to add here.
+///
+/// [0]: https://docs.google.com/document/d/1rb-AU_PsH2Z40XFLjmLP7DcyeJzlwKI4Aa-GQgEoWKA
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum QueryOperation {
     ColumnAggregate(AggregateType),
@@ -1130,7 +1138,7 @@ pub enum QueryOperation {
     SingleParameter,
     MultipleParameters,
     ProjectBuiltinFunction(BuiltinFunction),
-    TopK(OrderType),
+    TopK { order_type: OrderType, limit: u64 },
     Subquery(SubqueryPosition),
 }
 
@@ -1149,9 +1157,17 @@ const JOIN_OPERATORS: &[JoinOperator] = &[
     JoinOperator::InnerJoin,
 ];
 
+const DEFAULT_LIMIT: u64 = 10;
+
 const ALL_TOPK: &[QueryOperation] = &[
-    QueryOperation::TopK(OrderType::OrderAscending),
-    QueryOperation::TopK(OrderType::OrderDescending),
+    QueryOperation::TopK {
+        order_type: OrderType::OrderAscending,
+        limit: DEFAULT_LIMIT,
+    },
+    QueryOperation::TopK {
+        order_type: OrderType::OrderDescending,
+        limit: DEFAULT_LIMIT,
+    },
 ];
 
 lazy_static! {
@@ -1513,7 +1529,7 @@ impl QueryOperation {
                     BuiltinFunction::Round => add_builtin!(round(SqlType::Real)),
                 }
             }
-            QueryOperation::TopK(order_type) => {
+            QueryOperation::TopK { order_type, limit } => {
                 let table = state.some_table_mut();
 
                 if query.tables.is_empty() {
@@ -1532,7 +1548,7 @@ impl QueryOperation {
                 });
 
                 query.limit = Some(LimitClause {
-                    limit: 10,
+                    limit: *limit,
                     offset: 0,
                 })
             }
