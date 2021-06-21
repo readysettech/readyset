@@ -3223,7 +3223,7 @@ dependencies = [
  "launchpad",
  "mysql 17.0.0",
  "mysql_async 0.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "mysql_common 0.19.2",
+ "mysql_common 0.26.0",
  "nom 5.1.2",
  "postgres 0.15.2",
  "proptest",

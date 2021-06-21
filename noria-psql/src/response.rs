@@ -85,6 +85,9 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
             MySqlWrite { .. } => Err(ps::Error::Unimplemented(
                 "QueryResult::MySqlWrite not handled in psql_backend".to_string(),
             )),
+            MySqlSelect { .. } => Err(ps::Error::Unimplemented(
+                "QueryResult::MySqlSelect not handled in psql_backend".to_string(),
+            )),
         }
     }
 }

@@ -96,10 +96,26 @@ async fn write_column<W: AsyncWrite + Unpin>(
     Ok(written?)
 }
 
+pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
+    let took = start.elapsed();
+    if took.as_secs_f32() > time::Duration::from_millis(5).as_secs_f32() {
+        warn!(
+            %query,
+            time = ?took,
+            "slow query",
+        );
+    }
+}
+
 #[derive(From)]
 pub enum Writer<A: 'static + Authority> {
     MySqlConnector(MySqlConnector),
     NoriaConnector(NoriaConnector<A>),
+}
+
+pub struct Reader<A: 'static + Authority> {
+    pub mysql_connector: Option<MySqlConnector>,
+    pub noria_connector: NoriaConnector<A>,
 }
 
 /// Builder for a [`Backend`]
@@ -107,7 +123,7 @@ pub struct BackendBuilder<A: 'static + Authority> {
     sanitize: bool,
     static_responses: bool,
     writer: Option<Writer<A>>,
-    reader: Option<NoriaConnector<A>>,
+    reader: Option<Reader<A>>,
     slowlog: bool,
     permissive: bool,
     users: HashMap<String, String>,
@@ -174,7 +190,7 @@ impl<A: 'static + Authority> BackendBuilder<A> {
         self
     }
 
-    pub fn reader(mut self, reader: NoriaConnector<A>) -> Self {
+    pub fn reader(mut self, reader: Reader<A>) -> Self {
         self.reader = Some(reader);
         self
     }
@@ -221,7 +237,7 @@ pub struct Backend<A: 'static + Authority> {
     prepared_count: u32,
     static_responses: bool,
     writer: Writer<A>,
-    reader: NoriaConnector<A>,
+    reader: Reader<A>,
     slowlog: bool,
     permissive: bool,
     /// Map from username to password for all users allowed to connect to the db
@@ -273,7 +289,7 @@ pub enum PrepareResult {
 /// The type returned when a query is carried out by `Backend`,
 /// through either the `query` or `execute` functions.
 /// Variants prefixed with `Noria` come from a `NoriaConnector` writer or reader.
-/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer
+/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer or reader.
 #[derive(Debug)]
 pub enum QueryResult {
     NoriaCreateTable,
@@ -298,9 +314,33 @@ pub enum QueryResult {
         num_rows_affected: u64,
         last_inserted_id: u64,
     },
+    MySqlSelect {
+        data: Vec<mysql_async::Row>,
+    },
 }
 
 impl<A: 'static + Authority> Backend<A> {
+    /// Executes query on mysql_backend, if present, when it cannot be parsed_query
+    /// or executed by noria. Returns the query result and RYW ticket.
+    pub async fn query_fallback(
+        &mut self,
+        query: &str,
+    ) -> Result<(QueryResult, Option<String>), Error> {
+        let q = query.to_string().trim_start().to_lowercase();
+        let is_read = q.starts_with("select") || q.starts_with("show") || q.starts_with("describe");
+        match self.reader.mysql_connector {
+            Some(ref mut connector) => {
+                let (res, id) = if is_read {
+                    (connector.handle_select(&query).await?, None)
+                } else {
+                    connector.handle_write(&query, false).await?
+                };
+                Ok((res, id))
+            }
+            None => Err(Error::ReadySet(ReadySetError::FallbackNoConnector)),
+        }
+    }
+
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -319,6 +359,7 @@ impl<A: 'static + Authority> Backend<A> {
                 //todo : also prepare in writer if it is mysql
                 let (statement_id, params, schema) = self
                     .reader
+                    .noria_connector
                     .prepare_select(parsed_query.clone(), self.prepared_count)
                     .await?;
                 Ok(PrepareResult::NoriaPrepareSelect {
@@ -399,23 +440,14 @@ impl<A: 'static + Authority> Backend<A> {
 
         let res = match prep {
             SqlQuery::Select(_) => {
-                let (data, select_schema) = self
-                    .reader
+                self.reader
+                    .noria_connector
                     .execute_prepared_select(id, params, self.ticket.clone())
-                    .await?;
-                Ok(QueryResult::NoriaSelect {
-                    data,
-                    select_schema,
-                })
+                    .await
             }
             SqlQuery::Insert(ref _q) => match &mut self.writer {
                 Writer::NoriaConnector(connector) => {
-                    let (num_rows_inserted, first_inserted_id) =
-                        connector.execute_prepared_insert(id, params).await?;
-                    Ok(QueryResult::NoriaInsert {
-                        num_rows_inserted,
-                        first_inserted_id,
-                    })
+                    connector.execute_prepared_insert(id, params).await
                 }
                 Writer::MySqlConnector(connector) => {
                     let (num_rows_affected, last_inserted_id) =
@@ -428,12 +460,7 @@ impl<A: 'static + Authority> Backend<A> {
             },
             SqlQuery::Update(ref _q) => match &mut self.writer {
                 Writer::NoriaConnector(connector) => {
-                    let (num_rows_updated, last_inserted_id) =
-                        connector.execute_prepared_update(id, params).await?;
-                    Ok(QueryResult::NoriaUpdate {
-                        num_rows_updated,
-                        last_inserted_id,
-                    })
+                    connector.execute_prepared_update(id, params).await
                 }
                 Writer::MySqlConnector(connector) => {
                     let (num_rows_affected, last_inserted_id) =
@@ -471,11 +498,32 @@ impl<A: 'static + Authority> Backend<A> {
     pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
-        let start = time::Instant::now();
 
+        let start = time::Instant::now();
         let query = self.sanitize_query(query);
-        let (parsed_query, use_params) = self.parse_query(&query, true)?;
+
+        let parse_result = self.parse_query(&query, true);
         let parse_time = start.elapsed().as_micros();
+
+        // fallback to mysql database on query parse failure
+        let (parsed_query, use_params) = match parse_result {
+            Ok(parsed_tuple) => parsed_tuple,
+            Err(e) => {
+                // TODO(Dan): Implement RYW for query_fallback
+                match self.reader.mysql_connector {
+                    Some(_) => {
+                        let (res, _) = self.query_fallback(&query).await?;
+                        if self.slowlog {
+                            warn_on_slow_query(&start, &query);
+                        }
+                        return Ok(res);
+                    }
+                    None => {
+                        return Err(e);
+                    }
+                }
+            }
+        };
 
         let res = match &mut self.writer {
             // Interacting directly with Noria writer (No RYW support)
@@ -483,10 +531,11 @@ impl<A: 'static + Authority> Backend<A> {
             Writer::NoriaConnector(connector) => match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let (data, select_schema) = self
+                    let res = self
                         .reader
+                        .noria_connector
                         .handle_select(q, use_params, self.ticket.clone())
-                        .await?;
+                        .await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -494,22 +543,16 @@ impl<A: 'static + Authority> Backend<A> {
                         execution_time,
                         SqlQueryType::Read,
                     );
-                    Ok(QueryResult::NoriaSelect {
-                        data,
-                        select_schema,
-                    })
+                    res
                 }
                 nom_sql::SqlQuery::CreateView(q) => {
-                    self.reader.handle_create_view(q).await?;
-                    Ok(QueryResult::NoriaCreateView)
+                    self.reader.noria_connector.handle_create_view(q).await
                 }
-                nom_sql::SqlQuery::CreateTable(q) => {
-                    connector.handle_create_table(q).await?;
-                    Ok(QueryResult::NoriaCreateTable)
-                }
+
+                nom_sql::SqlQuery::CreateTable(q) => connector.handle_create_table(q).await,
                 nom_sql::SqlQuery::Insert(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let (num_rows_inserted, first_inserted_id) = connector.handle_insert(q).await?;
+                    let res = connector.handle_insert(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -517,14 +560,11 @@ impl<A: 'static + Authority> Backend<A> {
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    Ok(QueryResult::NoriaInsert {
-                        num_rows_inserted,
-                        first_inserted_id,
-                    })
+                    res
                 }
                 nom_sql::SqlQuery::Update(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let (num_rows_updated, last_inserted_id) = connector.handle_update(q).await?;
+                    let res = connector.handle_update(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -532,14 +572,11 @@ impl<A: 'static + Authority> Backend<A> {
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    Ok(QueryResult::NoriaUpdate {
-                        num_rows_updated,
-                        last_inserted_id,
-                    })
+                    res
                 }
                 nom_sql::SqlQuery::Delete(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let num_rows_deleted = connector.handle_delete(q).await?;
+                    let res = connector.handle_delete(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -547,8 +584,9 @@ impl<A: 'static + Authority> Backend<A> {
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    Ok(QueryResult::NoriaDelete { num_rows_deleted })
+                    res
                 }
+
                 nom_sql::SqlQuery::DropTable(_) => {
                     warn!("Ignoring drop table because using Noria writer not Mysql writer.");
                     if self.permissive {
@@ -570,27 +608,33 @@ impl<A: 'static + Authority> Backend<A> {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
                         let execution_timer = std::time::Instant::now();
-                        let (data, select_schema) = self
+                        let try_noria_read = self
                             .reader
+                            .noria_connector
                             .handle_select(q, use_params, self.ticket.clone())
-                            .await?;
+                            .await;
+                        //TODO(Dan): Implement fallback execution timing
                         let execution_time = execution_timer.elapsed().as_micros();
                         measure_parse_and_execution_time(
                             parse_time,
                             execution_time,
                             SqlQueryType::Read,
                         );
-                        Ok(QueryResult::NoriaSelect {
-                            data,
-                            select_schema,
-                        })
+                        match try_noria_read {
+                            Ok(res) => Ok(res),
+                            Err(_) => {
+                                // RYW identifier will not be present on select
+                                let (res, _) = self.query_fallback(&query).await?;
+                                Ok(res)
+                            }
+                        }
                     }
                     nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         let execution_timer = std::time::Instant::now();
-                        let (num_rows_affected, last_inserted_id, identifier) = connector
-                            .on_query(&query, self.timestamp_client.is_some())
+                        let (query_result, identifier) = connector
+                            .handle_write(&query, self.timestamp_client.is_some())
                             .await?;
 
                         // Update ticket if RYW enabled
@@ -599,7 +643,11 @@ impl<A: 'static + Authority> Backend<A> {
 
                             // TODO(andrew): Move table name to table index conversion to timestamp service
                             // https://app.clubhouse.io/readysettech/story/331
-                            let index = self.reader.node_index_of(t.name.as_str()).await?;
+                            let index = self
+                                .reader
+                                .noria_connector
+                                .node_index_of(t.name.as_str())
+                                .await?;
                             let affected_tables = vec![WriteKey::TableIndex(index)];
 
                             let new_timestamp = timestamp_service
@@ -622,10 +670,7 @@ impl<A: 'static + Authority> Backend<A> {
                             SqlQueryType::Write,
                         );
 
-                        Ok(QueryResult::MySqlWrite {
-                            num_rows_affected,
-                            last_inserted_id,
-                        })
+                        Ok(query_result)
                     }
 
                     // Table Create / Drop (RYW not supported)
@@ -633,35 +678,21 @@ impl<A: 'static + Authority> Backend<A> {
                     nom_sql::SqlQuery::CreateView(_)
                     | nom_sql::SqlQuery::CreateTable(_)
                     | nom_sql::SqlQuery::DropTable(_) => {
-                        let (num_rows_affected, last_inserted_id, _) =
-                            connector.on_query(&parsed_query.to_string(), false).await?;
-                        Ok(QueryResult::MySqlWrite {
-                            num_rows_affected,
-                            last_inserted_id,
-                        })
+                        let (query_result, _) = connector
+                            .handle_write(&parsed_query.to_string(), false)
+                            .await?;
+                        Ok(query_result)
                     }
-                    // Other queries that we are not expecting, just pass straight to MySQL
                     _ => {
-                        let (num_rows_affected, last_inserted_id, _) =
-                            connector.on_query(&parsed_query.to_string(), false).await?;
-                        Ok(QueryResult::MySqlWrite {
-                            num_rows_affected,
-                            last_inserted_id,
-                        })
+                        let (query_result, _) = self.query_fallback(&query).await?;
+                        Ok(query_result)
                     }
                 }
             }
         };
 
         if self.slowlog {
-            let took = start.elapsed();
-            if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                warn!(
-                    %query,
-                    time = ?took,
-                    "slow query",
-                );
-            }
+            warn_on_slow_query(&start, &query);
         }
 
         res
@@ -715,24 +746,6 @@ impl<A: 'static + Authority> Backend<A> {
                     }
                 }
             }
-        }
-    }
-
-    async fn handle_failure<W: AsyncWrite + Unpin>(
-        &mut self,
-        q: &str,
-        results: QueryResultWriter<'_, W>,
-        e: String,
-    ) -> io::Result<()> {
-        if let Writer::MySqlConnector(connector) = &mut self.writer {
-            let res = connector.on_query(q, false).await;
-            let res = res.map(|(row_count, last_insert, _)| (row_count, last_insert));
-            Backend::<A>::write_query_results(res, results).await
-        } else {
-            results
-                .error(msql_srv::ErrorKind::ER_PARSE_ERROR, e.as_bytes())
-                .await?;
-            Ok(())
         }
     }
 
@@ -982,19 +995,35 @@ where
                 )
                 .await
             }
-            e @ Err(Error::ReadySet(ReadySetError::UnparseableQuery { .. })) => {
-                if self.permissive {
-                    warn!(
-                        "permissive flag enabled, so returning success despite query parse failure"
-                    );
-                    return Ok(results.completed(0, 0).await?);
+            Ok(QueryResult::MySqlSelect { data }) => {
+                if let Some(cols) = data.get(0).cloned() {
+                    let cols = cols.columns_ref();
+                    let formatted_cols = cols
+                        .iter()
+                        .map(|c| Column {
+                            table: c.table_str().to_string(),
+                            column: c.name_str().to_string(),
+                            coltype: c.column_type(),
+                            colflags: c.flags(),
+                        })
+                        .collect::<Vec<Column>>();
+                    let mut rw = results.start(&formatted_cols).await?;
+                    for r in data {
+                        for (coli, _) in formatted_cols.iter().enumerate() {
+                            rw.write_col(&r[coli]).await?;
+                        }
+                        rw.end_row().await?
+                    }
+                    rw.finish().await
                 } else {
-                    return self
-                        .handle_failure(&query, results, e.unwrap_err().to_string())
-                        .await
-                        .map_err(Error::Io);
+                    // TODO: (Dan) msql-srv will respond Query Ok in this case instead of "Empty
+                    // set". Passing a dummy column to result.start() will trigger an empty set
+                    // response. A better solution could be to modify msql-srv.
+                    let rw = results.start(&[]).await?;
+                    rw.finish().await
                 }
             }
+
             Err(e) => {
                 results
                     .error(e.error_kind(), e.to_string().as_bytes())

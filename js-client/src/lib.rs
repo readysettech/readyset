@@ -12,7 +12,7 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
-    Writer,
+    Reader, Writer,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
@@ -76,7 +76,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let writer = if !mysql_address.is_empty() {
-        let writer = rt.block_on(MySqlConnector::new(mysql_address));
+        let writer = rt.block_on(MySqlConnector::new(mysql_address.clone()));
         Writer::MySqlConnector(writer)
     } else {
         let writer = rt.block_on(NoriaConnector::new(
@@ -87,13 +87,22 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         ));
         Writer::NoriaConnector(writer)
     };
-    let reader = rt.block_on(NoriaConnector::new(
+    let noria_connector = rt.block_on(NoriaConnector::new(
         ch,
         auto_increments,
         query_cache,
         Some(region),
     ));
+    let mysql_connector = if !mysql_address.is_empty() {
+        Some(rt.block_on(MySqlConnector::new(mysql_address)))
+    } else {
+        None
+    };
 
+    let reader = Reader {
+        mysql_connector,
+        noria_connector,
+    };
     let b = BackendBuilder::new()
         .sanitize(sanitize)
         .static_responses(static_responses)

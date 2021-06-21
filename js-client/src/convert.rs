@@ -220,6 +220,10 @@ where
                 last_inserted_id as f64,
             )?;
         }
+        // TODO(Dan): Implement
+        QueryResult::MySqlSelect { data: _ } => {
+            unimplemented!("Query fallback processing not implemented for js-client")
+        }
     }
     Ok(js_query_result)
 }

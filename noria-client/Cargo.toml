@@ -46,3 +46,6 @@ name = "basic_demo"
 
 [[example]]
 name = "ryw"
+
+[[example]]
+name = "fallback"

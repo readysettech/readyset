@@ -3,6 +3,7 @@ use mysql_async::*;
 use mysql_async::{consts::CapabilityFlags, params::Params};
 
 use crate::backend::error::Error;
+use crate::backend::QueryResult;
 use noria::{errors::internal_err, DataType};
 use std::collections::HashMap;
 
@@ -62,17 +63,23 @@ impl MySqlConnector {
         Ok((conn.affected_rows(), conn.last_insert_id().unwrap_or(0)))
     }
 
+    pub async fn handle_select(&mut self, query: &str) -> std::result::Result<QueryResult, Error> {
+        let q = query.to_string();
+        let mut conn = self.pool.get_conn().await?;
+        let rows = conn.query(&q).await?;
+        Ok(QueryResult::MySqlSelect { data: rows })
+    }
+
     /// Executes the given query on the mysql backend.
     /// If `create_identifier`, creates identifier for the write to be used by RYW timestamp service
-    pub async fn on_query(
+    pub async fn handle_write(
         &mut self,
         query: &str,
         create_identifier: bool,
-    ) -> std::result::Result<(u64, u64, Option<String>), Error> {
+    ) -> std::result::Result<(QueryResult, Option<String>), Error> {
         let q = query.to_string();
-
+        let mut conn = self.pool.get_conn().await?;
         if create_identifier {
-            let mut conn = self.pool.get_conn().await?;
             let mut transaction = conn.start_transaction(TxOpts::default()).await?;
             transaction.query_drop(&q).await.map_err(|e| {
                 error!("Could not execute query in mysql : {:?}", e);
@@ -89,9 +96,14 @@ impl MySqlConnector {
                     e
                 ))
             })?;
-            Ok((affected_rows, last_insert_id.unwrap_or(0), Some(txid)))
+            Ok((
+                QueryResult::MySqlWrite {
+                    num_rows_affected: affected_rows,
+                    last_inserted_id: last_insert_id.unwrap_or(0),
+                },
+                Some(txid),
+            ))
         } else {
-            let mut conn = self.pool.get_conn().await?;
             conn.query_drop(&q).await.map_err(|e| {
                 error!("Could not execute query in mysql : {:?}", e);
                 e
@@ -103,8 +115,10 @@ impl MySqlConnector {
                 conn.last_insert_id()
             );
             Ok((
-                conn.affected_rows(),
-                conn.last_insert_id().unwrap_or(0),
+                QueryResult::MySqlWrite {
+                    num_rows_affected: conn.affected_rows(),
+                    last_inserted_id: conn.last_insert_id().unwrap_or(0),
+                },
                 None,
             ))
         }

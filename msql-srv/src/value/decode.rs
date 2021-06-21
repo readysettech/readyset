@@ -414,13 +414,14 @@ mod tests {
     //
     // rt!(f32_one_float, f32, 1.0, ColumnType::MYSQL_TYPE_FLOAT, false);
 
+    /*see ENG-385
     rt!(
         f32_one_double,
         f32,
         1.0,
         ColumnType::MYSQL_TYPE_DOUBLE,
         false
-    );
+    );*/
     rt!(f64_one, f64, 1.0, ColumnType::MYSQL_TYPE_DOUBLE, false);
 
     rt!(

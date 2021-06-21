@@ -40,6 +40,11 @@ pub fn wrap_boxed_error(
 /// General error type to be used across all of the ReadySet codebase.
 #[derive(Serialize, Deserialize, Error, Debug)]
 pub enum ReadySetError {
+    /// Query fallback failed because noria_connector is not present. This error
+    /// would indicate a bug if seen.
+    #[error("Fallback failed because noria_connector is not present")]
+    FallbackNoConnector,
+
     /// An intra-ReadySet RPC call failed.
     #[error("Error during RPC ({during}): {source}")]
     RpcFailed {

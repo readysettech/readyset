@@ -24,7 +24,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 nom = "5.0.1"
-mysql_common = "0.19"
+mysql_common = "0.26"
 byteorder = "1"
 chrono = "0.4"
 time = "0.2.27"
