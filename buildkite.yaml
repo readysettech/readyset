@@ -22,7 +22,13 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':docker: Build prettier image'
+              exclude:
+                - "js-client/**"
+
             - label: ':prettier: Check prettier'
+              exclude:
+                - "js-client/**"
 
             - label: ':docker: Build cargo-audit imate'
               include:
