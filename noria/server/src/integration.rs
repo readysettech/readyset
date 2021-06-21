@@ -4117,7 +4117,7 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            order_by: Some((1, false)),
+            order_by: Some(vec![(1, false)]),
             limit: None,
             filter: Some(ViewQueryFilter {
                 column: 0,

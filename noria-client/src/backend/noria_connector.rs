@@ -28,7 +28,7 @@ use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
 use noria::results::Results;
-use noria::{internal, invariant_eq, unsupported};
+use noria::{internal, invariant, invariant_eq, unsupported};
 use std::fmt;
 
 type StatementID = u32;
@@ -733,21 +733,23 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .order
             .as_ref()
             .map(|oc| -> ReadySetResult<_> {
-                // TODO(eta): support this. It isn't necessarily hard, just a pain.
-                if oc.columns.len() != 1 {
-                    unsupported!(
-                        "ORDER BY expressions with more than one column are not supported yet"
-                    );
-                }
-                // TODO(eta): figure out whether this error is actually possible
-                let col_idx = schema
+                invariant!(!oc.columns.is_empty());
+
+                // TODO(eta): figure out whether this can actually fail
+                let col_indices = oc
+                    .columns
                     .iter()
-                    .position(|x| x.column == oc.columns[0].0.name)
-                    .ok_or_else(|| ReadySetError::NoSuchColumn(oc.columns[0].0.name.clone()))?;
-                Ok((
-                    col_idx,
-                    oc.columns[0].1 == nom_sql::OrderType::OrderDescending,
-                ))
+                    .map(|&(ref col, typ)| {
+                        schema
+                            .iter()
+                            .position(|x| x.column == col.name)
+                            .ok_or_else(|| {
+                                ReadySetError::NoSuchColumn(oc.columns[0].0.name.clone())
+                            })
+                            .map(|x| (x, typ == nom_sql::OrderType::OrderDescending))
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+                Ok(col_indices)
             })
             .transpose()?;
 
