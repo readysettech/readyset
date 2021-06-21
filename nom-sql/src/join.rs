@@ -44,10 +44,14 @@ impl fmt::Display for JoinRightSide {
 pub enum JoinOperator {
     Join,
     LeftJoin,
+    #[weight(0)]
     LeftOuterJoin,
+    #[weight(0)]
     RightJoin,
     InnerJoin,
+    #[weight(0)]
     CrossJoin,
+    #[weight(0)]
     StraightJoin,
 }
 
