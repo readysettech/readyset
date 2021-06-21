@@ -64,6 +64,8 @@ use derive_more::{Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
+use proptest::arbitrary::{any, Arbitrary};
+use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
@@ -1786,13 +1788,44 @@ impl Subquery {
 }
 
 /// A specification for generating an individual query
-#[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuerySeed {
     /// The set of operations to include in the query
     operations: Vec<QueryOperation>,
 
     /// A set of subqueries to include in the query
     subqueries: Vec<Subquery>,
+}
+
+impl Arbitrary for QuerySeed {
+    type Parameters = ();
+
+    type Strategy = BoxedStrategy<QuerySeed>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        any::<Vec<QueryOperation>>()
+            .prop_map(|operations| Self {
+                operations,
+                subqueries: vec![],
+            })
+            .prop_recursive(3, 5, 3, |inner| {
+                (
+                    proptest::collection::vec((any::<SubqueryPosition>(), inner), 0..3).prop_map(
+                        |sqs| {
+                            sqs.into_iter()
+                                .map(|(position, seed)| Subquery { position, seed })
+                                .collect()
+                        },
+                    ),
+                    any::<Vec<QueryOperation>>(),
+                )
+                    .prop_map(|(subqueries, operations)| Self {
+                        subqueries,
+                        operations,
+                    })
+            })
+            .boxed()
+    }
 }
 
 impl QuerySeed {
