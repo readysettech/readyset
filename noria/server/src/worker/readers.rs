@@ -17,6 +17,7 @@ use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFil
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::mem;
@@ -228,7 +229,7 @@ fn handle_normal_read_query(
             }
 
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key, order_by, limit, &filter) {
+            match do_lookup(reader, &key, order_by.clone(), limit, &filter) {
                 Ok(rs) => {
                     if consistency_miss {
                         ret.push(SerializedReadReplyBatch::empty());
@@ -438,26 +439,36 @@ where
     }
 }
 
-fn do_order<'a, I>(iter: I, idx: usize, reverse: bool) -> impl Iterator<Item = &'a Vec<DataType>>
+fn do_order<'a, I>(iter: I, indices: &[(usize, bool)]) -> impl Iterator<Item = &'a Vec<DataType>>
 where
     I: Iterator<Item = &'a Vec<DataType>>,
 {
     // TODO(eta): is there a way to avoid buffering all the results?
     let mut results = iter.collect::<Vec<_>>();
     results.sort_by(|a, b| {
-        let ret = a[idx].cmp(&b[idx]);
-        if reverse {
-            ret.reverse()
-        } else {
-            ret
-        }
+        // protip: look at what `Ordering::then` does if you're confused by this
+        //
+        // TODO(eta): Technically, this is inefficient, because you can break out of the fold
+        //            early if you hit something that isn't `Ordering::Equal`. In practice though
+        //            it's likely to be neglegible.
+        indices
+            .iter()
+            .map(|&(idx, reverse)| {
+                let ret = a[idx].cmp(&b[idx]);
+                if reverse {
+                    ret.reverse()
+                } else {
+                    ret
+                }
+            })
+            .fold(Ordering::Equal, |acc, next| acc.then(next))
     });
     results.into_iter()
 }
 
 fn do_order_limit<'a, I>(
     iter: I,
-    order_by: Option<(usize, bool)>,
+    order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
 ) -> impl Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator
 where
@@ -465,17 +476,17 @@ where
 {
     match (order_by, limit) {
         (None, None) => OrderedLimitedIter::Original(iter),
-        (Some((idx, reverse)), None) => OrderedLimitedIter::Ordered(do_order(iter, idx, reverse)),
+        (Some(indices), None) => OrderedLimitedIter::Ordered(do_order(iter, &indices)),
         (None, Some(lim)) => OrderedLimitedIter::Limited(iter.take(lim)),
-        (Some((idx, reverse)), Some(lim)) => {
-            OrderedLimitedIter::OrderedLimited(do_order(iter, idx, reverse).take(lim))
+        (Some(indices), Some(lim)) => {
+            OrderedLimitedIter::OrderedLimited(do_order(iter, &indices).take(lim))
         }
     }
 }
 
 fn post_lookup<'a, I>(
     iter: I,
-    order_by: Option<(usize, bool)>,
+    order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
     filter: &Option<ViewQueryFilter>,
 ) -> impl Iterator<Item = &'a Vec<DataType>>
@@ -507,14 +518,17 @@ where
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
-    order_by: Option<(usize, bool)>,
+    order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
     filter: &Option<ViewQueryFilter>,
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(&*equal, |rs| {
-                serialize(post_lookup(rs.into_iter(), order_by, limit, filter).collect::<Vec<_>>())
+                serialize(
+                    post_lookup(rs.into_iter(), order_by.clone(), limit, filter)
+                        .collect::<Vec<_>>(),
+                )
             })
             .map(|r| r.0)
     } else {
@@ -556,7 +570,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 struct BlockingRead {
     tag: u32,
     target: (NodeIndex, usize),
-    order_by: Option<(usize, bool)>,
+    order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
@@ -620,7 +634,13 @@ impl BlockingRead {
                         .pop()
                         .expect("pending.len() == keys.len()");
 
-                    match do_lookup(reader, &key, self.order_by, self.limit, &self.filter) {
+                    match do_lookup(
+                        reader,
+                        &key,
+                        self.order_by.clone(),
+                        self.limit,
+                        &self.filter,
+                    ) {
                         Ok(rs) => {
                             read[read_i] = rs;
                         }

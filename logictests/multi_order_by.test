@@ -1,0 +1,33 @@
+statement ok
+create table t1 (a int, b int);
+
+statement ok
+insert into t1 values (1, 4), (2, 3), (3, 2), (3, 9), (4, 1);
+
+query II nosort
+select a, b from t1 order by a asc, b asc;
+----
+1
+4
+2
+3
+3
+2
+3
+9
+4
+1
+
+query II nosort
+select a, b from t1 order by a asc, b desc;
+----
+1
+4
+2
+3
+3
+9
+3
+2
+4
+1

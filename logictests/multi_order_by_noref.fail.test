@@ -1,0 +1,25 @@
+# Currently fails because you have to select all the columns you order by
+
+statement ok
+create table t1 (a int, b int);
+
+statement ok
+insert into t1 values (1, 4), (2, 3), (3, 2), (3, 9), (4, 1);
+
+query I nosort
+select b from t1 order by a asc, b asc;
+----
+4
+3
+2
+9
+1
+
+query I nosort
+select b from t1 order by a asc, b desc;
+----
+4
+3
+9
+2
+1

@@ -564,8 +564,10 @@ pub struct ViewQuery {
     pub key_comparisons: Vec<KeyComparison>,
     /// Whether the query should block.
     pub block: bool,
-    /// Column index to order by, and whether or not to reverse
-    pub order_by: Option<(usize, bool)>,
+    /// Column indices to order by, and whether or not to reverse order on each index.
+    ///
+    /// If you specify an empty `Vec`, all rows are sorted as if they were equal to each other.
+    pub order_by: Option<Vec<(usize, bool)>>,
     /// Maximum number of records to return
     pub limit: Option<usize>,
     /// Filter to apply to values after they're returned from the underlying reader
@@ -697,7 +699,7 @@ impl Service<ViewQuery> for View {
                             key_comparisons: shard_queries,
                             block: query.block,
                             // TODO(eta): is it valid to copy across the order_by like this?
-                            order_by: query.order_by,
+                            order_by: query.order_by.clone(),
                             limit: query.limit,
                             filter: query.filter.clone(),
                             timestamp: query.timestamp.clone(),
