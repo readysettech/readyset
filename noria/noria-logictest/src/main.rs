@@ -1,13 +1,18 @@
 #![warn(clippy::dbg_macro)]
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{anyhow, Context};
 use clap::Clap;
 use colored::Colorize;
+use proptest::arbitrary::any;
+use proptest::strategy::Strategy;
+use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
+use query_generator::QuerySeed;
 use walkdir::WalkDir;
 
 pub mod ast;
@@ -15,7 +20,7 @@ pub mod generate;
 pub mod parser;
 pub mod runner;
 
-use crate::generate::Generate;
+use crate::generate::{DatabaseURL, Generate};
 use crate::runner::{RunOptions, TestScript};
 
 #[derive(Clap)]
@@ -29,14 +34,22 @@ enum Command {
     Parse(Parse),
     Verify(Verify),
     Generate(Generate),
+    Fuzz(Fuzz),
 }
 
 impl Command {
-    async fn run(self) -> anyhow::Result<()> {
+    fn run(self) -> anyhow::Result<()> {
         match self {
             Self::Parse(parse) => parse.run(),
-            Self::Verify(verify) => verify.run().await,
-            Self::Generate(generate) => generate.run().await,
+            Self::Verify(verify) => verify.run(),
+            Self::Generate(generate) => generate.run(),
+            Self::Fuzz(fuzz) => {
+                // This will live as long as the program anyway, and we need to be able to reference
+                // it from multiple different async tasks, so we can just leak a reference, which is
+                // cheaper than putting it in an Arc or something
+                let fuzz: &'static mut _ = Box::leak(Box::new(fuzz));
+                fuzz.run()
+            }
         }
     }
 }
@@ -294,6 +307,7 @@ impl Display for VerifyResult {
 }
 
 impl Verify {
+    #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
         let mut result = VerifyResult::default();
         for InputFile {
@@ -355,8 +369,124 @@ impl From<&Verify> for RunOptions {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+/// Representation for a test seed to be passed to proptest
+#[derive(Debug, Clone, Copy)]
+struct Seed([u8; 32]);
+
+impl Display for Seed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
+
+impl FromStr for Seed {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(hex::decode(s)?.try_into().map_err(|_| {
+            anyhow!("Wrong number of bytes for seed, expected 32")
+        })?))
+    }
+}
+
+/// Fuzz-test noria by randomly generating queries and seed data, and ensuring that both Noria and a
+/// reference database return the same results
+#[derive(Clap, Debug, Clone)]
+pub struct Fuzz {
+    /// Number of test cases to generate
+    ///
+    /// Each test case consists of a list of queries that will be run against both Noria and the
+    /// reference database
+    #[clap(long, short = 'n', default_value = "100")]
+    num_tests: u32,
+
+    /// Hex-encoded seed for the random generator to use when generating test cases. Defaults to a
+    /// randomly generated seed.
+    #[clap(long)]
+    seed: Option<Seed>,
+
+    /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
+    /// expanded in the future
+    #[clap(long, parse(try_from_str))]
+    compare_to: DatabaseURL,
+
+    /// Enable verbose log output
+    #[clap(long, short = 'v')]
+    verbose: bool,
+}
+
+impl Fuzz {
+    fn run(&'static self) -> anyhow::Result<()> {
+        let mut runner = if let Some(Seed(seed)) = self.seed {
+            TestRunner::new_with_rng(self.into(), TestRng::from_seed(Default::default(), &seed))
+        } else {
+            TestRunner::new(self.into())
+        };
+
+        let result = runner.run(
+            &(&any::<Vec<QuerySeed>>(), self.generate_opts()),
+            move |(query_seeds, generate_opts)| {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _guard = rt.enter();
+                rt.block_on(async move { self.test_query_seeds(query_seeds, generate_opts).await })
+                    .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
+            },
+        );
+
+        if let Err(TestError::Fail(reason, value)) = result {
+            eprintln!(
+                "Found failing set of queries: {:?} (reason: {})",
+                value, reason
+            )
+        }
+
+        Ok(())
+    }
+
+    fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {
+        let compare_to = self.compare_to.clone();
+        let verbose = self.verbose;
+        (0..100usize).prop_flat_map(move |rows_per_table| {
+            let compare_to = compare_to.clone();
+            (0..=rows_per_table).prop_map(move |rows_to_delete| generate::GenerateOpts {
+                compare_to: compare_to.clone(),
+                rows_per_table,
+                verbose,
+                random: true,
+                include_deletes: true,
+                rows_to_delete: Some(rows_to_delete),
+            })
+        })
+    }
+
+    async fn test_query_seeds(
+        &self,
+        seeds: Vec<QuerySeed>,
+        generate_opts: generate::GenerateOpts,
+    ) -> anyhow::Result<()> {
+        let mut seed = generate::Seed::try_from(seeds)?;
+        let script = seed.run(generate_opts).await?;
+        script
+            .run(RunOptions {
+                verbose: self.verbose,
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+}
+
+impl<'a> From<&'a Fuzz> for test_runner::Config {
+    fn from(fuzz: &'a Fuzz) -> Self {
+        Self {
+            cases: fuzz.num_tests,
+            verbose: if fuzz.verbose { 1 } else { 0 },
+            ..Default::default()
+        }
+    }
+}
+
+fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    opts.subcommand.run().await
+    opts.subcommand.run()
 }

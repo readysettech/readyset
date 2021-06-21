@@ -3962,6 +3962,7 @@ dependencies = [
  "noria-client",
  "noria-server",
  "pretty_assertions",
+ "proptest 1.0.0",
  "query_generator",
  "slog",
  "tokio 1.7.0",
