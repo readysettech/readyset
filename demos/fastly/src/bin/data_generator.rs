@@ -56,20 +56,21 @@ impl DataGenerator {
         table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
 
         let table = database_spec.table_spec("recommendations");
+        // For each user we will generate `self.per_user_recs` rows. Recommendations for
+        // each user are pulled from a non-repeated uniform distribution over the set of
+        // articles.
         table.set_column_generator_specs(&[
             (
                 "user_id".into(),
-                ColumnGenerationSpec::Uniform(
-                    DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.user_table_rows as u32),
-                ),
+                ColumnGenerationSpec::UniqueRepeated(self.per_user_recs as u32),
             ),
             (
                 "article_id".into(),
-                ColumnGenerationSpec::Uniform(
-                    DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.article_table_rows as u32),
-                ),
+                ColumnGenerationSpec::UniformWithoutReplacement {
+                    min: DataType::UnsignedInt(0),
+                    max: DataType::UnsignedInt(self.article_table_rows as u32),
+                    batch_size: Some(self.per_user_recs as u32),
+                },
             ),
         ]);
 
