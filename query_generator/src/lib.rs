@@ -1018,14 +1018,39 @@ impl<'gen> Query<'gen> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum AggregateType {
-    Count,
-    Sum,
-    Avg,
+    Count {
+        column_type: SqlType,
+    },
+    Sum {
+        #[strategy(SqlType::arbitrary_numeric_type())]
+        column_type: SqlType,
+    },
+    Avg {
+        #[strategy(SqlType::arbitrary_numeric_type())]
+        column_type: SqlType,
+    },
     GroupConcat,
-    Max,
-    Min,
+    Max {
+        column_type: SqlType,
+    },
+    Min {
+        column_type: SqlType,
+    },
+}
+
+impl AggregateType {
+    pub fn column_type(&self) -> SqlType {
+        match self {
+            AggregateType::Count { column_type } => column_type.clone(),
+            AggregateType::Sum { column_type } => column_type.clone(),
+            AggregateType::Avg { column_type } => column_type.clone(),
+            AggregateType::GroupConcat => SqlType::Text,
+            AggregateType::Max { column_type } => column_type.clone(),
+            AggregateType::Min { column_type } => column_type.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
@@ -1170,6 +1195,25 @@ const ALL_TOPK: &[QueryOperation] = &[
     },
 ];
 
+const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
+    AggregateType::Count {
+        column_type: SqlType::Int(32),
+    },
+    AggregateType::Sum {
+        column_type: SqlType::Int(32),
+    },
+    AggregateType::Avg {
+        column_type: SqlType::Int(32),
+    },
+    AggregateType::GroupConcat,
+    AggregateType::Max {
+        column_type: SqlType::Int(32),
+    },
+    AggregateType::Min {
+        column_type: SqlType::Int(32),
+    },
+];
+
 lazy_static! {
     static ref ALL_COMPARISON_FILTER_OPS: Vec<FilterOp> = {
         COMPARISON_OPS
@@ -1205,7 +1249,9 @@ lazy_static! {
 
     /// A list of all possible [`QueryOperation`]s
     pub static ref ALL_OPERATIONS: Vec<QueryOperation> = {
-        AggregateType::iter()
+        ALL_AGGREGATE_TYPES
+            .iter()
+            .cloned()
             .map(QueryOperation::ColumnAggregate)
             .chain(ALL_FILTERS.iter().cloned().map(QueryOperation::Filter))
             .chain(iter::once(QueryOperation::Distinct))
@@ -1297,10 +1343,7 @@ impl QueryOperation {
                     query.tables.push(tbl.name.clone().into());
                 }
 
-                let col = tbl.fresh_column_with_type(match agg {
-                    GroupConcat => SqlType::Text,
-                    _ => SqlType::Int(32),
-                });
+                let col = tbl.fresh_column_with_type(agg.column_type());
 
                 let expr = Box::new(Expression::Column(Column {
                     name: col.into(),
@@ -1308,15 +1351,15 @@ impl QueryOperation {
                     function: None,
                 }));
                 let func = match agg {
-                    Count => FunctionExpression::Count {
+                    Count { .. } => FunctionExpression::Count {
                         expr,
                         distinct: false,
                     },
-                    Sum => FunctionExpression::Sum {
+                    Sum { .. } => FunctionExpression::Sum {
                         expr,
                         distinct: false,
                     },
-                    Avg => FunctionExpression::Avg {
+                    Avg { .. } => FunctionExpression::Avg {
                         expr,
                         distinct: false,
                     },
@@ -1324,8 +1367,8 @@ impl QueryOperation {
                         expr,
                         separator: ", ".to_owned(),
                     },
-                    Max => FunctionExpression::Max(expr),
-                    Min => FunctionExpression::Min(expr),
+                    Max { .. } => FunctionExpression::Max(expr),
+                    Min { .. } => FunctionExpression::Min(expr),
                 };
 
                 query.fields.push(FieldDefinitionExpression::Expression {
@@ -1610,13 +1653,32 @@ impl FromStr for Operations {
         use QueryOperation::*;
 
         match s {
-            "aggregates" => Ok(AggregateType::iter().map(ColumnAggregate).collect()),
-            "count" => Ok(vec![ColumnAggregate(AggregateType::Count)].into()),
-            "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum)].into()),
-            "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg)].into()),
+            "aggregates" => Ok(ALL_AGGREGATE_TYPES
+                .iter()
+                .cloned()
+                .map(ColumnAggregate)
+                .collect()),
+            "count" => Ok(vec![ColumnAggregate(AggregateType::Count {
+                column_type: SqlType::Int(32),
+            })]
+            .into()),
+            "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum {
+                column_type: SqlType::Int(32),
+            })]
+            .into()),
+            "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg {
+                column_type: SqlType::Int(32),
+            })]
+            .into()),
             "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)].into()),
-            "max" => Ok(vec![ColumnAggregate(AggregateType::Max)].into()),
-            "min" => Ok(vec![ColumnAggregate(AggregateType::Min)].into()),
+            "max" => Ok(vec![ColumnAggregate(AggregateType::Max {
+                column_type: SqlType::Int(32),
+            })]
+            .into()),
+            "min" => Ok(vec![ColumnAggregate(AggregateType::Min {
+                column_type: SqlType::Int(32),
+            })]
+            .into()),
             "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
             "equal_filters" => Ok(crate::Filter::all_with_operator(BinaryOperator::Equal)
                 .map(Filter)
@@ -2057,12 +2119,22 @@ mod tests {
             res,
             vec![
                 Operations(vec![
-                    QueryOperation::ColumnAggregate(AggregateType::Count),
-                    QueryOperation::ColumnAggregate(AggregateType::Sum),
-                    QueryOperation::ColumnAggregate(AggregateType::Avg),
+                    QueryOperation::ColumnAggregate(AggregateType::Count {
+                        column_type: SqlType::Int(32)
+                    }),
+                    QueryOperation::ColumnAggregate(AggregateType::Sum {
+                        column_type: SqlType::Int(32)
+                    }),
+                    QueryOperation::ColumnAggregate(AggregateType::Avg {
+                        column_type: SqlType::Int(32)
+                    }),
                     QueryOperation::ColumnAggregate(AggregateType::GroupConcat),
-                    QueryOperation::ColumnAggregate(AggregateType::Max),
-                    QueryOperation::ColumnAggregate(AggregateType::Min),
+                    QueryOperation::ColumnAggregate(AggregateType::Max {
+                        column_type: SqlType::Int(32)
+                    }),
+                    QueryOperation::ColumnAggregate(AggregateType::Min {
+                        column_type: SqlType::Int(32)
+                    }),
                 ]),
                 Operations(vec![
                     QueryOperation::Join(JoinOperator::LeftJoin),

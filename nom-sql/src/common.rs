@@ -13,7 +13,11 @@ use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{char, complete, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
+use proptest::prelude as prop;
+use proptest::prop_oneof;
+use proptest::strategy::Strategy;
 use std::fmt::{self, Display};
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::expression::expression;
@@ -21,7 +25,7 @@ use crate::keywords::{escape_if_keyword, sql_keyword};
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
     Bool,
     Char(u16),
@@ -51,8 +55,31 @@ pub enum SqlType {
     Timestamp,
     Binary(u16),
     Varbinary(u16),
+    #[weight(0)]
     Enum(Vec<Literal>),
     Decimal(u8, u8),
+}
+
+impl SqlType {
+    /// Returns a proptest strategy to generate *numeric* [`SqlType`]s - signed or unsigned, floats
+    /// or reals
+    pub fn arbitrary_numeric_type() -> impl Strategy<Value = SqlType> {
+        use SqlType::*;
+
+        prop_oneof![
+            prop::Just(Int(32)),
+            prop::Just(UnsignedInt(32)),
+            prop::Just(Bigint(64)),
+            prop::Just(UnsignedBigint(64)),
+            prop::Just(Tinyint(8)),
+            prop::Just(UnsignedTinyint(8)),
+            prop::Just(Smallint(16)),
+            prop::Just(UnsignedSmallint(16)),
+            prop::Just(Double),
+            prop::Just(Float),
+            prop::Just(Real),
+        ]
+    }
 }
 
 impl fmt::Display for SqlType {
@@ -92,7 +119,7 @@ impl fmt::Display for SqlType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Real {
     pub mantissa: u64,
     pub exponent: i16,
@@ -100,7 +127,7 @@ pub struct Real {
     pub precision: u8,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ItemPlaceholder {
     QuestionMark,
     DollarNumber(i32),
@@ -117,7 +144,7 @@ impl ToString for ItemPlaceholder {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum Literal {
     Null,
     Integer(i64),
