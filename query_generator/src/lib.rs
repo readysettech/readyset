@@ -1123,10 +1123,10 @@ pub enum BuiltinFunction {
 /// A representation for where in a query a subquery is located
 ///
 /// When we support them, subqueries in `IN` clauses should go here as well
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Arbitrary)]
 pub enum SubqueryPosition {
-    Cte,
-    Join,
+    Cte(JoinOperator),
+    Join(JoinOperator),
 }
 
 /// Operations that can be performed as part of a SQL query
@@ -1214,6 +1214,11 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     },
 ];
 
+const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] = &[
+    SubqueryPosition::Join(JoinOperator::InnerJoin),
+    SubqueryPosition::Cte(JoinOperator::InnerJoin),
+];
+
 lazy_static! {
     static ref ALL_COMPARISON_FILTER_OPS: Vec<FilterOp> = {
         COMPARISON_OPS
@@ -1260,7 +1265,7 @@ lazy_static! {
             .chain(iter::once(QueryOperation::SingleParameter))
             .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
             .chain(ALL_TOPK.iter().cloned())
-            .chain(SubqueryPosition::iter().map(QueryOperation::Subquery))
+            .chain(ALL_SUBQUERY_POSITIONS.iter().cloned().map(QueryOperation::Subquery))
             .collect()
     };
 }
@@ -1734,9 +1739,15 @@ impl FromStr for Operations {
             "project_builtin" => Ok(BuiltinFunction::iter()
                 .map(ProjectBuiltinFunction)
                 .collect()),
-            "subqueries" => Ok(SubqueryPosition::iter().map(Subquery).collect()),
-            "cte" => Ok(vec![Subquery(SubqueryPosition::Cte)].into()),
-            "join_subquery" => Ok(vec![Subquery(SubqueryPosition::Join)].into()),
+            "subqueries" => Ok(ALL_SUBQUERY_POSITIONS
+                .iter()
+                .cloned()
+                .map(Subquery)
+                .collect()),
+            "cte" => Ok(vec![Subquery(SubqueryPosition::Cte(JoinOperator::InnerJoin))].into()),
+            "join_subquery" => {
+                Ok(vec![Subquery(SubqueryPosition::Join(JoinOperator::InnerJoin))].into())
+            }
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
@@ -1831,26 +1842,29 @@ impl Subquery {
         let left_join_col = column_in_query(state, query);
 
         let subquery_name = state.fresh_alias();
-        let join_rhs = match self.position {
-            SubqueryPosition::Cte => {
+        let (join_rhs, operator) = match self.position {
+            SubqueryPosition::Cte(operator) => {
                 query.ctes.push(CommonTableExpression {
                     name: subquery_name.clone(),
                     statement: subquery,
                 });
-                JoinRightSide::Table(Table {
-                    name: subquery_name.clone(),
-                    schema: None,
-                    alias: None,
-                })
+                (
+                    JoinRightSide::Table(Table {
+                        name: subquery_name.clone(),
+                        schema: None,
+                        alias: None,
+                    }),
+                    operator,
+                )
             }
-            SubqueryPosition::Join => {
-                JoinRightSide::NestedSelect(Box::new(subquery), Some(subquery_name.clone()))
-            }
+            SubqueryPosition::Join(operator) => (
+                JoinRightSide::NestedSelect(Box::new(subquery), Some(subquery_name.clone())),
+                operator,
+            ),
         };
 
         query.join.push(JoinClause {
-            // TODO(grfn): Pick other join operators
-            operator: JoinOperator::InnerJoin,
+            operator,
             right: join_rhs,
             constraint: JoinConstraint::On(Expression::BinaryOp {
                 lhs: Box::new(Expression::Column(left_join_col)),
