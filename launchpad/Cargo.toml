@@ -9,6 +9,6 @@ description = "Extensions to the Rust standard library"
 
 [dependencies]
 anyhow = "1.0.38"
-proptest = "0.10.1"
+proptest = "1.0.0"
 reqwest = "0.11.1"
 chrono = { version = "0.4.0", features = ["serde"] }
