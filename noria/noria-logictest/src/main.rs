@@ -275,6 +275,18 @@ impl Display for VerifyResult {
             for script in &self.unexpected_passes {
                 writeln!(f, "    {}", script)?;
             }
+            writeln!(
+                f,
+                "TIP: To rectify this, copy and paste the following commands in the relevant directory:"
+            )?;
+            for script in &self.unexpected_passes {
+                writeln!(
+                    f,
+                    "    mv {} {}",
+                    script,
+                    script.replace(".fail.test", ".test")
+                )?;
+            }
         }
 
         Ok(())
