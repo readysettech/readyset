@@ -1334,7 +1334,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "pretty_assertions",
- "proptest 0.10.1",
+ "proptest",
  "serde",
  "test-strategy",
 ]
@@ -2662,7 +2662,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "proptest 0.10.1",
+ "proptest",
  "reqwest 0.11.3",
 ]
 
@@ -3208,7 +3208,7 @@ dependencies = [
  "mysql_common 0.19.2",
  "nom 5.1.2",
  "postgres 0.15.2",
- "proptest 0.10.1",
+ "proptest",
  "regex",
  "serde",
  "serde_test",
@@ -3699,12 +3699,13 @@ dependencies = [
  "assert_approx_eq",
  "derive_more",
  "itertools 0.10.1",
+ "launchpad",
  "maplit",
  "maths",
  "nom 5.1.2",
  "pratt",
  "pretty_assertions",
- "proptest 1.0.0",
+ "proptest",
  "serde",
  "serde_derive",
  "test-strategy",
@@ -3750,7 +3751,7 @@ dependencies = [
  "nom-sql",
  "petgraph",
  "pin-project 0.4.28",
- "proptest 0.10.1",
+ "proptest",
  "regex",
  "reqwest 0.11.3",
  "serde",
@@ -3916,7 +3917,7 @@ dependencies = [
  "noria-common",
  "petgraph",
  "pretty_assertions",
- "proptest 0.10.1",
+ "proptest",
  "rand 0.7.3",
  "reader_map",
  "regex",
@@ -3962,7 +3963,7 @@ dependencies = [
  "noria-client",
  "noria-server",
  "pretty_assertions",
- "proptest 1.0.0",
+ "proptest",
  "query_generator",
  "slog",
  "tokio 1.7.0",
@@ -4052,7 +4053,7 @@ dependencies = [
  "noria-mir",
  "petgraph",
  "pin-project 1.0.7",
- "proptest 0.10.1",
+ "proptest",
  "rand 0.7.3",
  "replicators",
  "reqwest 0.11.3",
@@ -4835,26 +4836,6 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12e6c80c1139113c28ee4670dc50cc42915228b51f56a9e407f0ec60f966646f"
-dependencies = [
- "bit-set",
- "bitflags",
- "byteorder",
- "lazy_static",
- "num-traits",
- "quick-error 1.2.3",
- "rand 0.7.3",
- "rand_chacha 0.2.2",
- "rand_xorshift 0.2.0",
- "regex-syntax",
- "rusty-fork",
- "tempfile",
-]
-
-[[package]]
-name = "proptest"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0d9cc07f18492d879586c92b485def06bc850da3118075cd45d50e9c95b0e5"
@@ -4949,7 +4930,7 @@ dependencies = [
  "noria",
  "noria-server",
  "prettytable-rs",
- "proptest 1.0.0",
+ "proptest",
  "rand 0.8.4",
  "regex",
  "serde",
@@ -5239,15 +5220,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbf7e9e623549b0e21f6e97cf8ecf247c1a8fd2e8a992ae265314300b2455d5c"
 dependencies = [
  "rand_core 0.3.1",
-]
-
-[[package]]
-name = "rand_xorshift"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77d416b86801d23dde1aa643023b775c3a462efc0ed96443add11546cdf1dca8"
-dependencies = [
- "rand_core 0.5.1",
 ]
 
 [[package]]
@@ -7334,7 +7306,7 @@ dependencies = [
  "itertools 0.10.1",
  "launchpad",
  "pretty_assertions",
- "proptest 0.10.1",
+ "proptest",
  "rand 0.7.3",
  "test-strategy",
 ]
