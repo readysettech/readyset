@@ -1568,6 +1568,7 @@ mod tests {
             let f = Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column::from("votes.userid"))),
                 distinct: false,
+                count_nulls: false,
             });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
@@ -2387,6 +2388,7 @@ mod tests {
             let f = Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column::from("votes.userid"))),
                 distinct: false,
+                count_nulls: false,
             });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
@@ -2442,6 +2444,7 @@ mod tests {
             let f = Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column::from("votes.aid"))),
                 distinct: false,
+                count_nulls: true,
             });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
@@ -2504,7 +2507,8 @@ mod tests {
                     then_expr: Box::new(Expression::Column(Column::from("votes.aid"))),
                     else_expr: None,
                 }),
-                distinct: false
+                distinct: false,
+                count_nulls: false,
             });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],
@@ -2857,7 +2861,8 @@ mod tests {
                     then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
                     else_expr: None,
                 }),
-                distinct: false
+                distinct: false,
+                count_nulls: false,
             });
             let qid = query_id_hash(
                 &["computed_columns", "votes"],

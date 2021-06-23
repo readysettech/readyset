@@ -1028,6 +1028,7 @@ pub enum AggregateType {
     Count {
         column_type: SqlType,
         distinct: bool,
+        count_nulls: bool,
     },
     Sum {
         #[strategy(SqlType::arbitrary_numeric_type())]
@@ -1257,10 +1258,12 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::Count {
         column_type: SqlType::Int(32),
         distinct: true,
+        count_nulls: false,
     },
     AggregateType::Count {
         column_type: SqlType::Int(32),
         distinct: false,
+        count_nulls: false,
     },
     AggregateType::Sum {
         column_type: SqlType::Int(32),
@@ -1431,8 +1434,17 @@ impl QueryOperation {
                     table: Some(tbl.name.clone().into()),
                     function: None,
                 }));
+
                 let func = match *agg {
-                    Count { distinct, .. } => FunctionExpression::Count { expr, distinct },
+                    Count {
+                        distinct,
+                        count_nulls,
+                        ..
+                    } => FunctionExpression::Count {
+                        expr,
+                        distinct,
+                        count_nulls,
+                    },
                     Sum { distinct, .. } => FunctionExpression::Sum { expr, distinct },
                     Avg { distinct, .. } => FunctionExpression::Avg { expr, distinct },
                     GroupConcat => FunctionExpression::GroupConcat {
@@ -1736,11 +1748,13 @@ impl FromStr for Operations {
             "count" => Ok(vec![ColumnAggregate(AggregateType::Count {
                 column_type: SqlType::Int(32),
                 distinct: false,
+                count_nulls: false,
             })]
             .into()),
             "count_distinct" => Ok(vec![ColumnAggregate(AggregateType::Count {
                 column_type: SqlType::Int(32),
                 distinct: true,
+                count_nulls: false,
             })]
             .into()),
             "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum {
@@ -2227,10 +2241,12 @@ mod tests {
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(32),
                         distinct: true,
+                        count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(32),
                         distinct: false,
+                        count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Sum {
                         column_type: SqlType::Int(32),

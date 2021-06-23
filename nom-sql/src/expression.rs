@@ -29,6 +29,9 @@ pub enum FunctionExpression {
     Count {
         expr: Box<Expression>,
         distinct: bool,
+        // count_nulls is not syntatic, and only ever set to true during a rewrite phase from
+        // CountStar -> Count.
+        count_nulls: bool,
     },
 
     /// `COUNT(*)` aggregation
@@ -94,6 +97,7 @@ impl Display for FunctionExpression {
             FunctionExpression::Count {
                 expr,
                 distinct: true,
+                ..
             } => write!(f, "count(distinct {})", expr),
             FunctionExpression::Sum {
                 expr,

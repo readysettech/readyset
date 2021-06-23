@@ -11,7 +11,12 @@ use noria::{invariant, ReadySetResult};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Aggregation {
     /// Count the number of records for each group. The value for the `over` column is ignored.
-    Count,
+    Count {
+        // count_nulls specifies whether the count operation will count null fields, or ignore
+        // them. As far as we know, this behavior is only true in the case of count(*).
+        // We currently only set this field to true as the result of a count(*) rewrite.
+        count_nulls: bool,
+    },
     /// Sum the value of the `over` column for all records of each group.
     Sum,
     /// Average the value of the `over` column. Maintains count and sum in HashMap
@@ -42,6 +47,21 @@ impl Aggregation {
                 over_else: None,
             },
         ))
+    }
+
+    /// Indicate whether the aggregate should count null records or ignore them.
+    ///
+    /// Currently we only ignore nulls in the case of count(*).
+    fn count_nulls(&self) -> bool {
+        match self {
+            // Only ignore nulls in the Count case if we've been instructed to. This is
+            // necessary for supporting count(*) where nulls are not ignored.
+            Aggregation::Count { count_nulls } if *count_nulls => true,
+            _ => {
+                // Always ignore nulls for all other agg func types.
+                false
+            }
+        }
     }
 }
 
@@ -173,12 +193,12 @@ impl GroupedOperation for Aggregator {
 
         let apply_diff =
             |curr: ReadySetResult<DataType>, diff: Self::Diff| -> ReadySetResult<DataType> {
-                if diff.value.is_none() {
+                if !self.op.count_nulls() && diff.value.is_none() {
                     return curr;
                 }
 
                 match self.op {
-                    Aggregation::Count => apply_count(curr?, diff),
+                    Aggregation::Count { .. } => apply_count(curr?, diff),
                     Aggregation::Sum => apply_sum(curr?, diff),
                     Aggregation::Avg => apply_avg(curr?, diff),
                     Aggregation::GroupConcat { separator: _ } => unreachable!(
@@ -196,7 +216,7 @@ impl GroupedOperation for Aggregator {
     fn description(&self, detailed: bool) -> String {
         if !detailed {
             return match self.op {
-                Aggregation::Count => "+".to_owned(),
+                Aggregation::Count { .. } => "+".to_owned(),
                 Aggregation::Sum => "𝛴".to_owned(),
                 Aggregation::Avg => "Avg".to_owned(),
                 Aggregation::GroupConcat { separator: ref s } => {
@@ -206,7 +226,7 @@ impl GroupedOperation for Aggregator {
         }
 
         let op_string = match self.op {
-            Aggregation::Count => "|*|".to_owned(),
+            Aggregation::Count { .. } => "|*|".to_owned(),
             Aggregation::Sum => format!("𝛴({})", self.over),
             Aggregation::Avg => format!("Avg({})", self.over),
             Aggregation::GroupConcat { separator: ref s } => format!("||({}, {})", s, self.over),
@@ -226,7 +246,7 @@ impl GroupedOperation for Aggregator {
 
     fn output_col_type(&self) -> Option<nom_sql::SqlType> {
         match self.op {
-            Aggregation::Count => Some(SqlType::Bigint(64)),
+            Aggregation::Count { .. } => Some(SqlType::Bigint(64)),
             // (atsakiris) not sure if this is the right type? float?
             Aggregation::Avg => Some(SqlType::Decimal(64, 64)),
             _ => None, // Sum can be either an int or float.
@@ -235,7 +255,7 @@ impl GroupedOperation for Aggregator {
 
     fn empty_value(&self) -> Option<DataType> {
         match self.op {
-            Aggregation::Count => Some(0.into()),
+            Aggregation::Count { .. } => Some(0.into()),
             _ => None,
         }
     }
@@ -279,7 +299,9 @@ mod tests {
     fn it_describes() {
         let src = 0.into();
 
-        let c = Aggregation::Count.over(src, 1, &[0, 2]).unwrap();
+        let c = Aggregation::Count { count_nulls: false }
+            .over(src, 1, &[0, 2])
+            .unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
         let s = Aggregation::Sum.over(src, 1, &[2, 0]).unwrap();
@@ -295,7 +317,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_forwards() {
-        let mut c = setup(Aggregation::Count, true);
+        let mut c = setup(Aggregation::Count { count_nulls: false }, true);
 
         // Add Group=1, Value=1
         let u: Record = vec![1.into(), 1.into()].into();
@@ -419,7 +441,7 @@ mod tests {
 
     #[test]
     fn count_empty_group() {
-        let mut c = setup(Aggregation::Count, true);
+        let mut c = setup(Aggregation::Count { count_nulls: false }, true);
 
         let u = Record::from(vec![1.into(), 1.into()]);
         let rs = c.narrow_one(u, true);
@@ -922,7 +944,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_groups_by_multiple_columns() {
-        let mut c = setup_multicolumn(Aggregation::Count, true);
+        let mut c = setup_multicolumn(Aggregation::Count { count_nulls: false }, true);
 
         // Add Group=(1,2), Value=1
         let u: Record = vec![1.into(), 1.into(), 2.into()].into();

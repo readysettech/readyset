@@ -704,6 +704,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
             FunctionExpression::Count {
                 expr: Box::new(args.0.clone()),
                 distinct: args.1,
+                count_nulls: false,
             }
         }),
         map(preceded(tag_no_case("sum"), delim_fx_args), |args| {

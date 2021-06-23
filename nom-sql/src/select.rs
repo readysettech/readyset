@@ -891,6 +891,7 @@ mod tests {
         let agg_expr = FunctionExpression::Count {
             expr: Box::new(Expression::Column(Column::from("vote_id"))),
             distinct: true,
+            count_nulls: false,
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
@@ -922,6 +923,7 @@ mod tests {
                 condition: Box::new(filter_cond),
             }),
             distinct: false,
+            count_nulls: false,
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
@@ -1027,6 +1029,7 @@ mod tests {
                 condition: Box::new(filter_cond),
             }),
             distinct: false,
+            count_nulls: false,
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],

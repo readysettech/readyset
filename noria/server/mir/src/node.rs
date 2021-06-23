@@ -637,7 +637,7 @@ mod tests {
                 MirNodeInner::Aggregation {
                     on: "z".into(),
                     group_by: vec!["x".into()],
-                    kind: AggregationKind::Count,
+                    kind: AggregationKind::Count { count_nulls: false },
                 },
                 vec![],
                 vec![],
