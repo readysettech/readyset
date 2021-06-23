@@ -133,9 +133,14 @@ fn rewrite_function_expression(
             expr: Box::new(rewrite_expression(col_table_remap, expr)),
             distinct: *distinct,
         },
-        FunctionExpression::Count { expr, distinct } => FunctionExpression::Count {
+        FunctionExpression::Count {
+            expr,
+            distinct,
+            count_nulls,
+        } => FunctionExpression::Count {
             expr: Box::new(rewrite_expression(col_table_remap, expr)),
             distinct: *distinct,
+            count_nulls: *count_nulls,
         },
         FunctionExpression::CountStar => FunctionExpression::CountStar,
         FunctionExpression::Sum { expr, distinct } => FunctionExpression::Sum {
@@ -496,6 +501,7 @@ mod tests {
                     function: None,
                 })),
                 distinct: true,
+                count_nulls: false,
             })),
         };
         let col_full = Column {
@@ -508,6 +514,7 @@ mod tests {
                     function: None,
                 })),
                 distinct: true,
+                count_nulls: false,
             })),
         };
         let q = SelectStatement {

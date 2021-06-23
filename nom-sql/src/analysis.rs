@@ -269,7 +269,8 @@ mod tests {
                             Expression::Column(Column::from("col2")),
                         ]
                     })),
-                    distinct: false
+                    distinct: false,
+                    count_nulls: false,
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),

@@ -143,6 +143,7 @@ pub(super) fn make_grouped(
                     Count {
                         expr: box Expression::Column(ref col),
                         distinct,
+                        ..
                     } => {
                         let colname = format!("{}.count({})", col.clone().table.unwrap(), col.name);
                         FunctionExpression::Sum {

@@ -1,0 +1,18 @@
+statement ok
+create table t1 (number int);
+
+statement ok
+insert into t1 (number) values
+(0),
+(1),
+(NULL);
+
+query I nosort
+select count(number) from t1;
+----
+2
+
+query I nosort
+select count(*) from t1;
+----
+3

@@ -925,15 +925,20 @@ impl SqlToMirConverter {
             Count {
                 expr: box Expression::Column(ref col),
                 distinct,
+                count_nulls,
             } => mknode(
                 &Column::from(col),
-                GroupedNodeType::Aggregation(Aggregation::Count),
+                GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
-            Count { ref expr, distinct } => mknode(
+            Count {
+                ref expr,
+                distinct,
+                count_nulls,
+            } => mknode(
                 // TODO(celine): replace with ParentRef
                 &Column::named(projected_exprs[&expr].clone()),
-                GroupedNodeType::Aggregation(Aggregation::Count),
+                GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
             Avg {

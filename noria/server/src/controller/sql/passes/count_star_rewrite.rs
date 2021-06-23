@@ -41,6 +41,7 @@ impl CountStarRewrite for SqlQuery {
                         function: None,
                     })),
                     distinct: false,
+                    count_nulls: true,
                 };
             }
             Ok(())
@@ -109,6 +110,7 @@ mod tests {
                         FunctionExpression::Count {
                             expr: Box::new(Expression::Column(Column::from("users.id"))),
                             distinct: false,
+                            count_nulls: true,
                         }
                     ))]
                 );
@@ -142,6 +144,7 @@ mod tests {
                         FunctionExpression::Count {
                             expr: Box::new(Expression::Column(Column::from("users.name"))),
                             distinct: false,
+                            count_nulls: true,
                         }
                     ))]
                 );

@@ -1045,7 +1045,7 @@ fn make_distinct_node(
         // We use 0 as a placeholder. The over column is ignored with Count entirely. This should
         // be refactored so Count doesn't take an over column at all.
         // Issue: https://readysettech.atlassian.net/browse/ENG-310
-        Aggregation::Count.over(parent_na, 0, &group_by_indx)?,
+        Aggregation::Count { count_nulls: false }.over(parent_na, 0, &group_by_indx)?,
     );
     Ok(FlowNode::New(na))
 }
