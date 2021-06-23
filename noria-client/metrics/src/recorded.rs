@@ -19,6 +19,7 @@ pub const QUERY_PARSING_TIME: &str = "noria-client.parsing_time";
 pub const QUERY_EXECUTION_TIME: &str = "noria-client.execution_time";
 
 /// The type of a SQL query.
+#[derive(Copy, Clone)]
 pub enum SqlQueryType {
     /// Read query.
     Read,
