@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use colored::Colorize;
 use proptest::arbitrary::any;
@@ -434,11 +434,14 @@ impl Fuzz {
         );
 
         if let Err(TestError::Fail(reason, (seeds, _))) = result {
-            eprintln!(
+            bail!(
                 "Found failing set of queries: {:?} (reason: {})",
-                seeds, reason
+                seeds,
+                reason
             )
         }
+
+        println!("No bugs found!");
 
         Ok(())
     }
