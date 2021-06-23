@@ -1,17 +1,18 @@
 #![warn(clippy::dbg_macro)]
 //! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
 //!
-//! The intent of this library is to be used to automatically and *deterministically* generate an
-//! exhaustive set of SQL queries, to be used as seed data to run *comparative* benchmarks of
-//! various operators in Noria. Notably, this means a few things are explicitly *not* in scope for
-//! this library:
+//! The intent of this library is to provide a hook for generating SQL queries both
+//! *deterministically*, via exhaustively iterating over all permutations of all sets of operations
+//! that are supported, while also allowing *randomly* generating queries (aka "fuzz testing"),
+//! permuting over parameters to operations with a larger state space.
 //!
-//! - The queries we generate are intended primarily for benchmarking, not for correctness testing.
-//!   For example, we don't attempt to generate interesting seed data to exercise edge cases in
-//!   operators.
-//! - Everything this library does *must* be deterministic, so we can provide a consistent and
-//!   reproducible environment for running comparative benchmarks. This means no random generation
-//!   of permutations of query operators, and no random seed data.
+//! This serves a dual purpose:
+//!
+//! - Deterministically generating queries allows us to write benchmark suites that run on every
+//!   commit, and give us an isolated comparative metric of how our performance changes over time
+//! - Randomly generating queries and seed data allows us to generate test cases (with the
+//!   `noria-logictest` crate elsewhere in the repository) to evaluate the correctness of our system
+//!   and catch regressions.
 //!
 //! Alongside the library component of this crate is a command-line interface with a runtime for
 //! running benchmarks on generated queries against noria and collecting metrics - see the
@@ -45,10 +46,14 @@
 //! - There's a [`QueryOperation`] enum which enumerates, in some sense, the individual "operations"
 //!   that can be performed as part of a SQL query
 //! - Each [`QueryOperation`] knows how to [add itself to a SQL query][0]
-//! - To support that, there's a [`GeneratorState`] struct, to which mutable references get passed
-//!   around, which knows how to summon up [new tables][1] and [columns][2] for use in queries
-//! - We can then [calculate all permutations of all the possible QueryOperations][3] (up to a
-//!   certain depth), and use those to generate queries.
+//!   - To support that, there's a [`GeneratorState`] struct, to which mutable references get passed
+//!     around, which knows how to summon up [new tables][1] and [columns][2] for use in queries
+//! - Many [`QueryOperation`]s have extra fields, such as [`QueryOperation::TopK::limit`], which are
+//!   hardcoded when exhaustively permuting combinations of operations, but allowed to be generated
+//!   *randomly* when generating random queries via the [`Arbitrary`] impl
+//! - The set of [`QueryOperation`]s for a query, plus the set of [`Subquery`]s that that query
+//!   contains, are wrapped up together into a [`QuerySeed`] struct, which is passed to
+//!   [`GeneratorState::generate_query`] to actually generate a SQL query
 //!
 //! [0]: QueryOperation::add_to_query
 //! [1]: GeneratorState::fresh_table_mut
