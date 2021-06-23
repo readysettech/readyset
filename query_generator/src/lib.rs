@@ -64,7 +64,7 @@ use derive_more::{Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
-use proptest::arbitrary::{any, Arbitrary};
+use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -1053,9 +1053,24 @@ impl AggregateType {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
+/// Parameters for generating an arbitrary FilterRhs
+#[derive(Clone)]
+pub struct FilterRhsArgs {
+    column_type: SqlType,
+}
+
+impl Default for FilterRhsArgs {
+    fn default() -> Self {
+        Self {
+            column_type: SqlType::Int(32),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = FilterRhsArgs)]
 pub enum FilterRHS {
-    Constant,
+    Constant(#[strategy(Literal::arbitrary_with_type(&args.column_type))] Literal),
     Column,
 }
 
@@ -1076,9 +1091,15 @@ impl From<LogicalOp> for BinaryOperator {
 
 /// An individual filter operation
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = FilterRhsArgs)]
 pub enum FilterOp {
     /// Compare a column with either another column, or a value
-    Comparison { op: BinaryOperator, rhs: FilterRHS },
+    Comparison {
+        op: BinaryOperator,
+
+        #[strategy(any_with::<FilterRHS>((*args).clone()))]
+        rhs: FilterRHS,
+    },
 
     /// A BETWEEN comparison on a column and two constant values
     Between { negated: bool },
@@ -1088,23 +1109,50 @@ pub enum FilterOp {
 }
 
 /// A full representation of a filter to be added to a query
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Filter {
     /// How to add the filter to the WHERE clause of the query
     pub extend_where_with: LogicalOp,
 
     /// The actual filter operation to add
     pub operation: FilterOp,
+
+    /// The type of the column that's being filtered on
+    pub column_type: SqlType,
+}
+
+impl Arbitrary for Filter {
+    type Parameters = ();
+
+    type Strategy = BoxedStrategy<Filter>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        (any::<SqlType>(), any::<LogicalOp>())
+            .prop_flat_map(|(column_type, extend_where_with)| {
+                any_with::<FilterOp>(FilterRhsArgs {
+                    column_type: column_type.clone(),
+                })
+                .prop_map(move |operation| Self {
+                    column_type: column_type.clone(),
+                    operation,
+                    extend_where_with,
+                })
+            })
+            .boxed()
+    }
 }
 
 impl Filter {
     fn all_with_operator(operator: BinaryOperator) -> impl Iterator<Item = Self> {
-        FilterRHS::iter().cartesian_product(LogicalOp::iter()).map(
-            move |(rhs, extend_where_with)| Self {
+        ALL_FILTER_RHS
+            .iter()
+            .cloned()
+            .cartesian_product(LogicalOp::iter())
+            .map(move |(rhs, extend_where_with)| Self {
                 operation: FilterOp::Comparison { op: operator, rhs },
                 extend_where_with,
-            },
-        )
+                column_type: SqlType::Int(32),
+            })
     }
 }
 
@@ -1167,6 +1215,8 @@ pub enum QueryOperation {
     Subquery(SubqueryPosition),
 }
 
+const ALL_FILTER_RHS: &[FilterRHS] = &[FilterRHS::Column, FilterRHS::Constant(Literal::Integer(1))];
+
 const COMPARISON_OPS: &[BinaryOperator] = &[
     BinaryOperator::Equal,
     BinaryOperator::NotEqual,
@@ -1223,7 +1273,7 @@ lazy_static! {
     static ref ALL_COMPARISON_FILTER_OPS: Vec<FilterOp> = {
         COMPARISON_OPS
             .iter()
-            .cartesian_product(FilterRHS::iter())
+            .cartesian_product(ALL_FILTER_RHS.iter().cloned())
             .map(|(operator, rhs)| FilterOp::Comparison {
                     op: *operator,
                     rhs,
@@ -1248,7 +1298,11 @@ lazy_static! {
             .iter()
             .cloned()
             .cartesian_product(LogicalOp::iter())
-            .map(|(operation, extend_where_with)| Filter { extend_where_with, operation })
+            .map(|(operation, extend_where_with)| Filter {
+                extend_where_with,
+                operation,
+                column_type: SqlType::Int(32)
+            })
             .collect()
     };
 
@@ -1385,7 +1439,7 @@ impl QueryOperation {
             QueryOperation::Filter(filter) => {
                 let alias = state.fresh_alias();
                 let tbl = state.some_table_mut();
-                let col = tbl.some_column_with_type(SqlType::Int(1));
+                let col = tbl.some_column_with_type(filter.column_type.clone());
 
                 if query.tables.is_empty() {
                     query.tables.push(tbl.name.clone().into());
@@ -1401,12 +1455,12 @@ impl QueryOperation {
                     alias: Some(alias),
                 });
 
-                let cond = match filter.operation {
+                let cond = match &filter.operation {
                     FilterOp::Comparison { op, rhs } => {
                         let rhs = Box::new(match rhs {
-                            FilterRHS::Constant => {
-                                tbl.expect_value(col, 1i32.into());
-                                Expression::Literal(Literal::Integer(1))
+                            FilterRHS::Constant(val) => {
+                                tbl.expect_value(col, val.clone().into());
+                                Expression::Literal(val.clone())
                             }
                             FilterRHS::Column => {
                                 let col = tbl.fresh_column();
@@ -1418,7 +1472,7 @@ impl QueryOperation {
                         });
 
                         Expression::BinaryOp {
-                            op,
+                            op: *op,
                             lhs: Box::new(col_expr),
                             rhs,
                         }
@@ -1427,13 +1481,13 @@ impl QueryOperation {
                         operand: Box::new(col_expr),
                         min: Box::new(Expression::Literal(Literal::Integer(1))),
                         max: Box::new(Expression::Literal(Literal::Integer(5))),
-                        negated,
+                        negated: *negated,
                     },
                     FilterOp::IsNull { negated } => {
                         tbl.expect_value(col, DataType::None);
                         Expression::BinaryOp {
                             lhs: Box::new(col_expr),
-                            op: if negated {
+                            op: if *negated {
                                 BinaryOperator::Is
                             } else {
                                 BinaryOperator::IsNot
@@ -1715,6 +1769,8 @@ impl FromStr for Operations {
                 .map(|(extend_where_with, operation)| crate::Filter {
                     extend_where_with,
                     operation,
+
+                    column_type: SqlType::Int(32),
                 })
                 .map(Filter)
                 .collect()),
@@ -1726,6 +1782,7 @@ impl FromStr for Operations {
                 .map(|(extend_where_with, operation)| crate::Filter {
                     extend_where_with,
                     operation,
+                    column_type: SqlType::Int(32),
                 })
                 .map(Filter)
                 .collect()),

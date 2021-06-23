@@ -2,6 +2,9 @@ use std::str;
 use std::str::FromStr;
 
 use itertools::Itertools;
+use launchpad::arbitrary::{
+    arbitrary_naive_date, arbitrary_naive_time, arbitrary_timestamp_naive_date_time,
+};
 use maths::float::{decode_f64, encode_f64};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
@@ -225,6 +228,57 @@ impl ToString for Literal {
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
             Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
             Literal::Placeholder(ref item) => item.to_string(),
+        }
+    }
+}
+
+impl Literal {
+    pub fn arbitrary_with_type(sql_type: &SqlType) -> impl Strategy<Value = Self> + 'static {
+        use proptest::prelude::*;
+
+        match sql_type {
+            SqlType::Bool => prop_oneof![Just(Self::Integer(0)), Just(Self::Integer(1)),].boxed(),
+            SqlType::Char(_)
+            | SqlType::Varchar(_)
+            | SqlType::Tinytext
+            | SqlType::Mediumtext
+            | SqlType::Longtext
+            | SqlType::Text => any::<String>().prop_map(Self::String).boxed(),
+            SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedInt(_) => any::<u32>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
+            SqlType::Bigint(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedBigint(_) => any::<u64>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
+            SqlType::Tinyint(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedTinyint(_) => any::<u8>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
+            SqlType::Smallint(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedSmallint(_) => any::<u16>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
+            SqlType::Blob
+            | SqlType::Longblob
+            | SqlType::Mediumblob
+            | SqlType::Tinyblob
+            | SqlType::Binary(_)
+            | SqlType::Varbinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
+            SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
+                any::<Real>().prop_map(Self::FixedPoint).boxed()
+            }
+            SqlType::Date => arbitrary_naive_date()
+                .prop_map(|nd| Self::String(nd.format("%Y-%m-%d").to_string()))
+                .boxed(),
+            SqlType::DateTime(_) | SqlType::Timestamp => arbitrary_timestamp_naive_date_time()
+                .prop_map(|ndt| Self::String(ndt.format("%Y-%m-%d %H:%M:%S").to_string()))
+                .boxed(),
+            SqlType::Time => arbitrary_naive_time()
+                .prop_map(|nt| Self::String(nt.format("%H:%M:%S").to_string()))
+                .boxed(),
+            SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
         }
     }
 }
