@@ -142,7 +142,11 @@ impl TestScript {
         println!(
             "==> {} {}",
             "Running test script".bold(),
-            self.path.canonicalize()?.to_string_lossy().blue()
+            self.path
+                .canonicalize()
+                .unwrap_or_else(|_| "".into())
+                .to_string_lossy()
+                .blue()
         );
 
         if opts.use_mysql {
