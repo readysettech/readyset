@@ -1,8 +1,8 @@
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::{consensus::Authority, ReadySetResult, ReplicationOffset};
-use slog::{info, Logger};
+use noria::{consensus::Authority, ReadySetResult};
+use slog::{debug, info, Logger};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 
@@ -23,52 +23,68 @@ pub struct MySqlReplicator {
     pub(crate) log: Logger,
 }
 
+/// Get the list of tables defined in the database
+async fn load_table_list<Q: Queryable>(q: &mut Q, kind: TableKind) -> mysql::Result<Vec<String>> {
+    let query = format!("show full tables where Table_Type={}", kind);
+    let tables_entries: Vec<(String, String)> = q.query_map(query, std::convert::identity).await?;
+    Ok(tables_entries.into_iter().map(|(name, _)| name).collect())
+}
+
+/// Issue a `LOCK TABLES tbl_name READ, ...` for the names of tables and views provided
+async fn lock_tables<Q, N, I>(q: &mut Q, names: I) -> mysql::Result<()>
+where
+    Q: Queryable,
+    N: Display,
+    I: IntoIterator<Item = N>,
+{
+    let mut query = names.into_iter().fold("LOCK TABLES".to_string(), |q, t| {
+        format!("{} {} READ,", q, t)
+    });
+    query.pop(); // Remove any trailing commas
+    q.query_drop(query).await
+}
+
+/// Get the `CREATE TABLE` or `CREATE VIEW` statement for the named table
+async fn create_for_table<Q: Queryable>(
+    q: &mut Q,
+    table_name: &str,
+    kind: TableKind,
+) -> mysql::Result<String> {
+    let query = format!("show create {} {}", kind.kind(), table_name);
+    match kind {
+        TableKind::View => {
+            // For SHOW CREATE VIEW the format is the name of the view, the create DDL, character_set_client and collation_connection
+            let r: Option<(String, String, String, String)> = q.query_first(query).await?;
+            Ok(r.ok_or("Empty response for SHOW CREATE VIEW")?.1)
+        }
+        TableKind::BaseTable => {
+            // For SHOW CREATE TABLE format is the name of the table and the create DDL
+            let r: Option<(String, String)> = q.query_first(query).await?;
+            Ok(r.ok_or("Empty response for SHOW CREATE TABLE")?.1)
+        }
+    }
+}
+
 impl MySqlReplicator {
-    /// Get the list of tables defined in the database
-    async fn load_table_list(&self, kind: TableKind) -> mysql::Result<Vec<String>> {
-        let mut conn = self.pool.get_conn().await?;
-        let query = format!("show full tables where Table_Type={}", kind);
-        let tables_entries: Vec<(String, String)> = conn.query_map(query, |r| r).await?;
-        Ok(tables_entries.into_iter().map(|(name, _)| name).collect())
-    }
-
-    /// Get the `CREATE TABLE` statement for the named table
-    async fn create_for_table(&self, table_name: &str) -> mysql::Result<String> {
-        let mut conn = self.pool.get_conn().await?;
-        let query = format!("show create table {}", table_name);
-        // For SHOW CREATE TABLE format is the name of the table and the create DDL
-        let create: Option<(String, String)> = conn.query_first(query).await?;
-        Ok(create.ok_or("Empty response for SHOW CREATE TABLE")?.1)
-    }
-
-    /// Get the `CREATE VIEW` statement for the named view
-    async fn create_for_view(&self, view_name: &str) -> mysql::Result<String> {
-        let mut conn = self.pool.get_conn().await?;
-        let query = format!("show create view {}", view_name);
-        // For SHOW CREATE VIEW the is the name of the view, the create DDL, character_set_client and collation_connection
-        let create: Option<(String, String, String, String)> = conn.query_first(query).await?;
-        Ok(create.ok_or("Empty response for SHOW CREATE VIEW")?.1)
-    }
-
     /// Load all the `CREATE TABLE` statements for the database and concatenate them
     /// into a single String that can be installed as a recipe in Noria
-    pub async fn load_recipe(&mut self) -> mysql::Result<String> {
+    pub async fn load_recipe<Q: Queryable>(&mut self, q: &mut Q) -> mysql::Result<String> {
         if self.tables.is_none() {
-            self.tables = Some(self.load_table_list(TableKind::BaseTable).await?);
+            self.tables = Some(load_table_list(q, TableKind::BaseTable).await?);
         }
 
         let mut recipe = String::new();
 
         // Append `CREATE TABLE` statements
         for table in self.tables.as_ref().unwrap() {
-            let create = self.create_for_table(&table).await?;
+            let create = create_for_table(q, &table, TableKind::BaseTable).await?;
             recipe.push_str(&create);
             recipe.push_str(";\n");
         }
 
         // Append `CREATE VIEW` statements
-        for view in self.load_table_list(TableKind::View).await? {
-            let create = self.create_for_view(&view).await?;
+        for view in load_table_list(q, TableKind::View).await? {
+            let create = create_for_table(q, &view, TableKind::View).await?;
             recipe.push_str(&create);
             recipe.push_str(";\n");
         }
@@ -160,39 +176,112 @@ impl MySqlReplicator {
         noria: &mut noria::ControllerHandle<A>,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
+        let result = match self
+            .replicate_to_noria_with_global_lock(noria, install_recipe)
+            .await
+        {
+            Err(err) if err.to_string().contains("Access denied for user") => {
+                self.replicate_to_noria_with_table_locks(noria, install_recipe)
+                    .await
+            }
+            result => result,
+        };
+
+        // Wait for all connections to finish, not strictly neccessary
+        self.pool.disconnect().await?;
+        result
+    }
+
+    /// This is a fallback method to obtaining a database lock, that obtains table level locks
+    /// instead of a global lock. The only difference between that and obtaining a global lock
+    /// is that some `CREATE TABLE` or `CREATE VIEW` statements may be missed if they happen to
+    /// execute at the narrow timeframe of us reading the tables list, and us reading the binlog
+    /// offset.
+    async fn replicate_to_noria_with_table_locks<A: Authority>(
+        &mut self,
+        noria: &mut noria::ControllerHandle<A>,
+        install_recipe: bool,
+    ) -> ReadySetResult<BinlogPosition> {
+        // Start a transaction with `REPEATABLE READ` isolation level
+        let mut tx_opts = mysql::TxOpts::default();
+        tx_opts.with_isolation_level(mysql::IsolationLevel::RepeatableRead);
+        let mut tx = self.pool.start_transaction(tx_opts).await?;
+        // Read the list of tables and views
+        let tables = load_table_list(&mut tx, TableKind::BaseTable).await?;
+        let views = load_table_list(&mut tx, TableKind::View).await?;
+        lock_tables(&mut tx, tables.into_iter().chain(views)).await?;
+        debug!(self.log, "Acquired table read locks");
+        // Get current binlog position, since all table are locked no action can take place that would
+        // advance the binlog *and* affect the tables
+        let binlog_position = self.get_binlog_position().await?;
+
+        // Even if we don't install the recipe, this will load the tables from the database
+        let recipe = self.load_recipe(&mut tx).await?;
+        debug!(self.log, "Loaded recipe:\n{}", recipe);
+
+        if install_recipe {
+            noria.install_recipe(&recipe).await?;
+            debug!(self.log, "Recipe installed");
+        }
+
+        // Although the table dumping happens on a connection pool, and not within our transaction,
+        // it doesn't matter because we maintain a read lock on all the tables anyway
+        self.dump_tables(noria).await?;
+        noria
+            .extend_recipe_with_offset("", Some((&binlog_position).try_into()?))
+            .await?;
+
+        Ok(binlog_position)
+    }
+
+    /// This method aquires a global read lock using `FLUSH TABLES WITH READ LOCK`, which is
+    /// the recommended MySQL method of obtaining a snapshot, however it is not available on
+    /// Amazon RDS.
+    async fn replicate_to_noria_with_global_lock<A: Authority>(
+        &mut self,
+        noria: &mut noria::ControllerHandle<A>,
+        install_recipe: bool,
+    ) -> ReadySetResult<BinlogPosition> {
         // We must hold the locking connection open until replication is finished,
         // if dropped, it would probably remain open in the pool, but we can't risk it
         let _lock = self.flush_and_read_lock().await?;
-
-        info!(self.log, "Acquired read lock");
+        debug!(self.log, "Acquired read lock");
 
         let binlog_position = self.get_binlog_position().await?;
-        let repl_offset: ReplicationOffset = (&binlog_position).try_into()?;
 
         // Even if we don't install the recipe, this will load the tables from the database
-        let recipe = self.load_recipe().await?;
-        info!(self.log, "Loaded recipe:\n{}", recipe);
+        let recipe = self.load_recipe(&mut self.pool.get_conn().await?).await?;
+        debug!(self.log, "Loaded recipe:\n{}", recipe);
 
         if install_recipe {
-            noria
-                .install_recipe_with_offset(&recipe, Some(repl_offset.clone()))
-                .await?;
-            info!(self.log, "Recipe installed");
+            noria.install_recipe(&recipe).await?;
+            debug!(self.log, "Recipe installed");
         }
 
+        self.dump_tables(noria).await?;
+        noria
+            .extend_recipe_with_offset("", Some((&binlog_position).try_into()?))
+            .await?;
+
+        drop(_lock);
+
+        Ok(binlog_position)
+    }
+
+    /// Copy all base tables into noria
+    async fn dump_tables<A: Authority>(
+        &mut self,
+        noria: &mut noria::ControllerHandle<A>,
+    ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
 
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
             let dumper = self.dump_table(&table_name).await?;
-            let mut table_mutator = noria.table(&table_name).await?;
+            let table_mutator = noria.table(&table_name).await?;
 
             let log = self.log.new(slog::o!("table" => table_name.clone()));
-            info!(log, "Replicating table");
-
-            table_mutator
-                .set_replication_offset(repl_offset.clone())
-                .await?;
+            debug!(log, "Replicating table");
 
             replication_tasks.push(tokio::spawn(Self::replicate_table(
                 dumper,
@@ -205,12 +294,7 @@ impl MySqlReplicator {
             task_result.unwrap()?; // The unwrap is for the join handle in that case
         }
 
-        drop(_lock);
-
-        // Wait for all connections to finish, not strictly neccessary
-        self.pool.disconnect().await?;
-
-        Ok(binlog_position)
+        Ok(())
     }
 }
 
@@ -267,6 +351,15 @@ fn value_to_value(val: &mysql::Value) -> mysql_common::value::Value {
         }
         mysql::Value::Time(is_neg, d, hh, mm, ss, us) => {
             mysql_common::value::Value::Time(*is_neg, *d, *hh, *mm, *ss, *us)
+        }
+    }
+}
+
+impl TableKind {
+    fn kind(&self) -> &str {
+        match self {
+            TableKind::BaseTable => "TABLE",
+            TableKind::View => "VIEW",
         }
     }
 }

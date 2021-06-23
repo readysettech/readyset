@@ -20,10 +20,11 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 ///
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to `full`.
 ///
-/// The connector user must have the following permissions:
-/// `SELECT` - to be able to perform a snapshot (WIP)
-/// `RELOAD` - to be able to flush tables and acquire locks for a snapshot (WIP)
-/// `SHOW DATABASES` - to see databases for a snapshot (WIP)
+/// The connector user may optionally have the following permissions:
+/// `SELECT` - to be able to perform a snapshot
+/// `RELOAD` - to be able to flush tables and acquire locks for a snapshot (otherwise table level locks will be used)
+/// `LOCK TABLES` - if unable to acquire a global lock, this permission is required for table level locks
+/// `SHOW DATABASES` - to see databases for a snapshot
 /// `REPLICATION SLAVE` - to be able to connect and read the binlog
 /// `REPLICATION CLIENT` - to use SHOW MASTER STATUS, SHOW SLAVE STATUS, and SHOW BINARY LOGS;
 ///
