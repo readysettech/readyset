@@ -126,8 +126,8 @@ fn value_of_type(typ: &SqlType) -> DataType {
         }
         SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
         SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
+        SqlType::Bool => 1i32.into(),
         SqlType::Enum(_) => unimplemented!(),
-        SqlType::Bool => unimplemented!(),
     }
 }
 
