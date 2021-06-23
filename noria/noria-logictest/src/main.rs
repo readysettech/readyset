@@ -433,10 +433,10 @@ impl Fuzz {
             },
         );
 
-        if let Err(TestError::Fail(reason, value)) = result {
+        if let Err(TestError::Fail(reason, (seeds, _))) = result {
             eprintln!(
                 "Found failing set of queries: {:?} (reason: {})",
-                value, reason
+                seeds, reason
             )
         }
 
