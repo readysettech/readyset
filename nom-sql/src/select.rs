@@ -16,7 +16,7 @@ use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
-use crate::{Column, Expression};
+use crate::{Column, Expression, FunctionExpression};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -103,6 +103,28 @@ pub struct SelectStatement {
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
+}
+
+impl SelectStatement {
+    pub fn contains_aggregate_select(&self) -> bool {
+        self.fields.iter().any(|e| match e {
+            FieldDefinitionExpression::Expression { expr, .. } => match expr {
+                Expression::Call(func) => matches!(
+                    func,
+                    FunctionExpression::Avg { .. }
+                        | FunctionExpression::Count { .. }
+                        | FunctionExpression::CountStar
+                        | FunctionExpression::Sum { .. }
+                        | FunctionExpression::Max(_)
+                        | FunctionExpression::Min(_)
+                        | FunctionExpression::GroupConcat { .. }
+                ),
+                Expression::NestedSelect(select) => select.contains_aggregate_select(),
+                _ => false,
+            },
+            _ => false,
+        })
+    }
 }
 
 impl fmt::Display for SelectStatement {
