@@ -172,10 +172,7 @@ steps:
 
   - label: ':rust: Run tests'
     key: rust-tests
-    command:
-    - 'echo +++ :rust: Running cargo test'
-    - cargo test --all --exclude clustertest -- --skip integration_serial
-    - cargo test -p noria-server integration_serial -- --test-threads=1
+    command: .buildkite/run-tests.sh
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -187,6 +184,7 @@ steps:
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
           config: build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
       - ecr#v2.2.0:
           login: true
     env:
