@@ -483,15 +483,10 @@ impl<A: 'static + Authority> Backend<A> {
                         .await?;
                     let execution_time = execution_timer.elapsed().as_micros();
 
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
-                        parse_time as f64,
-                        "query_type" => SqlQueryType::Read
-                    );
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
-                        execution_time as f64,
-                        "query_type" => SqlQueryType::Read
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Read,
                     );
                     Ok(QueryResult::NoriaSelect {
                         data,
@@ -511,15 +506,10 @@ impl<A: 'static + Authority> Backend<A> {
                     let (num_rows_inserted, first_inserted_id) = connector.handle_insert(q).await?;
                     let execution_time = execution_timer.elapsed().as_micros();
 
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
-                        parse_time as f64,
-                        "query_type" => SqlQueryType::Write
-                    );
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
-                        execution_time as f64,
-                        "query_type" => SqlQueryType::Write
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Write,
                     );
                     Ok(QueryResult::NoriaInsert {
                         num_rows_inserted,
@@ -531,15 +521,10 @@ impl<A: 'static + Authority> Backend<A> {
                     let (num_rows_updated, last_inserted_id) = connector.handle_update(q).await?;
                     let execution_time = execution_timer.elapsed().as_micros();
 
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
-                        parse_time as f64,
-                        "query_type" => SqlQueryType::Write
-                    );
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
-                        execution_time as f64,
-                        "query_type" => SqlQueryType::Write
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Write,
                     );
                     Ok(QueryResult::NoriaUpdate {
                         num_rows_updated,
@@ -551,15 +536,10 @@ impl<A: 'static + Authority> Backend<A> {
                     let num_rows_deleted = connector.handle_delete(q).await?;
                     let execution_time = execution_timer.elapsed().as_micros();
 
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_PARSING_TIME,
-                        parse_time as f64,
-                        "query_type" => SqlQueryType::Write
-                    );
-                    histogram!(
-                        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
-                        execution_time as f64,
-                        "query_type" => SqlQueryType::Write
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Write,
                     );
                     Ok(QueryResult::NoriaDelete { num_rows_deleted })
                 }
@@ -583,10 +563,17 @@ impl<A: 'static + Authority> Backend<A> {
             Writer::MySqlConnector(connector) => {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
+                        let execution_timer = std::time::Instant::now();
                         let (data, select_schema) = self
                             .reader
                             .handle_select(q, use_params, self.ticket.clone())
                             .await?;
+                        let execution_time = execution_timer.elapsed().as_micros();
+                        measure_parse_and_execution_time(
+                            parse_time,
+                            execution_time,
+                            SqlQueryType::Read,
+                        );
                         Ok(QueryResult::NoriaSelect {
                             data,
                             select_schema,
@@ -595,6 +582,7 @@ impl<A: 'static + Authority> Backend<A> {
                     nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                        let execution_timer = std::time::Instant::now();
                         let (num_rows_affected, last_inserted_id, identifier) = connector
                             .on_query(&query, self.timestamp_client.is_some())
                             .await?;
@@ -620,6 +608,13 @@ impl<A: 'static + Authority> Backend<A> {
 
                             self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
                         }
+                        let execution_time = execution_timer.elapsed().as_micros();
+
+                        measure_parse_and_execution_time(
+                            parse_time,
+                            execution_time,
+                            SqlQueryType::Write,
+                        );
 
                         Ok(QueryResult::MySqlWrite {
                             num_rows_affected,
@@ -748,6 +743,23 @@ impl<A: 'static + Authority> Backend<A> {
             }
         }
     }
+}
+
+fn measure_parse_and_execution_time(
+    parse_time: u128,
+    execution_time: u128,
+    sql_query_type: SqlQueryType,
+) {
+    histogram!(
+        noria_client_metrics::recorded::QUERY_PARSING_TIME,
+        parse_time as f64,
+        "query_type" => sql_query_type
+    );
+    histogram!(
+        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
+        execution_time as f64,
+        "query_type" => sql_query_type
+    );
 }
 
 #[async_trait]
