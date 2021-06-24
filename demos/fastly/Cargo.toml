@@ -20,9 +20,10 @@ query_generator = { path = "../../query_generator" }
 noria-logictest = { path = "../../noria/noria-logictest" }
 
 [[bin]]
-name = "data_generator"
-path = "src/bin/data_generator.rs"
+name = "fastly_data_generator"
+path = "src/bin/fastly_data_generator.rs"
 
 [[bin]]
 name = "reader"
 path = "src/bin/reader.rs"
+

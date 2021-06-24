@@ -19,5 +19,5 @@ query_generator = { path = "../../query_generator" }
 noria-logictest = { path = "../../noria/noria-logictest" }
 
 [[bin]]
-name = "data_generator"
-path = "src/bin/data_generator.rs"
+name = "weavegrid_data_generator"
+path = "src/bin/weavegrid_data_generator.rs"
