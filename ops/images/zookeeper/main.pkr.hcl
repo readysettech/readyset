@@ -9,12 +9,13 @@ locals {
     var.short_commit_id,
     local.date
   )
-  root_device_type    = "ebs"
-  service             = "readyset-zookeeper"
-  ssh_username        = "ubuntu"
-  ubuntu_account      = "099720109477" # https://wiki.ubuntu.com/Minimal
-  ubuntu_release      = "focal"        # 20.04 LTS
-  virtualization_type = "hvm"
+  root_device_type      = "ebs"
+  service               = "readyset-zookeeper"
+  ssh_username          = "ubuntu"
+  ubuntu_account        = "099720109477" # https://wiki.ubuntu.com/Minimal
+  ubuntu_release        = "focal"        # 20.04 LTS
+  virtualization_type   = "hvm"
+  node_exporter_version = "1.1.2"
 
   tags = {
     BuildDate = local.date
@@ -115,6 +116,11 @@ source "amazon-ebs" "main" {
 build {
   sources = ["source.amazon-ebs.main"]
 
+  provisioner "file" {
+    source      = "files/node-exporter.service"
+    destination = "/tmp/node-exporter.service"
+  }
+
   provisioner "shell" {
     inline = [
       "echo Wait for cloud-init to update /etc/apt/sources.list",
@@ -122,7 +128,20 @@ build {
       "sudo apt-get update",
       "sudo apt-get upgrade -y",
       "sudo apt-get install -y locales-all zookeeperd",
-      "sudo systemctl enable zookeeper"
+      # Install Prometheus Node Exporter
+      ## Create Node Exporter user
+      "sudo useradd --system node-exporter",
+      ## Download Prometheus Node Exporter binaries
+      format("wget https://github.com/prometheus/node_exporter/releases/download/v%s/node_exporter-%s.linux-amd64.tar.gz", local.node_exporter_version, local.node_exporter_version),
+      format("tar xzf node_exporter-%s.linux-amd64.tar.gz", local.node_exporter_version),
+      format("sudo cp node_exporter-%s.linux-amd64/node_exporter /usr/local/bin/node_exporter", local.node_exporter_version),
+      format("rm -rf node_exporter-%s.linux-amd64.tar.gz node_exporter-%s.linux-amd64", local.node_exporter_version, local.node_exporter_version),
+      ## Configure Prometheus Node Exporter as a service to be run by Systemd
+      "sudo install -o root -g -root -m 644 /tmp/node-exporter.service /etc/systemd/system/",
+      # Finish Node Exporter installation
+      "sudo systemctl daemon-reload",
+      "sudo systemctl enable zookeeper",
+      "sudo systemctl enable node-exporter"
     ]
   }
 }
