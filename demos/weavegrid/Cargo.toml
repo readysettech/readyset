@@ -1,5 +1,5 @@
 [package]
-name = "fastly-demo"
+name = "weavegrid-demo"
 version = "0.1.0"
 authors = ["justin@readyset.io"]
 edition = "2018"

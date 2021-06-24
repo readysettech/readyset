@@ -1,6 +1,6 @@
 use clap::{Clap, ValueHint};
-use fastly_demo::generate::load;
-use fastly_demo::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use demo_utils::generate::load;
+use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use noria::DataType;
 use noria_logictest::generate::DatabaseURL;
 use query_generator::ColumnGenerationSpec;

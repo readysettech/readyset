@@ -20,7 +20,9 @@ members = [
     "query_generator",
     "taster",
     "maths",
-    "demos/fastly"
+    "demos/fastly",
+    "demos/weavegrid",
+    "demos/utils"
 ]
 [profile.release]
 debug=true
