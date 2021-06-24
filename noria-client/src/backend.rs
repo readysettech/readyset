@@ -82,7 +82,13 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 let f: f64 = <f64>::try_from(dt)?;
                 rw.write_col(f).await
             }
-            _ => internal!(),
+            msql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
+                let f: f32 = <f64>::try_from(dt)? as f32;
+                rw.write_col(f).await
+            }
+            _ => {
+                internal!()
+            }
         },
         DataType::Timestamp(ts) => rw.write_col(ts).await,
         DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
