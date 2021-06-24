@@ -813,7 +813,12 @@ impl SqlToMirConverter {
         columns: Vec<Column>,
     ) -> ReadySetResult<MirNodeRef> {
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
-        trace!(self.log, "Added union node wiht columns {:?}", columns);
+        trace!(
+            self.log,
+            "Added union node {} with columns {:?}",
+            name,
+            columns
+        );
         let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
         Ok(MirNode::new(
@@ -1349,7 +1354,7 @@ impl SqlToMirConverter {
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
                         let union = self.make_union_from_same_base(
-                            &format!("{}_un", name),
+                            &format!("{}_un{}", name, nc + left.len() + right.len()),
                             vec![last_left, last_right],
                             output_cols,
                         )?;
