@@ -164,7 +164,6 @@ impl ToString for ItemPlaceholder {
 pub enum Literal {
     Null,
     Integer(i64),
-    UnsignedInteger(u64),
     FixedPoint(Real),
     String(String),
     Blob(Vec<u8>),
@@ -182,7 +181,7 @@ impl From<i64> for Literal {
 
 impl From<u64> for Literal {
     fn from(i: u64) -> Self {
-        Literal::UnsignedInteger(i)
+        Literal::Integer(i as _)
     }
 }
 
@@ -194,7 +193,7 @@ impl From<i32> for Literal {
 
 impl From<u32> for Literal {
     fn from(i: u32) -> Self {
-        Literal::UnsignedInteger(i.into())
+        Literal::Integer(i.into())
     }
 }
 
@@ -215,7 +214,6 @@ impl ToString for Literal {
         match *self {
             Literal::Null => "NULL".to_string(),
             Literal::Integer(ref i) => format!("{}", i),
-            Literal::UnsignedInteger(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => {
                 let precision = if f.precision < 30 { f.precision } else { 30 };
                 let fstr = format!("{:.*}", precision as usize, f.value);
@@ -254,21 +252,15 @@ impl Literal {
             | SqlType::Longtext
             | SqlType::Text => any::<String>().prop_map(Self::String).boxed(),
             SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedInt(_) => any::<u32>()
-                .prop_map(|i| Self::UnsignedInteger(i as _))
-                .boxed(),
+            SqlType::UnsignedInt(_) => any::<u32>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::Bigint(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedBigint(_) => any::<u64>()
-                .prop_map(|i| Self::UnsignedInteger(i as _))
-                .boxed(),
+            SqlType::UnsignedBigint(_) => any::<u64>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::Tinyint(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedTinyint(_) => any::<u8>()
-                .prop_map(|i| Self::UnsignedInteger(i as _))
-                .boxed(),
+            SqlType::UnsignedTinyint(_) => any::<u8>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::Smallint(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedSmallint(_) => any::<u16>()
-                .prop_map(|i| Self::UnsignedInteger(i as _))
-                .boxed(),
+            SqlType::UnsignedSmallint(_) => {
+                any::<u16>().prop_map(|i| Self::Integer(i as _)).boxed()
+            }
             SqlType::Blob
             | SqlType::Longblob
             | SqlType::Mediumblob

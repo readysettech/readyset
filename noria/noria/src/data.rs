@@ -878,7 +878,7 @@ impl TryFrom<DataType> for Literal {
         match dt {
             DataType::None => Ok(Literal::Null),
             DataType::Int(i) => Ok(Literal::Integer(i as _)),
-            DataType::UnsignedInt(i) => Ok(Literal::UnsignedInteger(i as _)),
+            DataType::UnsignedInt(i) => Ok(Literal::Integer(i as _)),
             DataType::BigInt(i) => Ok(Literal::Integer(i)),
             DataType::UnsignedBigInt(i) => Ok(Literal::Integer(i as _)),
             DataType::Real(value, precision) => Ok(Literal::FixedPoint(Real { value, precision })),

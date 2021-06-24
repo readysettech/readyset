@@ -31,7 +31,6 @@ impl ToDataType for Literal {
                 }
             }
             Literal::Integer(i) => i.into(),
-            Literal::UnsignedInteger(i) => i.into(),
             Literal::FixedPoint(Real { value, precision }) => DataType::Real(value, precision),
             Literal::CurrentDate => {
                 DataType::Timestamp(chrono::Local::today().and_hms(0, 0, 0).naive_local())
