@@ -1,7 +1,6 @@
-use nom_sql::analysis::ReferredColumns;
 use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
 
-use crate::errors::{internal_err, ReadySetResult};
+use crate::errors::ReadySetResult;
 use crate::{internal, invariant};
 use std::collections::HashMap;
 
@@ -19,45 +18,40 @@ impl CountStarRewrite for SqlQuery {
     ) -> ReadySetResult<SqlQuery> {
         use nom_sql::FunctionExpression::*;
 
-        let rewrite_count_star = |f: &mut FunctionExpression,
-                                  tables: &Vec<Table>,
-                                  avoid_columns: &[&Column]|
-         -> ReadySetResult<_> {
-            invariant!(!tables.is_empty());
-            if *f == CountStar {
-                let bogo_table = &tables[0];
-                let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
-                let mut bogo_column = schema_iter.next().unwrap();
-                while avoid_columns.iter().any(|c| c.name == *bogo_column) {
-                    bogo_column = schema_iter.next().ok_or_else(|| {
-                        internal_err("ran out of columns trying to pick a bogo column for COUNT(*)")
-                    })?;
-                }
+        let rewrite_count_star =
+            |f: &mut FunctionExpression, tables: &Vec<Table>| -> ReadySetResult<_> {
+                invariant!(!tables.is_empty());
+                if *f == CountStar {
+                    let bogo_table = &tables[0];
+                    // This unwrap is safe because we are getting the table directly from the
+                    // query which has already been registered into the write_schemas map being
+                    // passed in.
+                    let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
+                    // The columns in the write_schemas map are actually columns as seen from the
+                    // current mir node. In this case, we've already passed star expansion, which
+                    // means the list of columns in the passed in write_schemas map contains all
+                    // columns for the table in question. This means that we are garaunteed to have
+                    // at least one result in this columns list, and can simply choose the first
+                    // column.
+                    let bogo_column = schema_iter.next().unwrap();
 
-                *f = Count {
-                    expr: Box::new(Expression::Column(Column {
-                        name: bogo_column.clone(),
-                        table: Some(bogo_table.name.clone()),
-                        function: None,
-                    })),
-                    distinct: false,
-                    count_nulls: true,
-                };
-            }
-            Ok(())
-        };
+                    *f = Count {
+                        expr: Box::new(Expression::Column(Column {
+                            name: bogo_column.clone(),
+                            table: Some(bogo_table.name.clone()),
+                            function: None,
+                        })),
+                        distinct: false,
+                        count_nulls: true,
+                    };
+                }
+                Ok(())
+            };
 
         Ok(match self {
             SqlQuery::Select(mut sq) => {
                 // Expand within field list
                 let tables = sq.tables.clone();
-                let mut avoid_cols = vec![];
-                if let Some(ref gbc) = sq.group_by {
-                    avoid_cols.extend(&gbc.columns);
-                }
-                if let Some(ref w) = sq.where_clause {
-                    avoid_cols.extend(w.referred_columns());
-                }
                 for field in sq.fields.iter_mut() {
                     match *field {
                         FieldDefinitionExpression::All
@@ -67,7 +61,7 @@ impl CountStarRewrite for SqlQuery {
                         FieldDefinitionExpression::Expression {
                             expr: Expression::Call(ref mut f),
                             ..
-                        } => rewrite_count_star(f, &tables, &avoid_cols)?,
+                        } => rewrite_count_star(f, &tables)?,
                         _ => {}
                     }
                 }
@@ -142,7 +136,7 @@ mod tests {
                     tq.fields,
                     vec![FieldDefinitionExpression::from(Expression::Call(
                         FunctionExpression::Count {
-                            expr: Box::new(Expression::Column(Column::from("users.name"))),
+                            expr: Box::new(Expression::Column(Column::from("users.id"))),
                             distinct: false,
                             count_nulls: true,
                         }

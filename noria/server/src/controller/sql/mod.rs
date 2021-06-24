@@ -2442,7 +2442,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
             let f = Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column::from("votes.aid"))),
+                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
                 distinct: false,
                 count_nulls: true,
             });
