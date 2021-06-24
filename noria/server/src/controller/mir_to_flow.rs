@@ -3,6 +3,7 @@ use nom_sql::{
     OrderType, UnaryOperator,
 };
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 use crate::controller::Migration;
 use crate::errors::internal_err;
@@ -122,7 +123,7 @@ fn mir_node_to_flow_parts(
                     ref keys,
                     ref adapted_over,
                 } => match *adapted_over {
-                    None => make_base_node(&name, column_specs.as_mut_slice(), keys, mig),
+                    None => make_base_node(&name, column_specs.as_mut_slice(), keys, mig)?,
                     Some(ref bna) => adapt_base_node(
                         bna.over.clone(),
                         mig,
@@ -366,14 +367,13 @@ fn adapt_base_node(
     };
 
     for a in add.iter() {
-        let default_value = a
-            .constraints
-            .iter()
-            .find_map(|c| match *c {
-                ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
-                _ => None,
-            })
-            .unwrap_or(DataType::None);
+        let mut default_value = DataType::None;
+        for c in &a.constraints {
+            if let ColumnConstraint::DefaultValue(dv) = c {
+                default_value = dv.try_into()?;
+                break;
+            }
+        }
         let column_id = mig.add_column(na, &a.column.name, default_value)?;
 
         // store the new column ID in the column specs for this node
@@ -409,7 +409,7 @@ fn make_base_node(
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &[Column],
     mig: &mut Migration,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
         cs.1 = Some(i);
@@ -428,12 +428,12 @@ fn make_base_node(
         .map(|&(ref cs, _)| {
             for c in &cs.constraints {
                 if let ColumnConstraint::DefaultValue(ref dv) = *c {
-                    return dv.into();
+                    return dv.try_into();
                 }
             }
-            DataType::None
+            Ok(DataType::None)
         })
-        .collect::<Vec<DataType>>();
+        .collect::<Result<Vec<DataType>, _>>()?;
 
     let base = if !pkey_columns.is_empty() {
         let pkey_column_ids = pkey_columns
@@ -451,7 +451,11 @@ fn make_base_node(
         node::special::Base::new(default_values)
     };
 
-    FlowNode::New(mig.add_base(name, column_names.as_slice(), base))
+    Ok(FlowNode::New(mig.add_base(
+        name,
+        column_names.as_slice(),
+        base,
+    )))
 }
 
 fn make_union_node(
@@ -892,7 +896,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             "Unexpected (aggregate?) call node in project expression: {:?}",
             call
         ),
-        Expression::Literal(lit) => Ok(DataflowExpression::Literal(lit.into())),
+        Expression::Literal(lit) => Ok(DataflowExpression::Literal(lit.try_into()?)),
         Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
             parent
                 .borrow()

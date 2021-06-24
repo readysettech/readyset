@@ -5,6 +5,7 @@ use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
+use std::convert::TryFrom;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
@@ -1459,13 +1460,18 @@ impl SqlToMirConverter {
                 .collect();
             let projected_literals: Vec<(String, DataType)> = arith_and_lit_columns_needed
                 .iter()
-                .filter_map(|&(_, ref oc)| match oc {
-                    OutputColumn::Expression(_) => None,
-                    OutputColumn::Data { .. } => None,
-                    OutputColumn::Literal(ref lc) => {
-                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                .map(|&(_, ref oc)| -> ReadySetResult<_> {
+                    match oc {
+                        OutputColumn::Expression(_) => Ok(None),
+                        OutputColumn::Data { .. } => Ok(None),
+                        OutputColumn::Literal(ref lc) => {
+                            Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
+                        }
                     }
                 })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
                 .collect();
 
             // prev_node must be set at this point
@@ -1911,18 +1917,23 @@ impl SqlToMirConverter {
             let mut projected_literals: Vec<(String, DataType)> = qg
                 .columns
                 .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Expression(_) => None,
-                    OutputColumn::Data { .. } => None,
-                    OutputColumn::Literal(ref lc) => {
-                        if !already_computed.contains(oc) {
-                            Some((lc.name.clone(), DataType::from(&lc.value)))
-                        } else {
-                            projected_columns.push(Column::new(None, &lc.name));
-                            None
+                .map(|oc| -> ReadySetResult<_> {
+                    match *oc {
+                        OutputColumn::Expression(_) => Ok(None),
+                        OutputColumn::Data { .. } => Ok(None),
+                        OutputColumn::Literal(ref lc) => {
+                            if !already_computed.contains(oc) {
+                                Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
+                            } else {
+                                projected_columns.push(Column::new(None, &lc.name));
+                                Ok(None)
+                            }
                         }
                     }
                 })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
                 .collect();
 
             if added_bogokey {

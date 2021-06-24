@@ -3,10 +3,10 @@ use arccstr::ArcCStr;
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Either;
 
-use crate::{ReadySetError, ReadySetResult};
+use crate::{internal, ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
 use std::{borrow::Cow, mem};
@@ -849,25 +849,33 @@ impl<'a> From<&'a DataType> for DataType {
     }
 }
 
-impl<'a> From<&'a Literal> for DataType {
-    fn from(l: &'a Literal) -> Self {
-        match *l {
-            Literal::Null => DataType::None,
-            Literal::Integer(i) => (i as i64).into(),
-            Literal::String(ref s) => s.as_str().into(),
-            Literal::CurrentTimestamp => {
+impl<'a> TryFrom<&'a Literal> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(l: &'a Literal) -> Result<Self, Self::Error> {
+        match l {
+            Literal::Null => Ok(DataType::None),
+            Literal::Integer(i) => Ok((*i as i64).into()),
+            Literal::String(s) => Ok(s.as_str().into()),
+            Literal::CurrentTimestamp | Literal::CurrentTime => {
                 let ts = chrono::Local::now().naive_local();
-                DataType::Timestamp(ts)
+                Ok(DataType::Timestamp(ts))
             }
-            Literal::FixedPoint(ref r) => DataType::Real(r.value, r.precision),
-            _ => unimplemented!(),
+            Literal::CurrentDate => Ok(DataType::from(chrono::Local::now().naive_local().date())),
+            Literal::FixedPoint(ref r) => Ok(DataType::Real(r.value, r.precision)),
+            Literal::Blob(b) => DataType::try_from(b.as_slice()),
+            Literal::Placeholder(_) => {
+                internal!("Tried to convert a Placeholder literal to a DataType")
+            }
         }
     }
 }
 
-impl From<Literal> for DataType {
-    fn from(l: Literal) -> Self {
-        (&l).into()
+impl TryFrom<Literal> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(l: Literal) -> Result<Self, Self::Error> {
+        (&l).try_into()
     }
 }
 
