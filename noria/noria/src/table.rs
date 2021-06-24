@@ -119,7 +119,7 @@ macro_rules! row {
                                 allow_null = false;
                             }
                             ColumnConstraint::DefaultValue(ref literal) => {
-                                row[coli] = Into::<$crate::DataType>::into(literal);
+                                row[coli] = ::std::convert::TryInto::<$crate::DataType>::try_into(literal)?;
                             }
                             ColumnConstraint::AutoIncrement => {
                                 // TODO

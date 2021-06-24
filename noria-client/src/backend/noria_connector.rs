@@ -190,8 +190,12 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let data: Vec<Vec<DataType>> = q
             .data
             .iter()
-            .map(|row| row.iter().map(DataType::from).collect())
-            .collect();
+            .map(|row| {
+                row.iter()
+                    .map(DataType::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.do_insert(&q, data).await
     }
@@ -571,7 +575,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                         })?;
                     // only use default value if query doesn't specify one
                     if !columns_specified.contains(&c) {
-                        buf[ri][idx] = v.into();
+                        buf[ri][idx] = v.try_into()?;
                     }
                 }
 

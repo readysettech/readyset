@@ -204,7 +204,7 @@ pub fn contains_aggregate(expr: &Expression) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BinaryOperator, Literal};
+    use crate::BinaryOperator;
 
     mod referred_columns {
         use super::*;

@@ -1,4 +1,7 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::convert::{TryFrom, TryInto};
 
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, Literal,
@@ -7,8 +10,6 @@ use nom_sql::{
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
 use regex::Regex;
-use std::borrow::Cow;
-use std::collections::HashMap;
 
 lazy_static! {
     pub(crate) static ref HARD_CODED_REPLIES: Vec<(Regex, Vec<(&'static str, &'static str)>)> = vec![
@@ -111,7 +112,7 @@ fn do_flatten_conditional(
                 unsupported!("UPDATE/DELETE contains references to another table")
             }
 
-            let value = DataType::from(l);
+            let value = DataType::try_from(l)?;
             // We want to look through our existing keys and see if any of them
             // are missing any columns. In that case we'll add the one we're looking
             // at now there.
@@ -364,7 +365,7 @@ where
                     .ok_or_else(|| {
                         bad_request_err("Not enough parameter values given in EXECUTE")
                     })?,
-                v => DataType::from(v),
+                v => DataType::try_from(v)?,
             };
             let oldv = col2v.insert(c.name, v);
             invariant!(oldv.is_none());
@@ -413,9 +414,8 @@ where
                     updates.push((
                         i,
                         Modification::Set(
-                            DataType::from(v)
-                                .coerce_to(&field.sql_type)
-                                .unwrap()
+                            DataType::try_from(v)?
+                                .coerce_to(&field.sql_type)?
                                 .into_owned(),
                         ),
                     ));
@@ -430,10 +430,10 @@ where
                     invariant_eq!(c, &field.column);
                     match op {
                         BinaryOperator::Add => {
-                            updates.push((i, Modification::Apply(Operation::Add, l.into())))
+                            updates.push((i, Modification::Apply(Operation::Add, l.try_into()?)))
                         }
                         BinaryOperator::Subtract => {
-                            updates.push((i, Modification::Apply(Operation::Sub, l.into())))
+                            updates.push((i, Modification::Apply(Operation::Sub, l.try_into()?)))
                         }
                         _ => unsupported!(),
                     }

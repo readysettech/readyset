@@ -1485,7 +1485,7 @@ impl QueryOperation {
                     FilterOp::Comparison { op, rhs } => {
                         let rhs = Box::new(match rhs {
                             FilterRHS::Constant(val) => {
-                                tbl.expect_value(col, val.clone().into());
+                                tbl.expect_value(col, val.clone().try_into().unwrap());
                                 Expression::Literal(val.clone())
                             }
                             FilterRHS::Column => {
