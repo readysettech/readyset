@@ -11,6 +11,7 @@ anyhow = "1.0.38"
 nom = "5.1.2"
 mysql = "20.1.0"
 rand = "0.8.3"
+futures = "0.3.15"
 
 # local dependencies
 demo-utils = { path = "../utils/" }

@@ -1607,6 +1607,7 @@ dependencies = [
  "anyhow",
  "clap 3.0.0-beta.2",
  "demo-utils",
+ "futures 0.3.15",
  "mysql 20.1.0",
  "nom 5.1.2",
  "nom-sql",
