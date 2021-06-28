@@ -1,0 +1,12 @@
+statement ok
+CREATE TABLE table_1 (column_7 INT(32), column_5 INT(32), column_13 INT(32), column_4 INT(32), column_10 INT(32), column_2 INT(32), column_9 INT(32), column_12 INT(32), column_11 INT(32), column_1 INT(32), column_6 INT(32), column_3 INT(32), column_8 INT(32), PRIMARY KEY (column_13))
+
+
+statement ok
+INSERT INTO table_1 (column_9, column_10, column_7, column_5, column_4, column_8, column_6, column_2, column_13, column_12, column_1, column_3, column_11) VALUES (1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 5, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 1, 1, 1)
+
+
+query  nosort
+WITH alias_3 AS (SELECT count(table_1.column_2) AS alias_2 FROM table_1) SELECT count(table_1.column_1) AS alias_1 FROM table_1 INNER JOIN alias_3 ON (table_1.column_1 = alias_3.alias_2)
+----
+0

@@ -78,6 +78,11 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn empty_value(&self) -> Option<DataType> {
         None
     }
+
+    /// Returns whether the empty value should be emitted for this aggregate.
+    fn emit_empty(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,7 +339,9 @@ where
                         }
 
                         // emit positive, which is group + new, unless it's the empty value
-                        if !this.inner.empty_value().contains(&new) {
+                        // For some aggregates, if there is no group by then we should still
+                        // emit the zero value rather than ignore it.
+                        if this.inner.emit_empty() || !this.inner.empty_value().contains(&new) {
                             let mut rec = group;
                             rec.push(new);
                             out.push(Record::Positive(rec));
