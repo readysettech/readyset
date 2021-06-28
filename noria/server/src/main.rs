@@ -251,7 +251,9 @@ If specified, overrides the value of --external-address"))
         }
         if use_prometheus_metrics {
             rec.add(MetricsRecorder::Prometheus(
-                PrometheusBuilder::new().build(),
+                PrometheusBuilder::new()
+                    .add_global_label("deployment", deployment_name)
+                    .build(),
             ));
         }
         let bufrec = BufferedRecorder::new(rec, metrics_queue_len);

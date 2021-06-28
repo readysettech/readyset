@@ -244,6 +244,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 self.database_type.into();
             PrometheusBuilder::new()
                 .add_global_label("database_type", database_label)
+                .add_global_label("deployment", deployment)
                 .install()
                 .unwrap();
         }
