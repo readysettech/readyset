@@ -19,6 +19,10 @@ struct DataGenerator {
     #[clap(long, default_value = "10")]
     user_table_rows: usize,
 
+    /// The number of rows to generate for the authors table.
+    #[clap(long, default_value = "10")]
+    author_table_rows: usize,
+
     /// The number of rows to generate for the recommendations table per user.
     #[clap(long, default_value = "10")]
     per_user_recs: usize,
@@ -40,7 +44,8 @@ impl DataGenerator {
         let mut database_spec = DatabaseGenerationSpec::new(fastly_schema)
             .table_rows("articles", self.article_table_rows)
             .table_rows("users", self.user_table_rows)
-            .table_rows("recommendations", self.user_table_rows * self.per_user_recs);
+            .table_rows("recommendations", self.user_table_rows * self.per_user_recs)
+            .table_rows("authors", self.author_table_rows);
 
         // Article table overrides.
         let table = database_spec.table_spec("articles");
@@ -50,9 +55,19 @@ impl DataGenerator {
                 "priority".into(),
                 ColumnGenerationSpec::Uniform(DataType::Int(0), DataType::Int(128)),
             ),
+            (
+                "author_id".into(),
+                ColumnGenerationSpec::Uniform(
+                    DataType::UnsignedInt(0),
+                    DataType::UnsignedInt(self.author_table_rows as u32),
+                ),
+            ),
         ]);
 
         let table = database_spec.table_spec("users");
+        table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
+
+        let table = database_spec.table_spec("authors");
         table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
 
         let table = database_spec.table_spec("recommendations");
