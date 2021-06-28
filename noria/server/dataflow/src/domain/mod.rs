@@ -3613,7 +3613,7 @@ impl Domain {
             .sum();
 
         gauge!(
-            recorded::DOMAIN_NODE_STATE_SIZE_BYTES,
+            recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
             total as f64,
             "domain" => self.index.index().to_string(),
             "shard" => self.shard.unwrap_or(0).to_string(),
