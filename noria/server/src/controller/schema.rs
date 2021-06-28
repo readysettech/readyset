@@ -3,12 +3,12 @@ use super::recipe::{Recipe, Schema};
 use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
-use noria::ReadySetError;
+use noria::{ColumnBase, ColumnSchema};
 
-type Path = std::vec::Vec<(
+type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,
     std::vec::Vec<std::option::Option<usize>>,
-)>;
+)];
 
 fn type_for_internal_column(
     node: &dataflow::node::Node,
@@ -17,14 +17,14 @@ fn type_for_internal_column(
     recipe: &Recipe,
     graph: &Graph,
     log: &slog::Logger,
-) -> Result<Option<SqlType>, ReadySetError> {
+) -> ReadySetResult<Option<SqlType>> {
     // column originates at internal view: literal, aggregation output
     // FIXME(malte): return correct type depending on what column does
     match *(*node) {
         ops::NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
             Ok(
                 column_schema(graph, next_node_on_path, recipe, parent_col, log)?
-                    .map(|cs| cs.sql_type),
+                    .map(ColumnSchema::take_type),
             )
         }),
         ops::NodeOperator::Aggregation(ref grouped_op) => {
@@ -39,13 +39,13 @@ fn type_for_internal_column(
                     // use type of the "over" column
                     Ok(
                         column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
-                            .map(|cs| cs.sql_type),
+                            .map(ColumnSchema::take_type),
                     )
                 }
             } else {
                 Ok(
                     column_schema(graph, next_node_on_path, recipe, column_index, log)?
-                        .map(|cs| cs.sql_type),
+                        .map(ColumnSchema::take_type),
                 )
             }
         }
@@ -55,7 +55,7 @@ fn type_for_internal_column(
             // use type of the "over" column
             Ok(
                 column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
-                    .map(|cs| cs.sql_type),
+                    .map(ColumnSchema::take_type),
             )
         }
         ops::NodeOperator::Concat(_) => {
@@ -83,7 +83,7 @@ fn type_for_base_column(
     base: &str,
     column_index: usize,
     log: &slog::Logger,
-) -> Result<Option<SqlType>, ReadySetError> {
+) -> ReadySetResult<Option<SqlType>> {
     if let Some(schema) = recipe.schema_for(base) {
         // projected base table column
         match schema {
@@ -101,7 +101,7 @@ fn trace_column_type_on_path(
     graph: &Graph,
     recipe: &Recipe,
     log: &slog::Logger,
-) -> Result<Option<SqlType>, ReadySetError> {
+) -> ReadySetResult<Option<SqlType>> {
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
@@ -137,13 +137,37 @@ fn trace_column_type_on_path(
     }
 }
 
+fn get_base_for_column(
+    path: Path,
+    graph: &Graph,
+    recipe: &Recipe,
+) -> ReadySetResult<Option<ColumnBase>> {
+    // column originates at last element of the path whose second element is not None
+    if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
+        let (ni, cols) = &path[pos];
+
+        let source_node = &graph[*ni];
+        if source_node.is_base() {
+            if let Some(Schema::Table(ref schema)) = recipe.schema_for(source_node.name()) {
+                let col_index = cols.first().unwrap().unwrap();
+                return Ok(Some(ColumnBase {
+                    column: schema.fields[col_index].column.name.clone(),
+                    table: schema.fields[col_index].column.table.clone().unwrap(),
+                }));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 pub(super) fn column_schema(
     graph: &Graph,
     view: NodeIndex,
     recipe: &Recipe,
     column_index: usize,
     log: &slog::Logger,
-) -> Result<Option<ColumnSpecification>, ReadySetError> {
+) -> ReadySetResult<Option<ColumnSchema>> {
     trace!(
         log,
         "tracing provenance of {} on {} for schema",
@@ -154,10 +178,12 @@ pub(super) fn column_schema(
     let vn = &graph[view];
 
     let mut col_type = None;
-    for p in paths {
+    let mut col_base = None;
+    for ref p in paths {
         trace!(log, "considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log)? {
+        if let t @ Some(_) = trace_column_type_on_path(&p, graph, recipe, log)? {
             col_type = t;
+            col_base = get_base_for_column(&p, graph, recipe)?;
         }
     }
 
@@ -172,7 +198,11 @@ pub(super) fn column_schema(
             // ? in case we found no schema for this column
             col_type,
         );
-        Ok(Some(cs))
+
+        Ok(Some(ColumnSchema {
+            spec: cs,
+            base: col_base,
+        }))
     } else {
         Ok(None)
     }

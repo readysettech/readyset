@@ -13,9 +13,8 @@ use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::{self, Method, StatusCode};
-use nom_sql::ColumnSpecification;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::{builders::*, ReplicationOffset};
+use noria::{builders::*, ReplicationOffset, ViewSchema};
 use noria::{
     consensus::{Authority, Epoch, STATE_KEY},
     RecipeSpec,
@@ -986,20 +985,17 @@ impl ControllerInner {
         Ok(Some(ViewBuilder { replicas }))
     }
 
-    fn view_schema(
-        &self,
-        view_ni: NodeIndex,
-    ) -> Result<Option<Vec<ColumnSpecification>>, ReadySetError> {
+    fn view_schema(&self, view_ni: NodeIndex) -> Result<Option<ViewSchema>, ReadySetError> {
         let n = &self.ingredients[view_ni];
+
         let schema: Vec<_> = (0..n.fields().len())
             .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
             .collect::<Result<Vec<_>, ReadySetError>>()?;
 
-        if schema.iter().any(Option::is_none) {
-            Ok(None)
-        } else {
-            Ok(Some(schema.into_iter().map(Option::unwrap).collect()))
-        }
+        Ok(schema
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .map(ViewSchema))
     }
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes

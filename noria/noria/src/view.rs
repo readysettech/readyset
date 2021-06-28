@@ -1,6 +1,6 @@
 use crate::consistency::Timestamp;
 use crate::data::*;
-use crate::errors::{view_err, ReadySetError, ReadySetResult};
+use crate::errors::{internal_err, view_err, ReadySetError, ReadySetResult};
 use crate::util::like::CaseSensitivityMode;
 use crate::{rpc_err, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
@@ -9,6 +9,7 @@ use futures_util::{
     stream::StreamExt, stream::TryStreamExt,
 };
 use launchpad::intervals::{BoundFunctor, BoundPair};
+use nom_sql::SqlType;
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
@@ -38,6 +39,29 @@ type Transport = AsyncBincodeStream<
 #[derive(Debug)]
 struct Endpoint(SocketAddr);
 
+/// Identifies the source base table column for a projected column
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnBase {
+    /// The name of the column in the base table
+    pub column: String,
+    /// The name of the base table for this column
+    pub table: String,
+}
+
+/// Combines the specification for a columns with its base name
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnSchema {
+    /// The specification for the column
+    pub spec: ColumnSpecification,
+    /// If the column is an alias, this field represents its base column
+    pub base: Option<ColumnBase>,
+}
+
+/// A `ViewSchema` is used to desribe the columns of a stored Noria
+/// view as a vector of columns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewSchema(pub Vec<ColumnSchema>);
+
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
     tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<ReadQuery>>,
@@ -65,6 +89,65 @@ impl Service<()> for Endpoint {
                 eprintln!("view server went away: {}", e)
             }))
         }
+    }
+}
+
+impl ViewSchema {
+    /// Return a vector specifiying the types of the columns for the
+    /// requested indices
+    pub fn col_types(&self, indices: &[usize]) -> ReadySetResult<Vec<&SqlType>> {
+        indices
+            .iter()
+            .map(|i| self.0.get(*i).map(|c| &c.spec.sql_type))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| internal_err("Schema expects valid column indices"))
+    }
+
+    /// Convert the schema to a `Vec` of [`msql_srv::Column`], excluding "bogokey" columns
+    pub fn to_cols(&self) -> Vec<msql_srv::Column> {
+        self.0
+            .iter()
+            .filter_map(|c| {
+                if c.spec.column.name == "bogokey" {
+                    None
+                } else {
+                    Some(c.spec.convert_column())
+                }
+            })
+            .collect()
+    }
+
+    /// Convert the schema to a `Vec` of [`msql_srv::Column`], for the speicified indices
+    pub fn to_cols_with_indices(&self, indices: &[usize]) -> ReadySetResult<Vec<msql_srv::Column>> {
+        indices
+            .iter()
+            .map(|i| self.0.get(*i).map(|c| c.spec.convert_column()))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| internal_err("Schema expects valid column indices"))
+    }
+
+    /// Get the indices of the columns in the schema that correspond to the list of provided
+    /// [`nom_sql::Column`]. The columns match if either the column name matches (the alias)
+    /// or the real base name
+    pub fn indices_for_cols<'a, T>(&self, cols: T) -> ReadySetResult<Vec<usize>>
+    where
+        T: Iterator<Item = &'a nom_sql::Column>,
+    {
+        cols.map(|c| {
+            self.0.iter().position(|e| {
+                e.spec.column.name == c.name
+                    || e.base.as_ref().map(|b| b.column == c.name).unwrap_or(false)
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| internal_err("Schema expects all columns to be present"))
+    }
+}
+
+impl ColumnSchema {
+    /// Consume the schema, returning the type for the column
+    pub fn take_type(self) -> nom_sql::SqlType {
+        self.spec.sql_type
     }
 }
 
@@ -383,7 +466,7 @@ pub struct ViewBuilder {
 pub struct ViewReplica {
     pub node: NodeIndex,
     pub columns: Vec<String>,
-    pub schema: Option<Vec<ColumnSpecification>>,
+    pub schema: Option<ViewSchema>,
     pub shards: Vec<ReplicaShard>,
 }
 
@@ -493,7 +576,7 @@ impl ViewBuilder {
 pub struct View {
     node: NodeIndex,
     columns: Vec<String>,
-    schema: Option<Vec<ColumnSpecification>>,
+    schema: Option<ViewSchema>,
 
     shards: Vec<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
@@ -749,8 +832,8 @@ impl View {
     }
 
     /// Get the schema definition of this view.
-    pub fn schema(&self) -> Option<&[ColumnSpecification]> {
-        self.schema.as_deref()
+    pub fn schema(&self) -> Option<&ViewSchema> {
+        self.schema.as_ref()
     }
 
     /// Get the NodeIndex of the dataflow node that this

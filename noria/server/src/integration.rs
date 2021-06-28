@@ -3427,11 +3427,11 @@ async fn correct_nested_view_schema() {
     let q = g.view("swvc").await.unwrap();
 
     let expected_schema = vec![
-        ColumnSpecification::new("swvc.id".into(), SqlType::Int(32)),
-        ColumnSpecification::new("swvc.content".into(), SqlType::Text),
-        ColumnSpecification::new("swvc.vc".into(), SqlType::Bigint(64)),
+        ColumnSpecification::new("swvc.id".into(), SqlType::Int(32)).convert_column(),
+        ColumnSpecification::new("swvc.content".into(), SqlType::Text).convert_column(),
+        ColumnSpecification::new("swvc.vc".into(), SqlType::Bigint(64)).convert_column(),
     ];
-    assert_eq!(q.schema(), Some(&expected_schema[..]));
+    assert_eq!(q.schema().unwrap().to_cols(), &expected_schema[..]);
 }
 
 // FIXME: The test is disabled because join column projection does not work correctly.
