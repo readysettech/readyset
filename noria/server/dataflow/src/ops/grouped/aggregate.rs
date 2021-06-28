@@ -259,6 +259,15 @@ impl GroupedOperation for Aggregator {
             _ => None,
         }
     }
+
+    fn emit_empty(&self) -> bool {
+        match self.op {
+            Aggregation::Count { .. } | Aggregation::GroupConcat { .. } => {
+                self.group_by().is_empty()
+            }
+            _ => false,
+        }
+    }
 }
 
 // TODO: These unit tests are lengthy, repetitive, and hard to read.
