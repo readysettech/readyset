@@ -228,7 +228,7 @@ fn uniform_random_value(min: &DataType, max: &DataType) -> DataType {
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn unique_value_of_type(typ: &SqlType, idx: u8) -> DataType {
+fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
     match typ {
         SqlType::Char(_)
         | SqlType::Varchar(_)
@@ -433,7 +433,7 @@ pub struct UniqueGenerator {
     generated: u32,
     /// The current index to use to generate the random value. Incremented
     /// every batch_size.
-    index: u8,
+    index: u32,
     /// The number of values to generate before incrementing `index`.
     batch_size: u32,
     sql_type: SqlType,
@@ -966,7 +966,7 @@ impl<'a> QueryState<'a> {
         for (table_name, column_name) in self.parameters.iter() {
             let val = unique_value_of_type(
                 &self.gen.tables[table_name].columns[column_name].sql_type,
-                self.datatype_counter,
+                self.datatype_counter as u32,
             );
             self.unique_parameters
                 .entry(table_name.clone())
