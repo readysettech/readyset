@@ -238,6 +238,7 @@ use crate::internal::*;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::task_local;
+pub use view::{ColumnBase, ColumnSchema, ViewSchema};
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {

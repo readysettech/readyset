@@ -28,7 +28,7 @@ mod keys;
 pub(crate) mod migrate; // crate viz for tests
 mod mir_to_flow;
 pub(crate) mod recipe; // crate viz for tests
-mod schema;
+pub(crate) mod schema;
 mod security;
 pub(crate) mod sql; // crate viz for tests
 
