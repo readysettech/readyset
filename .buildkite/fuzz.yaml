@@ -19,7 +19,7 @@ steps:
     key: logictest-fuzz
     command:
     - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest -- fuzz -n 5000 --compare-to mysql://root:noria@mysql
+    - cargo run --bin noria-logictest -- fuzz -n 5000 --compare-to mysql://root:noria@mysql/noria
     depends_on:
     - build-image
     plugins:
