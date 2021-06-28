@@ -184,6 +184,9 @@ where
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
+        // TODO(peter): We can't just exit if rs is empty because it means that we never emit 0 for
+        // empty tables on count operations. It also means we emit an empty result for
+        // GROUP_CONCAT(col1) with no group by, when we should emit NULL.
         if rs.is_empty() {
             return Ok(ProcessingResult {
                 results: rs,
