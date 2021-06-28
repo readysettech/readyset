@@ -1,5 +1,5 @@
 CREATE TABLE articles (
-  id int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id int(11) NOT NULL PRIMARY KEY,
   author_id int(11) NOT NULL,
   creation_time TIMESTAMP NOT NULL,
   keywords varchar(40) NOT NULL,
@@ -13,13 +13,13 @@ CREATE TABLE articles (
 );
 
 CREATE TABLE authors (
-  id int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id int(11) NOT NULL PRIMARY KEY,
   name varchar(40) NOT NULL,
   image_url varchar(128) NOT NULL
 );
 
 CREATE TABLE users (
-  id int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY
+  id int(11) NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE recommendations (
