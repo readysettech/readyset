@@ -353,6 +353,9 @@ impl TestScript {
                 }
             }
             QueryResults::Results(expected_vals) => {
+                if vals.len() != expected_vals.len() {
+                    bail!("The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}, {}",expected_vals.len(), vals.len());
+                }
                 if !compare_results(&vals, expected_vals, query.column_types.is_some()) {
                     bail!(
                         "Incorrect values returned from query (left: expected, right: actual): \n{}",
