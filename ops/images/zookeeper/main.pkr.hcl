@@ -137,7 +137,7 @@ build {
       format("sudo cp node_exporter-%s.linux-amd64/node_exporter /usr/local/bin/node_exporter", local.node_exporter_version),
       format("rm -rf node_exporter-%s.linux-amd64.tar.gz node_exporter-%s.linux-amd64", local.node_exporter_version, local.node_exporter_version),
       ## Configure Prometheus Node Exporter as a service to be run by Systemd
-      "sudo install -o root -g -root -m 644 /tmp/node-exporter.service /etc/systemd/system/",
+      "sudo install -o root -g root -m 644 /tmp/node-exporter.service /etc/systemd/system/",
       # Finish Node Exporter installation
       "sudo systemctl daemon-reload",
       "sudo systemctl enable zookeeper",
