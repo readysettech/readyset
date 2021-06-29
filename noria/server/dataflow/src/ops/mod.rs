@@ -19,6 +19,7 @@ pub mod topk;
 pub mod trigger;
 pub mod union;
 
+use crate::ops::grouped::conkitten::GroupConkitten;
 use crate::processing::{ColumnMiss, ColumnSource};
 pub use msql_srv::MysqlTime;
 
@@ -29,7 +30,7 @@ pub enum NodeOperator {
     // Aggregation supports both filtered and normal Aggregations
     Aggregation(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
-    Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
+    Concat(grouped::GroupedOperator<GroupConkitten>),
     Join(join::Join),
     ParamFilter(param_filter::ParamFilter),
     Latest(latest::Latest),

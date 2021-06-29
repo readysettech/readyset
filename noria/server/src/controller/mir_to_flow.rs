@@ -19,6 +19,7 @@ use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 
+use dataflow::ops::grouped::conkitten::GroupConkitten;
 use petgraph::graph::NodeIndex;
 
 pub(super) fn mir_query_to_flow_parts(
@@ -558,8 +559,7 @@ fn make_grouped_node(
         // For this reason, we need to pattern match for a groupconcat aggregation before we pattern
         // match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
-            use dataflow::ops::grouped::concat::{GroupConcat, TextComponent};
-            let gc = GroupConcat::new(parent_na, vec![TextComponent::Column(over_col_indx)], sep)?;
+            let gc = GroupConkitten::new(parent_na, vec![over_col_indx], sep)?;
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
         }
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
