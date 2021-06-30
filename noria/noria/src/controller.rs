@@ -14,6 +14,7 @@ use crate::{
     ReadySetResult, ReplicationOffset, ViewFilter, ViewRequest,
 };
 use futures_util::future;
+use futures_util::future::Either;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -110,9 +111,11 @@ where
 
                 // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
                 //             (if you try and use the `url` directly instead of stringifying)
-                let r = hyper::Request::post(url.as_ref().unwrap().to_string())
+                #[allow(clippy::unwrap_used)]
+                let string_url = url.as_ref().unwrap().to_string();
+                let r = hyper::Request::post(string_url)
                     .body(hyper::Body::from(body.clone()))
-                    .unwrap();
+                    .map_err(|e| internal_err(format!("hyper request failed: {}", e)))?;
 
                 // TODO(eta): custom error types here?
 
@@ -270,7 +273,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::inputs"))?
-            .call(ControllerRequest::new("inputs", &()).unwrap())
+            .call(ControllerRequest::new("inputs", &())?)
             .await
             .map_err(rpc_err!("ControllerHandle::inputs"))?;
 
@@ -288,7 +291,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::outputs"))?
-            .call(ControllerRequest::new("outputs", &()).unwrap())
+            .call(ControllerRequest::new("outputs", &())?)
             .await
             .map_err(rpc_err!("ControllerHandle::outputs"))?;
 
@@ -349,7 +352,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::view_builder"))?
-            .call(ControllerRequest::new("view_builder", &view_request).unwrap())
+            .call(ControllerRequest::new("view_builder", &view_request)?)
             .await
             .map_err(rpc_err!("ControllerHandle::view_builder"))?;
 
@@ -400,7 +403,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .ready()
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?
-                .call(ControllerRequest::new("table_builder", &name).unwrap())
+                .call(ControllerRequest::new("table_builder", &name)?)
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?;
 
@@ -445,7 +448,10 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 .map_err(|e| rpc_err_no_downcast(path, e))
         }
 
-        rpc_inner(self, ControllerRequest::new(path, r).unwrap(), path)
+        match ControllerRequest::new(path, r) {
+            Ok(req) => Either::Left(rpc_inner(self, req, path)),
+            Err(e) => Either::Right(std::future::ready(Err(e))),
+        }
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
