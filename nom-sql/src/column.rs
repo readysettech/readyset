@@ -47,15 +47,15 @@ impl fmt::Display for Column {
 
 impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
-        match c.find('.') {
+        match c.split_once('.') {
             None => Column {
                 name: String::from(c),
                 table: None,
                 function: None,
             },
-            Some(i) => Column {
-                name: String::from(&c[i + 1..]),
-                table: Some(String::from(&c[0..i])),
+            Some((table_name, col_name)) => Column {
+                name: String::from(col_name),
+                table: Some(String::from(table_name)),
                 function: None,
             },
         }

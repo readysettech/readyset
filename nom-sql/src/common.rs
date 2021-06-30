@@ -220,7 +220,7 @@ impl ToString for Literal {
                 let fstr = format!("{:.*}", precision as usize, f.value);
                 // Trim all trailing zeros, but leave one after the dot if this is a whole number
                 let res = fstr.trim_end_matches('0');
-                if &res[(res.len() - 1)..] == "." {
+                if res.ends_with('.') {
                     format!("{}0", res)
                 } else {
                     res.to_owned()
@@ -445,10 +445,25 @@ pub fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'_' || chr == b'@'
 }
 
-#[inline]
 fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
+            Ok(v) => Ok((len, v)),
+            Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
+                len,
+                ErrorKind::LengthValue,
+            ))),
+        },
+        Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
+            len,
+            ErrorKind::LengthValue,
+        ))),
+    }
+}
+
+fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
+    match str::from_utf8(len) {
+        Ok(s) => match u8::from_str(s) {
             Ok(v) => Ok((len, v)),
             Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
                 len,
@@ -491,7 +506,15 @@ fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
         opt(preceded(tag(","), preceded(multispace0, digit1))),
     ))(i)?;
 
-    Ok((remaining_input, (m[0], d.map(|r| r[0]))))
+    let m = digit_as_u8(m)?.1;
+    // Manual map allowed for nom error propagation.
+    #[allow(clippy::manual_map)]
+    let d = match d {
+        None => None,
+        Some(v) => Some(digit_as_u8(v)?.1),
+    };
+
+    Ok((remaining_input, (m, d)))
 }
 
 pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
@@ -581,10 +604,7 @@ fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             |t| SqlType::Char(t.1),
         ),
         map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
-            SqlType::DateTime(match fsp {
-                Some(fsp) => fsp,
-                None => 0_u16,
-            })
+            SqlType::DateTime(fsp.unwrap_or(0_u16))
         }),
         map(tag_no_case("date"), |_| SqlType::Date),
         map(
