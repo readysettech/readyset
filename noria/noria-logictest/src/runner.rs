@@ -247,7 +247,7 @@ impl TestScript {
                         prev_was_statement = false;
                         // When binlog replication is enabled, we need to give the statements some time to propagate
                         // before we can issue the next query
-                        std::thread::sleep(Duration::from_millis(250));
+                        tokio::time::sleep(Duration::from_millis(250)).await;
                     }
 
                     self.run_query(query, conn)
@@ -372,10 +372,8 @@ impl TestScript {
         run_opts: &RunOptions,
         authority: Arc<A>,
     ) -> noria_server::Handle<A> {
-        let logger = run_opts.logger();
-
         let mut builder = Builder::default();
-        builder.log_with(logger);
+        builder.log_with(run_opts.logger());
 
         if run_opts.disable_reuse {
             builder.set_reuse(ReuseConfigType::NoReuse)
@@ -386,7 +384,7 @@ impl TestScript {
             builder.set_replicator_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
         }
 
-        builder.start(authority).await.unwrap()
+        builder.start(Arc::clone(&authority)).await.unwrap()
     }
 
     async fn setup_mysql_adapter<A: 'static + noria::consensus::Authority>(
