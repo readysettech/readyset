@@ -1043,6 +1043,16 @@ pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
     )(i)
 }
 
+named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
+    tag_no_case!("if")
+        >> multispace1
+        >> tag_no_case!("not")
+        >> multispace1
+        >> tag_no_case!("exists")
+        >> multispace1
+        >> (())
+    )), |o| o.is_some()));
+
 // Parse a reference to a named table, with an optional alias
 pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
     map(pair(sql_identifier, opt(as_alias)), |tup| Table {

@@ -603,6 +603,7 @@ impl From<TableSpec> for CreateTableStatement {
             keys: spec
                 .primary_key
                 .map(|cn| vec![TableKey::PrimaryKey(vec![cn.into()])]),
+            if_not_exists: false,
         }
     }
 }
