@@ -5,14 +5,17 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use colored::Colorize;
+use futures::StreamExt;
 use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::QuerySeed;
+use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
 pub mod ast;
@@ -309,7 +312,18 @@ impl Display for VerifyResult {
 impl Verify {
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
-        let mut result = VerifyResult::default();
+        let result = Arc::new(Mutex::new(VerifyResult::default()));
+        let mut tasks = futures::stream::futures_unordered::FuturesUnordered::new();
+
+        let max_tasks = if self.binlog_mysql.is_some() {
+            // Can not parallelize tests when binlog is enabled, because each test reuses the same db
+            1
+        } else {
+            std::env::var("NORIA_LOGICTEST_TASKS")
+                .unwrap_or_else(|_| "32".to_string())
+                .parse()?
+        };
+
         for InputFile {
             name,
             data,
@@ -319,34 +333,54 @@ impl Verify {
             let script = TestScript::read(name.clone(), data)
                 .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
             let run_opts: RunOptions = self.into();
+            let result = Arc::clone(&result);
 
-            let script_result = script
-                .run(run_opts)
-                .await
-                .with_context(|| format!("Running test script {}", script.name()));
+            tasks.push(tokio::spawn(async move {
+                let script_result = script
+                    .run(run_opts)
+                    .await
+                    .with_context(|| format!("Running test script {}", script.name()));
 
-            match script_result {
-                Ok(_) if expected_result == ExpectedResult::Fail => {
-                    result.unexpected_passes.push(script.name().into_owned());
-                    eprintln!(
-                        "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
-                        script.name(),
-                        script.name().replace(".fail.test", ".test")
-                    )
+                match script_result {
+                    Ok(_) if expected_result == ExpectedResult::Fail => {
+                        result
+                            .lock()
+                            .await
+                            .unexpected_passes
+                            .push(script.name().into_owned());
+                        eprintln!(
+                            "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
+                            script.name(),
+                            script.name().replace(".fail.test", ".test")
+                        )
+                    }
+                    Err(e) if expected_result == ExpectedResult::Pass => {
+                        result
+                            .lock()
+                            .await
+                            .failures
+                            .push(script.name().into_owned());
+                        eprintln!("{:#}", e);
+                    }
+                    _ => {
+                        result.lock().await.passes += 1;
+                    }
                 }
-                Err(e) if expected_result == ExpectedResult::Pass => {
-                    result.failures.push(script.name().into_owned());
-                    eprintln!("{:#}", e);
-                }
-                _ => {
-                    result.passes += 1;
-                }
+            }));
+
+            if tasks.len() >= max_tasks {
+                // We want to limit the number of concurrent tests, so we wait for one of the current tasks to finish first
+                tasks.select_next_some().await.unwrap();
             }
         }
 
-        println!("{}", result);
+        while !tasks.is_empty() {
+            tasks.select_next_some().await.unwrap();
+        }
 
-        if result.is_success() {
+        println!("{}", result.lock().await);
+
+        if result.lock().await.is_success() {
             Ok(())
         } else {
             Err(anyhow!("Test run failed"))
