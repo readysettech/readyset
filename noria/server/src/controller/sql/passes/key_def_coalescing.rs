@@ -62,6 +62,7 @@ mod tests {
                 ColumnSpecification::new(Column::from("t.val"), SqlType::Text),
             ],
             keys: None,
+            if_not_exists: false,
         };
 
         let res = SqlQuery::CreateTable(q).coalesce_key_definitions();

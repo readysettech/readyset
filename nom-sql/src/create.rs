@@ -7,8 +7,8 @@ use std::str;
 use std::str::FromStr;
 
 use crate::common::{
-    column_identifier_no_alias, schema_table_reference, sql_identifier, statement_terminator,
-    ws_sep_comma, TableKey,
+    column_identifier_no_alias, if_not_exists, schema_table_reference, sql_identifier,
+    statement_terminator, ws_sep_comma, TableKey,
 };
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::table_options;
@@ -32,6 +32,7 @@ pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
+    pub if_not_exists: bool,
 }
 
 impl fmt::Display for CreateTableStatement {
@@ -276,27 +277,30 @@ pub fn field_specification_list(i: &[u8]) -> IResult<&[u8], Vec<ColumnSpecificat
 // Parse rule for a column definition constraint.
 
 // Parse rule for a SQL CREATE TABLE query.
-// TODO(malte): support types, TEMPORARY tables, IF NOT EXISTS, AS stmt
+// TODO(malte): support types, TEMPORARY tables, AS stmt
 pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
-    let (remaining_input, (_, _, _, _, table, _, _, _, fields_list, _, keys_list, _, _, _, _, _)) =
-        tuple((
-            tag_no_case("create"),
-            multispace1,
-            tag_no_case("table"),
-            multispace1,
-            schema_table_reference,
-            multispace0,
-            tag("("),
-            multispace0,
-            field_specification_list,
-            multispace0,
-            opt(key_specification_list),
-            multispace0,
-            tag(")"),
-            multispace0,
-            table_options,
-            statement_terminator,
-        ))(i)?;
+    let (
+        remaining_input,
+        (_, _, _, _, if_not_exists, table, _, _, _, fields_list, _, keys_list, _, _, _, _, _),
+    ) = tuple((
+        tag_no_case("create"),
+        multispace1,
+        tag_no_case("table"),
+        multispace1,
+        if_not_exists,
+        schema_table_reference,
+        multispace0,
+        tag("("),
+        multispace0,
+        field_specification_list,
+        multispace0,
+        opt(key_specification_list),
+        multispace0,
+        tag(")"),
+        multispace0,
+        table_options,
+        statement_terminator,
+    ))(i)?;
 
     // "table AS alias" isn't legal in CREATE statements
     assert!(table.alias.is_none());
@@ -379,6 +383,7 @@ pub fn creation(i: &[u8]) -> IResult<&[u8], CreateTableStatement> {
             table,
             fields,
             keys,
+            if_not_exists,
         },
     ))
 }
@@ -521,7 +526,7 @@ mod tests {
 
     #[test]
     fn simple_create() {
-        let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255));";
+        let qstring = "CREATE TABLE if Not  ExistS users (id bigint(20), name varchar(255), email varchar(255));";
 
         let res = creation(qstring.as_bytes());
         assert_eq!(
@@ -533,6 +538,7 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
+                if_not_exists: true,
                 ..Default::default()
             }
         );
@@ -688,7 +694,8 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: None,
                     }
-                ])
+                ]),
+                if_not_exists: false
             }
         )
     }
@@ -756,7 +763,8 @@ mod tests {
                         index_name: None,
                     },
                     TableKey::PrimaryKey(vec![col("id")]),
-                ])
+                ]),
+                if_not_exists: false,
             }
         )
     }
@@ -820,7 +828,8 @@ mod tests {
                         index_name: Some("ordered_product".into()),
                     },
                     TableKey::PrimaryKey(vec![col("order_number")]),
-                ])
+                ]),
+                if_not_exists: false,
             }
         )
     }
@@ -867,7 +876,8 @@ mod tests {
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey(vec![col("id")]),])
+                keys: Some(vec![TableKey::PrimaryKey(vec![col("id")]),]),
+                if_not_exists: false,
             }
         )
     }
@@ -952,7 +962,8 @@ mod tests_mysql {
                     name: "id".into(),
                     table: Some("django_admin_log".into()),
                     function: None,
-                }])])
+                }])]),
+                if_not_exists: false,
             }
         );
 
@@ -984,7 +995,8 @@ mod tests_mysql {
                     name: "id".into(),
                     table: Some("auth_group".into()),
                     function: None,
-                }])])
+                }])]),
+                if_not_exists: false,
             }
         );
     }
@@ -1097,6 +1109,7 @@ mod tests_mysql {
                         function: None,
                     }]),
                 ]),
+                if_not_exists: false,
             }
         );
     }
