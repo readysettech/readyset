@@ -6,7 +6,7 @@ resource "aws_internet_gateway" "admin-default-us-east-2" {
     Manager          = "Terraform"
     Name             = "admin-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -19,7 +19,7 @@ resource "aws_ram_resource_share" "admin-default-us-east-2" {
     Manager          = "Terraform"
     Name             = "admin-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
 }
 
@@ -83,7 +83,7 @@ resource "aws_subnet" "admin-default-public-us-east-2a" {
     Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2a"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -101,7 +101,7 @@ resource "aws_subnet" "admin-default-public-us-east-2b" {
     Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2b"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -119,7 +119,7 @@ resource "aws_subnet" "admin-default-public-us-east-2c" {
     Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2c"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -134,7 +134,7 @@ resource "aws_vpc" "admin-default-us-east-2" {
     Manager          = "Terraform"
     Name             = "admin-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
 }
 
@@ -146,7 +146,7 @@ resource "aws_vpc_endpoint" "admin-default-us-east-2" {
     Manager          = "Terraform"
     Name             = "admin-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }

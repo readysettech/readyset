@@ -6,55 +6,49 @@ resource "aws_egress_only_internet_gateway" "stage-default-us-west-2" {
     Manager          = "Terraform"
     Name             = "stage-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_eip" "stage-default-us-west-2a" {
   depends_on = [aws_internet_gateway.stage-default-us-west-2]
-  tags =   {
+  tags = {
     AvailabilityZone = "us-west-2a"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-nat-gateway-us-west-2a"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-nat-gateway-us-west-2a"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_eip" "stage-default-us-west-2c" {
   depends_on = [aws_internet_gateway.stage-default-us-west-2]
-  tags =   {
+  tags = {
     AvailabilityZone = "us-west-2c"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-nat-gateway-us-west-2c"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-nat-gateway-us-west-2c"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_eip" "stage-default-us-west-2d" {
   depends_on = [aws_internet_gateway.stage-default-us-west-2]
-  tags =   {
+  tags = {
     AvailabilityZone = "us-west-2d"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-nat-gateway-us-west-2d"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-nat-gateway-us-west-2d"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
-*/
 
 resource "aws_internet_gateway" "stage-default-us-west-2" {
   tags = {
@@ -62,55 +56,49 @@ resource "aws_internet_gateway" "stage-default-us-west-2" {
     Manager          = "Terraform"
     Name             = "stage-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_nat_gateway" "stage-default-us-west-2a" {
   allocation_id = aws_eip.stage-default-us-west-2a.id
-  subnet_id = aws_subnet.stage-default-public-us-west-2a.id
-  tags =   {
+  subnet_id     = aws_subnet.stage-default-public-us-west-2a.id
+  tags = {
     AvailabilityZone = "us-west-2a"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-us-west-2a"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-us-west-2a"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_nat_gateway" "stage-default-us-west-2c" {
   allocation_id = aws_eip.stage-default-us-west-2c.id
-  subnet_id = aws_subnet.stage-default-public-us-west-2c.id
-  tags =   {
+  subnet_id     = aws_subnet.stage-default-public-us-west-2c.id
+  tags = {
     AvailabilityZone = "us-west-2c"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-us-west-2c"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-us-west-2c"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_nat_gateway" "stage-default-us-west-2d" {
   allocation_id = aws_eip.stage-default-us-west-2d.id
-  subnet_id = aws_subnet.stage-default-public-us-west-2d.id
-  tags =   {
+  subnet_id     = aws_subnet.stage-default-public-us-west-2d.id
+  tags = {
     AvailabilityZone = "us-west-2d"
-    Environment = "stage"
-    Manager = "Terraform"
-    Name = "stage-default-us-west-2d"
-    Quality = "default"
-    SubstrateVersion = "2021.05"
+    Environment      = "stage"
+    Manager          = "Terraform"
+    Name             = "stage-default-us-west-2d"
+    Quality          = "default"
+    SubstrateVersion = "2021.06"
   }
 }
-*/
 
 resource "aws_ram_resource_share" "stage-default-us-west-2" {
   allow_external_principals = false
@@ -120,7 +108,7 @@ resource "aws_ram_resource_share" "stage-default-us-west-2" {
     Manager          = "Terraform"
     Name             = "stage-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
 }
 
@@ -189,29 +177,23 @@ resource "aws_route" "stage-default-public-internet-ipv6-us-west-2" {
   route_table_id              = aws_vpc.stage-default-us-west-2.default_route_table_id
 }
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_route" "stage-default-us-west-2a" {
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id = aws_nat_gateway.stage-default-us-west-2a.id
-  route_table_id = aws_route_table.stage-default-private-us-west-2a.id
+  nat_gateway_id         = aws_nat_gateway.stage-default-us-west-2a.id
+  route_table_id         = aws_route_table.stage-default-private-us-west-2a.id
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_route" "stage-default-us-west-2c" {
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id = aws_nat_gateway.stage-default-us-west-2c.id
-  route_table_id = aws_route_table.stage-default-private-us-west-2c.id
+  nat_gateway_id         = aws_nat_gateway.stage-default-us-west-2c.id
+  route_table_id         = aws_route_table.stage-default-private-us-west-2c.id
 }
-*/
 
-/* commented because -no-nat-gateways was passed to substrate-bootstrap-network-account
 resource "aws_route" "stage-default-us-west-2d" {
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id = aws_nat_gateway.stage-default-us-west-2d.id
-  route_table_id = aws_route_table.stage-default-private-us-west-2d.id
+  nat_gateway_id         = aws_nat_gateway.stage-default-us-west-2d.id
+  route_table_id         = aws_route_table.stage-default-private-us-west-2d.id
 }
-*/
 
 resource "aws_route_table" "stage-default-private-us-west-2a" {
   tags = {
@@ -221,7 +203,7 @@ resource "aws_route_table" "stage-default-private-us-west-2a" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2a"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -234,7 +216,7 @@ resource "aws_route_table" "stage-default-private-us-west-2c" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2c"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -247,7 +229,7 @@ resource "aws_route_table" "stage-default-private-us-west-2d" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2d"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -295,7 +277,7 @@ resource "aws_subnet" "stage-default-private-us-west-2a" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2a"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -313,7 +295,7 @@ resource "aws_subnet" "stage-default-private-us-west-2c" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2c"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -331,7 +313,7 @@ resource "aws_subnet" "stage-default-private-us-west-2d" {
     Manager          = "Terraform"
     Name             = "stage-default-private-us-west-2d"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -349,7 +331,7 @@ resource "aws_subnet" "stage-default-public-us-west-2a" {
     Manager          = "Terraform"
     Name             = "stage-default-public-us-west-2a"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -367,7 +349,7 @@ resource "aws_subnet" "stage-default-public-us-west-2c" {
     Manager          = "Terraform"
     Name             = "stage-default-public-us-west-2c"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -385,7 +367,7 @@ resource "aws_subnet" "stage-default-public-us-west-2d" {
     Manager          = "Terraform"
     Name             = "stage-default-public-us-west-2d"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
@@ -400,7 +382,7 @@ resource "aws_vpc" "stage-default-us-west-2" {
     Manager          = "Terraform"
     Name             = "stage-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
 }
 
@@ -417,7 +399,7 @@ resource "aws_vpc_endpoint" "stage-default-us-west-2" {
     Manager          = "Terraform"
     Name             = "stage-default"
     Quality          = "default"
-    SubstrateVersion = "2021.05"
+    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.stage-default-us-west-2.id
 }
