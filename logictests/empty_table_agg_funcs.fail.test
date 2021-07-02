@@ -1,0 +1,58 @@
+statement ok
+CREATE TABLE t1 (id int, PRIMARY KEY(id));
+
+statement ok
+CREATE TABLE t2 (id int, number int, value int);
+
+query I nosort
+SELECT count(id) from t1;
+----
+0
+
+query I nosort
+SELECT sum(id) from t1;
+----
+NULL
+
+query I nosort
+SELECT avg(id) from t1;
+----
+NULL
+
+query I nosort
+SELECT min(id) from t1;
+----
+NULL
+
+query I nosort
+SELECT max(id) from t1;
+----
+NULL
+
+query II nosort
+SELECT count(*), max(id) from t1;
+----
+0
+NULL
+
+query III nosort
+SELECT count(*), id, number from t2;
+----
+0
+NULL
+NULL
+
+query III nosort
+SELECT count(*), max(id), avg(number) from t2;
+----
+0
+NULL
+NULL
+
+statement ok
+INSERT INTO t1 (id) VALUES (0), (1), (2);
+
+query I nosort
+SELECT count(id) from t1;
+----
+3
