@@ -6590,3 +6590,67 @@ async fn group_by_agg_col_with_join() {
 
     assert_eq!(res, vec![(3, 20.)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn count_emit_zero() {
+    let mut g = start_simple_unsharded("count_emit_zero").await;
+    let sql = "
+        # base tables
+        CREATE TABLE test (id int);
+
+        # read queries
+        QUERY countemitzero: SELECT count(id) as c FROM test GROUP BY id;
+        QUERY countemitzeronogroup: SELECT count(*) as c FROM test;
+    ";
+    g.install_recipe(sql).await.unwrap();
+
+    // With no data in the table, we should get no results with a GROUP BY
+    let mut q = g.view("countemitzero").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r[0]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+    assert_eq!(res, Vec::<i32>::new());
+
+    // With no data in the table, we should get results _without_ a GROUP BY
+    let mut q = g.view("countemitzeronogroup").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r[0]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+    assert_eq!(res, vec![0]);
+
+    // Now let's add some data to ensure count is still correct.
+    let mut test = g.table("test").await.unwrap();
+    test.insert_many(vec![
+        vec![0i64.into()],
+        vec![0i64.into()],
+        vec![0i64.into()],
+    ])
+    .await
+    .unwrap();
+    sleep().await;
+
+    let mut q = g.view("countemitzero").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r[0]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+    assert_eq!(res, vec![3]);
+
+    let mut q = g.view("countemitzeronogroup").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r[0]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+    assert_eq!(res, vec![3]);
+}
