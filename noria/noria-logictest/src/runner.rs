@@ -372,19 +372,34 @@ impl TestScript {
         run_opts: &RunOptions,
         authority: Arc<A>,
     ) -> noria_server::Handle<A> {
-        let mut builder = Builder::default();
-        builder.log_with(run_opts.logger());
+        let mut retry: usize = 0;
+        loop {
+            retry += 1;
 
-        if run_opts.disable_reuse {
-            builder.set_reuse(ReuseConfigType::NoReuse)
+            let mut builder = Builder::default();
+            builder.log_with(run_opts.logger());
+
+            if run_opts.disable_reuse {
+                builder.set_reuse(ReuseConfigType::NoReuse)
+            }
+
+            if let Some(binlog_url) = &run_opts.binlog_url {
+                // Add the data base name to the mysql url, and set as binlog source
+                builder.set_replicator_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
+            }
+
+            match builder.start(Arc::clone(&authority)).await {
+                Ok(builder) => return builder,
+                Err(err) => {
+                    // This can error out if there are too many open files, but if we wait a bit
+                    // they will get closed (macOS problem)
+                    if retry > 100 {
+                        panic!("{:?}", err)
+                    }
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+            }
         }
-
-        if let Some(binlog_url) = &run_opts.binlog_url {
-            // Add the data base name to the mysql url, and set as binlog source
-            builder.set_replicator_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
-        }
-
-        builder.start(Arc::clone(&authority)).await.unwrap()
     }
 
     async fn setup_mysql_adapter<A: 'static + noria::consensus::Authority>(
@@ -399,7 +414,19 @@ impl TestScript {
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut retry: usize = 0;
+        let listener = loop {
+            retry += 1;
+            match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+                Ok(listener) => break listener,
+                Err(err) => {
+                    if retry > 100 {
+                        panic!("{:?}", err)
+                    }
+                    tokio::time::sleep(Duration::from_millis(1000)).await
+                }
+            }
+        };
         let addr = listener.local_addr().unwrap();
 
         let ch = ControllerHandle::<A>::new(authority).await.unwrap();
