@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f43c9ff3b34c6c1f6bb47b21ff477b1567912847df81a8b27da8fff11c9eb9d9 # shrinks to input = _RealHashMatchesEqArgs { real1: Real { value: 0.0, precision: 37 }, real2: Real { value: -0.0, precision: 37 } }

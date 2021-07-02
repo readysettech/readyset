@@ -27,11 +27,9 @@ impl serde::ser::Serialize for DataType {
             DataType::UnsignedBigInt(v) => {
                 serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
             }
-            DataType::Real(ref mant, ref exp, ref sign, ref prec) => {
-                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Real", 4)?;
-                tv.serialize_field(mant)?;
-                tv.serialize_field(exp)?;
-                tv.serialize_field(sign)?;
+            DataType::Real(f, prec) => {
+                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Real", 2)?;
+                tv.serialize_field(f)?;
                 tv.serialize_field(prec)?;
                 tv.end()
             }
@@ -173,72 +171,19 @@ impl<'de> serde::Deserialize<'de> for DataType {
                             where
                                 A: serde::de::SeqAccess<'de>,
                             {
-                                let field0 =
-                                    match match serde::de::SeqAccess::next_element::<u64>(&mut seq)
-                                    {
-                                        Ok(val) => val,
-                                        Err(err) => {
-                                            return Err(err);
-                                        }
-                                    } {
-                                        Some(val) => val,
-                                        None => {
-                                            return Err(serde::de::Error::invalid_length(
-                                                0usize,
-                                                &"tuple variant DataType::Real with 4 elements",
-                                            ));
-                                        }
-                                    };
-                                let field1 =
-                                    match match serde::de::SeqAccess::next_element::<i16>(&mut seq)
-                                    {
-                                        Ok(val) => val,
-                                        Err(err) => {
-                                            return Err(err);
-                                        }
-                                    } {
-                                        Some(val) => val,
-                                        None => {
-                                            return Err(serde::de::Error::invalid_length(
-                                                1usize,
-                                                &"tuple variant DataType::Real with 4 elements",
-                                            ));
-                                        }
-                                    };
-                                let field2 = match match serde::de::SeqAccess::next_element::<i8>(
-                                    &mut seq,
-                                ) {
-                                    Ok(val) => val,
-                                    Err(err) => {
-                                        return Err(err);
-                                    }
-                                } {
-                                    Some(val) => val,
-                                    None => {
-                                        return Err(serde::de::Error::invalid_length(
-                                            2usize,
-                                            &"tuple variant DataType::Real with 4 elements",
-                                        ));
-                                    }
-                                };
-                                let field3 = match match serde::de::SeqAccess::next_element::<u8>(
-                                    &mut seq,
-                                ) {
-                                    Ok(val) => val,
-                                    Err(err) => {
-                                        return Err(err);
-                                    }
-                                } {
-                                    Some(val) => val,
-                                    None => {
-                                        return Err(serde::de::Error::invalid_length(
-                                            3usize,
-                                            &"tuple variant DataType::Real with 4 elements",
-                                        ));
-                                    }
-                                };
-
-                                Ok(DataType::Real(field0, field1, field2, field3))
+                                let f = seq.next_element()?.ok_or_else(|| {
+                                    serde::de::Error::invalid_length(
+                                        0usize,
+                                        &"tuple variant DataType::Real with 2 elements",
+                                    )
+                                })?;
+                                let prec = seq.next_element()?.ok_or_else(|| {
+                                    serde::de::Error::invalid_length(
+                                        0usize,
+                                        &"tuple variant DataType::Real with 2 elements",
+                                    )
+                                })?;
+                                Ok(DataType::Real(f, prec))
                             }
                         }
                         VariantAccess::tuple_variant(variant, 4usize, Visitor)

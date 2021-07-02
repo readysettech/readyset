@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
-use maths::{float::encode_f64, int::integer_rnd};
+use maths::int::integer_rnd;
 use msql_srv::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use noria::{unsupported, DataType, ReadySetError, ReadySetResult};
@@ -353,14 +353,12 @@ impl Expression {
                         DataType::UnsignedInt(inner) => *inner as i32,
                         DataType::BigInt(inner) => *inner as i32,
                         DataType::UnsignedBigInt(inner) => *inner as i32,
-                        DataType::Real(m, e, s, _) => encode_f64(*m, *e, *s).round() as i32,
+                        DataType::Real(f, _) => f.round() as i32,
                         _ => 0,
                     };
 
                     match non_null!(expr) {
-                        DataType::Real(mant, exp, sign, prec) => {
-                            // We convert back to original float for all rounding math.
-                            let float = encode_f64(*mant, *exp, *sign);
+                        DataType::Real(float, prec) => {
                             if rnd_prec > 0 {
                                 // If rounding precision is positive, than we keep the returned
                                 // type as a float. We never return greater precision than was
@@ -439,7 +437,7 @@ impl Expression {
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
-                    Expression::Literal(DataType::Real(_, _, _, _)) => {
+                    Expression::Literal(DataType::Real(_, _)) => {
                         match **prec {
                             // Precision should always be coercable to a DataType::Int.
                             Expression::Literal(DataType::Int(p)) => {
@@ -468,8 +466,8 @@ impl Expression {
                                 // Precision is positive so we will continue to return a Real.
                                 Ok(Some(SqlType::Real))
                             }
-                            Expression::Literal(DataType::Real(_, _, s, _)) => {
-                                if s < 0 {
+                            Expression::Literal(DataType::Real(f, _)) => {
+                                if f.is_sign_negative() {
                                     // Precision is negative, which means that we will be returning a rounded Int.
                                     Ok(Some(SqlType::Int(32)))
                                 } else {

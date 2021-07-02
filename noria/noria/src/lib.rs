@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 //! This create contains client bindings for [Noria](https://github.com/mit-pdos/noria).
 //!
 //! # What is Noria?
@@ -103,11 +102,12 @@
 //! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
-#![feature(type_alias_impl_trait, or_patterns, bound_cloned)]
+#![feature(type_alias_impl_trait, or_patterns, bound_cloned, total_cmp)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
+#![warn(clippy::dbg_macro)]
 
 #[macro_use]
 extern crate anyhow;
@@ -407,7 +407,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         }
         // a bit hacky: send all NULL values to the first shard
         DataType::None => 0,
-        DataType::Real(_, _, _, _) | DataType::Time(_) => {
+        DataType::Real(_, _) | DataType::Time(_) => {
             use std::hash::{Hash, Hasher};
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             dt.hash(&mut hasher);
