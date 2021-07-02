@@ -93,7 +93,7 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
-                DataType::Real(5629499659188010, -49, 1, 9),
+                DataType::Real(10.000000222, 9),
             ],
             project_fields: Arc::new(vec![0, 1, 2]),
             project_field_types: Arc::new(vec![
@@ -118,7 +118,7 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
-                DataType::Real(5629499659188010, -49, 1, 9),
+                DataType::Real(10.000000222, 9),
                 DataType::Int(0),
             ],
             // Only the first three fields are specified for projection.
@@ -148,7 +148,7 @@ mod tests {
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
                 DataType::Int(0),
                 DataType::Int(0),
-                DataType::Real(5629499659188010, -49, 1, 9),
+                DataType::Real(10.000000222, 9),
                 DataType::Int(0),
             ],
             // Only some of the fields are specified for projection.

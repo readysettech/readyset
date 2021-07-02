@@ -12,7 +12,6 @@ use crate::{
     },
     Real,
 };
-use maths::float::decode_f64;
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
@@ -285,14 +284,11 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let precision = f.len();
     let int = i32::from_str(str::from_utf8(i).unwrap()).unwrap();
     let dec = i32::from_str(str::from_utf8(f).unwrap()).unwrap();
-    let float = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
-    let (mantissa, exponent, sign) = decode_f64(float);
+    let value = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
     Ok((
         remaining_input,
         Literal::FixedPoint(Real {
-            mantissa,
-            exponent,
-            sign,
+            value,
             precision: precision as u8,
         }),
     ))

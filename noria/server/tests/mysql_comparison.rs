@@ -1,4 +1,3 @@
-use maths::float::encode_f64;
 use mysql::prelude::Queryable;
 use mysql::OptsBuilder;
 use mysql::Params;
@@ -311,9 +310,7 @@ async fn check_query(
                         DataType::UnsignedInt(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
                         DataType::UnsignedBigInt(i) => i.to_string(),
-                        DataType::Real(m, e, s, _) => {
-                            format!("{}", encode_f64(m, e, s))
-                        }
+                        DataType::Real(f, _) => format!("{}", f),
                         DataType::Text(_) | DataType::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()

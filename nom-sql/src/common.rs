@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
 
@@ -5,7 +6,6 @@ use itertools::Itertools;
 use launchpad::arbitrary::{
     arbitrary_naive_date, arbitrary_naive_time, arbitrary_timestamp_naive_date_time,
 };
-use maths::float::{decode_f64, encode_f64};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
@@ -122,12 +122,25 @@ impl fmt::Display for SqlType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Real {
-    pub mantissa: u64,
-    pub exponent: i16,
-    pub sign: i8,
+    pub value: f64,
     pub precision: u8,
+}
+
+impl PartialEq for Real {
+    fn eq(&self, other: &Self) -> bool {
+        self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
+    }
+}
+
+impl Eq for Real {}
+
+impl Hash for Real {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.value.to_bits());
+        state.write_u8(self.precision);
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -205,11 +218,7 @@ impl ToString for Literal {
             Literal::UnsignedInteger(ref i) => format!("{}", i),
             Literal::FixedPoint(ref f) => {
                 let precision = if f.precision < 30 { f.precision } else { 30 };
-                let fstr = format!(
-                    "{f:.prec$}",
-                    f = encode_f64(f.mantissa, f.exponent, f.sign),
-                    prec = precision as usize
-                );
+                let fstr = format!("{:.*}", precision as usize, f.value);
                 // Trim all trailing zeros, but leave one after the dot if this is a whole number
                 let res = fstr.trim_end_matches('0');
                 if &res[(res.len() - 1)..] == "." {
@@ -912,18 +921,15 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
         tuple((opt(tag("-")), digit1, tag("."), digit1)),
         |(sign, whole, _, frac): (Option<&[u8]>, &[u8], &[u8], &[u8])| {
             let prec = frac.len();
-            let float = f64::from_str(&format!(
+            let value = f64::from_str(&format!(
                 "{}{}.{}",
                 sign.map_or("", |s| str::from_utf8(s).unwrap()),
                 str::from_utf8(whole).unwrap(),
                 str::from_utf8(frac).unwrap()
             ))
             .unwrap();
-            let (mantissa, exponent, sign) = decode_f64(float);
             Literal::FixedPoint(Real {
-                mantissa,
-                exponent,
-                sign,
+                value,
                 precision: prec as _,
             })
         },
@@ -1077,6 +1083,8 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
 mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
+    use launchpad::hash::hash;
+    use test_strategy::proptest;
 
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
         opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())
@@ -1206,11 +1214,8 @@ mod tests {
 
     #[test]
     fn float_formatting_strips_trailing_zeros() {
-        let (mantissa, exponent, sign) = decode_f64(1.5);
         let f = Literal::FixedPoint(Real {
-            mantissa,
-            exponent,
-            sign,
+            value: 1.5,
             precision: u8::MAX,
         });
         assert_eq!(f.to_string(), "1.5");
@@ -1218,11 +1223,8 @@ mod tests {
 
     #[test]
     fn float_formatting_leaves_zero_after_dot() {
-        let (mantissa, exponent, sign) = decode_f64(0.0);
         let f = Literal::FixedPoint(Real {
-            mantissa,
-            exponent,
-            sign,
+            value: 0.0,
             precision: u8::MAX,
         });
         assert_eq!(f.to_string(), "0.0");
@@ -1234,17 +1236,16 @@ mod tests {
             .unwrap()
             .1;
         match res {
-            Literal::FixedPoint(Real {
-                mantissa,
-                exponent,
-                sign,
-                ..
-            }) => {
-                let res_f = encode_f64(mantissa, exponent, sign);
-                assert_approx_eq!(res_f, 1.5);
+            Literal::FixedPoint(Real { value, .. }) => {
+                assert_approx_eq!(value, 1.5);
             }
             _ => unreachable!(),
         }
+    }
+
+    #[proptest]
+    fn real_hash_matches_eq(real1: Real, real2: Real) {
+        assert_eq!(real1 == real2, hash(&real1) == hash(&real2));
     }
 }
 

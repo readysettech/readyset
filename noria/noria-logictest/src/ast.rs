@@ -242,9 +242,7 @@ impl TryFrom<DataType> for Value {
             DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
             DataType::BigInt(bi) => Ok(Value::Integer(bi)),
             DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
-            DataType::Real(mantissa, exponent, sign, _) => {
-                Ok(maths::float::encode_f64(mantissa, exponent, sign).into())
-            }
+            DataType::Real(f, _) => Ok(f.into()),
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::Time(t) => Ok(Value::Time(*t)),
