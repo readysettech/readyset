@@ -1,8 +1,6 @@
-use anyhow::bail;
 use clap::{Clap, ValueHint};
 use noria_logictest::generate::DatabaseURL;
 use rand::distributions::{Distribution, Uniform};
-use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -25,12 +23,13 @@ struct Reader {
     query: Option<PathBuf>,
 
     /// MySQL database connection string.
+    /// Only one of MySQL database url and zooekeper url can be specified.
     #[clap(long)]
     database_url: DatabaseURL,
 
     /// The target rate at the reader issues queries at.
-    #[clap(long, default_value = "10")]
-    target_qps: u64,
+    #[clap(long)]
+    target_qps: Option<u64>,
 
     /// The number of threads to spawn to issue reader queries.
     #[clap(long, default_value = "1")]
@@ -56,10 +55,10 @@ impl Reader {
         &self,
         id: u32,
         query: String,
-        query_interval: Duration,
+        query_interval: Option<Duration>,
         sender: Sender<ReaderThreadUpdate>,
     ) -> anyhow::Result<()> {
-        let mut next_query = Instant::now() + query_interval;
+        let mut next_query = query_interval.map(|i| Instant::now() + i);
         let mut last_thread_update = Instant::now();
         let mut reader_update = ReaderThreadUpdate {
             id,
@@ -75,16 +74,18 @@ impl Reader {
                 last_thread_update = Instant::now();
             }
 
-            if now < next_query {
-                // Sleep for 1/10th the query interval so we don't miss any
-                // intervals.
-                sleep(Duration::from_nanos(
-                    (query_interval.as_nanos() / 10) as u64,
-                ));
-                continue;
+            if let Some(t) = next_query {
+                if now < t {
+                    // Sleep for 1/10th the query interval so we don't miss any
+                    // intervals.
+                    sleep(Duration::from_nanos(
+                        (query_interval.as_ref().unwrap().as_nanos() / 10) as u64,
+                    ));
+                    continue;
+                }
             }
 
-            next_query = now + query_interval;
+            next_query = query_interval.map(|i| now + i);
             let mut conn = self.database_url.connect().await.unwrap();
 
             // Execute and time the query.
@@ -106,25 +107,23 @@ impl Reader {
         // received a message from all threads, it's likely a thread has
         // failed.
         let mut updates = Vec::new();
+        let mut next_check = Instant::now() + THREAD_UPDATE_INTERVAL;
         loop {
-            let r = receiver.recv_timeout(THREAD_UPDATE_INTERVAL * 2).unwrap();
-            updates.push(r);
-
-            if updates.len() == self.threads as usize {
+            let now = Instant::now();
+            if now > next_check {
                 self.process_thread_updates(&updates).unwrap();
                 updates.clear();
+                next_check = now + THREAD_UPDATE_INTERVAL;
             }
+
+            let r = receiver.recv_timeout(THREAD_UPDATE_INTERVAL * 2).unwrap();
+            updates.push(r);
         }
     }
 
     fn process_thread_updates(&'static self, updates: &[ReaderThreadUpdate]) -> anyhow::Result<()> {
-        let mut updates_seen = HashSet::new();
         let mut query_latencies: Vec<u128> = Vec::new();
         for u in updates {
-            if !updates_seen.insert(u.id) {
-                bail!("Multiple updates from the same thread");
-            }
-
             query_latencies.append(&mut u.queries.clone());
         }
 
@@ -137,17 +136,13 @@ impl Reader {
     }
 
     pub async fn run(&'static self) -> anyhow::Result<()> {
-        println!(
-            "Starting reader with threads {}, target_qps {}",
-            self.threads, self.target_qps
-        );
-
         let fastly_query_file = self.query.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/fastly_read_query.sql")
         });
         let param_query = fs::read_to_string(fastly_query_file)?;
-        let query_issue_interval =
-            Duration::from_nanos(1000000000 / self.target_qps * self.threads);
+        let query_issue_interval = self
+            .target_qps
+            .map(|t| Duration::from_nanos(1000000000 / t * self.threads));
         let (tx, rx): (Sender<ReaderThreadUpdate>, Receiver<ReaderThreadUpdate>) = mpsc::channel();
 
         let mut threads: Vec<_> = (0..self.threads + 1)
