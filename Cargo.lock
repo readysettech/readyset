@@ -1616,6 +1616,7 @@ dependencies = [
  "query_generator",
  "rand 0.8.4",
  "tokio 1.8.1",
+ "vec1",
 ]
 
 [[package]]
