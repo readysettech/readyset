@@ -1,6 +1,7 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
-use crate::errors::{table_err, ReadySetError, ReadySetResult};
+use crate::errors::{internal_err, table_err, ReadySetError, ReadySetResult};
+use crate::internal;
 use crate::internal::*;
 use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
@@ -61,8 +62,8 @@ impl Service<()> for Endpoint {
         async move {
             let mut s = f.await?;
             s.set_nodelay(true)?;
-            s.write_all(&[CONNECTION_FROM_BASE]).await.unwrap();
-            s.flush().await.unwrap();
+            s.write_all(&[CONNECTION_FROM_BASE]).await?;
+            s.flush().await?;
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
             Ok(multiplex::Client::with_error_handler(t, |e| {
@@ -144,7 +145,10 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub(crate) fn build(self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>) -> Table {
+    pub(crate) fn build(
+        self,
+        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
+    ) -> ReadySetResult<Table> {
         let mut addrs = Vec::with_capacity(self.txs.len());
         let mut conns = Vec::with_capacity(self.txs.len());
         for (shardi, &addr) in self.txs.iter().enumerate() {
@@ -154,7 +158,9 @@ impl TableBuilder {
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
-            let mut rpcs = rpcs.lock().unwrap();
+            let mut rpcs = rpcs.lock().map_err(|e| {
+                internal_err(format!("unable to acquire rpcs lock. Error: '{}'", e))
+            })?;
             let s = match rpcs.entry((addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -180,7 +186,7 @@ impl TableBuilder {
         }
 
         let dispatch = tracing::dispatcher::get_default(|d| d.clone());
-        Table {
+        Ok(Table {
             ni: self.ni,
             node: self.addr,
             key: self.key,
@@ -195,7 +201,7 @@ impl TableBuilder {
             shards: conns,
 
             dispatch,
-        }
+        })
     }
 }
 
@@ -320,79 +326,119 @@ impl Table {
             return future::Either::Left(future::Either::Left(async move { Err(e) }));
         }
 
-        if self.shards.len() == 1 {
-            let request = Tagged::from(unsafe { LocalOrNot::new_for_dst(i, self.dst_is_local) });
-            let _guard = span.as_ref().map(tracing::Span::enter);
-            tracing::trace!("submit request");
-            future::Either::Right(future::Either::Left(
-                self.shards[0]
-                    .call(request)
-                    .map_err(rpc_err!("Table::input")),
-            ))
-        } else {
-            // FIXME(eta): proper error handling here!
-            if self.key.is_empty() {
-                unreachable!("sharded base without a key?");
+        let nshards = self.shards.len();
+        future::Either::Right(match self.shards.first_mut() {
+            Some(table_rpc) if nshards == 1 => {
+                let request =
+                    Tagged::from(unsafe { LocalOrNot::new_for_dst(i, self.dst_is_local) });
+                let _guard = span.as_ref().map(tracing::Span::enter);
+                tracing::trace!("submit request");
+                future::Either::Left(future::Either::Right(
+                    table_rpc.call(request).map_err(rpc_err!("Table::input")),
+                ))
             }
-            if self.key.len() != 1 {
-                // base sharded by complex key
-                unimplemented!();
-            }
-            let key_col = self.key[0];
+            _ => {
+                let key_len = self.key.len();
+                let key_col = match self.key.get(0) {
+                    // If it's `None`, then it's empty.
+                    None => {
+                        return future::Either::Right(future::Either::Left(future::Either::Left(
+                            future::Either::Left(
+                                async move { internal!("sharded base without a key") },
+                            ),
+                        )))
+                    }
+                    Some(_) if key_len != 1 => {
+                        return future::Either::Right(future::Either::Left(future::Either::Left(
+                            future::Either::Right(async move {
+                                internal!("base sharded by complex key")
+                            }),
+                        )))
+                    }
+                    Some(&k) => k,
+                };
 
-            let _guard = span.as_ref().map(tracing::Span::enter);
-            tracing::trace!("shard request");
-            let mut shard_writes = vec![Vec::new(); self.shards.len()];
-            let ops: &mut Vec<TableOperation> = (&mut i.data).try_into().unwrap();
-            for r in ops.drain(..) {
-                match r.shards(key_col, self.shards.len()) {
-                    Ok(iter) => {
-                        for shard in iter {
-                            shard_writes[shard].push(r.clone())
+                let _guard = span.as_ref().map(tracing::Span::enter);
+                tracing::trace!("shard request");
+                let mut shard_writes = vec![Vec::new(); nshards];
+                let ops: &mut Vec<TableOperation> = match (&mut i.data).try_into() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return future::Either::Left(future::Either::Right(future::Either::Right(
+                            async move {
+                                internal!(
+                                    "couldn't get table operations from packet. Error: '{}'",
+                                    e
+                                )
+                            },
+                        )))
+                    }
+                };
+                for r in ops.drain(..) {
+                    match r.shards(key_col, nshards) {
+                        Ok(iter) => {
+                            for shard in iter {
+                                // The `shard` index belongs to the range `0..nshards`,
+                                // so it's not out of bounds.
+                                #[allow(clippy::indexing_slicing)]
+                                shard_writes[shard].push(r.clone())
+                            }
+                        }
+                        Err(e) => {
+                            return future::Either::Left(future::Either::Right(
+                                future::Either::Left(async move { Err(e) }),
+                            ))
                         }
                     }
-                    Err(e) => {
-                        return future::Either::Left(future::Either::Right(async move { Err(e) }))
+                }
+
+                let wait_for = FuturesUnordered::new();
+                for (s, rs) in shard_writes.drain(..).enumerate() {
+                    if !rs.is_empty() {
+                        let new_i = PacketData {
+                            dst: i.dst,
+                            data: PacketPayload::Input(rs),
+                        };
+
+                        let p = unsafe { LocalOrNot::new_for_dst(new_i, self.dst_is_local) };
+                        let request = Tagged::from(p);
+
+                        // make a span per shard
+                        let span = if span.is_some() {
+                            Some(tracing::trace_span!("table-shard", s))
+                        } else {
+                            None
+                        };
+                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        tracing::trace!("submit request shard");
+
+                        // `s` is within the range of `0..nshards`, so it is not out of bounds
+                        // for the `self.shards` vector.
+                        #[allow(clippy::indexing_slicing)]
+                        wait_for.push(self.shards[s].call(request));
+                    } else {
+                        // poll_ready reserves a sender slot which we have to release
+                        // we do that by dropping the old handle and replacing it with a clone
+                        // https://github.com/tokio-rs/tokio/issues/898
+                        // `s` is within the range of `0..nshards`, so it is not out of bounds
+                        // for the `self.shards` vector.
+                        // This is also inside the block so the annotation applies to both terms
+                        // in the assignment.
+                        #[allow(clippy::indexing_slicing)]
+                        {
+                            self.shards[s] = self.shards[s].clone()
+                        }
                     }
                 }
+
+                future::Either::Right(
+                    wait_for
+                        .try_for_each(|_| async { Ok(()) })
+                        .map_err(rpc_err!("Table::input"))
+                        .map_ok(Tagged::from),
+                )
             }
-
-            let wait_for = FuturesUnordered::new();
-            for (s, rs) in shard_writes.drain(..).enumerate() {
-                if !rs.is_empty() {
-                    let new_i = PacketData {
-                        dst: i.dst,
-                        data: PacketPayload::Input(rs),
-                    };
-
-                    let p = unsafe { LocalOrNot::new_for_dst(new_i, self.dst_is_local) };
-                    let request = Tagged::from(p);
-
-                    // make a span per shard
-                    let span = if span.is_some() {
-                        Some(tracing::trace_span!("table-shard", s))
-                    } else {
-                        None
-                    };
-                    let _guard = span.as_ref().map(tracing::Span::enter);
-                    tracing::trace!("submit request shard");
-
-                    wait_for.push(self.shards[s].call(request));
-                } else {
-                    // poll_ready reserves a sender slot which we have to release
-                    // we do that by dropping the old handle and replacing it with a clone
-                    // https://github.com/tokio-rs/tokio/issues/898
-                    self.shards[s] = self.shards[s].clone()
-                }
-            }
-
-            future::Either::Right(future::Either::Right(
-                wait_for
-                    .try_for_each(|_| async { Ok(()) })
-                    .map_err(rpc_err!("Table::input"))
-                    .map_ok(Tagged::from),
-            ))
-        }
+        })
     }
 
     /// Sends the timestamp `PacketData` to each base table shard associated with
@@ -401,35 +447,44 @@ impl Table {
         &mut self,
         t: PacketData,
     ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
-        if self.shards.len() == 1 {
-            let request = Tagged::from(unsafe { LocalOrNot::new_for_dst(t, self.dst_is_local) });
-            future::Either::Left(
-                self.shards[0]
-                    .call(request)
-                    .map_err(rpc_err!("Table::timestamp")),
-            )
-        } else {
-            if self.key.is_empty() {
-                unreachable!("sharded base without a key?");
+        let nshards = self.shards.len();
+        match self.shards.first_mut() {
+            Some(table_rpc) if nshards == 1 => {
+                let request =
+                    Tagged::from(unsafe { LocalOrNot::new_for_dst(t, self.dst_is_local) });
+                future::Either::Left(
+                    table_rpc
+                        .call(request)
+                        .map_err(rpc_err!("Table::timestamp")),
+                )
             }
-            if self.key.len() != 1 {
-                // base sharded by complex key
-                unimplemented!();
-            }
+            _ => {
+                if self.key.is_empty() {
+                    return future::Either::Right(future::Either::Left(future::Either::Left(
+                        async move { internal!("sharded base without a key?") },
+                    )));
+                }
+                if self.key.len() != 1 {
+                    // base sharded by complex key
+                    return future::Either::Right(future::Either::Left(future::Either::Right(
+                        async move { internal!("sharded base without a key?") },
+                    )));
+                }
 
-            // We create a request to each base table shard with the new timestamp.
-            let wait_for = FuturesUnordered::new();
-            for s in &mut self.shards {
-                let p = unsafe { LocalOrNot::new_for_dst(t.clone(), self.dst_is_local) };
-                let request = Tagged::from(p);
-                wait_for.push(s.call(request));
+                // We create a request to each base table shard with the new timestamp.
+                let wait_for = FuturesUnordered::new();
+                for s in &mut self.shards {
+                    let p = unsafe { LocalOrNot::new_for_dst(t.clone(), self.dst_is_local) };
+                    let request = Tagged::from(p);
+                    wait_for.push(s.call(request));
+                }
+                future::Either::Right(future::Either::Right(
+                    wait_for
+                        .try_for_each(|_| async { Ok(()) })
+                        .map_err(rpc_err!("Table::timestamp"))
+                        .map_ok(Tagged::from),
+                ))
             }
-            future::Either::Right(
-                wait_for
-                    .try_for_each(|_| async { Ok(()) })
-                    .map_err(rpc_err!("Table::timestamp"))
-                    .map_ok(Tagged::from),
-            )
         }
     }
 }
@@ -460,10 +515,12 @@ impl Service<TableRequest> for Table {
         // TODO(eta): error handling impl adds overhead
         let tn = self.table_name.to_owned();
         match req {
-            TableRequest::TableOperations(ops) => {
-                let i = self.prep_records(ops);
-                future::Either::Left(self.input(i).map_err(|e| table_err(tn, e)))
-            }
+            TableRequest::TableOperations(ops) => match self.prep_records(ops) {
+                Ok(i) => future::Either::Left(future::Either::Left(
+                    self.input(i).map_err(|e| table_err(tn, e)),
+                )),
+                Err(e) => future::Either::Left(future::Either::Right(async move { Err(e) })),
+            },
             TableRequest::Timestamp(t) => {
                 let p = PacketData {
                     dst: self.node,
@@ -502,7 +559,7 @@ impl Table {
         self.schema.as_ref()
     }
 
-    fn inject_dropped_cols(&self, r: &mut TableOperation) {
+    fn inject_dropped_cols(&self, r: &mut TableOperation) -> ReadySetResult<()> {
         use std::mem;
         let ndropped = self.dropped.len();
         if ndropped != 0 {
@@ -530,7 +587,7 @@ impl Table {
             //
             // |#d##d#|
             //
-            // if columns 1 and 5 were dropped (d here signifies the default values).
+            // if columns 1 and 4 were dropped (d here signifies the default values).
             // what makes this tricky is that we need to preserve the order of all the #.
             // to accomplish this, we're going to move the # to the end of the record, one at a
             // time, starting with the last one, and then "inject" the default values as we go.
@@ -581,22 +638,26 @@ impl Table {
                 }
 
                 // we're at the right index -- insert the dropped value
-                let current = &mut r[next_insert];
+                let current = match r.get_mut(next_insert) {
+                    Some(v) => v,
+                    None => internal!("index out of bounds"),
+                };
                 let old = mem::replace(current, default.clone());
                 debug_assert_eq!(old, DataType::None);
             }
         }
+        Ok(())
     }
 
-    fn prep_records(&self, mut ops: Vec<TableOperation>) -> PacketData {
+    fn prep_records(&self, mut ops: Vec<TableOperation>) -> ReadySetResult<PacketData> {
         for r in &mut ops {
-            self.inject_dropped_cols(r);
+            self.inject_dropped_cols(r)?;
         }
 
-        PacketData {
+        Ok(PacketData {
             dst: self.node,
             data: PacketPayload::Input(ops),
-        }
+        })
     }
 
     async fn quick_n_dirty<Request, R>(
@@ -685,13 +746,15 @@ impl Table {
 
         let mut update = vec![Modification::None; self.columns.len()];
         for (coli, m) in u {
-            if coli >= self.columns.len() {
-                return Err(table_err(
-                    self.table_name(),
-                    ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                ));
+            match update.get_mut(coli) {
+                Some(elem) => *elem = m,
+                None => {
+                    return Err(table_err(
+                        self.table_name(),
+                        ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
+                    ))
+                }
             }
-            update[coli] = m;
         }
 
         self.quick_n_dirty(TableRequest::TableOperations(vec![
@@ -718,13 +781,15 @@ impl Table {
 
         let mut set = vec![Modification::None; self.columns.len()];
         for (coli, m) in update {
-            if coli >= self.columns.len() {
-                return Err(table_err(
-                    self.table_name(),
-                    ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                ));
+            match set.get_mut(coli) {
+                Some(elem) => *elem = m,
+                None => {
+                    return Err(table_err(
+                        self.table_name(),
+                        ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
+                    ))
+                }
             }
-            set[coli] = m;
         }
 
         self.quick_n_dirty(TableRequest::TableOperations(vec![

@@ -410,7 +410,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
             match bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
                 .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
             {
-                Some(tb) => Ok(tb.build(domains)),
+                Some(tb) => tb.build(domains),
                 None => Err(ReadySetError::TableNotFound(name)),
             }
         }
